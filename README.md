@@ -9,3 +9,8 @@ Windows / macOS / Ubuntu のデスクトップと、iOS / Android のモバイ�
 - 設計書: `docs/superpowers/specs/`
 - 調査メモ: `docs/research/`
 - デザイン: `design/` (pen.dev)
+
+## 起動
+
+- UI の確認: `npm install` のあと `npm run storybook` (http://localhost:6006)
+- ビルド確認: `npm run build-storybook`
