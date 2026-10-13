@@ -10,7 +10,7 @@
 ここで固めた画面構成と操作項目を Phase 1 以降の UI 実装の基準にする。
 
 成果物
-- `design/powertodo.pen`: 全画面のデザイン
+- `design.pen` (リポジトリ直下): 全画面のデザイン (当初案は `design/powertodo.pen`。決定ログ参照)
 - `design/storyboard.md`: 画面一覧、各画面の操作項目、画面間の遷移表
 - 全体設計 spec の決定ログに、確認で出た修正点を追記
 
@@ -91,7 +91,7 @@ D-01、D-03、D-04 の 3 枚。theme 軸 `mode: dark` を適用したコピー�
 
 ## 6. 完了条件
 
-- 上記の全画面が `powertodo.pen` にあり、`placeholder: true` が残っていない
+- 上記の全画面が `design.pen` にあり、`placeholder: true` が残っていない
 - 各画面でレイアウト崩れ、はみ出し、コントラスト不足がない (pen の `Get` でクリップ問題を確認、スクリーンショットで視覚確認)
 - `design/storyboard.md` がある
 - ユーザーが操作性を確認し、修正点を取り込んだ
