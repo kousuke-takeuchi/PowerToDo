@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useState } from "react";
 import { CalendarCheck, CalendarDays, List, Search } from "lucide-react";
 
 export type TabBarProps = {
@@ -15,6 +16,9 @@ const tabs: { id: NonNullable<TabBarProps["active"]>; label: string; Icon: React
 
 /** モバイルの下部タブ (pen の TabBar: Tabs 56 + HomeIndicator 34、上に 1px の線)。 */
 export function TabBar({ active, onChange }: TabBarProps) {
+  // 選択の見た目だけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
+  const [current, setCurrent] = useState(active);
+  useEffect(() => setCurrent(active), [active]);
   return (
     <nav
       aria-label="タブ"
@@ -30,13 +34,16 @@ export function TabBar({ active, onChange }: TabBarProps) {
     >
       <div style={{ height: 56, display: "flex", justifyContent: "space-around", alignItems: "center" }}>
         {tabs.map(({ id, label, Icon }) => {
-          const on = id === active;
+          const on = id === current;
           return (
             <button
               key={id}
               type="button"
               aria-current={on ? "page" : undefined}
-              onClick={() => onChange?.(id)}
+              onClick={() => {
+                setCurrent(id);
+                onChange?.(id);
+              }}
               style={{
                 width: 80,
                 height: 38,

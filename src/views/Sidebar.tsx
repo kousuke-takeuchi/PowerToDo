@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useState } from "react";
 import { Bell, CalendarCheck, CalendarDays, CirclePlus, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
 import { Button } from "../components/Button";
 import { ProjectItem } from "../components/ProjectItem";
@@ -16,6 +17,8 @@ export type SidebarProps = {
   lastSyncedAt?: string;
   onNavigate?: (target: SidebarProps["active"]) => void;
   onAddTask?: () => void;
+  /** アカウント (アバター + 名前) をクリックしたとき。設定ダイアログを開き直す Story が渡す。 */
+  onOpenSettings?: () => void;
 };
 
 const heading: React.CSSProperties = {
@@ -25,9 +28,16 @@ const heading: React.CSSProperties = {
   color: "var(--color-text-secondary)",
 };
 
-export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, onNavigate, onAddTask }: SidebarProps) {
+export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, onNavigate, onAddTask, onOpenSettings }: SidebarProps) {
+  // 選択行のハイライトだけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
+  const [current, setCurrent] = useState(active);
+  useEffect(() => setCurrent(active), [active.kind, active.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = (target: SidebarProps["active"]) => {
+    setCurrent(target);
+    onNavigate?.(target);
+  };
   const countOf = (name: string) => (c as Record<string, number>)[name];
-  const isActive = (kind: SidebarProps["active"]["kind"]) => active.kind === kind;
+  const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind;
   const mine = projects.filter((p) => !p.inbox);
   const favorites = projects.filter((p) => p.favorite);
   return (
@@ -44,10 +54,29 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", height: 32 }}>
-        <span aria-hidden style={{ width: 28, height: 28, borderRadius: 14, background: "var(--color-accent)", flex: "0 0 auto" }} />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: "20px", fontWeight: 600, color: "var(--color-text-primary)" }}>
-          たろう
-        </span>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="アカウント"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-2)",
+            padding: 0,
+            border: 0,
+            background: "none",
+            fontFamily: "var(--font-body)",
+            textAlign: "left",
+            cursor: onOpenSettings ? "pointer" : "default",
+          }}
+        >
+          <span aria-hidden style={{ width: 28, height: 28, borderRadius: 14, background: "var(--color-accent)", flex: "0 0 auto" }} />
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: "20px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+            たろう
+          </span>
+        </button>
         <Button variant="icon" icon={Bell} ariaLabel="通知" />
         <Button variant="icon" icon={PanelLeftClose} ariaLabel="サイドバーを閉じる" />
       </div>
@@ -81,21 +110,21 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
           label="受信トレイ"
           count={c.inbox}
           active={isActive("inbox")}
-          onClick={() => onNavigate?.({ kind: "inbox" })}
+          onClick={() => go({ kind: "inbox" })}
         />
         <SidebarItem
           icon={CalendarCheck}
           label="今日"
           count={c.today}
           active={isActive("today")}
-          onClick={() => onNavigate?.({ kind: "today" })}
+          onClick={() => go({ kind: "today" })}
         />
-        <SidebarItem icon={CalendarDays} label="近日" active={isActive("upcoming")} onClick={() => onNavigate?.({ kind: "upcoming" })} />
+        <SidebarItem icon={CalendarDays} label="近日" active={isActive("upcoming")} onClick={() => go({ kind: "upcoming" })} />
         <SidebarItem
           icon={LayoutGrid}
           label="フィルターとラベル"
           active={isActive("labels")}
-          onClick={() => onNavigate?.({ kind: "labels" })}
+          onClick={() => go({ kind: "labels" })}
         />
       </nav>
 
@@ -103,7 +132,7 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
         <section style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={heading}>お気に入り</div>
           {favorites.map((p) => (
-            <ProjectItem key={p.name} color={p.color} label={p.name} count={countOf(p.name)} onClick={() => onNavigate?.({ kind: "project", name: p.name })} />
+            <ProjectItem key={p.name} color={p.color} label={p.name} count={countOf(p.name)} onClick={() => go({ kind: "project", name: p.name })} />
           ))}
         </section>
       )}
@@ -119,8 +148,8 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
             color={p.color}
             label={p.name}
             count={countOf(p.name)}
-            active={active.kind === "project" && active.name === p.name}
-            onClick={() => onNavigate?.({ kind: "project", name: p.name })}
+            active={current.kind === "project" && current.name === p.name}
+            onClick={() => go({ kind: "project", name: p.name })}
           />
         ))}
       </section>

@@ -20,6 +20,8 @@ export type ProjectViewProps = {
   state?: "normal" | "empty" | "error" | "invalid";
   /** 行の 4 アイコンを常に表示する (D-13 で右端のはみ出しを確認するため)。既定はホバー時のみ。 */
   showActions?: boolean;
+  /** 行のクリック (チェック / シェブロン / アイコン以外) でタスク詳細を開く。D-03 系の Story だけが渡す。 */
+  onOpenTask?: (t: Task) => void;
 };
 
 const INVALID_TASK_NO = 2; // D-11c で要修正にする行 (洗剤の詰め替え)
@@ -35,6 +37,7 @@ export function ProjectView({
   showLongTitleRow,
   state = "normal",
   showActions,
+  onOpenTask,
 }: ProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [formParent, setFormParent] = useState<number | undefined>(initialFormParent);
@@ -69,6 +72,7 @@ export function ProjectView({
         labels={t.labels}
         indent={indent}
         showActions={showActions}
+        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
         subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
         onToggleDone={() => setDoneOverride((m) => new Map(m).set(t.no, !isDone(t)))}
         onToggleExpand={() => setExpanded((s) => toggleSet(s, t.no))}

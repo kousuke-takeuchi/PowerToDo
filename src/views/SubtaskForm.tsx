@@ -32,6 +32,9 @@ export function SubtaskForm({ defaultTitle = "", autoFocus, onCancel, onSubmit }
   const [title, setTitle] = useState(defaultTitle);
   return (
     <form
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel?.();
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         if (title.trim()) onSubmit?.(title);

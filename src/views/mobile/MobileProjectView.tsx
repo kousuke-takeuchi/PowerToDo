@@ -23,6 +23,10 @@ export type MobileProjectViewProps = {
   initialOverlay?: "none" | "quickAdd" | "drawer";
   projects?: Project[];
   quickAddTokens?: QuickAddToken[];
+  /** スワイプ中の行のタイトル。pen は M-01 / M-02 / M-06 が「食パン」、M-01b が「電池を買う」。 */
+  swipeTitle?: string;
+  /** ヘッダの同期アイコン (回転)。pen の M-02 / M-06 には無い。 */
+  showSync?: boolean;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -69,6 +73,8 @@ export function MobileProjectView({
   initialOverlay = "none",
   projects = mockProjects,
   quickAddTokens = defaultTokens,
+  swipeTitle = "電池を買う",
+  showSync = true,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
@@ -118,7 +124,7 @@ export function MobileProjectView({
 
   return (
     <MobileShell
-      header={<MobileHeader title={project} sync="syncing" onMenu={() => setOverlay("drawer")} />}
+      header={<MobileHeader title={project} sync={showSync ? "syncing" : "synced"} onMenu={() => setOverlay("drawer")} />}
       tab="list"
       fab={overlay === "none"}
       onFab={() => setOverlay("quickAdd")}
@@ -140,7 +146,7 @@ export function MobileProjectView({
             </section>
           );
         })}
-        <SwipeDemo title="電池を買う" />
+        <SwipeDemo title={swipeTitle} />
       </div>
     </MobileShell>
   );

@@ -43,14 +43,11 @@ const shiftMonth = (ymd: string, delta: number) => {
 export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜" }: DatePickerProps) {
   const [date, setDate] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
-  // pen では入力欄の "明日 15:00" は placeholder (muted)。ユーザーが選ぶ / 入力するまでは値を空にして placeholder で出す。
-  const [touched, setTouched] = useState(false);
   const [month, setMonth] = useState(monthStart(value ?? TODAY));
 
   const select = (d: string | undefined) => {
     setDate(d);
     setTyped(null);
-    setTouched(true);
     if (d) setMonth(monthStart(d));
     // 時刻はタスクに有るときだけ渡す (既定の時刻を勝手に足さない)
     onChange?.(time ? { date: d, time } : { date: d });
@@ -79,7 +76,7 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
 
   return (
     <PopoverShell label="日付">
-      <TextField value={typed ?? (touched ? derived : "")} placeholder={derived || "日付を入力"} onChange={setTyped} />
+      <TextField value={typed ?? derived} placeholder="日付を入力" onChange={setTyped} />
       <div style={{ display: "flex", flexDirection: "column" }}>
         {picks.map((p) => (
           <PopRow key={p.key} icon={p.icon} iconColor={p.color} onClick={() => select(p.date)} ariaLabel={p.label}>

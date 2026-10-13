@@ -1,5 +1,5 @@
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, Calendar, ChevronDown, ChevronRight, ChevronUp, Ellipsis, Flag, Folder, Repeat, Tag, X } from "lucide-react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { Button } from "../components/Button";
@@ -72,6 +72,7 @@ function PropRow({
   return onClick ? (
     <button
       type="button"
+      data-prop-row
       onClick={onClick}
       aria-expanded={expanded}
       className="bg-transparent hover:bg-[var(--color-bg-hover)]"
@@ -96,6 +97,28 @@ export function TaskDetailPanel({ task, subtasks, project, section, initialPopov
   const sub = useDone();
   const taskComments = comments.filter((c) => c.taskNo === task.no);
   const toggle = (p: Popover) => setPopover((cur) => (cur === p ? null : p));
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Esc / ポップオーバーの外のクリックで閉じる。ポップオーバー内の行を押すと押した要素が消えてフォーカスが body に戻るので、
+  // パネルの onKeyDown ではなく window で受ける。Esc はポップオーバーが開いていれば閉じ、無ければパネルを閉じる。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (popover) setPopover(null);
+      else onClose?.();
+    };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (!popover || !t || popoverRef.current?.contains(t) || t.closest("[data-prop-row]")) return;
+      setPopover(null);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [popover, onClose]);
 
   const dueInfo = dateLabel(due);
   const dueText = dueInfo ? `${dueInfo.label}${time ? ` ${time}` : ""}` : "なし";
@@ -104,13 +127,6 @@ export function TaskDetailPanel({ task, subtasks, project, section, initialPopov
 
   return (
     <div
-      tabIndex={-1}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        e.stopPropagation();
-        if (popover) setPopover(null);
-        else onClose?.();
-      }}
       style={{
         outline: "none",
         position: "relative",
@@ -196,7 +212,7 @@ export function TaskDetailPanel({ task, subtasks, project, section, initialPopov
       </div>
 
       {popover && (
-        <div style={{ position: "absolute", left: -1, top: POPOVER_TOP[popover], zIndex: 10 }}>
+        <div ref={popoverRef} style={{ position: "absolute", left: -1, top: POPOVER_TOP[popover], zIndex: 10 }}>
           {popover === "date" && (
             <DatePicker
               value={due}

@@ -33,7 +33,7 @@ type Story = StoryObj<typeof meta>;
 // pen の「買い物」プロジェクトは 今週 に 2 件 (牛乳と卵を買う / 洗剤の詰め替え)。
 // mock の「食パンを買う」(no 8) は D-04 今日 用なので、プロジェクト画面の Story からは外す。
 const shopping = tasks.filter((t) => t.no !== 8);
-// D-11c (要修正行) と D-13 は件数バッジとシェブロンを出さない (pen どおり)。
+// D-11c / D-13 に加え、D-01 系以外の「買い物」背景 (D-02 / D-03 / D-07 / D-08 / D-09 系) も、pen は件数バッジとシェブロンを出さない (pen どおり)。
 const shoppingFlat = shopping.filter((t) => t.parentNo === undefined);
 
 const sidebar = (
@@ -102,7 +102,7 @@ function QuickAddScreen() {
         ) : undefined
       }
     >
-      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
     </AppShell>
   );
 }
@@ -197,30 +197,32 @@ const detailTask = {
   note: "近所のスーパーで。卵は 10 個入り。ポイントカードを忘れない。",
   labels: ["食品", "急ぎ"],
 };
-const detailSubtasks = tasks.filter((t) => t.parentNo === detailTask.no);
 const detailProject = projects.find((p) => p.name === "買い物")!;
 
 function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProps["initialPopover"] }) {
-  const [open, setOpen] = useState(true);
+  // 行をクリックするとその行のパネルを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
+  const [openNo, setOpenNo] = useState<number | null>(detailTask.no);
+  const shown = openNo === null ? undefined : openNo === detailTask.no ? detailTask : tasks.find((t) => t.no === openNo);
   return (
     <AppShell
       sidebar={sidebar}
       syncState="synced"
       panel={
-        open ? (
+        shown ? (
           <TaskDetailPanel
-            task={detailTask}
-            subtasks={detailSubtasks}
+            key={shown.no}
+            task={shown}
+            subtasks={tasks.filter((t) => t.parentNo === shown.no)}
             project={detailProject}
-            section="今週"
+            section={shown.category ?? undefined}
             comments={comments}
-            initialPopover={initialPopover}
-            onClose={() => setOpen(false)}
+            initialPopover={shown.no === detailTask.no ? initialPopover : undefined}
+            onClose={() => setOpenNo(null)}
           />
         ) : undefined
       }
     >
-      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} onOpenTask={(t) => setOpenNo(t.no)} />
     </AppShell>
   );
 }
@@ -252,18 +254,25 @@ export const D08b: Story = {
 };
 
 // D-09 系: D-01 の上に設定ダイアログ。同期先セグメントで本文が切り替わり、ログイン / 接続 / ログアウト / 切断で接続状態が動く。
-// scrim クリック / Esc で閉じる。サイドバー最下部の同期状態は pen に合わせて Story ごとに渡す。
+// scrim クリック / Esc で閉じ、サイドバーのアカウントで開き直す。サイドバー最下部の同期状態は pen に合わせて Story ごとに渡す。
 function SettingsScreen({ initialTarget, connected, syncState, lastSyncedAt }: { initialTarget: SyncTarget; connected?: boolean; syncState: SyncState; lastSyncedAt?: string }) {
   const [open, setOpen] = useState(true);
   return (
     <AppShell
       sidebar={
-        <Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState={syncState} lastSyncedAt={lastSyncedAt} />
+        <Sidebar
+          active={{ kind: "project", name: "買い物" }}
+          counts={counts}
+          projects={projects}
+          syncState={syncState}
+          lastSyncedAt={lastSyncedAt}
+          onOpenSettings={() => setOpen(true)}
+        />
       }
       syncState={syncState}
       overlay={open ? <SettingsDialog open initialTarget={initialTarget} connected={connected} onClose={() => setOpen(false)} /> : undefined}
     >
-      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
     </AppShell>
   );
 }
@@ -296,7 +305,7 @@ function ConflictScreen() {
       syncState="error"
       banner={shown ? <ConflictBanner fileName="買い物.xlsx" conflictName="買い物 (競合 2026-10-13 0941).xlsx" onClose={() => setShown(false)} /> : undefined}
     >
-      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
     </AppShell>
   );
 }
