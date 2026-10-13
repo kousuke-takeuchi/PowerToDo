@@ -19,6 +19,8 @@ export type TaskRowProps = {
   indent?: 0 | 1 | 2;
   variant?: "desktop" | "mobile";
   showActions?: boolean;
+  /** 右端の 4 アイコンを出さない (D-03 のサブタスク行)。 */
+  hideActions?: boolean;
   onToggleDone?: () => void;
   onToggleExpand?: () => void;
   onClick?: () => void;
@@ -130,7 +132,7 @@ export function TaskRow(p: TaskRowProps) {
           </div>
         )}
       </div>
-      {!mobile && (
+      {!mobile && !p.hideActions && (
         <div
           style={{ display: "flex", gap: "var(--space-1)", alignItems: "center", opacity: p.showActions ? 1 : undefined }}
           onClick={(e) => e.stopPropagation()}

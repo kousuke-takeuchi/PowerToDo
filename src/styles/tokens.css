@@ -17,6 +17,7 @@
   --color-danger: #D1453B;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px;
   --radius: 8px;
+  --shadow-popover: 0 8px 24px #00000022; /* pen のポップオーバーの影 */
 }
 html[data-theme="dark"] {
   --color-bg: #1E1E1E;

@@ -1,13 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 import { TODAY, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
 import { FixBanner } from "../../views/FixBanner";
 import { LabelDetailView } from "../../views/LabelDetailView";
 import { LabelsView } from "../../views/LabelsView";
+import { OsNotification } from "../../views/OsNotification";
 import { ProjectView } from "../../views/ProjectView";
 import type { ProjectViewProps } from "../../views/ProjectView";
 import { Sidebar } from "../../views/Sidebar";
 import type { SidebarProps } from "../../views/Sidebar";
+import { TaskDetailPanel } from "../../views/TaskDetailPanel";
+import type { TaskDetailPanelProps } from "../../views/TaskDetailPanel";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
 
@@ -118,4 +122,64 @@ export const D06: Story = {
 export const D06b: Story = {
   name: "D-06b ラベル詳細",
   render: () => navShell({ kind: "labels" }, <LabelDetailView label="食品" tasks={tasks} />),
+};
+
+// D-03 系: pen の詳細パネルは「牛乳と卵を買う」。mock の task 1 に pen 固有の説明文とラベル 2 つを足して渡す
+// (D-01 の行は mock のまま。パネルだけ pen に合わせる)。
+const detailTask = {
+  ...tasks[0],
+  note: "近所のスーパーで。卵は 10 個入り。ポイントカードを忘れない。",
+  labels: ["食品", "急ぎ"],
+};
+const detailSubtasks = tasks.filter((t) => t.parentNo === detailTask.no);
+const detailProject = projects.find((p) => p.name === "買い物")!;
+
+function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProps["initialPopover"] }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AppShell
+      sidebar={sidebar}
+      syncState="synced"
+      panel={
+        open ? (
+          <TaskDetailPanel
+            task={detailTask}
+            subtasks={detailSubtasks}
+            project={detailProject}
+            section="今週"
+            initialPopover={initialPopover}
+            onClose={() => setOpen(false)}
+          />
+        ) : undefined
+      }
+    >
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+    </AppShell>
+  );
+}
+
+export const D03: Story = {
+  name: "D-03 タスク詳細",
+  render: () => <DetailScreen />,
+};
+
+export const D07: Story = {
+  name: "D-07 日付ピッカー",
+  render: () => <DetailScreen initialPopover="date" />,
+};
+
+export const D07b: Story = {
+  name: "D-07b 繰り返し設定",
+  render: () => <DetailScreen initialPopover="recurrence" />,
+};
+
+export const D08: Story = {
+  name: "D-08 リマインダー",
+  render: () => <DetailScreen initialPopover="reminder" />,
+};
+
+export const D08b: Story = {
+  name: "D-08b OS 通知",
+  parameters: { layout: "fullscreen" },
+  render: () => <OsNotification title="牛乳と卵を買う" sub="15:00 · 買い物" />,
 };

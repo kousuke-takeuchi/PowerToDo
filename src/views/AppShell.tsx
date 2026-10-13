@@ -16,6 +16,7 @@ const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
 
 /**
  * デスクトップのシェル。1440: Sidebar 280 + Main (Column 最大 800 中央) + 任意の panel 400。
+ * panel があるとき Main は 760 になり、Column は左右 24 の padding で幅いっぱいに縮む (pen の D-03)。
  * 960: SidebarRail 56 + Main (Column は全幅、padding 24/32)。390 は Main のみ (モバイルは MobileShell を使う)。
  * overflow: hidden はルートだけ。Main / Column はクリップしない (左余白のシェブロンが見えるように)。
  */
@@ -54,7 +55,7 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
             width: "100%",
             maxWidth: wide ? 800 : undefined,
             boxSizing: "border-box",
-            padding: wide ? "40px 0" : rail ? "24px 32px" : "16px",
+            padding: wide ? (panel ? "40px 24px" : "40px 0") : rail ? "24px 32px" : "16px",
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-4)",
