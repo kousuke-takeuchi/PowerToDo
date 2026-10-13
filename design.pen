@@ -971,6 +971,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "zhAqM",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "Odgak",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -1672,6 +1687,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "H73t04",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "V9BBa",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -3094,6 +3124,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "qi0W7",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "eUgPt",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -4213,6 +4258,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "Y2WEjx",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "WapcL",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -4962,6 +5022,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "L74Ffm",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "l8RwB",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -5612,6 +5687,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "kMc7i",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "cKsG6",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -6640,6 +6730,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "uxnXg",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "QAmGz",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -7536,6 +7641,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "TyG5V",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "R1vDCb",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -8167,6 +8287,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "DdEWa",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "w50Vm7",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -10993,6 +11128,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "YZO4Q",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "g4Uqf9",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -12729,6 +12879,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "mYnWj",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "xVuRS",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -14649,6 +14814,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "tlBgZ",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "iURuk",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -15826,6 +16006,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "o6nChs",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "y3GUkW",
+              "type": "ref",
+              "ref": "y4RHlK",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -16205,47 +16400,6 @@
                   ]
                 }
               ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "yIJ9Q",
-          "layoutPosition": "absolute",
-          "x": 1240,
-          "y": 864,
-          "name": "SyncStatus",
-          "width": 184,
-          "fill": "$bg-sidebar",
-          "cornerRadius": 6,
-          "stroke": "$border",
-          "strokeWidth": 1,
-          "gap": "$space-1",
-          "padding": [
-            4,
-            8
-          ],
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "icon",
-              "id": "JMiFW",
-              "name": "Icon",
-              "width": 14,
-              "height": 14,
-              "icon": "cloud-off",
-              "library": "lucide",
-              "fill": "$text-secondary"
-            },
-            {
-              "type": "text",
-              "id": "vS1uK",
-              "name": "Text",
-              "fill": "$text-secondary",
-              "content": "オフライン · 最終同期 09:41",
-              "fontFamily": "$font-body",
-              "fontSize": 11,
-              "fontWeight": "normal"
             }
           ]
         }
@@ -16969,6 +17123,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "Q6UdRJ",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "xO4Zo",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -18001,6 +18170,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "VTWQJ",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "xu3Ot",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -18564,6 +18748,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "Hecpg",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "rtR2l",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -19154,6 +19353,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "Ichjf",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "kcR07",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -19635,6 +19849,28 @@
                 "k6ut1g": {
                   "icon": "layout-grid",
                   "fill": "$text-secondary"
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "Uc5oK",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "iOxF3",
+              "type": "ref",
+              "ref": "fJ1ZV",
+              "name": "SyncStatus",
+              "descendants": {
+                "k6ut1g": {
+                  "icon": "circle-check",
+                  "width": 16,
+                  "height": 16,
+                  "fill": "$success"
                 }
               }
             }
@@ -20323,6 +20559,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "jIfHv",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "wFVHM",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -21027,6 +21278,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "v2A9Z",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "J0tbQY",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -22452,6 +22718,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "uN0Y9",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "SaRlh",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -23360,6 +23641,19 @@
               "fill": "$accent"
             }
           }
+        },
+        {
+          "type": "icon",
+          "id": "vdiiG",
+          "layoutPosition": "absolute",
+          "x": 318,
+          "y": 60,
+          "name": "HeaderSync",
+          "width": 18,
+          "height": 18,
+          "icon": "loader-circle",
+          "library": "lucide",
+          "fill": "$text-secondary"
         }
       ]
     },
@@ -25775,6 +26069,21 @@
                       }
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tEYhb",
+                  "name": "Spacer",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical"
+                },
+                {
+                  "id": "hhl20",
+                  "type": "ref",
+                  "ref": "ejpEA",
+                  "name": "SyncStatus",
+                  "width": "fill_container"
                 }
               ]
             }
@@ -26412,6 +26721,19 @@
               "fill": "$text-secondary"
             }
           }
+        },
+        {
+          "type": "icon",
+          "id": "FLyjW",
+          "layoutPosition": "absolute",
+          "x": 318,
+          "y": 60,
+          "name": "HeaderSync",
+          "width": 18,
+          "height": 18,
+          "icon": "cloud-off",
+          "library": "lucide",
+          "fill": "$text-secondary"
         }
       ]
     },
@@ -27475,6 +27797,21 @@
                   }
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "tMawi",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "FHd7M",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
             }
           ]
         },
@@ -28292,6 +28629,351 @@
                   ]
                 }
               ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "ejpEA",
+      "x": 1306,
+      "y": 0,
+      "name": "SyncStatus",
+      "reusable": true,
+      "width": 248,
+      "cornerRadius": 6,
+      "gap": "$space-2",
+      "padding": [
+        6,
+        10
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "sePzH",
+          "name": "Icon",
+          "width": 14,
+          "height": 14,
+          "icon": "circle-check",
+          "library": "lucide",
+          "fill": "$success"
+        },
+        {
+          "type": "text",
+          "id": "l5Fi3s",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "同期済み 09:41",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "T2KXDP",
+      "x": 1594,
+      "y": 0,
+      "name": "SyncStatus-同期中",
+      "reusable": true,
+      "width": 248,
+      "cornerRadius": 6,
+      "gap": "$space-2",
+      "padding": [
+        6,
+        10
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "gYi0O",
+          "name": "Icon",
+          "width": 14,
+          "height": 14,
+          "icon": "loader-circle",
+          "library": "lucide",
+          "fill": "$text-secondary"
+        },
+        {
+          "type": "text",
+          "id": "g8ccx1",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "同期中…",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "y4RHlK",
+      "x": 1882,
+      "y": 0,
+      "name": "SyncStatus-オフライン",
+      "reusable": true,
+      "width": 248,
+      "cornerRadius": 6,
+      "gap": "$space-2",
+      "padding": [
+        6,
+        10
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "m3qLFo",
+          "name": "Icon",
+          "width": 14,
+          "height": 14,
+          "icon": "cloud-off",
+          "library": "lucide",
+          "fill": "$text-secondary"
+        },
+        {
+          "type": "text",
+          "id": "PEXpO",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "オフライン · 最終同期 09:41",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "V6gnh",
+      "x": 2170,
+      "y": 0,
+      "name": "SyncStatus-エラー",
+      "reusable": true,
+      "width": 248,
+      "cornerRadius": 6,
+      "gap": "$space-2",
+      "padding": [
+        6,
+        10
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "R7gJQ",
+          "name": "Icon",
+          "width": 14,
+          "height": 14,
+          "icon": "triangle-alert",
+          "library": "lucide",
+          "fill": "$danger"
+        },
+        {
+          "type": "text",
+          "id": "fdJoL",
+          "name": "Label",
+          "fill": "$danger",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "同期エラー · クリックで再試行",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "vPDK7",
+      "x": 4680,
+      "y": 6666,
+      "name": "D-09d 同期状態一覧",
+      "width": 1440,
+      "height": 900,
+      "fill": "$bg",
+      "layout": "vertical",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "Ugko8",
+          "name": "Samples",
+          "width": 320,
+          "layout": "vertical",
+          "gap": "$space-4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Nw2MZ",
+              "name": "Sample-同期中",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Kc2D1",
+                  "name": "StateName",
+                  "fill": "$text-primary",
+                  "content": "同期中",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "kgcQ8",
+                  "name": "SidebarBg",
+                  "width": 248,
+                  "fill": "$bg-sidebar",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "ty7hH",
+                      "type": "ref",
+                      "ref": "T2KXDP",
+                      "name": "SyncStatus",
+                      "width": "fill_container"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "BCAmk",
+              "name": "Sample-同期済み",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "KFCrk",
+                  "name": "StateName",
+                  "fill": "$text-primary",
+                  "content": "同期済み",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "u3wHmF",
+                  "name": "SidebarBg",
+                  "width": 248,
+                  "fill": "$bg-sidebar",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "BkCIp",
+                      "type": "ref",
+                      "ref": "ejpEA",
+                      "name": "SyncStatus",
+                      "width": "fill_container"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "z0aZpo",
+              "name": "Sample-オフライン",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "rvl8A",
+                  "name": "StateName",
+                  "fill": "$text-primary",
+                  "content": "オフライン",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "OyTcg",
+                  "name": "SidebarBg",
+                  "width": 248,
+                  "fill": "$bg-sidebar",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "c4RQTL",
+                      "type": "ref",
+                      "ref": "y4RHlK",
+                      "name": "SyncStatus",
+                      "width": "fill_container"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "OEFKz",
+              "name": "Sample-エラー",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "vlbAv",
+                  "name": "StateName",
+                  "fill": "$text-primary",
+                  "content": "エラー",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ekmSL",
+                  "name": "SidebarBg",
+                  "width": 248,
+                  "fill": "$bg-sidebar",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "Ni5oH",
+                      "type": "ref",
+                      "ref": "V6gnh",
+                      "name": "SyncStatus",
+                      "width": "fill_container"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "xZHTy",
+              "name": "Note",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": 320,
+              "content": "サイドバー最下部に常設。同期中はアイコンが回転。エラーはクリックで再試行。",
+              "fontFamily": "$font-body",
+              "fontSize": 12,
+              "fontWeight": "normal"
             }
           ]
         }
