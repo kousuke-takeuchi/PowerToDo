@@ -35,7 +35,7 @@ export function Segmented<T extends string>({ options, value, onChange }: Segmen
               color: selected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
               fontFamily: "var(--font-body)",
               fontSize: 13,
-              lineHeight: "18px",
+              lineHeight: "19px",
               fontWeight: selected ? 600 : 400,
               cursor: "pointer",
             }}

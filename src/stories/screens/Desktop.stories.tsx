@@ -3,17 +3,23 @@ import { useState } from "react";
 import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
 import { BoardView } from "../../views/BoardView";
+import { ConflictBanner } from "../../views/ConflictBanner";
 import { FixBanner } from "../../views/FixBanner";
 import { LabelDetailView } from "../../views/LabelDetailView";
 import { LabelsView } from "../../views/LabelsView";
+import { Onboarding } from "../../views/Onboarding";
 import { OsNotification } from "../../views/OsNotification";
 import { ProjectView } from "../../views/ProjectView";
 import { QuickAddDialog } from "../../views/QuickAddDialog";
 import type { ProjectViewProps } from "../../views/ProjectView";
+import { SettingsDialog } from "../../views/SettingsDialog";
+import type { SyncTarget } from "../../views/SettingsDialog";
 import { Sidebar } from "../../views/Sidebar";
 import type { SidebarProps } from "../../views/Sidebar";
+import { SyncSamples } from "../../views/SyncSamples";
 import { TaskDetailPanel } from "../../views/TaskDetailPanel";
 import type { TaskDetailPanelProps } from "../../views/TaskDetailPanel";
+import type { SyncState } from "../../components/SyncStatus";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
 
@@ -243,4 +249,85 @@ export const D08b: Story = {
   name: "D-08b OS 通知",
   parameters: { layout: "fullscreen" },
   render: () => <OsNotification title="牛乳と卵を買う" sub="15:00 · 買い物" />,
+};
+
+// D-09 系: D-01 の上に設定ダイアログ。同期先セグメントで本文が切り替わり、ログイン / 接続 / ログアウト / 切断で接続状態が動く。
+// scrim クリック / Esc で閉じる。サイドバー最下部の同期状態は pen に合わせて Story ごとに渡す。
+function SettingsScreen({ initialTarget, connected, syncState, lastSyncedAt }: { initialTarget: SyncTarget; connected?: boolean; syncState: SyncState; lastSyncedAt?: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AppShell
+      sidebar={
+        <Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState={syncState} lastSyncedAt={lastSyncedAt} />
+      }
+      syncState={syncState}
+      overlay={open ? <SettingsDialog open initialTarget={initialTarget} connected={connected} onClose={() => setOpen(false)} /> : undefined}
+    >
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+    </AppShell>
+  );
+}
+
+export const D09: Story = {
+  name: "D-09 設定",
+  render: () => <SettingsScreen initialTarget="google" syncState="off" />,
+};
+
+export const D09c: Story = {
+  name: "D-09c 設定 (接続済み)",
+  render: () => <SettingsScreen initialTarget="google" connected syncState="synced" lastSyncedAt="09:41" />,
+};
+
+export const D09e: Story = {
+  name: "D-09e 設定 (NAS 未接続)",
+  render: () => <SettingsScreen initialTarget="nas" syncState="off" />,
+};
+
+// pen の D-09f はサイドバー最下部が「同期オフ · 未ログイン」のまま (D-09e と同じ)。pen に合わせる。
+export const D09f: Story = {
+  name: "D-09f 設定 (NAS 接続済み)",
+  render: () => <SettingsScreen initialTarget="nas" connected syncState="off" />,
+};
+
+function ConflictScreen() {
+  const [shown, setShown] = useState(true);
+  return (
+    <AppShell
+      sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState="error" />}
+      syncState="error"
+      banner={shown ? <ConflictBanner fileName="買い物.xlsx" conflictName="買い物 (競合 2026-10-13 0941).xlsx" onClose={() => setShown(false)} /> : undefined}
+    >
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+    </AppShell>
+  );
+}
+
+export const D09b: Story = {
+  name: "D-09b 競合バナー",
+  render: () => <ConflictScreen />,
+};
+
+export const D09d: Story = {
+  name: "D-09d 同期状態一覧",
+  render: () => <SyncSamples />,
+};
+
+export const D12: Story = {
+  name: "D-12 初回起動",
+  render: () => <Onboarding step={1} />,
+};
+
+export const D12b: Story = {
+  name: "D-12b 初回起動 (Google 接続)",
+  render: () => <Onboarding step={2} target="google" />,
+};
+
+export const D12c: Story = {
+  name: "D-12c 初回起動 (受信トレイ)",
+  render: () => <Onboarding step={3} />,
+};
+
+export const D12d: Story = {
+  name: "D-12d 初回起動 (NAS)",
+  render: () => <Onboarding step={2} target="nas" />,
 };
