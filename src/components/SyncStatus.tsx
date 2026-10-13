@@ -8,19 +8,19 @@ type Def = {
   Icon: React.ComponentType<{ size?: number }>;
   iconColor: string;
   textColor: string;
-  text: (t: string) => string;
+  text: (t?: string) => string;
   spin?: boolean;
 };
 
 const defs: Record<SyncState, Def> = {
-  synced: { Icon: CircleCheck, iconColor: "var(--color-success)", textColor: "var(--color-text-secondary)", text: (t) => `同期済み ${t}` },
+  synced: { Icon: CircleCheck, iconColor: "var(--color-success)", textColor: "var(--color-text-secondary)", text: (t) => (t ? `同期済み ${t}` : "同期済み") },
   syncing: { Icon: LoaderCircle, iconColor: "var(--color-text-secondary)", textColor: "var(--color-text-secondary)", text: () => "同期中…", spin: true },
-  offline: { Icon: CloudOff, iconColor: "var(--color-text-secondary)", textColor: "var(--color-text-secondary)", text: (t) => `オフライン · 最終同期 ${t}` },
+  offline: { Icon: CloudOff, iconColor: "var(--color-text-secondary)", textColor: "var(--color-text-secondary)", text: (t) => (t ? `オフライン · 最終同期 ${t}` : "オフライン") },
   error: { Icon: TriangleAlert, iconColor: "var(--color-danger)", textColor: "var(--color-danger)", text: () => "同期エラー · クリックで再試行" },
   off: { Icon: CloudOff, iconColor: "var(--color-text-muted)", textColor: "var(--color-text-secondary)", text: () => "同期オフ · 未ログイン" },
 };
 
-export function SyncStatus({ state, lastSyncedAt = "09:41", compact, onClick }: SyncStatusProps) {
+export function SyncStatus({ state, lastSyncedAt, compact, onClick }: SyncStatusProps) {
   const d = defs[state];
   const text = d.text(lastSyncedAt);
   const icon = (
@@ -41,7 +41,7 @@ export function SyncStatus({ state, lastSyncedAt = "09:41", compact, onClick }: 
       onClick={onClick}
       aria-label={compact ? text : undefined}
       title={compact ? text : undefined}
-      className="hover:bg-[var(--color-bg-hover)]"
+      className="bg-transparent hover:bg-[var(--color-bg-hover)]"
       style={
         compact
           ? {
@@ -52,7 +52,6 @@ export function SyncStatus({ state, lastSyncedAt = "09:41", compact, onClick }: 
               padding: 0,
               borderRadius: 6,
               border: 0,
-              background: "transparent",
               cursor: "pointer",
             }
           : {
@@ -63,7 +62,6 @@ export function SyncStatus({ state, lastSyncedAt = "09:41", compact, onClick }: 
               padding: "6px 10px",
               borderRadius: 6,
               border: 0,
-              background: "transparent",
               fontFamily: "var(--font-body)",
               textAlign: "left",
               cursor: "pointer",

@@ -1,3 +1,4 @@
+import type React from "react";
 import { ChevronDown, ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree } from "lucide-react";
 import { Checkbox } from "./Checkbox";
 import { DateChip } from "./DateChip";
@@ -21,6 +22,16 @@ export type TaskRowProps = {
   onToggleDone?: () => void;
   onToggleExpand?: () => void;
   onClick?: () => void;
+};
+
+const subCountStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "var(--space-1)",
+  fontFamily: "var(--font-body)",
+  fontSize: 12,
+  lineHeight: "17px",
+  color: "var(--color-text-secondary)",
 };
 
 export function TaskRow(p: TaskRowProps) {
@@ -60,14 +71,16 @@ export function TaskRow(p: TaskRowProps) {
             padding: 0,
             border: 0,
             background: "none",
-            color: "var(--color-text-secondary)",
+            color: "var(--color-text-muted)",
             cursor: "pointer",
           }}
         >
           <Chevron size={16} />
         </button>
       )}
-      <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} />
+      <div style={{ display: "flex", flex: "0 0 auto" }} onClick={(e) => e.stopPropagation()}>
+        <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} />
+      </div>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
         <div
           style={{
@@ -92,40 +105,36 @@ export function TaskRow(p: TaskRowProps) {
             {p.project && (
               <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{p.project}</span>
             )}
-            {p.subtasks && (
-              <button
-                type="button"
-                aria-label={mobile ? (p.subtasks.expanded ? "サブタスクを折りたたむ" : "サブタスクを展開") : undefined}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (mobile) p.onToggleExpand?.();
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "var(--space-1)",
-                  fontFamily: "var(--font-body)",
-                  fontSize: 12,
-                  lineHeight: "17px",
-                  color: "var(--color-text-secondary)",
-                  background: "none",
-                  border: 0,
-                  padding: 0,
-                  cursor: mobile ? "pointer" : "default",
-                }}
-              >
-                <ListTree size={12} color="var(--color-text-muted)" />
-                {p.subtasks.done}/{p.subtasks.total}
-                {mobile && <Chevron size={12} />}
-              </button>
-            )}
+            {p.subtasks &&
+              (mobile ? (
+                <button
+                  type="button"
+                  aria-label={p.subtasks.expanded ? "サブタスクを折りたたむ" : "サブタスクを展開"}
+                  aria-expanded={p.subtasks.expanded}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    p.onToggleExpand?.();
+                  }}
+                  style={{ ...subCountStyle, background: "none", border: 0, padding: 0, cursor: "pointer" }}
+                >
+                  <ListTree size={12} color="var(--color-text-muted)" />
+                  {p.subtasks.done}/{p.subtasks.total}
+                  <Chevron size={12} />
+                </button>
+              ) : (
+                <span style={subCountStyle}>
+                  <ListTree size={12} color="var(--color-text-muted)" />
+                  {p.subtasks.done}/{p.subtasks.total}
+                </span>
+              ))}
           </div>
         )}
       </div>
       {!mobile && (
         <div
           style={{ display: "flex", gap: "var(--space-1)", alignItems: "center", opacity: p.showActions ? 1 : undefined }}
-          className={p.showActions ? undefined : "opacity-0 group-hover:opacity-100"}
+          onClick={(e) => e.stopPropagation()}
+          className={p.showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}
         >
           <Button variant="icon" icon={Pencil} ariaLabel="編集" />
           <Button variant="icon" icon={Calendar} ariaLabel="日付" />

@@ -12,7 +12,7 @@ export function ProjectItem({ color, label, count, active, onClick }: ProjectIte
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className="hover:bg-[var(--color-bg-hover)]"
+      className="bg-transparent hover:bg-[var(--color-bg-hover)]"
       style={{
         width: "100%",
         display: "flex",
@@ -21,7 +21,7 @@ export function ProjectItem({ color, label, count, active, onClick }: ProjectIte
         padding: "6px 10px",
         borderRadius: 6,
         border: 0,
-        background: active ? "var(--color-bg-hover)" : "transparent",
+        background: active ? "var(--color-bg-hover)" : undefined,
         fontFamily: "var(--font-body)",
         textAlign: "left",
         cursor: "pointer",
