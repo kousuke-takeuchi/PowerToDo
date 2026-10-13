@@ -15276,7 +15276,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "db8j2",
+                  "id": "bgkoF",
                   "name": "SettingsBody",
                   "width": "fill_container",
                   "height": "fill_container",
@@ -15289,7 +15289,7 @@
                   "children": [
                     {
                       "type": "text",
-                      "id": "pcqLS",
+                      "id": "B8F03",
                       "name": "Title",
                       "fill": "$text-primary",
                       "content": "Google Drive",
@@ -15299,52 +15299,7 @@
                     },
                     {
                       "type": "frame",
-                      "id": "bHzzm",
-                      "name": "S-OAuth クライアント ID",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": "$space-2",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "Hi4QT",
-                          "name": "Label",
-                          "fill": "$text-primary",
-                          "content": "OAuth クライアント ID",
-                          "fontFamily": "$font-body",
-                          "fontSize": 13,
-                          "fontWeight": "600"
-                        },
-                        {
-                          "type": "text",
-                          "id": "B6dnWw",
-                          "name": "Desc",
-                          "fill": "$text-secondary",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Google Cloud コンソールで「デスクトップアプリ」のクライアント ID を作成し、ここに貼り付けます。",
-                          "fontFamily": "$font-body",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "id": "u22s6z",
-                          "type": "ref",
-                          "ref": "ryZIZ",
-                          "name": "ClientId",
-                          "width": "fill_container",
-                          "descendants": {
-                            "o39xK": {
-                              "content": "123456789012-abcdefg.apps.googleusercontent.com",
-                              "fill": "$text-primary"
-                            }
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "SwT2x",
+                      "id": "nqxvq",
                       "name": "S-接続状態",
                       "width": "fill_container",
                       "layout": "vertical",
@@ -15352,7 +15307,7 @@
                       "children": [
                         {
                           "type": "text",
-                          "id": "XuDHg",
+                          "id": "rfwu2",
                           "name": "Label",
                           "fill": "$text-primary",
                           "content": "接続状態",
@@ -15361,41 +15316,31 @@
                           "fontWeight": "600"
                         },
                         {
-                          "type": "frame",
-                          "id": "Vdrd8",
-                          "name": "Status",
+                          "type": "text",
+                          "id": "lnV50",
+                          "name": "Desc",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
                           "width": "fill_container",
+                          "content": "Google アカウントでログインすると、タスクのファイルが Google Drive の PowerToDo フォルダに同期されます。",
+                          "fontFamily": "$font-body",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "I6uFs",
+                          "name": "LoginRow",
                           "gap": "$space-2",
-                          "alignItems": "center",
                           "children": [
                             {
-                              "type": "ellipse",
-                              "id": "XICfW",
-                              "name": "Dot",
-                              "fill": "$success",
-                              "width": 8,
-                              "height": 8
-                            },
-                            {
-                              "type": "text",
-                              "id": "Fsi38",
-                              "name": "Text",
-                              "fill": "$text-primary",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "接続済み · user@example.com",
-                              "fontFamily": "$font-body",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "id": "pwVL0",
+                              "id": "KAKCz",
                               "type": "ref",
-                              "ref": "E2lHu",
-                              "name": "Disconnect",
+                              "ref": "pBoMx",
+                              "name": "Login",
                               "descendants": {
-                                "RbdS9": {
-                                  "content": "接続を解除"
+                                "inBhp": {
+                                  "content": "Google でログイン"
                                 }
                               }
                             }
@@ -15405,7 +15350,7 @@
                     },
                     {
                       "type": "frame",
-                      "id": "xd3c2",
+                      "id": "TK0yo",
                       "name": "S-同期",
                       "width": "fill_container",
                       "layout": "vertical",
@@ -15413,7 +15358,7 @@
                       "children": [
                         {
                           "type": "text",
-                          "id": "oOqGH",
+                          "id": "A15V7",
                           "name": "Label",
                           "fill": "$text-primary",
                           "content": "同期",
@@ -15423,24 +15368,27 @@
                         },
                         {
                           "type": "text",
-                          "id": "asgef",
+                          "id": "N4106",
                           "name": "Desc",
                           "fill": "$text-secondary",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "最終同期: 今日 09:41 · Drive フォルダ: PowerToDo/",
+                          "content": "ログインすると同期を開始できます。",
                           "fontFamily": "$font-body",
                           "fontSize": 12,
                           "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
-                          "id": "Sswhf",
+                          "id": "C7RH6X",
+                          "x": 0,
+                          "y": 0,
                           "name": "SyncRow",
+                          "enabled": false,
                           "gap": "$space-2",
                           "children": [
                             {
-                              "id": "XYA1f",
+                              "id": "phzZv",
                               "type": "ref",
                               "ref": "pBoMx",
                               "name": "SyncNow",
@@ -15451,7 +15399,7 @@
                               }
                             },
                             {
-                              "id": "iCNvi",
+                              "id": "XHYs6",
                               "type": "ref",
                               "ref": "E2lHu",
                               "name": "ChooseFolder",
@@ -15467,7 +15415,7 @@
                     },
                     {
                       "type": "frame",
-                      "id": "nmeMM",
+                      "id": "TwhUy",
                       "name": "S-ローカルキャッシュ",
                       "width": "fill_container",
                       "layout": "vertical",
@@ -15475,7 +15423,7 @@
                       "children": [
                         {
                           "type": "text",
-                          "id": "PDi2u",
+                          "id": "KcNgi",
                           "name": "Label",
                           "fill": "$text-primary",
                           "content": "ローカルキャッシュ",
@@ -15485,7 +15433,7 @@
                         },
                         {
                           "type": "text",
-                          "id": "e4K61J",
+                          "id": "iIl8u",
                           "name": "Desc",
                           "fill": "$text-secondary",
                           "textGrowth": "fixed-width",
@@ -15496,7 +15444,7 @@
                           "fontWeight": "normal"
                         },
                         {
-                          "id": "ljQLI",
+                          "id": "Y7CFrd",
                           "type": "ref",
                           "ref": "E2lHu",
                           "name": "OpenFolder",
@@ -26555,7 +26503,7 @@
                   "fill": "$text-secondary",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Google Drive と同期するには、Google Cloud で作成したクライアント ID を入力してログインします。あとからでも設定できます。",
+                  "content": "Google アカウントでログインすると、Google Drive と同期できます。あとからでも設定できます。",
                   "textAlign": "center",
                   "fontFamily": "$font-body",
                   "fontSize": 13,
@@ -26732,7 +26680,7 @@
                   "id": "vC353",
                   "name": "Label",
                   "fill": "$text-primary",
-                  "content": "OAuth クライアント ID",
+                  "content": "Google Drive と同期",
                   "fontFamily": "$font-body",
                   "fontSize": 13,
                   "fontWeight": "600"
@@ -26743,21 +26691,9 @@
                   "name": "Row",
                   "width": "fill_container",
                   "gap": "$space-2",
+                  "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
-                    {
-                      "id": "NzVaX",
-                      "type": "ref",
-                      "ref": "ryZIZ",
-                      "name": "Path",
-                      "width": "fill_container",
-                      "descendants": {
-                        "o39xK": {
-                          "content": "123-abc.apps.googleusercontent.com",
-                          "fill": "$text-primary"
-                        }
-                      }
-                    },
                     {
                       "id": "FYqXH",
                       "type": "ref",
@@ -26778,7 +26714,7 @@
                   "fill": "$text-secondary",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "同期を使わない場合はスキップできます。",
+                  "content": "ログイン画面がブラウザで開きます。同期を使わない場合はスキップできます。",
                   "fontFamily": "$font-body",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -27170,6 +27106,1190 @@
                       "content": "はじめる"
                     }
                   }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "z4h2v",
+      "x": 3120,
+      "y": 6666,
+      "name": "D-09c 設定 (接続済み)",
+      "clip": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "$bg",
+      "children": [
+        {
+          "type": "frame",
+          "id": "d9nxxr",
+          "name": "Sidebar",
+          "width": 280,
+          "height": "fill_container",
+          "fill": "$bg-sidebar",
+          "layout": "vertical",
+          "gap": "$space-4",
+          "padding": [
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "VcVUk",
+              "name": "Account",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "e3t4Xp",
+                  "name": "Avatar",
+                  "fill": "$accent",
+                  "width": 28,
+                  "height": 28
+                },
+                {
+                  "type": "text",
+                  "id": "Ssknz",
+                  "name": "Name",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "ktakeuchi",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "id": "FLQHu",
+                  "type": "ref",
+                  "ref": "fJ1ZV",
+                  "name": "Notifications",
+                  "descendants": {
+                    "k6ut1g": {
+                      "icon": "bell"
+                    }
+                  }
+                },
+                {
+                  "id": "XBUqH",
+                  "type": "ref",
+                  "ref": "fJ1ZV",
+                  "name": "Collapse",
+                  "descendants": {
+                    "k6ut1g": {
+                      "icon": "panel-left-close"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "oHqFK",
+              "name": "AddTaskNav",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "padding": [
+                6,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "tPhnc",
+                  "name": "Plus",
+                  "width": 20,
+                  "height": 20,
+                  "icon": "circle-plus",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "S7KQmJ",
+                  "name": "Label",
+                  "fill": "$accent",
+                  "content": "タスクを追加",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "X7vF98",
+              "name": "Nav",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "id": "wkbkD",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-検索",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "search"
+                    },
+                    "GCMiA": {
+                      "content": "検索"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                },
+                {
+                  "id": "PH35z",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-受信トレイ",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "inbox"
+                    },
+                    "GCMiA": {
+                      "content": "受信トレイ"
+                    },
+                    "OpYvr": {
+                      "content": "12"
+                    }
+                  }
+                },
+                {
+                  "id": "DCSpL",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-今日",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "calendar-check"
+                    },
+                    "GCMiA": {
+                      "content": "今日"
+                    },
+                    "OpYvr": {
+                      "content": "5"
+                    }
+                  }
+                },
+                {
+                  "id": "F7GdoA",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-近日",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "calendar-days"
+                    },
+                    "GCMiA": {
+                      "content": "近日"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                },
+                {
+                  "id": "DPG4R",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-フィルターとラベル",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "layout-grid"
+                    },
+                    "GCMiA": {
+                      "content": "フィルターとラベル"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "z29Eme",
+              "name": "Favorites",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "N94Hy",
+                  "name": "Heading",
+                  "fill": "$text-secondary",
+                  "content": "お気に入り",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700"
+                },
+                {
+                  "id": "rWhyB",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Fav-買い物",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-2"
+                    },
+                    "D02pdw": {
+                      "content": "買い物"
+                    },
+                    "WeUE4": {
+                      "content": "4"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "oD9YL",
+              "name": "Projects",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "zQR7G",
+                  "name": "ProjectsHeading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FDB7C",
+                      "name": "Heading",
+                      "fill": "$text-secondary",
+                      "content": "マイプロジェクト",
+                      "fontFamily": "$font-body",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "id": "QD1c4",
+                      "type": "ref",
+                      "ref": "fJ1ZV",
+                      "name": "AddProject",
+                      "descendants": {
+                        "k6ut1g": {
+                          "icon": "plus"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "F07IS",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-仕事",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-3"
+                    },
+                    "D02pdw": {
+                      "content": "仕事"
+                    },
+                    "WeUE4": {
+                      "content": "8"
+                    }
+                  }
+                },
+                {
+                  "id": "FUjRU",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-買い物",
+                  "width": "fill_container",
+                  "fill": "$bg-hover",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-2"
+                    },
+                    "D02pdw": {
+                      "content": "買い物"
+                    },
+                    "WeUE4": {
+                      "content": "4"
+                    }
+                  }
+                },
+                {
+                  "id": "ZPLKM",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-家のこと",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$success"
+                    },
+                    "D02pdw": {
+                      "content": "家のこと"
+                    },
+                    "WeUE4": {
+                      "content": "3"
+                    }
+                  }
+                },
+                {
+                  "id": "iaJPH",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-読書",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-4"
+                    },
+                    "D02pdw": {
+                      "content": "読書"
+                    },
+                    "WeUE4": {
+                      "content": "2"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "QiGMo",
+          "name": "Main",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "FFbZm",
+              "name": "Column",
+              "width": 800,
+              "layout": "vertical",
+              "gap": "$space-4",
+              "padding": [
+                40,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "pV094",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "m3nvUW",
+                      "name": "Title",
+                      "fill": "$text-primary",
+                      "content": "買い物",
+                      "fontFamily": "$font-body",
+                      "fontSize": 24,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "x0yN9S",
+                      "name": "HeaderActions",
+                      "gap": "$space-1",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "r1bpKn",
+                          "name": "HA-layout-list",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "oOQfE",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "layout-list",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "Z916bX",
+                              "name": "Label",
+                              "fill": "$text-secondary",
+                              "content": "表示",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "aCBBE",
+                          "name": "HA-arrow-up-down",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "ElHDr",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "arrow-up-down",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "BSwO4",
+                              "name": "Label",
+                              "fill": "$text-secondary",
+                              "content": "並び替え",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "l8EgoE",
+                          "name": "HA-ellipsis",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "m4CuM",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "ellipsis",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "i7mHH",
+                  "name": "List",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "b8bLQQ",
+                      "type": "ref",
+                      "ref": "TUMiy",
+                      "name": "Sec-今週",
+                      "width": "fill_container",
+                      "descendants": {
+                        "T7WfJl": {
+                          "content": "今週"
+                        },
+                        "IM2bg": {
+                          "content": "2"
+                        }
+                      }
+                    },
+                    {
+                      "id": "cjZEJ",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-牛乳と卵を買う",
+                      "width": "fill_container",
+                      "descendants": {
+                        "mL3ac": {
+                          "stroke": "$priority-1"
+                        },
+                        "ODPIf": {
+                          "content": "牛乳と卵を買う"
+                        },
+                        "PGwbs": {
+                          "content": "近所のスーパーで。卵は 10 個入り",
+                          "enabled": true
+                        },
+                        "DEucZ": {
+                          "enabled": true
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@食品"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        }
+                      }
+                    },
+                    {
+                      "id": "gzw2h",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-洗剤の詰め替え",
+                      "width": "fill_container",
+                      "descendants": {
+                        "mL3ac": {
+                          "stroke": "$priority-3"
+                        },
+                        "ODPIf": {
+                          "content": "洗剤の詰め替え"
+                        },
+                        "PGwbs": {
+                          "content": "",
+                          "enabled": false
+                        },
+                        "DEucZ": {
+                          "enabled": true
+                        },
+                        "DEucZ/t9NGEf": {
+                          "content": "今週末"
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@日用品"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        }
+                      }
+                    },
+                    {
+                      "id": "Mo6HH",
+                      "type": "ref",
+                      "ref": "hJYgK",
+                      "name": "Add-今週",
+                      "width": "fill_container"
+                    },
+                    {
+                      "id": "kIzaM",
+                      "type": "ref",
+                      "ref": "TUMiy",
+                      "name": "Sec-いつか",
+                      "width": "fill_container",
+                      "descendants": {
+                        "T7WfJl": {
+                          "content": "いつか"
+                        },
+                        "IM2bg": {
+                          "content": "1"
+                        }
+                      }
+                    },
+                    {
+                      "id": "pQeL7",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-新しいフライパン",
+                      "width": "fill_container",
+                      "descendants": {
+                        "mL3ac": {
+                          "stroke": "$priority-4"
+                        },
+                        "ODPIf": {
+                          "content": "新しいフライパン"
+                        },
+                        "PGwbs": {
+                          "content": "28cm、IH 対応",
+                          "enabled": true
+                        },
+                        "QTxVD": {
+                          "enabled": true
+                        },
+                        "DEucZ": {
+                          "enabled": false
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@キッチン"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        }
+                      }
+                    },
+                    {
+                      "id": "m0U6E",
+                      "type": "ref",
+                      "ref": "hJYgK",
+                      "name": "Add-いつか",
+                      "width": "fill_container"
+                    },
+                    {
+                      "type": "text",
+                      "id": "a9DH7",
+                      "name": "CompletedToggle",
+                      "fill": "$text-secondary",
+                      "content": "完了したタスクを表示",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SdsE3",
+          "layoutPosition": "absolute",
+          "x": 0,
+          "y": 0,
+          "name": "Overlay",
+          "width": 1440,
+          "height": 900,
+          "fill": "#00000055",
+          "layout": "vertical",
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "D3ikG",
+              "name": "SettingsDialog",
+              "clip": true,
+              "width": 760,
+              "height": 560,
+              "fill": "$bg",
+              "cornerRadius": 12,
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "#00000033",
+                "offset": {
+                  "x": 0,
+                  "y": 8
+                },
+                "blur": 32
+              },
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "bk3U6",
+                  "name": "SettingsNav",
+                  "width": 180,
+                  "height": "fill_container",
+                  "fill": "$bg-sidebar",
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    16,
+                    8
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "VcIDm",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "設定",
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gpMok",
+                      "name": "Nav-アカウント",
+                      "width": "fill_container",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "MK6zp",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "user",
+                          "library": "lucide",
+                          "fill": "$text-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "dxOuo",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "アカウント",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BqVbr",
+                      "name": "Nav-Google Drive",
+                      "width": "fill_container",
+                      "fill": "$bg-hover",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "UrZ7h",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "cloud",
+                          "library": "lucide",
+                          "fill": "$text-primary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "a4m3q",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "Google Drive",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "LUvDO",
+                      "name": "Nav-データ",
+                      "width": "fill_container",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "sSZhq",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$text-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "sCSxQ",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "データ",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Jygpf",
+                      "name": "Nav-通知",
+                      "width": "fill_container",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "ZFnDz",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "bell",
+                          "library": "lucide",
+                          "fill": "$text-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "eIphc",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "通知",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "JCevr",
+                      "name": "Nav-外観",
+                      "width": "fill_container",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "JFMgN",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "palette",
+                          "library": "lucide",
+                          "fill": "$text-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fFdVM",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "外観",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "R4yCsE",
+                      "name": "Nav-日付と時刻",
+                      "width": "fill_container",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "AVWkh",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "calendar",
+                          "library": "lucide",
+                          "fill": "$text-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "jQ4SL",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "日付と時刻",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dB2Od",
+                      "name": "Nav-キーボード",
+                      "width": "fill_container",
+                      "cornerRadius": 6,
+                      "gap": "$space-2",
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "N4xXpy",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "keyboard",
+                          "library": "lucide",
+                          "fill": "$text-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RLnqI",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "キーボード",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dzzXN",
+                  "name": "SettingsBody",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "gap": "$space-4",
+                  "padding": [
+                    20,
+                    24
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "s2AWNe",
+                      "name": "Title",
+                      "fill": "$text-primary",
+                      "content": "Google Drive",
+                      "fontFamily": "$font-body",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "f9U2y",
+                      "name": "S-接続状態",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": "$space-2",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "jdHam",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "接続状態",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "nEfOu",
+                          "name": "Status",
+                          "width": "fill_container",
+                          "gap": "$space-2",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "nJ2EW",
+                              "name": "Dot",
+                              "fill": "$success",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "XE767",
+                              "name": "Text",
+                              "fill": "$text-primary",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "ログイン中 · user@example.com",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "orrtZ",
+                              "type": "ref",
+                              "ref": "E2lHu",
+                              "name": "Disconnect",
+                              "descendants": {
+                                "RbdS9": {
+                                  "content": "ログアウト"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Sc4pJ",
+                      "name": "S-同期",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": "$space-2",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Zy5Mv",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "同期",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "X5K6La",
+                          "name": "Desc",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "最終同期: 今日 09:41 · Drive フォルダ: PowerToDo/",
+                          "fontFamily": "$font-body",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "N0DvX",
+                          "name": "SyncRow",
+                          "gap": "$space-2",
+                          "children": [
+                            {
+                              "id": "v7xDdr",
+                              "type": "ref",
+                              "ref": "pBoMx",
+                              "name": "SyncNow",
+                              "descendants": {
+                                "inBhp": {
+                                  "content": "今すぐ同期"
+                                }
+                              }
+                            },
+                            {
+                              "id": "ptNyj",
+                              "type": "ref",
+                              "ref": "E2lHu",
+                              "name": "ChooseFolder",
+                              "descendants": {
+                                "RbdS9": {
+                                  "content": "Drive フォルダを変更"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "yXMd8",
+                      "name": "S-ローカルキャッシュ",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": "$space-2",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "on7uG",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "ローカルキャッシュ",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ORTwY",
+                          "name": "Desc",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "~/Library/Application Support/PowerToDo/data/",
+                          "fontFamily": "$font-body",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "id": "YA7V0",
+                          "type": "ref",
+                          "ref": "E2lHu",
+                          "name": "OpenFolder",
+                          "descendants": {
+                            "RbdS9": {
+                              "content": "フォルダを開く"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
                 }
               ]
             }
