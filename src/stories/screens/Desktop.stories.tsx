@@ -2,11 +2,13 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
+import { BoardView } from "../../views/BoardView";
 import { FixBanner } from "../../views/FixBanner";
 import { LabelDetailView } from "../../views/LabelDetailView";
 import { LabelsView } from "../../views/LabelsView";
 import { OsNotification } from "../../views/OsNotification";
 import { ProjectView } from "../../views/ProjectView";
+import { QuickAddDialog } from "../../views/QuickAddDialog";
 import type { ProjectViewProps } from "../../views/ProjectView";
 import { Sidebar } from "../../views/Sidebar";
 import type { SidebarProps } from "../../views/Sidebar";
@@ -53,6 +55,51 @@ export const D01b: Story = {
 export const D01c: Story = {
   name: "D-01c サブタスク追加フォーム",
   render: () => <Screen initialExpanded={[1, 5]} initialFormParent={1} />,
+};
+
+// D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
+const quickAddTokens = [
+  { text: "牛乳と卵を買う " },
+  { text: "明日", kind: "date" as const },
+  { text: "p1", kind: "priority" as const },
+  { text: "#買い物", kind: "project" as const },
+  { text: "@食品", kind: "label" as const },
+];
+
+function QuickAddScreen() {
+  const [open, setOpen] = useState(true);
+  return (
+    <AppShell
+      sidebar={
+        <Sidebar
+          active={{ kind: "project", name: "買い物" }}
+          counts={counts}
+          projects={projects}
+          syncState="synced"
+          lastSyncedAt="09:41"
+          onAddTask={() => setOpen(true)}
+        />
+      }
+      syncState="synced"
+      overlay={<QuickAddDialog open={open} tokens={quickAddTokens} project="買い物" section="今週" onClose={() => setOpen(false)} />}
+    >
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+    </AppShell>
+  );
+}
+
+export const D02: Story = {
+  name: "D-02 クイック追加",
+  render: () => <QuickAddScreen />,
+};
+
+export const D10: Story = {
+  name: "D-10 ボード",
+  render: () => (
+    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
+      <BoardView project="買い物" tasks={shopping} sections={sections} dragging={1} />
+    </AppShell>
+  ),
 };
 
 export const D11a: Story = {

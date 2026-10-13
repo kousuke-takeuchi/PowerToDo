@@ -9,6 +9,8 @@ export type AppShellProps = {
   panel?: React.ReactNode;
   overlay?: React.ReactNode;
   banner?: React.ReactNode;
+  /** 中央カラムを 800 に絞らず Main いっぱいに広げる (D-10 ボード: padding 40/32)。 */
+  fullWidth?: boolean;
   syncState?: SyncState;
 };
 
@@ -20,7 +22,7 @@ const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
  * 960: SidebarRail 56 + Main (Column は全幅、padding 24/32)。390 は Main のみ (モバイルは MobileShell を使う)。
  * overflow: hidden はルートだけ。Main / Column はクリップしない (左余白のシェブロンが見えるように)。
  */
-export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, syncState = "synced" }: AppShellProps) {
+export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, syncState = "synced" }: AppShellProps) {
   const wide = width === 1440;
   const rail = width === 960;
   return (
@@ -53,9 +55,9 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
         <div
           style={{
             width: "100%",
-            maxWidth: wide ? 800 : undefined,
+            maxWidth: wide && !fullWidth ? 800 : undefined,
             boxSizing: "border-box",
-            padding: wide ? (panel ? "40px 24px" : "40px 0") : rail ? "24px 32px" : "16px",
+            padding: wide ? (fullWidth ? "40px 32px" : panel ? "40px 24px" : "40px 0") : rail ? "24px 32px" : "16px",
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-4)",

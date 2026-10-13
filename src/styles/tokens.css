@@ -18,6 +18,10 @@
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px;
   --radius: 8px;
   --shadow-popover: 0 8px 24px #00000022; /* pen のポップオーバーの影 */
+  --shadow-dialog: 0 8px 32px #00000033; /* D-02 クイック追加ダイアログ */
+  --shadow-card: 0 1px 3px #00000014; /* D-10 ボードのカード */
+  --shadow-drag: 0 8px 24px #00000033; /* D-10 ドラッグ中のカード */
+  --color-scrim: #00000055; /* D-02 の背面オーバーレイ */
 }
 html[data-theme="dark"] {
   --color-bg: #1E1E1E;

@@ -24,11 +24,11 @@ function HeaderAction({ icon: Icon, label }: { icon: React.ComponentType<{ size?
   );
 }
 
-/** 画面ヘッダー右の 表示 / 並び替え / その他 (pen の HeaderActions)。 */
-export function HeaderActions() {
+/** 画面ヘッダー右の 表示 / 並び替え / その他 (pen の HeaderActions)。viewLabel は 表示 ボタンの文言 (ボード画面では「ボード」)。 */
+export function HeaderActions({ viewLabel = "表示" }: { viewLabel?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-1)" }}>
-      <HeaderAction icon={LayoutList} label="表示" />
+      <HeaderAction icon={LayoutList} label={viewLabel} />
       <HeaderAction icon={ArrowUpDown} label="並び替え" />
       <HeaderAction icon={Ellipsis} />
     </div>
@@ -36,11 +36,11 @@ export function HeaderActions() {
 }
 
 /** 画面ヘッダー (pen の Header): 左に children (タイトル群)、右に HeaderActions。 */
-export function PageHeader({ children }: { children: React.ReactNode }) {
+export function PageHeader({ children, viewLabel }: { children: React.ReactNode; viewLabel?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "var(--font-body)" }}>
       {children}
-      <HeaderActions />
+      <HeaderActions viewLabel={viewLabel} />
     </div>
   );
 }
