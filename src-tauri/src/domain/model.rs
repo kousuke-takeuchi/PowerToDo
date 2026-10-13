@@ -211,6 +211,7 @@ pub struct Label {
 #[serde(rename_all = "camelCase")]
 pub struct InvalidRow {
     pub row: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no: Option<u32>,
     pub column: String,
     pub value: String,
@@ -258,10 +259,10 @@ pub struct TaskPatch {
     pub progress: Option<u8>,
     #[serde(
         default,
-        with = "serde_date::option",
+        with = "serde_date::nullable",
         skip_serializing_if = "Option::is_none"
     )]
-    pub start: Option<NaiveDate>,
+    pub start: Option<Option<NaiveDate>>,
     #[serde(
         default,
         with = "serde_date::nullable",
@@ -288,8 +289,12 @@ pub struct TaskPatch {
     pub parent_no: Option<Option<u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub labels: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rrule: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rrule: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reminders: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -387,11 +392,15 @@ mod tests {
         assert_eq!(p.due, None);
         assert_eq!(p.note, None);
         assert_eq!(p.parent_no, None);
+        assert_eq!(p.start, None);
+        assert_eq!(p.rrule, None);
 
         let p: TaskPatch = serde_json::from_str(
-            r#"{"due":null,"dueTime":null,"note":null,"category":null,"parentNo":null}"#,
+            r#"{"due":null,"dueTime":null,"note":null,"category":null,"parentNo":null,"start":null,"rrule":null}"#,
         )
         .unwrap();
+        assert_eq!(p.start, Some(None));
+        assert_eq!(p.rrule, Some(None));
         assert_eq!(p.due, Some(None));
         assert_eq!(p.due_time, Some(None));
         assert_eq!(p.note, Some(None));
@@ -399,9 +408,14 @@ mod tests {
         assert_eq!(p.parent_no, Some(None));
 
         let p: TaskPatch = serde_json::from_str(
-            r#"{"due":"2026-10-20","dueTime":"09:30","note":"n","category":"c","parentNo":3}"#,
+            r#"{"due":"2026-10-20","dueTime":"09:30","note":"n","category":"c","parentNo":3,"start":"2026-10-15","rrule":"FREQ=WEEKLY"}"#,
         )
         .unwrap();
+        assert_eq!(
+            p.start,
+            Some(Some(NaiveDate::from_ymd_opt(2026, 10, 15).unwrap()))
+        );
+        assert_eq!(p.rrule, Some(Some("FREQ=WEEKLY".to_string())));
         assert_eq!(
             p.due,
             Some(Some(NaiveDate::from_ymd_opt(2026, 10, 20).unwrap()))
@@ -466,6 +480,15 @@ mod tests {
         .unwrap();
         assert_eq!(v["row"], 3);
         assert_eq!(v["no"], 2);
+        let v = serde_json::to_value(InvalidRow {
+            row: 4,
+            no: None,
+            column: "c".into(),
+            value: "v".into(),
+            message: "m".into(),
+        })
+        .unwrap();
+        assert!(v.get("no").is_none());
         let v = serde_json::to_value(Project {
             name: INBOX.into(),
             color: "#fff".into(),

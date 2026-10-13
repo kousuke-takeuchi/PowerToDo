@@ -137,14 +137,14 @@ fn parse_numeric_date(w: &str) -> Option<RelDate> {
 /// Anchor a date word to `today`.
 /// `NextWeek` is the coming Monday; `NextWeekday(x)` is the first `x` on or after that Monday;
 /// `ThisWeekend` is the next Saturday (today if it is a Saturday);
-/// `MonthDay` is that day in `today`'s year even if already past (an impossible day such as
-/// 2/29 in a non-leap year falls back to `today`).
-pub fn resolve(rel: RelDate, today: NaiveDate) -> NaiveDate {
+/// `MonthDay` is that day in `today`'s year even if already past; a day that does not exist
+/// in that year (2/29 in a non-leap year) yields `None`. Every other word yields `Some`.
+pub fn resolve(rel: RelDate, today: NaiveDate) -> Option<NaiveDate> {
     let next_monday = || {
         let ahead = 7 - i64::from(today.weekday().num_days_from_monday());
         today + Duration::days(ahead)
     };
-    match rel {
+    let date = match rel {
         RelDate::Today => today,
         RelDate::Tomorrow => today + Duration::days(1),
         RelDate::DayAfterTomorrow => today + Duration::days(2),
@@ -157,9 +157,10 @@ pub fn resolve(rel: RelDate, today: NaiveDate) -> NaiveDate {
         RelDate::NextWeekday(w) => {
             next_monday() + Duration::days(i64::from(w.num_days_from_monday()))
         }
-        RelDate::MonthDay(m, d) => NaiveDate::from_ymd_opt(today.year(), m, d).unwrap_or(today),
+        RelDate::MonthDay(m, d) => return NaiveDate::from_ymd_opt(today.year(), m, d),
         RelDate::Ymd(date) => date,
-    }
+    };
+    Some(date)
 }
 
 /// Parse a time word: `15:00`, `15時`, `15時30分`, `午後3時`, `午前9時30分`, `3pm`, `3:30am`, `12pm`.
@@ -206,17 +207,7 @@ fn ja_time(s: &str, pm: Option<bool>) -> Option<NaiveTime> {
         if h > 12 {
             return None;
         }
-        h = match (pm, h) {
-            (_, 12) => {
-                if pm {
-                    12
-                } else {
-                    0
-                }
-            }
-            (true, h) => h + 12,
-            (false, h) => h,
-        };
+        h = to_24h(h, pm);
     }
     hm(h, m)
 }
@@ -229,18 +220,17 @@ fn twelve_hour(body: &str, pm: bool) -> Option<NaiveTime> {
     if !(1..=12).contains(&h) {
         return None;
     }
-    let h24 = match (pm, h) {
-        (_, 12) => {
-            if pm {
-                12
-            } else {
-                0
-            }
-        }
-        (true, h) => h + 12,
-        (false, h) => h,
-    };
-    hm(h24, m)
+    hm(to_24h(h, pm), m)
+}
+
+/// 12-hour clock to 24-hour: 12am -> 0, 12pm -> 12, other pm hours +12.
+fn to_24h(h: u32, pm: bool) -> u32 {
+    match (h, pm) {
+        (12, true) => 12,
+        (12, false) => 0,
+        (h, true) => h + 12,
+        (h, false) => h,
+    }
 }
 
 #[cfg(test)]
@@ -279,27 +269,27 @@ mod tests {
         let today = d("2026-10-13"); // Tuesday
         assert_eq!(
             resolve(parse_date_word("明日").unwrap(), today),
-            d("2026-10-14")
+            Some(d("2026-10-14"))
         );
         assert_eq!(
             resolve(parse_date_word("今週末").unwrap(), today),
-            d("2026-10-17")
+            Some(d("2026-10-17"))
         );
         assert_eq!(
             resolve(parse_date_word("来週月曜").unwrap(), today),
-            d("2026-10-19")
+            Some(d("2026-10-19"))
         );
         assert_eq!(
             resolve(parse_date_word("next fri").unwrap(), today),
-            d("2026-10-23")
+            Some(d("2026-10-23"))
         );
         assert_eq!(
             resolve(parse_date_word("10/20").unwrap(), today),
-            d("2026-10-20")
+            Some(d("2026-10-20"))
         );
         assert_eq!(
             resolve(parse_date_word("10月20日").unwrap(), today),
-            d("2026-10-20")
+            Some(d("2026-10-20"))
         );
         assert_eq!(parse_date_word("買い物"), None);
     }
@@ -307,7 +297,7 @@ mod tests {
     #[test]
     fn simple_words() {
         let today = d("2026-10-13");
-        let r = |w: &str| resolve(parse_date_word(w).unwrap(), today);
+        let r = |w: &str| resolve(parse_date_word(w).unwrap(), today).unwrap();
         assert_eq!(r("今日"), d("2026-10-13"));
         assert_eq!(r("today"), d("2026-10-13"));
         assert_eq!(r("明後日"), d("2026-10-15"));
@@ -328,22 +318,46 @@ mod tests {
         // Saturday -> itself, Sunday -> next Saturday
         assert_eq!(
             resolve(RelDate::ThisWeekend, d("2026-10-17")),
-            d("2026-10-17")
+            Some(d("2026-10-17"))
         );
         assert_eq!(
             resolve(RelDate::ThisWeekend, d("2026-10-18")),
-            d("2026-10-24")
+            Some(d("2026-10-24"))
         );
         // Monday -> next Monday (a full week later)
-        assert_eq!(resolve(RelDate::NextWeek, d("2026-10-19")), d("2026-10-26"));
+        assert_eq!(
+            resolve(RelDate::NextWeek, d("2026-10-19")),
+            Some(d("2026-10-26"))
+        );
     }
 
     #[test]
     fn month_day_stays_in_current_year_even_if_past() {
         assert_eq!(
             resolve(RelDate::MonthDay(1, 5), d("2026-10-13")),
-            d("2026-01-05")
+            Some(d("2026-01-05"))
         );
+    }
+
+    #[test]
+    fn month_day_feb_29_only_in_leap_years() {
+        assert_eq!(
+            resolve(RelDate::MonthDay(2, 29), d("2028-02-01")),
+            Some(d("2028-02-29"))
+        );
+        assert_eq!(resolve(RelDate::MonthDay(2, 29), d("2027-02-01")), None);
+        assert_eq!(
+            resolve(RelDate::Ymd(d("2027-03-01")), d("2027-02-01")),
+            Some(d("2027-03-01"))
+        );
+    }
+
+    #[test]
+    fn to_24h_maps_twelve_hour_clock() {
+        assert_eq!(to_24h(12, false), 0);
+        assert_eq!(to_24h(12, true), 12);
+        assert_eq!(to_24h(3, true), 15);
+        assert_eq!(to_24h(9, false), 9);
     }
 
     #[test]
