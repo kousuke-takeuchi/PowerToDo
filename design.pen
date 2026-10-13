@@ -25222,7 +25222,21 @@
           "id": "mCuL1",
           "type": "ref",
           "ref": "j2jdfX",
-          "name": "TabBar"
+          "name": "TabBar",
+          "descendants": {
+            "n8u8O": {
+              "fill": "$text-secondary"
+            },
+            "FyLeU": {
+              "fill": "$text-secondary"
+            },
+            "I33WoM": {
+              "fill": "$accent"
+            },
+            "k1DG4q": {
+              "fill": "$accent"
+            }
+          }
         }
       ]
     },
