@@ -431,6 +431,36 @@ fn priority_text(p: Priority) -> Option<&'static str> {
 /// finite number prints becomes a number, `%Y-%m-%d` / `%Y-%m-%d %H:%M` become date / date-time
 /// cells (only for years 1900..=9999, which Excel can show; earlier text stays text), `TRUE` /
 /// `FALSE` become booleans, anything else stays text.
+/// Writes a cell kept verbatim: dates at midnight with the date format, others with the
+/// date-time format.
+pub(super) fn write_raw(
+    ws: &mut Worksheet,
+    row: u32,
+    col: u16,
+    cell: &RawCell,
+    date_fmt: &Format,
+    datetime_fmt: &Format,
+) -> Result<(), XlsxError> {
+    match cell {
+        RawCell::Empty => {}
+        RawCell::Text(s) => {
+            ws.write_string(row, col, s)?;
+        }
+        RawCell::Number(n) => {
+            ws.write_number(row, col, *n)?;
+        }
+        RawCell::DateTime(d) => {
+            let f = if d.time() == NaiveTime::MIN {
+                date_fmt
+            } else {
+                datetime_fmt
+            };
+            ws.write_datetime_with_format(row, col, *d, f)?;
+        }
+    }
+    Ok(())
+}
+
 fn write_extra(ws: &mut Worksheet, row: u32, col: u16, value: &str) -> Result<(), XlsxError> {
     if let Ok(f) = value.parse::<f64>()
         && f.is_finite()
@@ -544,24 +574,7 @@ fn build_workbook(book: &ProjectBook, holidays: &[NaiveDate]) -> Result<Workbook
     // tasks, so their row numbers can shift).
     for cells_of_row in book.invalid_cells.values() {
         for (c, cell) in cells_of_row.iter().enumerate() {
-            let col = c as u16;
-            match cell {
-                RawCell::Empty => {}
-                RawCell::Text(s) => {
-                    ws.write_string(row, col, s)?;
-                }
-                RawCell::Number(n) => {
-                    ws.write_number(row, col, *n)?;
-                }
-                RawCell::DateTime(d) => {
-                    let f = if d.time() == NaiveTime::MIN {
-                        &date_fmt
-                    } else {
-                        &datetime_fmt
-                    };
-                    ws.write_datetime_with_format(row, col, *d, f)?;
-                }
-            }
+            write_raw(ws, row, c as u16, cell, &date_fmt, &datetime_fmt)?;
         }
         row += 1;
     }

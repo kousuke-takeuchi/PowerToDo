@@ -10,8 +10,8 @@
 //!
 //! Task numbers: the next No. is max + 1 over the tasks and the invalid rows of the project,
 //! and never goes below the highest No. seen in this session (`high_water`), so a number is
-//! not reused even after its task was deleted. The workbook has no memory of deleted rows, so
-//! after a restart the highest deleted No. can be handed out again.
+//! not reused even after its task was deleted, nor after a `reload`. The workbook has no memory
+//! of deleted rows, so after a restart the highest deleted No. can be handed out again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -82,6 +82,13 @@ struct Ctx {
 fn invalid(message: impl Into<String>) -> AppError {
     AppError::Invalid {
         message: message.into(),
+    }
+}
+
+/// The error for any operation on a project whose workbook failed to load.
+fn load_failed(name: &str, message: &str) -> AppError {
+    AppError::Corrupt {
+        message: format!("「{name}」は読み込めていません: {message}"),
     }
 }
 
@@ -192,14 +199,23 @@ fn adoptable_stem(path: &Path) -> Option<String> {
 }
 
 impl ProjectStore {
-    /// Opens the data folder: creates it, the common workbook and the inbox when missing,
-    /// reads the common workbook and every project workbook. A workbook that cannot be read
+    /// Opens the data folder. With `create` the folder is created when missing; without it a
+    /// missing folder is `NotFound` and nothing is created (e.g. a drive that is not mounted).
+    /// The common workbook and the inbox are created when missing. Then it reads the common
+    /// workbook and every project workbook. A workbook that cannot be read
     /// becomes `LoadedProject::Failed` and does not stop the others. `.xlsx` files in the
     /// folder that the common workbook does not list are adopted as projects.
     pub fn open(
         paths: Paths,
         clock: impl Fn() -> NaiveDateTime + Send + 'static,
+        create: bool,
     ) -> AppResult<Self> {
+        if !create && !paths.data_dir.is_dir() {
+            return Err(not_found(format!(
+                "データフォルダが見つかりません: {}",
+                paths.data_dir.display()
+            )));
+        }
         std::fs::create_dir_all(&paths.data_dir)?;
         let common_path = paths.common();
         let is_new = !common_path.exists();
@@ -341,7 +357,8 @@ impl ProjectStore {
         }
         recompute_days(&mut book, &self.common.holidays);
         if let Some(max) = all_nos(&book).max() {
-            self.high_water.insert(name.to_string(), max);
+            let h = self.high_water.entry(name.to_string()).or_insert(0);
+            *h = (*h).max(max);
         }
         if changed {
             self.dirty.insert(name.to_string());
@@ -360,7 +377,7 @@ impl ProjectStore {
     fn ok_book(&self, name: &str) -> AppResult<&ProjectBook> {
         match self.books.get(name) {
             Some(LoadedProject::Ok(b)) => Ok(b),
-            Some(LoadedProject::Failed(m)) => Err(AppError::Corrupt { message: m.clone() }),
+            Some(LoadedProject::Failed(m)) => Err(load_failed(name, m)),
             None => Err(not_found(format!("プロジェクト「{name}」がありません"))),
         }
     }
@@ -478,6 +495,11 @@ impl ProjectStore {
         }
 
         self.common.projects[idx].name = new_name.to_string();
+        if let Some(extra) = self.common.project_extra.remove(name) {
+            self.common
+                .project_extra
+                .insert(new_name.to_string(), extra);
+        }
         let loaded = match self.books.remove(name) {
             Some(LoadedProject::Ok(mut b)) => {
                 b.project = new_name.to_string();
@@ -502,8 +524,9 @@ impl ProjectStore {
     }
 
     /// Moves `<name>.xlsx` to `archive/<name> (YYYYMMDD-HHMM).xlsx` (never deletes it) and
-    /// removes the project from the common workbook. Unsaved changes are written first on a
-    /// best-effort basis so the archive holds the latest state.
+    /// removes the project from the common workbook. Unsaved changes are written first so the
+    /// archive holds the latest state; if that write fails, its error is returned and the
+    /// project is left as it was (still listed, still dirty, file not moved).
     pub fn delete_project(&mut self, name: &str) -> AppResult<()> {
         if name == INBOX {
             return Err(invalid("受信トレイは削除できません"));
@@ -512,7 +535,7 @@ impl ProjectStore {
             return Err(not_found(format!("プロジェクト「{name}」がありません")));
         }
         if self.dirty.contains(name) {
-            let _ = self.save(name);
+            self.save(name)?;
         }
         if let Ok(path) = self.paths.project(name)
             && path.exists()
@@ -529,6 +552,7 @@ impl ProjectStore {
             std::fs::rename(&path, &dest)?;
         }
         self.common.projects.retain(|p| p.name != name);
+        self.common.project_extra.remove(name);
         self.books.remove(name);
         self.dirty.remove(name);
         self.high_water.remove(name);
@@ -618,11 +642,7 @@ impl ProjectStore {
         };
         let book = match self.books.get_mut(name) {
             Some(LoadedProject::Ok(b)) => b,
-            Some(LoadedProject::Failed(m)) => {
-                return Err(AppError::Corrupt {
-                    message: format!("「{name}」は読み込めていません: {m}"),
-                });
-            }
+            Some(LoadedProject::Failed(m)) => return Err(load_failed(name, m)),
             None => return Err(not_found(format!("プロジェクト「{name}」がありません"))),
         };
         let r = f(book, &ctx)?;
@@ -829,8 +849,9 @@ impl ProjectStore {
     }
 
     /// Moves the task and its descendants. In another project they get new numbers (appended
-    /// after the target's highest), the moved task is detached from its old parent, and the
-    /// rest keep their tree. Within the same project only the section changes.
+    /// after the target's highest), the moved task is detached from its old parent, the rest
+    /// keep their tree, and their assignees join the target's assignee list. Within the same
+    /// project only the section changes.
     pub fn move_task(
         &mut self,
         project: &str,
@@ -907,6 +928,11 @@ impl ProjectStore {
             b.tasks.retain(|t| !gone.contains(&t.no));
         }
         if let Some(LoadedProject::Ok(b)) = self.books.get_mut(to_project) {
+            for t in &moved {
+                if !t.assignee.is_empty() && !b.assignees.contains(&t.assignee) {
+                    b.assignees.push(t.assignee.clone());
+                }
+            }
             b.tasks.extend(moved);
         }
         self.touch(project);
@@ -1008,11 +1034,7 @@ impl ProjectStore {
             Some(LoadedProject::Ok(book)) => {
                 write_project_book(&path, book, today, &self.common.holidays)?;
             }
-            Some(LoadedProject::Failed(m)) => {
-                return Err(invalid(format!(
-                    "「{name}」は読み込めていないため保存しません: {m}"
-                )));
-            }
+            Some(LoadedProject::Failed(m)) => return Err(load_failed(name, m)),
             None => return Err(not_found(format!("プロジェクト「{name}」がありません"))),
         }
         self.dirty.remove(name);
@@ -1061,7 +1083,7 @@ mod tests {
 
     fn open_at(dir: &Path, clock: &Clock) -> ProjectStore {
         let c = Arc::clone(clock);
-        ProjectStore::open(Paths::new(dir), move || *c.lock().unwrap()).unwrap()
+        ProjectStore::open(Paths::new(dir), move || *c.lock().unwrap(), true).unwrap()
     }
 
     fn env() -> Env {
@@ -1758,5 +1780,113 @@ mod tests {
         };
         let v = e.store.update_task(INBOX, 1, patch).unwrap();
         assert_eq!(task(&v, 1).days, Some(3)); // Wed, Thu, Fri
+    }
+
+    #[test]
+    fn reload_keeps_high_water_mark() {
+        let mut e = env();
+        for i in 1..=5 {
+            e.store.add_task(INBOX, input(&i.to_string())).unwrap();
+        }
+        e.store.delete_task(INBOX, 5).unwrap();
+        e.store.save(INBOX).unwrap();
+        e.store.reload(INBOX).unwrap();
+        let v = e.store.add_task(INBOX, input("next")).unwrap();
+        assert_eq!(nos(&v), vec![1, 2, 3, 4, 6]);
+    }
+
+    #[test]
+    fn delete_project_keeps_project_when_save_fails() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.add_task("仕事", input("未保存")).unwrap();
+        // The pre-archive save fails: the target path is a directory.
+        let path = e.data().join("仕事.xlsx");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+
+        let err = e.store.delete_project("仕事").unwrap_err();
+        assert!(matches!(err, AppError::Io { .. }), "{err:?}");
+        assert!(e.store.summaries().iter().any(|s| s.name == "仕事"));
+        assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
+        assert_eq!(nos(&e.store.view("仕事").unwrap()), vec![1]);
+        assert!(path.is_dir(), "nothing was moved");
+        assert!(!e.data().join("archive").exists());
+    }
+
+    #[test]
+    fn open_without_create_requires_existing_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("missing");
+        let clock: Clock = Arc::new(Mutex::new(dt("2026-10-14T09:30")));
+        let c = Arc::clone(&clock);
+        let r = ProjectStore::open(Paths::new(&data), move || *c.lock().unwrap(), false);
+        assert!(matches!(r, Err(AppError::NotFound { .. })));
+        assert!(!data.exists(), "no folder is created");
+
+        // An existing folder opens without `create`.
+        std::fs::create_dir_all(&data).unwrap();
+        let c = Arc::clone(&clock);
+        let s = ProjectStore::open(Paths::new(&data), move || *c.lock().unwrap(), false).unwrap();
+        assert_eq!(s.summaries().len(), 1);
+    }
+
+    fn is_corrupt<T>(r: AppResult<T>) -> bool {
+        matches!(r, Err(AppError::Corrupt { .. }))
+    }
+
+    #[test]
+    fn failed_project_is_corrupt_everywhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("壊れ.xlsx"), "ただのテキスト").unwrap();
+        let clock: Clock = Arc::new(Mutex::new(dt("2026-10-14T09:30")));
+        let mut s = open_at(&data, &clock);
+        s.add_task(INBOX, input("x")).unwrap();
+        let b = "壊れ";
+
+        assert!(is_corrupt(s.view(b)));
+        assert!(is_corrupt(s.add_task(b, input("x"))));
+        assert!(is_corrupt(s.update_task(b, 1, TaskPatch::default())));
+        assert!(is_corrupt(s.complete_task(b, 1, true)));
+        assert!(is_corrupt(s.delete_task(b, 1)));
+        assert!(is_corrupt(s.add_section(b, "s")));
+        assert!(is_corrupt(s.rename_section(b, "s", "t")));
+        assert!(is_corrupt(s.reorder_sections(b, &[])));
+        assert!(is_corrupt(s.reorder_tasks(b, None, &[])));
+        assert!(is_corrupt(s.move_task(b, 1, INBOX, None)));
+        assert!(is_corrupt(s.move_task(INBOX, 1, b, None)));
+        assert!(is_corrupt(s.save(b)));
+        // A missing task in a loaded project stays NotFound.
+        assert!(matches!(
+            s.complete_task(INBOX, 99, true),
+            Err(AppError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn move_task_adds_assignees_to_target() {
+        let mut e = env();
+        e.store.create_project("A", "c").unwrap();
+        e.store.create_project("B", "c").unwrap();
+        e.store.add_task("A", input("親")).unwrap();
+        e.store.add_task("A", child_of("子", 1)).unwrap();
+        let patch = TaskPatch {
+            assignee: Some("佐藤".into()),
+            ..Default::default()
+        };
+        e.store.update_task("A", 2, patch).unwrap();
+        e.store.move_task("A", 1, "B", None).unwrap();
+        e.store.save("B").unwrap();
+
+        let b = read_project_book(&e.data().join("B.xlsx")).unwrap();
+        let me = e.store.settings().display_name;
+        assert!(
+            b.assignees.contains(&"佐藤".to_string()),
+            "{:?}",
+            b.assignees
+        );
+        assert_eq!(b.assignees.iter().filter(|a| **a == me).count(), 1);
     }
 }

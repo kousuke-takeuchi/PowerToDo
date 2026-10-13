@@ -12,6 +12,12 @@
 //! Colors are the CSS variable strings the UI uses (e.g. `var(--color-priority-2)`); お気に入り
 //! and 受信トレイ are TRUE / FALSE cells. Sheets and columns are located by name, so a missing
 //! sheet reads as empty. Only the project named 受信トレイ is the inbox, whatever its cell says.
+//!
+//! What a round trip keeps beyond the modeled fields: extra columns on プロジェクト / ラベル
+//! (as text, written after the known columns in their original order), 祝日 rows whose 日付
+//! is not a date (cells as read, written after the dated rows), and 設定 rows with unknown
+//! keys (key / value text). Not kept: sheets other than the five above, フィルター rows,
+//! columns with a blank or repeated header, and formatting.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -21,8 +27,8 @@ use chrono::NaiveDate;
 use rust_xlsxwriter::{Workbook, Worksheet, XlsxError};
 use serde::{Deserialize, Serialize};
 
-use super::cells;
-use super::project_book::{persist_workbook, xlsx_err, xlsx_write_err};
+use super::cells::{self, RawCell};
+use super::project_book::{persist_workbook, write_raw, xlsx_err, xlsx_write_err};
 use super::style;
 use crate::domain::{INBOX, Label, Project};
 use crate::error::AppResult;
@@ -34,6 +40,11 @@ const SHEET_LABELS: &str = "ラベル";
 const SHEET_FILTERS: &str = "フィルター";
 const SHEET_HOLIDAYS: &str = "祝日";
 const SHEET_SETTINGS: &str = "設定";
+
+const PROJECT_HEADERS: &[&str] = &["名前", "色", "並び順", "お気に入り", "受信トレイ"];
+const LABEL_HEADERS: &[&str] = &["名前", "色", "並び順"];
+const HOLIDAY_HEADERS: &[&str] = &["日付", "名称"];
+const SETTINGS_HEADERS: &[&str] = &["キー", "値"];
 
 const KEY_DISPLAY_NAME: &str = "表示名";
 const KEY_WEEK_START: &str = "週の開始";
@@ -76,7 +87,20 @@ pub struct CommonBook {
     pub holidays: Vec<NaiveDate>,
     /// 祝日 の 名称 column, kept so editing the sheet by hand does not lose it.
     pub holiday_names: BTreeMap<NaiveDate, String>,
+    /// 祝日 rows whose 日付 is not a date, as read (日付, 名称); written back after the
+    /// dated rows.
+    pub unparsed_holidays: Vec<Vec<RawCell>>,
     pub settings: Settings,
+    /// 設定 rows whose key this version does not know, in sheet order.
+    pub extra_settings: Vec<(String, String)>,
+    /// プロジェクト columns this version does not know, in sheet order.
+    pub project_columns: Vec<String>,
+    /// Per project (by name): values of `project_columns`, non-empty cells only.
+    pub project_extra: BTreeMap<String, BTreeMap<String, String>>,
+    /// ラベル columns this version does not know, in sheet order.
+    pub label_columns: Vec<String>,
+    /// Per label (by name): values of `label_columns`, non-empty cells only.
+    pub label_extra: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl CommonBook {
@@ -94,41 +118,87 @@ impl CommonBook {
             holidays: Vec::new(),
             holiday_names: BTreeMap::new(),
             settings: Settings::default_for_user(),
+            unparsed_holidays: Vec::new(),
+            extra_settings: Vec::new(),
+            project_columns: Vec::new(),
+            project_extra: BTreeMap::new(),
+            label_columns: Vec::new(),
+            label_extra: BTreeMap::new(),
         }
     }
 }
 
-/// Rows of `sheet` below the header row, with cells arranged in the order of `headers`
-/// (`Empty` where the sheet has no such column). A missing sheet or a sheet without the
-/// first header yields no rows.
+/// The rows of a sheet below its header row.
+#[derive(Default)]
+struct SheetRows {
+    /// Header names of the columns not in the requested list, in sheet order (blank and
+    /// repeated headers are skipped).
+    extra_headers: Vec<String>,
+    /// Per row: the cells of the requested headers in that order (`Empty` where the sheet
+    /// has no such column), and the cells of `extra_headers`.
+    rows: Vec<(Vec<Data>, Vec<Data>)>,
+}
+
+/// Reads `sheet` by header name. A missing sheet or a sheet without the first header yields
+/// no rows.
 fn sheet_rows(
     wb: &mut Xlsx<std::io::BufReader<std::fs::File>>,
     sheet: &str,
     headers: &[&str],
-) -> AppResult<Vec<Vec<Data>>> {
+) -> AppResult<SheetRows> {
     let range = match wb.worksheet_range(sheet) {
         Ok(r) => r,
-        Err(calamine::XlsxError::WorksheetNotFound(_)) => return Ok(Vec::new()),
+        Err(calamine::XlsxError::WorksheetNotFound(_)) => return Ok(SheetRows::default()),
         Err(e) => return Err(xlsx_err(e)),
     };
     let mut rows = range.rows();
     let Some(header_row) = rows.next() else {
-        return Ok(Vec::new());
+        return Ok(SheetRows::default());
     };
+    let names: Vec<String> = header_row
+        .iter()
+        .map(|c| cells::text(c).trim().to_string())
+        .collect();
     let cols: Vec<Option<usize>> = headers
         .iter()
-        .map(|h| header_row.iter().position(|c| cells::text(c).trim() == *h))
+        .map(|h| names.iter().position(|n| n == h))
         .collect();
     if cols[0].is_none() {
-        return Ok(Vec::new());
+        return Ok(SheetRows::default());
     }
-    Ok(rows
+    let mut extra_cols: Vec<usize> = Vec::new();
+    let mut extra_headers: Vec<String> = Vec::new();
+    for (i, n) in names.iter().enumerate() {
+        if n.is_empty() || headers.contains(&n.as_str()) || extra_headers.contains(n) {
+            continue;
+        }
+        extra_cols.push(i);
+        extra_headers.push(n.clone());
+    }
+    let pick =
+        |r: &[Data], c: Option<usize>| c.and_then(|c| r.get(c)).cloned().unwrap_or(Data::Empty);
+    let rows = rows
         .map(|r| {
-            cols.iter()
-                .map(|c| c.and_then(|c| r.get(c)).cloned().unwrap_or(Data::Empty))
-                .collect()
+            (
+                cols.iter().map(|&c| pick(r, c)).collect(),
+                extra_cols.iter().map(|&c| pick(r, Some(c))).collect(),
+            )
         })
-        .collect())
+        .collect();
+    Ok(SheetRows {
+        extra_headers,
+        rows,
+    })
+}
+
+/// The non-blank extra cells of a row, as text keyed by header.
+fn extra_map(headers: &[String], cells_of_row: &[Data]) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .zip(cells_of_row)
+        .filter(|(_, c)| !cells::is_blank(c))
+        .map(|(h, c)| (h.clone(), cells::text(c)))
+        .collect()
 }
 
 fn truthy(d: &Data) -> bool {
@@ -173,16 +243,17 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
     let mut wb: Xlsx<_> = open_workbook(path).map_err(xlsx_err)?;
 
     let mut projects: Vec<Project> = Vec::new();
+    let mut project_extra = BTreeMap::new();
     let mut seen = HashSet::new();
-    let rows = sheet_rows(
-        &mut wb,
-        SHEET_PROJECTS,
-        &["名前", "色", "並び順", "お気に入り", "受信トレイ"],
-    )?;
-    for (i, r) in rows.iter().enumerate() {
+    let sheet = sheet_rows(&mut wb, SHEET_PROJECTS, PROJECT_HEADERS)?;
+    for (i, (r, extra)) in sheet.rows.iter().enumerate() {
         let name = cells::text(&r[0]).trim().to_string();
         if name.is_empty() || !seen.insert(name.clone()) {
             continue;
+        }
+        let extra = extra_map(&sheet.extra_headers, extra);
+        if !extra.is_empty() {
+            project_extra.insert(name.clone(), extra);
         }
         projects.push(Project {
             inbox: name == INBOX,
@@ -193,13 +264,20 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
         });
     }
 
+    let project_columns = sheet.extra_headers;
+
     let mut labels: Vec<Label> = Vec::new();
+    let mut label_extra = BTreeMap::new();
     let mut seen = HashSet::new();
-    let rows = sheet_rows(&mut wb, SHEET_LABELS, &["名前", "色", "並び順"])?;
-    for (i, r) in rows.iter().enumerate() {
+    let sheet = sheet_rows(&mut wb, SHEET_LABELS, LABEL_HEADERS)?;
+    for (i, (r, extra)) in sheet.rows.iter().enumerate() {
         let name = cells::text(&r[0]).trim().to_string();
         if name.is_empty() || !seen.insert(name.clone()) {
             continue;
+        }
+        let extra = extra_map(&sheet.extra_headers, extra);
+        if !extra.is_empty() {
+            label_extra.insert(name.clone(), extra);
         }
         labels.push(Label {
             name,
@@ -208,10 +286,18 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
         });
     }
 
+    let label_columns = sheet.extra_headers;
+
     let mut holidays: Vec<NaiveDate> = Vec::new();
     let mut holiday_names = BTreeMap::new();
-    for r in sheet_rows(&mut wb, SHEET_HOLIDAYS, &["日付", "名称"])? {
-        let Some(date) = date_of(&r[0]) else { continue };
+    let mut unparsed_holidays = Vec::new();
+    for (r, _) in sheet_rows(&mut wb, SHEET_HOLIDAYS, HOLIDAY_HEADERS)?.rows {
+        let Some(date) = date_of(&r[0]) else {
+            if !r.iter().all(cells::is_blank) {
+                unparsed_holidays.push(r.iter().map(cells::to_raw).collect());
+            }
+            continue;
+        };
         holidays.push(date);
         let label = cells::text(&r[1]).trim().to_string();
         if !label.is_empty() {
@@ -222,18 +308,20 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
     holidays.dedup();
 
     let mut settings = Settings::default_for_user();
-    for r in sheet_rows(&mut wb, SHEET_SETTINGS, &["キー", "値"])? {
+    let mut extra_settings: Vec<(String, String)> = Vec::new();
+    for (r, _) in sheet_rows(&mut wb, SHEET_SETTINGS, SETTINGS_HEADERS)?.rows {
+        let key = cells::text(&r[0]).trim().to_string();
         let value = cells::text(&r[1]).trim().to_string();
-        if value.is_empty() {
-            continue;
-        }
-        match cells::text(&r[0]).trim() {
-            KEY_DISPLAY_NAME => settings.display_name = value,
+        match key.as_str() {
+            "" => {}
+            KEY_DISPLAY_NAME if !value.is_empty() => settings.display_name = value,
             KEY_WEEK_START if matches!(value.as_str(), "mon" | "sun") => {
                 settings.week_start = value;
             }
-            KEY_TIMEZONE => settings.timezone = value,
-            _ => {}
+            KEY_TIMEZONE if !value.is_empty() => settings.timezone = value,
+            KEY_DISPLAY_NAME | KEY_WEEK_START | KEY_TIMEZONE => {}
+            _ if extra_settings.iter().any(|(k, _)| *k == key) => {}
+            _ => extra_settings.push((key, value)),
         }
     }
 
@@ -242,7 +330,13 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
         labels,
         holidays,
         holiday_names,
+        unparsed_holidays,
         settings,
+        extra_settings,
+        project_columns,
+        project_extra,
+        label_columns,
+        label_extra,
     })
 }
 
@@ -257,6 +351,32 @@ fn write_header(ws: &mut Worksheet, name: &str, headers: &[&str]) -> Result<(), 
     Ok(())
 }
 
+fn with_extra<'a>(known: &[&'a str], extra: &'a [String]) -> Vec<&'a str> {
+    known
+        .iter()
+        .copied()
+        .chain(extra.iter().map(String::as_str))
+        .collect()
+}
+
+fn write_extra_cells(
+    ws: &mut Worksheet,
+    row: u32,
+    first_col: usize,
+    columns: &[String],
+    values: Option<&BTreeMap<String, String>>,
+) -> Result<(), XlsxError> {
+    let Some(values) = values else {
+        return Ok(());
+    };
+    for (j, name) in columns.iter().enumerate() {
+        if let Some(v) = values.get(name) {
+            ws.write_string(row, (first_col + j) as u16, v)?;
+        }
+    }
+    Ok(())
+}
+
 fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
     let mut wb = Workbook::new();
 
@@ -264,7 +384,7 @@ fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
     write_header(
         ws,
         SHEET_PROJECTS,
-        &["名前", "色", "並び順", "お気に入り", "受信トレイ"],
+        &with_extra(PROJECT_HEADERS, &book.project_columns),
     )?;
     ws.set_column_width(0, 24)?;
     ws.set_column_width(1, 28)?;
@@ -275,10 +395,21 @@ fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
         ws.write_number(r, 2, p.order)?;
         ws.write_boolean(r, 3, p.favorite)?;
         ws.write_boolean(r, 4, p.name == INBOX)?;
+        write_extra_cells(
+            ws,
+            r,
+            PROJECT_HEADERS.len(),
+            &book.project_columns,
+            book.project_extra.get(&p.name),
+        )?;
     }
 
     let ws = wb.add_worksheet();
-    write_header(ws, SHEET_LABELS, &["名前", "色", "並び順"])?;
+    write_header(
+        ws,
+        SHEET_LABELS,
+        &with_extra(LABEL_HEADERS, &book.label_columns),
+    )?;
     ws.set_column_width(0, 24)?;
     ws.set_column_width(1, 28)?;
     for (i, l) in book.labels.iter().enumerate() {
@@ -286,6 +417,13 @@ fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
         ws.write_string(r, 0, &l.name)?;
         ws.write_string(r, 1, &l.color)?;
         ws.write_number(r, 2, l.order)?;
+        write_extra_cells(
+            ws,
+            r,
+            LABEL_HEADERS.len(),
+            &book.label_columns,
+            book.label_extra.get(&l.name),
+        )?;
     }
 
     write_header(
@@ -295,32 +433,44 @@ fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
     )?;
 
     let ws = wb.add_worksheet();
-    write_header(ws, SHEET_HOLIDAYS, &["日付", "名称"])?;
+    write_header(ws, SHEET_HOLIDAYS, HOLIDAY_HEADERS)?;
     let date_fmt = style::date_format();
+    let datetime_fmt = style::datetime_format();
     let mut days = book.holidays.clone();
     days.sort();
     days.dedup();
-    for (i, d) in days.iter().enumerate() {
-        let r = i as u32 + 1;
+    let mut r = 1;
+    for d in &days {
         ws.write_datetime_with_format(r, 0, *d, &date_fmt)?;
         if let Some(n) = book.holiday_names.get(d) {
             ws.write_string(r, 1, n)?;
         }
+        r += 1;
+    }
+    for row in &book.unparsed_holidays {
+        for (c, cell) in row.iter().enumerate() {
+            write_raw(ws, r, c as u16, cell, &date_fmt, &datetime_fmt)?;
+        }
+        r += 1;
     }
 
     let ws = wb.add_worksheet();
-    write_header(ws, SHEET_SETTINGS, &["キー", "値"])?;
+    write_header(ws, SHEET_SETTINGS, SETTINGS_HEADERS)?;
     let s = &book.settings;
-    for (i, (k, v)) in [
-        (KEY_DISPLAY_NAME, &s.display_name),
-        (KEY_WEEK_START, &s.week_start),
-        (KEY_TIMEZONE, &s.timezone),
-    ]
-    .iter()
-    .enumerate()
-    {
-        ws.write_string(i as u32 + 1, 0, *k)?;
-        ws.write_string(i as u32 + 1, 1, v.as_str())?;
+    let known = [
+        (KEY_DISPLAY_NAME, s.display_name.as_str()),
+        (KEY_WEEK_START, s.week_start.as_str()),
+        (KEY_TIMEZONE, s.timezone.as_str()),
+    ];
+    let extra = book
+        .extra_settings
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()));
+    for (i, (k, v)) in known.into_iter().chain(extra).enumerate() {
+        ws.write_string(i as u32 + 1, 0, k)?;
+        if !v.is_empty() {
+            ws.write_string(i as u32 + 1, 1, v)?;
+        }
     }
     Ok(wb)
 }
@@ -379,6 +529,7 @@ mod tests {
                 week_start: "sun".into(),
                 timezone: "Asia/Tokyo".into(),
             },
+            ..CommonBook::new_default()
         }
     }
 
@@ -467,5 +618,109 @@ mod tests {
             read_common_book(&dir.path().join("none.xlsx")),
             Err(AppError::Io { .. })
         ));
+    }
+
+    fn header(ws: &mut rust_xlsxwriter::Worksheet, name: &str, headers: &[&str]) {
+        ws.set_name(name).unwrap();
+        for (c, h) in headers.iter().enumerate() {
+            ws.write_string(0, c as u16, *h).unwrap();
+        }
+    }
+
+    fn sheet_text(p: &Path, sheet: &str) -> Vec<Vec<String>> {
+        let mut wb: Xlsx<_> = open_workbook(p).unwrap();
+        let range = wb.worksheet_range(sheet).unwrap();
+        range
+            .rows()
+            .map(|r| r.iter().map(cells::text).collect())
+            .collect()
+    }
+
+    #[test]
+    fn common_book_keeps_unparsed_holiday_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "祝日", &["日付", "名称"]);
+        ws.write_string(1, 0, "2026-01-01").unwrap();
+        ws.write_string(1, 1, "元日").unwrap();
+        ws.write_string(2, 0, "未定").unwrap();
+        ws.write_string(2, 1, "創立記念日").unwrap();
+        ws.write_string(3, 1, "日付なし").unwrap();
+        wb.save(&p).unwrap();
+
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(b.holidays, vec![d(2026, 1, 1)]);
+        assert_eq!(b.unparsed_holidays.len(), 2, "{:?}", b.unparsed_holidays);
+
+        let out = dir.path().join("out.xlsx");
+        write_common_book(&out, &b).unwrap();
+        assert_eq!(read_common_book(&out).unwrap(), b);
+        let rows = sheet_text(&out, "祝日");
+        assert!(rows.contains(&vec!["未定".to_string(), "創立記念日".to_string()]));
+        assert!(
+            rows.iter()
+                .any(|r| r.get(1).map(String::as_str) == Some("日付なし"))
+        );
+    }
+
+    #[test]
+    fn common_book_keeps_unknown_settings_and_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "プロジェクト", &["名前", "メモ", "色", "担当者"]);
+        ws.write_string(1, 0, INBOX).unwrap();
+        ws.write_string(1, 1, "受信用").unwrap();
+        ws.write_string(2, 0, "仕事").unwrap();
+        ws.write_string(2, 2, "var(--x)").unwrap();
+        ws.write_string(2, 3, "たろう").unwrap();
+        let ws = wb.add_worksheet();
+        header(ws, "ラベル", &["名前", "色", "並び順", "説明"]);
+        ws.write_string(1, 0, "急ぎ").unwrap();
+        ws.write_string(1, 3, "今日中").unwrap();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "表示名").unwrap();
+        ws.write_string(1, 1, "はなこ").unwrap();
+        ws.write_string(2, 0, "通知音").unwrap();
+        ws.write_string(2, 1, "オン").unwrap();
+        ws.write_string(3, 0, "週の開始").unwrap();
+        ws.write_string(3, 1, "sun").unwrap();
+        wb.save(&p).unwrap();
+
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(b.settings.display_name, "はなこ");
+        assert_eq!(b.settings.week_start, "sun");
+        assert_eq!(
+            b.extra_settings,
+            vec![("通知音".to_string(), "オン".to_string())]
+        );
+        assert_eq!(b.project_columns, vec!["メモ", "担当者"]);
+        assert_eq!(b.project_extra[INBOX]["メモ"], "受信用");
+        assert_eq!(b.project_extra["仕事"]["担当者"], "たろう");
+        assert_eq!(b.label_columns, vec!["説明"]);
+        assert_eq!(b.label_extra["急ぎ"]["説明"], "今日中");
+
+        let out = dir.path().join("out.xlsx");
+        write_common_book(&out, &b).unwrap();
+        assert_eq!(read_common_book(&out).unwrap(), b);
+        let rows = sheet_text(&out, "プロジェクト");
+        assert_eq!(
+            rows[0],
+            vec![
+                "名前",
+                "色",
+                "並び順",
+                "お気に入り",
+                "受信トレイ",
+                "メモ",
+                "担当者"
+            ]
+        );
+        let rows = sheet_text(&out, "設定");
+        assert!(rows.contains(&vec!["通知音".to_string(), "オン".to_string()]));
     }
 }
