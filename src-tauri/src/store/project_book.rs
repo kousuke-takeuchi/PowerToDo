@@ -1,4 +1,12 @@
 //! Project workbook (`<name>.xlsx`): read with calamine, write with rust_xlsxwriter.
+//!
+//! Known round-trip limits (callers must account for them):
+//! - A 終了 date-time of exactly 00:00 reads back as a date-only due: calamine does not expose
+//!   the cell's number format, so a midnight date-time and a date are indistinguishable. The
+//!   project store (Task 5) therefore treats `due_time == 00:00` as `None`.
+//! - Invalid rows are written back after the valid tasks, so their Excel row numbers (and the
+//!   `invalid_rows[].row` / `invalid_cells` keys) change after a save. Callers re-read the
+//!   book after writing instead of reusing those row numbers.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -300,7 +308,17 @@ fn parse_row(
             _ => Err(bad(no_r, k, msg, raw_text(k))),
         }
     };
-    let parent_no = int_cell(C_PARENT, "親No. は整数にしてください")?;
+    let parent_no = match int_cell(C_PARENT, "親No. は 1 以上の整数にしてください")? {
+        Some(0) => {
+            return Err(bad(
+                no_r,
+                C_PARENT,
+                "親No. は 1 以上の整数にしてください",
+                raw_text(C_PARENT),
+            ));
+        }
+        other => other,
+    };
     let order = int_cell(C_ORDER, "並び順は整数にしてください")?;
     let days = cells::integer(cell(C_DAYS))
         .ok()
@@ -384,11 +402,13 @@ pub fn write_project_book(
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
     };
-    let tmp = tempfile::Builder::new()
+    let mut tmp = tempfile::Builder::new()
         .prefix(".powertodo-")
         .suffix(".tmp")
         .tempfile_in(dir)?;
-    wb.save(tmp.path()).map_err(xlsx_write_err)?;
+    wb.save_to_writer(tmp.as_file_mut())
+        .map_err(xlsx_write_err)?;
+    tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| AppError::from(e.error))?;
     Ok(())
 }
@@ -402,16 +422,27 @@ fn priority_text(p: Priority) -> Option<&'static str> {
     }
 }
 
-/// Extra-column value back to a cell: a text that is exactly how a finite number prints
-/// becomes a number again, anything else stays text.
+/// Extra-column value back to a cell, undoing `cells::text`: a text that is exactly how a
+/// finite number prints becomes a number, `%Y-%m-%d` / `%Y-%m-%d %H:%M` become date / date-time
+/// cells, `TRUE` / `FALSE` become booleans, anything else stays text.
 fn write_extra(ws: &mut Worksheet, row: u32, col: u16, value: &str) -> Result<(), XlsxError> {
-    match value.parse::<f64>() {
-        Ok(f) if f.is_finite() && cells::number_text(f) == value => {
-            ws.write_number(row, col, f)?;
-        }
-        _ => {
-            ws.write_string(row, col, value)?;
-        }
+    if let Ok(f) = value.parse::<f64>()
+        && f.is_finite()
+        && cells::number_text(f) == value
+    {
+        ws.write_number(row, col, f)?;
+    } else if let Ok(d) = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        && d.format("%Y-%m-%d").to_string() == value
+    {
+        ws.write_datetime_with_format(row, col, d, &style::date_format())?;
+    } else if let Ok(dt) = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M")
+        && dt.format("%Y-%m-%d %H:%M").to_string() == value
+    {
+        ws.write_datetime_with_format(row, col, dt, &style::datetime_format())?;
+    } else if value == "TRUE" || value == "FALSE" {
+        ws.write_boolean(row, col, value == "TRUE")?;
+    } else {
+        ws.write_string(row, col, value)?;
     }
     Ok(())
 }
@@ -933,5 +964,105 @@ mod tests {
         // No 設定 sheet: lists are empty, not an error.
         assert!(book.sections.is_empty());
         assert!(book.assignees.is_empty());
+    }
+
+    #[test]
+    fn out_of_range_date_serial_is_invalid_row() {
+        let (_dir, p) = tmp();
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(TASK_SHEET).unwrap();
+        write_headers(ws, &QIITA_HEADERS);
+        ws.write_number(1, 0, 1.0).unwrap();
+        ws.write_string(1, 3, "あ").unwrap();
+        ws.write_number_with_format(1, 8, -1e12, &date_fmt())
+            .unwrap();
+        wb.save(&p).unwrap();
+
+        let book = read_project_book(&p).unwrap();
+        assert!(book.tasks.is_empty());
+        assert_eq!(book.invalid_rows.len(), 1);
+        assert_eq!(book.invalid_rows[0].column, "終了");
+        assert_eq!(book.invalid_rows[0].no, Some(1));
+        assert_eq!(book.invalid_cells[&2][C_DUE], RawCell::Number(-1e12));
+
+        // Written back unchanged (as a number) and still reported.
+        let out = p.with_file_name("out.xlsx");
+        write_project_book(&out, &book, d(2026, 10, 14), &[]).unwrap();
+        let again = read_project_book(&out).unwrap();
+        assert_eq!(again.invalid_rows.len(), 1);
+        assert_eq!(again.invalid_cells[&2][C_DUE], RawCell::Number(-1e12));
+    }
+
+    #[test]
+    fn unknown_column_values_keep_their_cell_types() {
+        let (_dir, p) = tmp();
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(TASK_SHEET).unwrap();
+        write_headers(ws, &["No.", "タスク", "期日2", "日時2", "済", "数"]);
+        ws.write_number(1, 0, 1.0).unwrap();
+        ws.write_string(1, 1, "あ").unwrap();
+        ws.write_datetime_with_format(1, 2, d(2026, 10, 20), &date_fmt())
+            .unwrap();
+        let dt_fmt = rust_xlsxwriter::Format::new().set_num_format("yyyy-mm-dd hh:mm");
+        ws.write_datetime_with_format(1, 3, dt("2026-10-20T09:30"), &dt_fmt)
+            .unwrap();
+        ws.write_boolean(1, 4, true).unwrap();
+        ws.write_number(1, 5, 3.0).unwrap();
+        wb.save(&p).unwrap();
+
+        let book = read_project_book(&p).unwrap();
+        let extra = &book.tasks[0].extra;
+        assert_eq!(extra["期日2"], "2026-10-20");
+        assert_eq!(extra["日時2"], "2026-10-20 09:30");
+        assert_eq!(extra["済"], "TRUE");
+
+        let out = p.with_file_name("out.xlsx");
+        write_project_book(&out, &book, d(2026, 10, 14), &[]).unwrap();
+        let mut back: Xlsx<_> = open_workbook(&out).unwrap();
+        let range = back.worksheet_range(TASK_SHEET).unwrap();
+        let base = HEADERS.len() as u32;
+        let cell = |c: u32| range.get_value((1, base + c)).unwrap().clone();
+        assert!(matches!(cell(0), Data::DateTime(_)), "{:?}", cell(0));
+        assert_eq!(cells::text(&cell(0)), "2026-10-20");
+        assert!(matches!(cell(1), Data::DateTime(_)), "{:?}", cell(1));
+        assert_eq!(cells::text(&cell(1)), "2026-10-20 09:30");
+        assert_eq!(cell(2), Data::Bool(true));
+        assert_eq!(cell(3), Data::Float(3.0));
+        assert_eq!(read_project_book(&out).unwrap().tasks, book.tasks);
+    }
+
+    #[test]
+    fn days_skip_holidays_round_trip() {
+        let (_dir, p) = tmp();
+        let holidays = [d(2026, 10, 14)];
+        let mut t = base_task(1, "週の作業");
+        t.start = Some(d(2026, 10, 12));
+        t.due = Some(d(2026, 10, 16));
+        write_project_book(&p, &book(vec![t.clone()]), d(2026, 10, 14), &holidays).unwrap();
+        let back = read_project_book(&p).unwrap();
+        // Mon..Fri is 5 business days; the Wednesday holiday is skipped.
+        assert_eq!(back.tasks[0].days, Some(4));
+        t.days = Some(4);
+        assert_eq!(back.tasks, vec![t]);
+    }
+
+    #[test]
+    fn parent_no_zero_is_invalid() {
+        let (_dir, p) = tmp();
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(TASK_SHEET).unwrap();
+        write_headers(ws, &["No.", "タスク", "親No."]);
+        ws.write_number(1, 0, 1.0).unwrap();
+        ws.write_string(1, 1, "あ").unwrap();
+        ws.write_number(1, 2, 0.0).unwrap();
+        wb.save(&p).unwrap();
+        let book = read_project_book(&p).unwrap();
+        assert!(book.tasks.is_empty());
+        assert_eq!(book.invalid_rows.len(), 1);
+        assert_eq!(book.invalid_rows[0].column, "親No.");
+        assert_eq!(book.invalid_rows[0].value, "0");
     }
 }

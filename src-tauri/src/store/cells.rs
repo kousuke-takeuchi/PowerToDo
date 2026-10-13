@@ -43,7 +43,16 @@ fn round_to_second(dt: NaiveDateTime) -> NaiveDateTime {
     }
 }
 
+/// Largest serial Excel accepts as a date (9999-12-31 23:59:59).
+const MAX_EXCEL_SERIAL: f64 = 2_958_465.999_99;
+
+/// Serial outside Excel's date range (or NaN / infinite) -> `None`. calamine's `as_datetime`
+/// panics inside chrono for huge values, so it is only called for serials in range.
 fn excel_datetime(e: &calamine::ExcelDateTime) -> Option<NaiveDateTime> {
+    let f = e.as_f64();
+    if !f.is_finite() || !(0.0..=MAX_EXCEL_SERIAL).contains(&f) {
+        return None;
+    }
     e.as_datetime().map(round_to_second)
 }
 
@@ -85,6 +94,9 @@ pub fn to_raw(d: &Data) -> RawCell {
             None => RawCell::Number(e.as_f64()),
         },
         Data::DateTime(e) => RawCell::Number(e.as_f64()),
+        Data::DateTimeIso(s) => {
+            parse_iso(s).map_or_else(|| RawCell::Text(s.clone()), RawCell::DateTime)
+        }
         other => RawCell::Text(text(other)),
     }
 }
@@ -155,5 +167,41 @@ mod tests {
         assert_eq!(dt.to_string(), "2026-10-14 00:00:00");
         assert!(datetime(&Data::String("来週".into())).is_err());
         assert!(datetime(&Data::Float(46000.0)).is_err());
+    }
+
+    #[test]
+    fn out_of_range_serials_are_bad_not_panics() {
+        use calamine::{ExcelDateTime, ExcelDateTimeType};
+        for v in [-1e12, -1.0, 2_958_466.0, 1e300, f64::NAN, f64::INFINITY] {
+            let d = Data::DateTime(ExcelDateTime::new(v, ExcelDateTimeType::DateTime, false));
+            assert_eq!(datetime(&d), Err(BadCell), "{v}");
+            assert!(matches!(to_raw(&d), RawCell::Number(_)), "{v}");
+            let _ = text(&d);
+        }
+        let ok = Data::DateTime(ExcelDateTime::new(
+            2_958_465.0,
+            ExcelDateTimeType::DateTime,
+            false,
+        ));
+        assert_eq!(
+            datetime(&ok).unwrap().unwrap().date(),
+            NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
+        );
+    }
+
+    #[test]
+    fn iso_datetime_is_raw_datetime() {
+        let dt = NaiveDate::from_ymd_opt(2026, 10, 14)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap();
+        assert_eq!(
+            to_raw(&Data::DateTimeIso("2026-10-14T09:30:00".into())),
+            RawCell::DateTime(dt)
+        );
+        assert_eq!(
+            to_raw(&Data::DateTimeIso("not a date".into())),
+            RawCell::Text("not a date".into())
+        );
     }
 }
