@@ -1,0 +1,23 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-bg-sidebar: var(--color-bg-sidebar);
+  --color-bg-hover: var(--color-bg-hover);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-border: var(--color-border);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-priority-1: var(--color-priority-1);
+  --color-priority-2: var(--color-priority-2);
+  --color-priority-3: var(--color-priority-3);
+  --color-priority-4: var(--color-priority-4);
+  --color-success: var(--color-success);
+  --color-danger: var(--color-danger);
+  --font-body: var(--font-body);
+  --radius-app: var(--radius);
+}
+html, body { font-family: var(--font-body); background: var(--color-bg); color: var(--color-text-primary); }
+@keyframes spin { to { transform: rotate(360deg); } }
