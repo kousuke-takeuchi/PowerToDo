@@ -25,6 +25,9 @@ const CANDIDATES = ["-10m", "-60m", "-1d", "-1w"];
 
 const optionOf = (code: string) => OPTIONS.find((o) => o.code === code);
 
+/** 1 件分の表示文言 (M-03 の「リマインダー」行など。"-30m" → "30 分前")。 */
+export const reminderLabel = (code: string) => optionOf(code)?.added ?? code;
+
 const pad = (n: number) => String(n).padStart(2, "0");
 function minus(time: string, minutes: number): string {
   const [h, m] = time.split(":").map(Number);

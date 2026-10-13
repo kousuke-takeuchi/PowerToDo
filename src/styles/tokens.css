@@ -22,6 +22,7 @@
   --shadow-welcome: 0 8px 32px #00000022; /* D-12 初回起動のカード */
   --shadow-card: 0 1px 3px #00000014; /* D-10 ボードのカード */
   --shadow-drag: 0 8px 24px #00000033; /* D-10 ドラッグ中のカード */
+  --shadow-fab: 0 4px 12px #00000044; /* M-01 などのモバイル FAB */
   --color-scrim: #00000055; /* D-02 の背面オーバーレイ */
 }
 html[data-theme="dark"] {
