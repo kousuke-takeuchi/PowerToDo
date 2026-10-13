@@ -1988,7 +1988,7 @@
           "id": "iSFJc",
           "name": "DetailPanel",
           "width": 400,
-          "height": 900,
+          "height": "fill_container",
           "fill": "$bg",
           "stroke": "$border",
           "strokeWidth": {
@@ -2559,6 +2559,13 @@
                   "name": "Sub-牛乳 1L",
                   "width": "fill_container",
                   "descendants": {
+                    "mL3ac": {
+                      "stroke": "$success"
+                    },
+                    "mL3ac/V3PSX": {
+                      "opacity": 1,
+                      "fill": "$success"
+                    },
                     "ODPIf": {
                       "content": "牛乳 1L",
                       "fill": "$text-muted"
