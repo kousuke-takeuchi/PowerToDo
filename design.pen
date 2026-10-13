@@ -4254,7 +4254,7 @@
                           "id": "xckiy",
                           "name": "Subtitle",
                           "fill": "$text-secondary",
-                          "content": "10月13日 月曜日 · 5 件",
+                          "content": "10月13日 火曜日 · 5 件",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -4999,7 +4999,7 @@
                           "id": "bxXoM",
                           "name": "Subtitle",
                           "fill": "$text-secondary",
-                          "content": "10月13日 月曜日 · 3 件",
+                          "content": "10月13日 火曜日 · 3 件",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -5802,7 +5802,7 @@
                           "id": "l3Rv1",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "月",
+                          "content": "火",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -5838,7 +5838,7 @@
                           "id": "MAmeu",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "火",
+                          "content": "水",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -5873,7 +5873,7 @@
                           "id": "ymkDJ",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "水",
+                          "content": "木",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -5908,7 +5908,7 @@
                           "id": "avrKL",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "木",
+                          "content": "金",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -5943,7 +5943,7 @@
                           "id": "Bp4bT",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "金",
+                          "content": "土",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -5978,7 +5978,7 @@
                           "id": "H2DDS2",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "土",
+                          "content": "日",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -6013,7 +6013,7 @@
                           "id": "i0F3ux",
                           "name": "W",
                           "fill": "$text-secondary",
-                          "content": "日",
+                          "content": "月",
                           "fontFamily": "$font-body",
                           "fontSize": 11,
                           "fontWeight": "normal"
@@ -6049,7 +6049,7 @@
                           "enabled": false
                         },
                         "T7WfJl": {
-                          "content": "10月13日 · 今日 · 月曜日"
+                          "content": "10月13日 · 今日 · 火曜日"
                         },
                         "IM2bg": {
                           "enabled": false
@@ -6128,7 +6128,7 @@
                           "enabled": false
                         },
                         "T7WfJl": {
-                          "content": "10月14日 · 明日 · 火曜日"
+                          "content": "10月14日 · 明日 · 水曜日"
                         },
                         "IM2bg": {
                           "enabled": false
@@ -6180,7 +6180,7 @@
                           "enabled": false
                         },
                         "T7WfJl": {
-                          "content": "10月15日 · 水曜日"
+                          "content": "10月15日 · 木曜日"
                         },
                         "IM2bg": {
                           "enabled": false
@@ -6205,7 +6205,7 @@
                           "enabled": false
                         },
                         "T7WfJl": {
-                          "content": "10月16日 · 木曜日"
+                          "content": "10月16日 · 金曜日"
                         },
                         "IM2bg": {
                           "enabled": false
@@ -7564,7 +7564,7 @@
                           "id": "mMZVE",
                           "name": "Subtitle",
                           "fill": "$text-secondary",
-                          "content": "6 件 · 全プロジェクト",
+                          "content": "3 件 · 全プロジェクト",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -7715,7 +7715,7 @@
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "週報を書く"
+                          "content": "食パンを買う"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -7730,7 +7730,7 @@
                           "enabled": false
                         },
                         "jI6gZ": {
-                          "content": "仕事"
+                          "content": "買い物"
                         }
                       }
                     },
@@ -7742,7 +7742,7 @@
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "ゴミ出し (燃えるごみ)"
+                          "content": "調味料の補充"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -7765,7 +7765,7 @@
                       "id": "q1HPF",
                       "type": "ref",
                       "ref": "hJYgK",
-                      "name": "Add-今日",
+                      "name": "Add-ラベル",
                       "width": "fill_container"
                     }
                   ]
@@ -9277,7 +9277,7 @@
                       "id": "ltN8N",
                       "name": "Value",
                       "fill": "$text-muted",
-                      "content": "月",
+                      "content": "火",
                       "fontFamily": "$font-body",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -9323,7 +9323,7 @@
                       "id": "yohYG",
                       "name": "Value",
                       "fill": "$text-muted",
-                      "content": "火",
+                      "content": "水",
                       "fontFamily": "$font-body",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -9415,7 +9415,7 @@
                       "id": "Enw2G",
                       "name": "Value",
                       "fill": "$text-muted",
-                      "content": "月 10/20",
+                      "content": "月 10/19",
                       "fontFamily": "$font-body",
                       "fontSize": 12,
                       "fontWeight": "normal"
