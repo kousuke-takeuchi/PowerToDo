@@ -1,15 +1,312 @@
-import type { AppStateDto } from "../types/model";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, errorMessage } from "../api/client";
+import type { Counts } from "../mock/data";
+import type { AppStateDto, ProjectSummary, QuickAddResult } from "../types/model";
+import { AppShell } from "../views/AppShell";
+import { EmptyState } from "../views/EmptyState";
+import { FixBanner } from "../views/FixBanner";
+import { ProjectView } from "../views/ProjectView";
+import { QuickAddDialog } from "../views/QuickAddDialog";
+import { Sidebar } from "../views/Sidebar";
+import type { SidebarProps } from "../views/Sidebar";
+import { TaskDetailPanel } from "../views/TaskDetailPanel";
+import { useShellWidth, useToday } from "./hooks";
+import { spansToTokens } from "./quickAddTokens";
+import { NoticeBanner, SaveBanner } from "./SaveBanner";
+import { useProject } from "./useProject";
+import { useSaveErrors } from "./useSaveStatus";
 
-/** Placeholder until Task 8 wires the real views: lists the project names. */
+type Nav = SidebarProps["active"];
+type Flash = { text: string; tone: "error" | "info" };
+type QuickAddState = { open: boolean; text: string; busy: boolean; error?: string; parsed?: { text: string; result: QuickAddResult } };
+
+const QA_CLOSED: QuickAddState = { open: false, text: "", busy: false };
+/** 新しいプロジェクトの色は順番に割り当てる (色の選択 UI は Phase 1 では出さない)。 */
+const PALETTE = [
+  "var(--color-priority-3)",
+  "var(--color-success)",
+  "var(--color-priority-2)",
+  "var(--color-priority-4)",
+  "var(--color-priority-1)",
+];
+const PHASE2_TITLE: Record<string, string> = { today: "今日", upcoming: "近日", labels: "フィルターとラベル" };
+
+/** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
 export function Main({ app }: { app: AppStateDto }) {
+  const today = useToday();
+  const width = useShellWidth();
+  const saveErrors = useSaveErrors();
+
+  const [nav, setNav] = useState<Nav>({ kind: "inbox" });
+  const [summaries, setSummaries] = useState<ProjectSummary[]>(app.projects);
+  const [displayName, setDisplayName] = useState<string | undefined>();
+  const [openNo, setOpenNo] = useState<number | null>(null);
+  const [drawer, setDrawer] = useState(false);
+  const [flash, setFlash] = useState<Flash | null>(null);
+  const [qa, setQa] = useState<QuickAddState>(QA_CLOSED);
+
+  const refreshSummaries = useCallback(async () => {
+    try {
+      setSummaries(await api.listProjects());
+    } catch {
+      // サイドバーの件数が古いままになるだけ。次の操作でまた更新する。
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSummaries();
+    api
+      .settings()
+      .then((s) => setDisplayName(s.displayName || undefined))
+      .catch(() => undefined);
+  }, [refreshSummaries]);
+
+  const placeholder = nav.kind === "today" || nav.kind === "upcoming" || nav.kind === "labels";
+  const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
+  const p = useProject(current, { onMutated: refreshSummaries });
+  const view = p.view;
+
+  const showError = useCallback((e: unknown) => setFlash({ text: errorMessage(e), tone: "error" }), []);
+  const navigate = useCallback((target: Nav) => {
+    setNav(target);
+    setOpenNo(null);
+    setDrawer(false);
+  }, []);
+  const openQuickAdd = useCallback(() => setQa((s) => (s.open ? s : { ...QA_CLOSED, open: true })), []);
+  const closeQuickAdd = useCallback(() => setQa(QA_CLOSED), []);
+
+  // 情報メッセージは数秒で消す (エラーは閉じるまで残す)。
+  useEffect(() => {
+    if (flash?.tone !== "info") return;
+    const id = window.setTimeout(() => setFlash(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [flash]);
+
+  // q: クイック追加 (入力欄にフォーカスがあるとき、修飾キー付き、IME 変換中は除く)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
+      e.preventDefault();
+      openQuickAdd();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openQuickAdd]);
+
+  // 狭い幅のドロワー: Esc で閉じる (幅が戻ったら閉じる)
+  useEffect(() => {
+    if (!drawer) return;
+    if (width !== 960) {
+      setDrawer(false);
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !qa.open) setDrawer(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer, width, qa.open]);
+
+  // クイック追加のプレビュー: 入力が止まってから parse_quick_add を呼ぶ。結果は解析した文字列とセットで持つ。
+  useEffect(() => {
+    if (!qa.open || !qa.text.trim()) return;
+    const text = qa.text;
+    let cancelled = false;
+    const id = window.setTimeout(() => {
+      p.parseQuickAdd(text)
+        .then((result) => {
+          if (!cancelled) setQa((s) => (s.text === text ? { ...s, parsed: { text, result } } : s));
+        })
+        .catch(() => undefined);
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [qa.open, qa.text, p.parseQuickAdd]);
+
+  const submitQuickAdd = async (text: string) => {
+    setQa((s) => ({ ...s, busy: true, error: undefined }));
+    try {
+      const out = await p.quickAdd(text);
+      setQa(QA_CLOSED);
+      if (out.view.project.name !== current) setFlash({ text: `「${out.view.project.name}」に追加しました`, tone: "info" });
+    } catch (e) {
+      setQa((s) => ({ ...s, busy: false, error: errorMessage(e) }));
+    }
+  };
+
+  const createProject = async (name: string) => {
+    try {
+      const color = PALETTE[summaries.filter((s) => !s.inbox).length % PALETTE.length];
+      const created = await api.createProject(name, color);
+      await refreshSummaries();
+      navigate({ kind: "project", name: created.name });
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const reveal = () => void api.revealDataDir().catch(showError);
+
+  const counts: Counts = useMemo(() => {
+    const byName = Object.fromEntries(summaries.map((s) => [s.name, s.taskCount]));
+    const inbox = summaries.find((s) => s.inbox);
+    return { ...byName, inbox: inbox?.taskCount ?? 0, today: 0 }; // 今日の件数は Phase 2
+  }, [summaries]);
+
+  const sidebar = (
+    <Sidebar
+      active={nav}
+      counts={counts}
+      projects={summaries}
+      syncState="off"
+      displayName={displayName}
+      onNavigate={navigate}
+      onAddTask={() => {
+        setDrawer(false);
+        openQuickAdd();
+      }}
+      onCreateProject={(name) => void createProject(name)}
+    />
+  );
+
+  // ---- クイック追加ダイアログに渡すもの ----
+  const parsed = qa.parsed && qa.parsed.text === qa.text ? qa.parsed.result : undefined;
+  const tokens = parsed ? spansToTokens(qa.text, parsed.spans) : qa.text ? [{ text: qa.text }] : [];
+  const qaProject = parsed?.project ?? current;
+  const qaColor = summaries.find((s) => s.name === qaProject)?.color;
+
+  // ---- タスク詳細 ----
+  const openTask = view && openNo !== null ? view.tasks.find((t) => t.no === openNo) : undefined;
+  const panel =
+    !placeholder && view && openTask ? (
+      <TaskDetailPanel
+        key={`${current}/${openTask.no}`}
+        task={openTask}
+        subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
+        project={view.project}
+        section={openTask.category ?? undefined}
+        today={today}
+        onClose={() => {
+          if (!qa.open) setOpenNo(null); // クイック追加の Esc では詳細を閉じない
+        }}
+        onChange={(patch) => void p.updateTask(openTask.no, patch)}
+        onToggleDone={(done) => void p.completeTask(openTask.no, done)}
+        onDelete={() => {
+          setOpenNo(null);
+          void p.deleteTask(openTask.no);
+        }}
+        onAddSubtask={(title) => void p.addSubtask(openTask.no, title)}
+        onToggleSubtask={(no, done) => void p.completeTask(no, done)}
+      />
+    ) : undefined;
+
+  // ---- 本文 ----
+  let body: React.ReactNode;
+  if (placeholder) {
+    body = <EmptyState title={PHASE2_TITLE[nav.kind]} message="Phase 2 で実装" hideAction />;
+  } else if (p.error) {
+    body = (
+      <ProjectView
+        project={current}
+        tasks={[]}
+        sections={[]}
+        state="error"
+        errorDetail={p.error}
+        onRetryLoad={() => void p.reload()}
+        onRevealFile={reveal}
+      />
+    );
+  } else if (!view) {
+    body = <div style={{ padding: "var(--space-6) 0", color: "var(--color-text-secondary)", fontSize: 14 }}>読み込み中…</div>;
+  } else {
+    body = (
+      <ProjectView
+        key={current}
+        project={current}
+        tasks={view.tasks}
+        sections={view.sections}
+        today={today}
+        invalidRows={view.invalidRows}
+        onOpenTask={(t) => setOpenNo(t.no)}
+        onToggleDone={(t, done) => void p.completeTask(t.no, done)}
+        onAddTask={(section, title) => void p.addTask({ title, section })}
+        onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
+        onDeleteTask={(t) => {
+          if (openNo === t.no) setOpenNo(null);
+          void p.deleteTask(t.no);
+        }}
+      />
+    );
+  }
+
+  const invalidCount = !placeholder && !p.error && view ? view.invalidRows.length : 0;
+  const banner = (
+    <>
+      {Object.entries(saveErrors).map(([project, message]) => (
+        <SaveBanner key={project} message={message} onRetry={() => void api.retrySave(project).catch(showError)} />
+      ))}
+      {invalidCount > 0 && (
+        <FixBanner
+          message={`${invalidCount} 行に型の不整合があります。Excel で修正するまで、その行はアプリから編集できません。修正したら「再読み込み」を押してください。`}
+          onOpenExcel={reveal}
+          onReload={() => void p.reload()}
+        />
+      )}
+      {p.notice && <NoticeBanner message={p.notice} onDismiss={p.clearNotice} />}
+      {flash && <NoticeBanner message={flash.text} tone={flash.tone} onDismiss={() => setFlash(null)} />}
+    </>
+  );
+
+  const overlay = (
+    <>
+      {width === 960 && drawer && (
+        <div
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDrawer(false);
+          }}
+          style={{ width: "100%", height: "100%", display: "flex", background: "var(--color-scrim)", pointerEvents: "auto" }}
+        >
+          <div style={{ flex: "0 0 280px", width: 280, height: "100%" }}>{sidebar}</div>
+        </div>
+      )}
+      <QuickAddDialog
+        open={qa.open}
+        tokens={tokens}
+        project={qaProject}
+        projectColor={qaColor}
+        text={qa.text}
+        onChangeText={(text) => setQa((s) => ({ ...s, text, error: undefined }))}
+        onSubmit={(text) => void submitQuickAdd(text)}
+        busy={qa.busy}
+        error={qa.error}
+        onClose={closeQuickAdd}
+      />
+    </>
+  );
+
   return (
-    <div style={{ padding: "var(--space-6)", fontFamily: "var(--font-body)", color: "var(--color-text-primary)" }}>
-      <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>PowerToDo</h1>
-      <ul style={{ margin: "var(--space-3) 0 0", paddingLeft: 20 }}>
-        {app.projects.map((p) => (
-          <li key={p.name}>{p.name}</li>
-        ))}
-      </ul>
-    </div>
+    <AppShell
+      width={width}
+      fill
+      syncState="off"
+      sidebar={sidebar}
+      rail={{
+        onExpand: () => setDrawer(true),
+        onAddTask: openQuickAdd,
+        onNavigate: (t) => {
+          if (t !== "search") navigate({ kind: t });
+        },
+      }}
+      banner={banner}
+      panel={panel}
+      overlay={overlay}
+    >
+      {body}
+    </AppShell>
   );
 }

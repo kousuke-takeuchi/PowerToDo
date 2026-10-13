@@ -39,7 +39,7 @@ export interface TaskPatch {
 export type TokenKind = "date" | "time" | "priority" | "project" | "label";
 /** Offsets are char (code point) indices into the original text, not UTF-16 units. */
 export interface Span { start: number; end: number; kind: TokenKind; }
-/** Rust serializes the absent Options as null (no skip_serializing_if); dueTime is chrono's default "HH:MM:SS". */
+/** Rust serializes the absent Options as null (no skip_serializing_if); dueTime is "HH:MM". */
 export interface QuickAddResult { title: string; due: string | null; dueTime: string | null; priority: Priority | null; project: string | null; labels: string[]; spans: Span[]; }
 export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; }
 export interface MoveOutcome { from: ProjectView; to: ProjectView; }

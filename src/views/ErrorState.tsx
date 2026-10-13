@@ -1,9 +1,18 @@
 import { FileX } from "lucide-react";
 import { Button } from "../components/Button";
 
-export type ErrorStateProps = { fileName: string; onRetry?: () => void; onReveal?: () => void; /** 追加の詳細 (実アプリのエラーメッセージ)。省略時は絵コンテと同じ表示。 */ detail?: string };
+export type ErrorStateProps = {
+  fileName: string;
+  onRetry?: () => void;
+  /** 省略時は「ファイルの場所を開く」を出さない。 */
+  onReveal?: () => void;
+  /** 追加の詳細 (実アプリのエラーメッセージ)。省略時は絵コンテと同じ表示。 */
+  detail?: string;
+  /** 起動時の致命エラー用: 別のデータフォルダを選び直す。省略時はボタンを出さない。 */
+  onChangeFolder?: () => void;
+};
 
-export function ErrorState({ fileName, onRetry, onReveal, detail }: ErrorStateProps) {
+export function ErrorState({ fileName, onRetry, onReveal, detail, onChangeFolder }: ErrorStateProps) {
   return (
     <div
       style={{
@@ -29,9 +38,16 @@ export function ErrorState({ fileName, onRetry, onReveal, detail }: ErrorStatePr
       )}
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <Button onClick={onRetry}>再試行</Button>
-        <Button variant="secondary" onClick={onReveal}>
-          ファイルの場所を開く
-        </Button>
+        {onChangeFolder && (
+          <Button variant="secondary" onClick={onChangeFolder}>
+            フォルダを選び直す
+          </Button>
+        )}
+        {onReveal && (
+          <Button variant="secondary" onClick={onReveal}>
+            ファイルの場所を開く
+          </Button>
+        )}
       </div>
     </div>
   );

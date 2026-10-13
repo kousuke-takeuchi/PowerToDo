@@ -1,10 +1,11 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarCheck, CalendarDays, CirclePlus, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
 import { Button } from "../components/Button";
 import { ProjectItem } from "../components/ProjectItem";
 import { SidebarItem } from "../components/SidebarItem";
 import { SyncStatus } from "../components/SyncStatus";
+import { TextField } from "../components/TextField";
 import type { SyncState } from "../components/SyncStatus";
 import type { counts } from "../mock/data";
 import type { Project } from "../types/model";
@@ -19,6 +20,10 @@ export type SidebarProps = {
   onAddTask?: () => void;
   /** アカウント (アバター + 名前) をクリックしたとき。設定ダイアログを開き直す Story が渡す。 */
   onOpenSettings?: () => void;
+  /** 渡すとマイプロジェクトの「+」が名前入力欄を開き、Enter でこれを呼ぶ (Esc で閉じる)。 */
+  onCreateProject?: (name: string) => void;
+  /** アカウント欄の表示名。既定は絵コンテのサンプル名。 */
+  displayName?: string;
 };
 
 const heading: React.CSSProperties = {
@@ -28,13 +33,34 @@ const heading: React.CSSProperties = {
   color: "var(--color-text-secondary)",
 };
 
-export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, onNavigate, onAddTask, onOpenSettings }: SidebarProps) {
+export function Sidebar({
+  active,
+  counts: c,
+  projects,
+  syncState,
+  lastSyncedAt,
+  onNavigate,
+  onAddTask,
+  onOpenSettings,
+  onCreateProject,
+  displayName = "たろう",
+}: SidebarProps) {
   // 選択行のハイライトだけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
   const [current, setCurrent] = useState(active);
   useEffect(() => setCurrent(active), [active.kind, active.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const go = (target: SidebarProps["active"]) => {
     setCurrent(target);
     onNavigate?.(target);
+  };
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const newNameRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (creating) newNameRef.current?.querySelector("input")?.focus();
+  }, [creating]);
+  const closeCreate = () => {
+    setCreating(false);
+    setNewName("");
   };
   const countOf = (name: string) => (c as Record<string, number>)[name];
   const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind;
@@ -74,7 +100,7 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
         >
           <span aria-hidden style={{ width: 28, height: 28, borderRadius: 14, background: "var(--color-accent)", flex: "0 0 auto" }} />
           <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: "20px", fontWeight: 600, color: "var(--color-text-primary)" }}>
-            たろう
+            {displayName}
           </span>
         </button>
         <Button variant="icon" icon={Bell} ariaLabel="通知" />
@@ -140,8 +166,28 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
       <section style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 32 }}>
           <span style={heading}>マイプロジェクト</span>
-          <Button variant="icon" icon={Plus} ariaLabel="プロジェクトを追加" />
+          <Button variant="icon" icon={Plus} ariaLabel="プロジェクトを追加" onClick={onCreateProject ? () => setCreating(true) : undefined} />
         </div>
+        {creating && onCreateProject && (
+          <div
+            ref={newNameRef}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === "Enter" && newName.trim()) {
+                onCreateProject(newName.trim());
+                closeCreate();
+              } else if (e.key === "Escape") {
+                e.stopPropagation();
+                closeCreate();
+              }
+            }}
+            onBlur={() => {
+              if (!newName.trim()) closeCreate();
+            }}
+          >
+            <TextField value={newName} placeholder="プロジェクト名" onChange={setNewName} />
+          </div>
+        )}
         {mine.map((p) => (
           <ProjectItem
             key={p.name}

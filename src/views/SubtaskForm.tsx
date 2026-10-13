@@ -8,6 +8,12 @@ export type SubtaskFormProps = {
   autoFocus?: boolean;
   onCancel?: () => void;
   onSubmit?: (title: string) => void;
+  /** 入力欄の placeholder / aria-label (既定は「サブタスク名」)。 */
+  placeholder?: string;
+  /** 送信ボタンの文言 (既定は「サブタスクを追加」)。 */
+  submitLabel?: string;
+  /** 説明欄と 4 つのツールバーボタンを出さない (実アプリ: まだ保存先が無い項目を見せない)。 */
+  compact?: boolean;
 };
 
 const bare: React.CSSProperties = {
@@ -28,12 +34,23 @@ const toolbar: { icon: React.ComponentType<{ size?: number }>; label: string }[]
 ];
 
 /** インラインのサブタスク追加フォーム (D-01c)。保存はしない (見た目と開閉だけ)。 */
-export function SubtaskForm({ defaultTitle = "", autoFocus, onCancel, onSubmit }: SubtaskFormProps) {
+export function SubtaskForm({
+  defaultTitle = "",
+  autoFocus,
+  onCancel,
+  onSubmit,
+  placeholder = "サブタスク名",
+  submitLabel = "サブタスクを追加",
+  compact,
+}: SubtaskFormProps) {
   const [title, setTitle] = useState(defaultTitle);
   return (
     <form
       onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel?.();
+        if (e.key === "Escape" && !e.nativeEvent.isComposing) {
+          e.stopPropagation(); // 開いている詳細パネルの Esc (window) まで届かせない
+          onCancel?.();
+        }
       }}
       onSubmit={(e) => {
         e.preventDefault();
@@ -52,52 +69,56 @@ export function SubtaskForm({ defaultTitle = "", autoFocus, onCancel, onSubmit }
       }}
     >
       <input
-        aria-label="サブタスク名"
+        aria-label={placeholder}
         autoFocus={autoFocus}
         value={title}
-        placeholder="サブタスク名"
+        placeholder={placeholder}
         onChange={(e) => setTitle(e.target.value)}
         className="placeholder:text-[var(--color-text-muted)]"
         style={{ ...bare, fontSize: 14, lineHeight: "20px", color: "var(--color-text-primary)" }}
       />
-      <input
-        aria-label="説明"
-        placeholder="説明"
-        className="placeholder:text-[var(--color-text-muted)]"
-        style={{ ...bare, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}
-      />
-      <div style={{ display: "flex", gap: "var(--space-2)" }}>
-        {toolbar.map(({ icon: Icon, label }) => (
-          <button
-            key={label}
-            type="button"
-            className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "var(--space-1)",
-              padding: "4px 8px",
-              border: 0,
-              boxShadow: "inset 0 0 0 1px var(--color-border)",
-              borderRadius: 6,
-              fontFamily: "var(--font-body)",
-              fontSize: 13,
-              lineHeight: "19px",
-              color: "var(--color-text-secondary)",
-              cursor: "pointer",
-            }}
-          >
-            <Icon size={14} />
-            {label}
-          </button>
-        ))}
-      </div>
+      {!compact && (
+        <>
+          <input
+            aria-label="説明"
+            placeholder="説明"
+            className="placeholder:text-[var(--color-text-muted)]"
+            style={{ ...bare, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}
+          />
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            {toolbar.map(({ icon: Icon, label }) => (
+              <button
+                key={label}
+                type="button"
+                className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "var(--space-1)",
+                  padding: "4px 8px",
+                  border: 0,
+                  boxShadow: "inset 0 0 0 1px var(--color-border)",
+                  borderRadius: 6,
+                  fontFamily: "var(--font-body)",
+                  fontSize: 13,
+                  lineHeight: "19px",
+                  color: "var(--color-text-secondary)",
+                  cursor: "pointer",
+                }}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
         <Button variant="secondary" onClick={onCancel}>
           キャンセル
         </Button>
         <Button type="submit" disabled={!title.trim()}>
-          サブタスクを追加
+          {submitLabel}
         </Button>
       </div>
     </form>

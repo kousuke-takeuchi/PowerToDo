@@ -24,6 +24,8 @@ export const api = {
 
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   getProject: (name: string) => invoke<ProjectView>("get_project", { name }),
+  /** Re-reads the project file from disk (discards unsaved in-memory changes); retries a failed load. */
+  reloadProject: (name: string) => invoke<ProjectView>("reload_project", { name }),
   createProject: (name: string, color: string) => invoke<ProjectSummary>("create_project", { name, color }),
   renameProject: (name: string, newName: string) => invoke<ProjectSummary>("rename_project", { name, newName }),
   deleteProject: (name: string) => invoke<null>("delete_project", { name }),

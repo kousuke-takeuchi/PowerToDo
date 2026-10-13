@@ -12,7 +12,7 @@ const centered = {
 } as const;
 
 export default function App() {
-  const { state, retry, pickFolder, confirmDataDir } = useAppState();
+  const { state, retry, pickFolder, confirmDataDir, changeDataDir } = useAppState();
 
   switch (state.status) {
     case "loading":
@@ -20,7 +20,7 @@ export default function App() {
     case "fatal":
       return (
         <div style={centered}>
-          <ErrorState fileName="共通ファイル" detail={state.message} onRetry={() => void retry()} />
+          <ErrorState fileName="共通ファイル" detail={state.message} onRetry={() => void retry()} onChangeFolder={() => void changeDataDir()} />
         </div>
       );
     case "onboarding":

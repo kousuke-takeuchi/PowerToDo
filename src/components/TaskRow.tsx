@@ -24,6 +24,8 @@ export type TaskRowProps = {
   onToggleDone?: () => void;
   onToggleExpand?: () => void;
   onClick?: () => void;
+  /** 右端の「その他」アイコンを押したとき。 */
+  onMore?: () => void;
 };
 
 const subCountStyle: React.CSSProperties = {
@@ -141,7 +143,7 @@ export function TaskRow(p: TaskRowProps) {
           <Button variant="icon" icon={Pencil} ariaLabel="編集" />
           <Button variant="icon" icon={Calendar} ariaLabel="日付" />
           <Button variant="icon" icon={MessageSquare} ariaLabel="コメント" />
-          <Button variant="icon" icon={Ellipsis} ariaLabel="その他" />
+          <Button variant="icon" icon={Ellipsis} ariaLabel="その他" onClick={p.onMore} />
         </div>
       )}
     </div>

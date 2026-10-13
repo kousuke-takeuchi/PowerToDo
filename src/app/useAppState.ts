@@ -84,5 +84,17 @@ export function useAppState() {
     [patchOnboarding],
   );
 
-  return { state, retry: load, pickFolder, confirmDataDir };
+  /** Fatal screen: choose another data folder (dialog, then set_data_dir). A cancelled dialog changes nothing. */
+  const changeDataDir = useCallback(async () => {
+    try {
+      const dir = await api.pickFolder();
+      if (!dir || !alive.current) return;
+      const app = await api.setDataDir(dir);
+      if (alive.current) setState({ status: "ready", app });
+    } catch (e) {
+      if (alive.current) setState({ status: "fatal", message: errorMessage(e) });
+    }
+  }, []);
+
+  return { state, retry: load, pickFolder, confirmDataDir, changeDataDir };
 }

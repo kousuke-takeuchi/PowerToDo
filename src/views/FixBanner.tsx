@@ -1,11 +1,17 @@
 import { TriangleAlert } from "lucide-react";
 import { Button } from "../components/Button";
 
-export type FixBannerProps = { message?: string; onOpenExcel?: () => void };
+export type FixBannerProps = {
+  message?: string;
+  onOpenExcel?: () => void;
+  /** 渡すと「再読み込み」を出す (Excel で直したあと、ファイルを読み直す)。 */
+  onReload?: () => void;
+};
 
 export function FixBanner({
   message = "1 行に型の不整合があります。Excel で修正するまで、その行はアプリから編集できません。",
   onOpenExcel,
+  onReload,
 }: FixBannerProps) {
   return (
     <div
@@ -24,6 +30,11 @@ export function FixBanner({
         <TriangleAlert size={18} />
       </span>
       <span style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>{message}</span>
+      {onReload && (
+        <Button variant="secondary" onClick={onReload}>
+          再読み込み
+        </Button>
+      )}
       <Button variant="secondary" onClick={onOpenExcel}>
         Excel で開く
       </Button>

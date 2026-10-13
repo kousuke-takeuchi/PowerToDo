@@ -108,7 +108,7 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
       <Block label="データフォルダ" hint="Google Drive との同期は次のステップで設定できます。あとからでも変更できます。">
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {live ? <TextField value={dataDir} placeholder="(アプリのデータフォルダ)" readOnly /> : <TextField value={localDir} onChange={setLocalDir} />}
+            {live ? <TextField value={dataDir} placeholder="未選択" readOnly /> : <TextField value={localDir} onChange={setLocalDir} />}
           </div>
           <Button variant="secondary" onClick={onPickFolder} disabled={busy}>
             選択
