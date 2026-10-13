@@ -1,6 +1,8 @@
 # PowerToDo storyboard メモ
 
-pen.dev の `design.pen` で画面ごとの操作性を確認するための手引き。
+操作性の確認は Storybook で行う (`npm run storybook`、http://localhost:6006)。Story 名は本書の画面名 (pen のノード名) と同じ。pen は見た目の参照用。
+
+pen.dev の `design.pen` で画面ごとの見た目を確認するための手引き。
 画面間リンクは pen の API では張れないため、必要なものだけ pen.dev 上で手で張る。
 
 画面は全部で 40 枚 (デスクトップ 32 枚 = 通常 29 枚 + ダーク 3 枚、モバイル 8 枚)。id は pen のノード id。
