@@ -1,6 +1,8 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarCheck, CalendarDays, CirclePlus, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
+import { isImeKey } from "../app/keys";
+import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { ProjectItem } from "../components/ProjectItem";
 import { SidebarItem } from "../components/SidebarItem";
@@ -62,6 +64,7 @@ export function Sidebar({
     setCreating(false);
     setNewName("");
   };
+  useEscLayer(creating && onCreateProject !== undefined, closeCreate);
   const countOf = (name: string) => (c as Record<string, number>)[name];
   const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind;
   const mine = projects.filter((p) => !p.inbox);
@@ -172,12 +175,10 @@ export function Sidebar({
           <div
             ref={newNameRef}
             onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing) return;
+              // IME 変換を確定する Enter は作成にしない (keys.ts)。Esc は Esc レイヤーで閉じる。
+              if (isImeKey(e)) return;
               if (e.key === "Enter" && newName.trim()) {
                 onCreateProject(newName.trim());
-                closeCreate();
-              } else if (e.key === "Escape") {
-                e.stopPropagation();
                 closeCreate();
               }
             }}

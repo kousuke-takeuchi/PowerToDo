@@ -1,6 +1,7 @@
 import { Bell, Calendar, Flag, Tag } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
+import { isImeKey } from "../app/keys";
 import { Button } from "../components/Button";
 
 export type SubtaskFormProps = {
@@ -47,8 +48,13 @@ export function SubtaskForm({
   return (
     <form
       onKeyDown={(e) => {
-        if (e.key === "Escape" && !e.nativeEvent.isComposing) {
-          e.stopPropagation(); // 開いている詳細パネルの Esc (window) まで届かせない
+        // IME 変換を確定する Enter / Esc は送信・キャンセルにしない (WebKit はその keydown を isComposing=false, keyCode 229 で送る。keys.ts)
+        if (isImeKey(e)) {
+          if (e.key === "Enter") e.preventDefault(); // 暗黙の form 送信を止める
+          return;
+        }
+        if (e.key === "Escape") {
+          e.stopPropagation(); // Esc レイヤー (window) まで届かせない: 閉じるのはこのフォームだけ
           onCancel?.();
         }
       }}

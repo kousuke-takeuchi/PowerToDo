@@ -1,6 +1,7 @@
 import { Bell, Calendar, Cloud, Folder, Keyboard, Palette, User } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import { NasFields, hintStyle, labelStyle, syncTargetOptions } from "./SyncFields";
@@ -71,14 +72,7 @@ export function SettingsDialog({ open, initialTarget = "google", connected = fal
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscLayer(open, () => onClose?.());
 
   if (!open) return null;
 

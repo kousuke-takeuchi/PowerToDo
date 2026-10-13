@@ -2,6 +2,8 @@ import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { Bell, Calendar, ChevronDown, ChevronRight, ChevronUp, Ellipsis, Flag, Folder, Repeat, Tag, X } from "lucide-react";
 import { AddTaskRow } from "../components/AddTaskRow";
+import { isImeKey } from "../app/keys";
+import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Checkbox } from "../components/Checkbox";
 import { TaskRow } from "../components/TaskRow";
@@ -25,8 +27,11 @@ export type TaskDetailPanelProps = {
   /** コメント一覧。task.no と同じ taskNo のものだけ表示する。 */
   comments?: Comment[];
   // ---- 実アプリ用 (onChange を渡すと編集モード。無ければ Storybook と同じ、見た目だけのローカル挙動) ----
-  /** 編集の確定 (タイトル / 説明は blur・Enter、優先度・期限・繰り返し・リマインダーは選択時)。 */
-  onChange?: (patch: TaskPatch) => void;
+  /**
+   * 編集の確定 (タイトル / 説明は blur・Enter、優先度・期限・繰り返し・リマインダーは選択時)。
+   * Promise<false> を返すと失敗とみなし、タイトル / 説明の入力欄を task の値に戻す。
+   */
+  onChange?: (patch: TaskPatch) => void | Promise<boolean>;
   /** 完了チェック。渡すと完了状態は task.progress から決まる。 */
   onToggleDone?: (done: boolean) => void;
   /** 渡すと下部に「タスクを削除」(確認つき) を出す。 */
@@ -155,14 +160,26 @@ export function TaskDetailPanel({
   const rruleNow = editable ? task.rrule : rrule;
   const remindersNow = editable ? task.reminders : reminders;
   const subDone = (t: Task) => (onToggleSubtask ? t.progress === 100 : sub.isDone(t));
+  // 失敗したら入力欄を task の値 (そのときの最新) に戻す。成功なら task が変わり、上の effect が入力欄を合わせる。
+  const taskRef = useRef(task);
+  taskRef.current = task;
+  const commit = (patch: TaskPatch, revert: () => void) => {
+    void onChange?.(patch)?.then((ok) => {
+      if (!ok) revert();
+    });
+  };
+  // 比較は trim 前の値で行う (前後の空白だけ足した入力も、保存せずに task の値へ戻す)。
   const commitTitle = () => {
+    if (titleDraft === task.title) return;
     const v = titleDraft.trim();
-    if (!v) setTitleDraft(task.title);
-    else if (v !== task.title) onChange?.({ title: v });
+    if (!v || v === task.title) setTitleDraft(task.title);
+    else commit({ title: v }, () => setTitleDraft(taskRef.current.title));
   };
   const commitNote = () => {
+    if (noteDraft === (task.note ?? "")) return;
     const v = noteDraft.trim();
-    if (v !== (task.note ?? "")) onChange?.({ note: v === "" ? null : v });
+    if (v === (task.note ?? "")) setNoteDraft(task.note ?? "");
+    else commit({ note: v === "" ? null : v }, () => setNoteDraft(taskRef.current.note ?? ""));
   };
   const taskComments = comments.filter((c) => c.taskNo === task.no);
   // 編集モードでは、押した行の直下にポップオーバーを出す (パネル内の位置は行の offsetTop から)。Storybook は pen の座標のまま。
@@ -173,30 +190,25 @@ export function TaskDetailPanel({
   };
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Esc / ポップオーバーの外のクリックで閉じる。ポップオーバー内の行を押すと押した要素が消えてフォーカスが body に戻るので、
-  // パネルの onKeyDown ではなく window で受ける。Esc はポップオーバーが開いていれば閉じ、無ければパネルを閉じる。
+  // Esc は Esc レイヤー (パネル本体の上にポップオーバー): ポップオーバーが開いていればそれだけ閉じ、無ければパネルを閉じる。
+  // ポップオーバー内の行を押すと押した要素が消えてフォーカスが body に戻るので、パネルの onKeyDown では受けられない。
+  useEscLayer(true, () => {
+    // フォーカス中の入力の blur で編集中の値を確定してから閉じる (消えた要素には blur が来ない)
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    onClose?.();
+  });
+  useEscLayer(popover !== null, () => setPopover(null));
+
+  // ポップオーバーの外のクリックで閉じる。
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.isComposing) return;
-      if (popover) setPopover(null);
-      else {
-        // フォーカス中の入力の blur で編集中の値を確定してから閉じる (消えた要素には blur が来ない)
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-        onClose?.();
-      }
-    };
     const onDown = (e: MouseEvent) => {
       const t = e.target as Element | null;
       if (!popover || !t || popoverRef.current?.contains(t) || t.closest("[data-prop-row]")) return;
       setPopover(null);
     };
-    window.addEventListener("keydown", onKey);
     window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
-  }, [popover, onClose]);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [popover]);
 
   const dueInfo = dateLabel(dueNow, today);
   const dueText = dueInfo ? `${dueInfo.label}${timeNow ? ` ${timeNow}` : ""}` : "なし";
@@ -254,7 +266,8 @@ export function TaskDetailPanel({
             onChange={(e) => setTitleDraft(e.target.value)}
             onBlur={commitTitle}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) e.currentTarget.blur();
+              // IME 変換を確定する Enter では確定 (blur) しない (keys.ts)
+              if (e.key === "Enter" && !isImeKey(e)) e.currentTarget.blur();
             }}
             style={{
               ...bareField,

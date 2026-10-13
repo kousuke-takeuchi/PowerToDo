@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, errorMessage } from "../api/client";
+import { api, errorMessage, isAppError } from "../api/client";
 import { onProjectChanged } from "../api/events";
 import type { ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
 
@@ -33,9 +33,12 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
     return p;
   }, []);
 
-  /** Load (get_project, or reload_project to re-read the file). `silent` keeps the current view on screen meanwhile. */
+  /**
+   * Load (get_project, or reload_project to re-read the file). `silent` keeps the current view on screen meanwhile.
+   * A failure becomes `error`, except one `rethrow` accepts: that one rejects the returned promise and changes nothing.
+   */
   const load = useCallback(
-    (call: () => Promise<ProjectView>, silent: boolean) => {
+    (call: () => Promise<ProjectView>, silent: boolean, rethrow?: (e: unknown) => boolean) => {
       const g = gen.current;
       return enqueue(async () => {
         if (g !== gen.current) return;
@@ -46,6 +49,7 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
           setView(v);
           setError(null);
         } catch (e) {
+          if (rethrow?.(e)) throw e;
           if (g === gen.current) setError(errorMessage(e));
         } finally {
           if (g === gen.current) setLoading(false);
@@ -94,7 +98,15 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
     [enqueue],
   );
 
-  const reload = useCallback(() => load(() => api.reloadProject(name), false), [load, name]);
+  /**
+   * reload_project. Without `discard`, a project with unsaved edits is left alone and the promise rejects with the
+   * `invalid` AppError (the caller asks the user, then calls again with `discard = true`). Other failures become `error`.
+   */
+  const reload = useCallback(
+    (discard = false) =>
+      load(() => api.reloadProject(name, discard), false, (e) => !discard && isAppError(e) && e.kind === "invalid"),
+    [load, name],
+  );
   const addTask = useCallback((input: TaskInput) => mutate(() => api.addTask(name, input)), [mutate, name]);
   const updateTask = useCallback((no: number, patch: TaskPatch) => mutate(() => api.updateTask(name, no, patch)), [mutate, name]);
   const completeTask = useCallback((no: number, done: boolean) => mutate(() => api.completeTask(name, no, done)), [mutate, name]);

@@ -1,6 +1,6 @@
 import type React from "react";
-import { useEffect } from "react";
 import { ArrowUp, Bell, Calendar, Flag, Folder, Tag } from "lucide-react";
+import { useEscLayer } from "../../app/layers";
 import type { QuickAddToken } from "../QuickAddDialog";
 
 export type MobileQuickAddSheetProps = {
@@ -30,13 +30,7 @@ function ToolbarIcon({ icon: Icon, label, color = "var(--color-text-secondary)" 
  * scrim は pointerEvents: "auto" (MobileShell の overlay ラッパーは "none")。
  */
 export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useEscLayer(true, () => onClose?.());
 
   const of = (kind: NonNullable<QuickAddToken["kind"]>) => tokens.some((t) => t.kind === kind);
   return (

@@ -11,6 +11,8 @@ import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
 import { useShellWidth, useToday } from "./hooks";
+import { isImeKey } from "./keys";
+import { useEscLayer } from "./layers";
 import { spansToTokens } from "./quickAddTokens";
 import { NoticeBanner, SaveBanner } from "./SaveBanner";
 import { useProject } from "./useProject";
@@ -85,7 +87,8 @@ export function Main({ app }: { app: AppStateDto }) {
   // q: クイック追加 (入力欄にフォーカスがあるとき、修飾キー付き、IME 変換中は除く)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      // isImeKey: see keys.ts (WebKit's committing keydown arrives with isComposing false but keyCode 229)
+      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || isImeKey(e)) return;
       const t = e.target instanceof HTMLElement ? e.target : null;
       if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
       e.preventDefault();
@@ -95,19 +98,11 @@ export function Main({ app }: { app: AppStateDto }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [openQuickAdd]);
 
-  // 狭い幅のドロワー: Esc で閉じる (幅が戻ったら閉じる)
+  // 狭い幅のドロワー: Esc で閉じる (Esc レイヤー。上に開いたものがあればそちらが先に閉じる)。幅が戻ったら閉じる。
   useEffect(() => {
-    if (!drawer) return;
-    if (width !== 960) {
-      setDrawer(false);
-      return;
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !qa.open) setDrawer(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer, width, qa.open]);
+    if (drawer && width !== 960) setDrawer(false);
+  }, [drawer, width]);
+  useEscLayer(drawer && width === 960, () => setDrawer(false));
 
   // クイック追加のプレビュー: 入力が止まってから parse_quick_add を呼ぶ。結果は解析した文字列とセットで持つ。
   useEffect(() => {
@@ -151,6 +146,18 @@ export function Main({ app }: { app: AppStateDto }) {
 
   const reveal = () => void api.revealDataDir().catch(showError);
 
+  // 読み込みに失敗したプロジェクトは未保存の変更を持たないので、確認なしで再試行する。
+  const retryLoad = () => void p.reload().catch(() => undefined);
+
+  // 「再読み込み」(FixBanner): 未保存の変更があると reload_project は断る。確認できたら破棄して読み直す。
+  const reloadProject = async () => {
+    try {
+      await p.reload();
+    } catch {
+      if (window.confirm("未保存の変更を破棄して読み直しますか？")) await p.reload(true).catch(() => undefined);
+    }
+  };
+
   const counts: Counts = useMemo(() => {
     const byName = Object.fromEntries(summaries.map((s) => [s.name, s.taskCount]));
     const inbox = summaries.find((s) => s.inbox);
@@ -190,10 +197,8 @@ export function Main({ app }: { app: AppStateDto }) {
         project={view.project}
         section={openTask.category ?? undefined}
         today={today}
-        onClose={() => {
-          if (!qa.open) setOpenNo(null); // クイック追加の Esc では詳細を閉じない
-        }}
-        onChange={(patch) => void p.updateTask(openTask.no, patch)}
+        onClose={() => setOpenNo(null)}
+        onChange={(patch) => p.updateTask(openTask.no, patch)}
         onToggleDone={(done) => void p.completeTask(openTask.no, done)}
         onDelete={() => {
           setOpenNo(null);
@@ -216,7 +221,7 @@ export function Main({ app }: { app: AppStateDto }) {
         sections={[]}
         state="error"
         errorDetail={p.error}
-        onRetryLoad={() => void p.reload()}
+        onRetryLoad={retryLoad}
         onRevealFile={reveal}
       />
     );
@@ -246,14 +251,15 @@ export function Main({ app }: { app: AppStateDto }) {
   const invalidCount = !placeholder && !p.error && view ? view.invalidRows.length : 0;
   const banner = (
     <>
+      {/* retry_save の失敗は save-status イベントでこの帯に出るので、catch は握りつぶすだけ (二重表示しない) */}
       {Object.entries(saveErrors).map(([project, message]) => (
-        <SaveBanner key={project} message={message} onRetry={() => void api.retrySave(project).catch(showError)} />
+        <SaveBanner key={project} message={message} onRetry={() => void api.retrySave(project).catch(() => undefined)} />
       ))}
       {invalidCount > 0 && (
         <FixBanner
           message={`${invalidCount} 行に型の不整合があります。Excel で修正するまで、その行はアプリから編集できません。修正したら「再読み込み」を押してください。`}
           onOpenExcel={reveal}
-          onReload={() => void p.reload()}
+          onReload={() => void reloadProject()}
         />
       )}
       {p.notice && <NoticeBanner message={p.notice} onDismiss={p.clearNotice} />}

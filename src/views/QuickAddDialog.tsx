@@ -1,6 +1,8 @@
 import { Bell, Calendar, ChevronDown, Ellipsis, Flag, Tag } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef } from "react";
+import { isImeKey } from "../app/keys";
+import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 
 export type QuickAddToken = { text: string; kind?: "date" | "priority" | "project" | "label" };
@@ -101,14 +103,7 @@ export function QuickAddDialog({
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.isComposing) onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscLayer(open, () => onClose?.());
 
   if (!open) return null;
 
@@ -163,7 +158,8 @@ export function QuickAddDialog({
               placeholder="タスク名 (例: 牛乳を買う 明日 p1 #買い物 @急ぎ)"
               onChange={(e) => onChangeText?.(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                // isImeKey: the Enter that commits a Japanese conversion must not submit (see keys.ts)
+                if (e.key === "Enter" && !isImeKey(e)) {
                   e.preventDefault();
                   submit();
                 }
