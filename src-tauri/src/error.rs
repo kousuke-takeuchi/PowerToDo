@@ -18,9 +18,15 @@ pub enum AppError {
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         let message = e.to_string();
-        match e.kind() {
-            std::io::ErrorKind::PermissionDenied => AppError::Locked { message },
-            _ => AppError::Io { message },
+        // 32 / 33: Windows ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION (file open in Excel).
+        // The codes mean something else on other platforms but are never produced for these
+        // operations there.
+        if e.kind() == std::io::ErrorKind::PermissionDenied
+            || matches!(e.raw_os_error(), Some(32 | 33))
+        {
+            AppError::Locked { message }
+        } else {
+            AppError::Io { message }
         }
     }
 }
@@ -46,5 +52,16 @@ mod tests {
         assert!(matches!(AppError::from(denied), AppError::Locked { .. }));
         let other = std::io::Error::from(std::io::ErrorKind::NotFound);
         assert!(matches!(AppError::from(other), AppError::Io { .. }));
+    }
+
+    #[test]
+    fn windows_sharing_violation_codes_are_locked() {
+        for code in [32, 33] {
+            let e = std::io::Error::from_raw_os_error(code);
+            assert!(
+                matches!(AppError::from(e), AppError::Locked { .. }),
+                "os error {code}"
+            );
+        }
     }
 }

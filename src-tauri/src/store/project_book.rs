@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use calamine::{Data, Range, Reader, Xlsx, open_workbook};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime};
 use rust_xlsxwriter::{Format, Workbook, Worksheet, XlsxError};
 
 use super::cells::{self, RawCell};
@@ -84,7 +84,7 @@ pub fn created_at_sentinel() -> NaiveDateTime {
         .unwrap_or_default()
 }
 
-fn xlsx_err(e: calamine::XlsxError) -> AppError {
+pub(super) fn xlsx_err(e: calamine::XlsxError) -> AppError {
     match e {
         calamine::XlsxError::Io(io) => io.into(),
         other => AppError::Corrupt {
@@ -381,7 +381,7 @@ fn parse_row(
     })
 }
 
-fn xlsx_write_err(e: XlsxError) -> AppError {
+pub(super) fn xlsx_write_err(e: XlsxError) -> AppError {
     AppError::Io {
         message: e.to_string(),
     }
@@ -398,6 +398,11 @@ pub fn write_project_book(
     holidays: &[NaiveDate],
 ) -> AppResult<()> {
     let mut wb = build_workbook(book, holidays).map_err(xlsx_write_err)?;
+    persist_workbook(&mut wb, path)
+}
+
+/// Saves `wb` to a temp file next to `path`, fsyncs it and renames it over `path`.
+pub(super) fn persist_workbook(wb: &mut Workbook, path: &Path) -> AppResult<()> {
     let dir = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
@@ -424,7 +429,8 @@ fn priority_text(p: Priority) -> Option<&'static str> {
 
 /// Extra-column value back to a cell, undoing `cells::text`: a text that is exactly how a
 /// finite number prints becomes a number, `%Y-%m-%d` / `%Y-%m-%d %H:%M` become date / date-time
-/// cells, `TRUE` / `FALSE` become booleans, anything else stays text.
+/// cells (only for years 1900..=9999, which Excel can show; earlier text stays text), `TRUE` /
+/// `FALSE` become booleans, anything else stays text.
 fn write_extra(ws: &mut Worksheet, row: u32, col: u16, value: &str) -> Result<(), XlsxError> {
     if let Ok(f) = value.parse::<f64>()
         && f.is_finite()
@@ -433,10 +439,12 @@ fn write_extra(ws: &mut Worksheet, row: u32, col: u16, value: &str) -> Result<()
         ws.write_number(row, col, f)?;
     } else if let Ok(d) = NaiveDate::parse_from_str(value, "%Y-%m-%d")
         && d.format("%Y-%m-%d").to_string() == value
+        && (1900..=9999).contains(&d.year())
     {
         ws.write_datetime_with_format(row, col, d, &style::date_format())?;
     } else if let Ok(dt) = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M")
         && dt.format("%Y-%m-%d %H:%M").to_string() == value
+        && (1900..=9999).contains(&dt.year())
     {
         ws.write_datetime_with_format(row, col, dt, &style::datetime_format())?;
     } else if value == "TRUE" || value == "FALSE" {
@@ -1064,5 +1072,23 @@ mod tests {
         assert_eq!(book.invalid_rows.len(), 1);
         assert_eq!(book.invalid_rows[0].column, "親No.");
         assert_eq!(book.invalid_rows[0].value, "0");
+    }
+
+    #[test]
+    fn pre_1900_extra_date_text_stays_text() {
+        let (_dir, p) = tmp();
+        let mut t = base_task(1, "あ");
+        t.extra.insert("古い日付".into(), "1850-01-01".into());
+        let b = ProjectBook {
+            unknown_columns: vec!["古い日付".into()],
+            ..book(vec![t])
+        };
+        write_project_book(&p, &b, d(2026, 10, 14), &[]).unwrap();
+        let back = read_project_book(&p).unwrap();
+        assert_eq!(back.tasks[0].extra["古い日付"], "1850-01-01");
+        let mut wb: Xlsx<_> = open_workbook(&p).unwrap();
+        let range = wb.worksheet_range(TASK_SHEET).unwrap();
+        let cell = range.get_value((1, HEADERS.len() as u32)).unwrap();
+        assert!(matches!(cell, Data::String(_)), "{cell:?}");
     }
 }
