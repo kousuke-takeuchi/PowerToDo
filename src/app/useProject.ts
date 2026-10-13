@@ -100,11 +100,11 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
 
   /**
    * reload_project. Without `discard`, a project with unsaved edits is left alone and the promise rejects with the
-   * `invalid` AppError (the caller asks the user, then calls again with `discard = true`). Other failures become `error`.
+   * `unsaved` AppError (the caller asks the user, then calls again with `discard = true`). Other failures become `error`.
    */
   const reload = useCallback(
     (discard = false) =>
-      load(() => api.reloadProject(name, discard), false, (e) => !discard && isAppError(e) && e.kind === "invalid"),
+      load(() => api.reloadProject(name, discard), false, (e) => !discard && isAppError(e) && e.kind === "unsaved"),
     [load, name],
   );
   const addTask = useCallback((input: TaskInput) => mutate(() => api.addTask(name, input)), [mutate, name]);

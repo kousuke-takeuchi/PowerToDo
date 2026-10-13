@@ -52,7 +52,7 @@ export const api = {
   updateSettings: (settings: SettingsDto) => invoke<SettingsDto>("update_settings", { settings }),
 };
 
-const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt"];
+const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];
 
 /** Tauri rejects with the serialized Rust `AppError` ({ kind, message }). */
 export function isAppError(e: unknown): e is AppError {

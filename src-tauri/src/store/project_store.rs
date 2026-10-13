@@ -205,6 +205,8 @@ impl ProjectStore {
     /// workbook and every project workbook. A workbook that cannot be read
     /// becomes `LoadedProject::Failed` and does not stop the others. `.xlsx` files in the
     /// folder that the common workbook does not list are adopted as projects.
+    /// Projects normalized while loading come back dirty (see `load_from_disk`); the caller
+    /// should schedule saves for `dirty_projects` (and the common workbook if `common_dirty`).
     pub fn open(
         paths: Paths,
         clock: impl Fn() -> NaiveDateTime + Send + 'static,
@@ -310,7 +312,11 @@ impl ProjectStore {
 
     /// Reads `<name>.xlsx` (creating an empty inbox when it is missing) and normalizes what
     /// the file may not have: the project column, a missing 作成日時, categories that are not
-    /// in the section list. Sets the dirty flag when it changed anything.
+    /// in the section list. Sets the dirty flag when it changed anything, so a project can be
+    /// dirty right after `open` / `reload` without any user edit. Callers that open or reload
+    /// should schedule a save for whatever `dirty_projects` reports, so the normalized file is
+    /// written and the project does not look like it has unsaved edits (the `commands` layer
+    /// does this).
     fn load_from_disk(&mut self, name: &str) -> LoadedProject {
         self.dirty.remove(name);
         let path = match self.paths.project(name) {
@@ -426,13 +432,14 @@ impl ProjectStore {
     }
 
     /// Re-reads the project's file. Also the way to retry a project that failed to load.
-    /// Refuses (`Invalid`) while the project has unsaved changes, so a reload never drops
+    /// Refuses (`Unsaved`) while the project has unsaved changes, so a reload never drops
     /// edits silently; `reload_discarding` is the explicit "throw them away" variant.
+    /// Like `open`, the result can be dirty from load-time normalization; see `load_from_disk`.
     pub fn reload(&mut self, name: &str) -> AppResult<ProjectView> {
         if self.dirty.contains(name) {
-            return Err(invalid(
-                "未保存の変更があります。破棄して読み直す場合は確認してください。",
-            ));
+            return Err(AppError::Unsaved {
+                message: "未保存の変更があります。破棄して読み直す場合は確認してください。".into(),
+            });
         }
         self.reload_discarding(name)
     }
@@ -1815,7 +1822,7 @@ mod tests {
         assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);
 
         let err = e.store.reload(INBOX).unwrap_err();
-        assert!(matches!(err, AppError::Invalid { .. }), "{err:?}");
+        assert!(matches!(err, AppError::Unsaved { .. }), "{err:?}");
         // Nothing was dropped.
         assert_eq!(e.store.view(INBOX).unwrap().tasks.len(), 2);
         assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);

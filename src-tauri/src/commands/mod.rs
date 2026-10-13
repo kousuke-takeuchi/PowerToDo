@@ -185,6 +185,23 @@ impl Saver {
 
 // ---- helpers ----
 
+/// Schedules saves for everything the store reports dirty right now. Used after opening or
+/// reloading: load-time normalization (blank 作成日時, unknown category, project name
+/// mismatch) marks a project dirty without any user edit, and writing it back promptly keeps
+/// such a project from looking like it has unsaved changes (e.g. to `reload_project`).
+fn schedule_dirty(app: &AppHandle, state: &AppState) {
+    let (projects, common) = match state.lock_store().as_ref() {
+        Some(s) => (s.dirty_projects(), s.common_dirty()),
+        None => return,
+    };
+    for p in projects {
+        state.saver.schedule(app.clone(), p);
+    }
+    if common {
+        state.saver.schedule_common(app.clone());
+    }
+}
+
 fn with_store<T>(
     state: &AppState,
     f: impl FnOnce(&mut ProjectStore) -> AppResult<T>,
@@ -312,13 +329,21 @@ pub fn quick_add_in(
 // ---- commands: app and data folder ----
 
 #[tauri::command]
-pub async fn app_state(state: State<'_, AppState>) -> AppResult<AppStateDto> {
-    startup(state.inner())
+pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStateDto> {
+    let dto = startup(state.inner())?;
+    schedule_dirty(&app, state.inner());
+    Ok(dto)
 }
 
 #[tauri::command]
-pub async fn set_data_dir(path: String, state: State<'_, AppState>) -> AppResult<AppStateDto> {
-    switch_data_dir(state.inner(), &path)
+pub async fn set_data_dir(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<AppStateDto> {
+    let dto = switch_data_dir(state.inner(), &path)?;
+    schedule_dirty(&app, state.inner());
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -355,21 +380,28 @@ pub async fn get_project(name: String, state: State<'_, AppState>) -> AppResult<
 }
 
 /// Re-reads the project's file from disk. The way to retry a project that failed to load, or
-/// to pick up a fix made in Excel. With unsaved in-memory changes it fails with `Invalid`
-/// unless `discard` is true (the UI asks the user first).
+/// to pick up a fix made in Excel. With unsaved in-memory changes it fails with `Unsaved`
+/// unless `discard` is true (the UI asks the user first). A project that comes back dirty
+/// from load-time normalization is scheduled for saving.
 #[tauri::command]
 pub async fn reload_project(
     name: String,
     discard: bool,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    with_store(state.inner(), |s| {
-        if discard {
-            s.reload_discarding(&name)
+    let (view, dirty) = with_store(state.inner(), |s| {
+        let view = if discard {
+            s.reload_discarding(&name)?
         } else {
-            s.reload(&name)
-        }
-    })
+            s.reload(&name)?
+        };
+        Ok((view, s.dirty_projects().contains(&name)))
+    })?;
+    if dirty {
+        state.saver.schedule(app, name);
+    }
+    Ok(view)
 }
 
 #[tauri::command]

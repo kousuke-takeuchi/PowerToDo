@@ -13,6 +13,10 @@ pub enum AppError {
     Locked { message: String },
     #[error("{message}")]
     Corrupt { message: String },
+    /// The operation would drop unsaved in-memory edits (e.g. `reload_project` without
+    /// `discard`). The UI asks the user and retries.
+    #[error("{message}")]
+    Unsaved { message: String },
 }
 
 impl From<std::io::Error> for AppError {
@@ -44,6 +48,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"kind":"invalid","message":"x"}"#);
+        let json = serde_json::to_string(&AppError::Unsaved {
+            message: "y".into(),
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"kind":"unsaved","message":"y"}"#);
     }
 
     #[test]

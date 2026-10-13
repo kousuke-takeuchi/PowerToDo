@@ -44,7 +44,7 @@ export interface QuickAddResult { title: string; due: string | null; dueTime: st
 export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; }
 export interface MoveOutcome { from: ProjectView; to: ProjectView; }
 
-export type AppErrorKind = "not_found" | "invalid" | "io" | "locked" | "corrupt";
+export type AppErrorKind = "not_found" | "invalid" | "io" | "locked" | "corrupt" | "unsaved";
 export interface AppError { kind: AppErrorKind; message: string; }
 
 /** `save-status` event payload. `project` is a project name or "_common". */
