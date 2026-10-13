@@ -1,10 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { counts, projects, sections, tasks } from "../../mock/data";
+import { TODAY, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
 import { FixBanner } from "../../views/FixBanner";
+import { LabelDetailView } from "../../views/LabelDetailView";
+import { LabelsView } from "../../views/LabelsView";
 import { ProjectView } from "../../views/ProjectView";
 import type { ProjectViewProps } from "../../views/ProjectView";
 import { Sidebar } from "../../views/Sidebar";
+import type { SidebarProps } from "../../views/Sidebar";
+import { TodayView } from "../../views/TodayView";
+import { UpcomingView } from "../../views/UpcomingView";
 
 const meta = {
   title: "Screens/Desktop",
@@ -73,4 +78,44 @@ export const D13: Story = {
       <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} showActions />
     </AppShell>
   ),
+};
+
+function navShell(active: SidebarProps["active"], children: React.ReactNode, todayCount: number = counts.today) {
+  return (
+    <AppShell
+      sidebar={<Sidebar active={active} counts={{ ...counts, today: todayCount }} projects={projects} syncState="synced" lastSyncedAt="09:41" />}
+      syncState="synced"
+    >
+      {children}
+    </AppShell>
+  );
+}
+
+// pen の今日 / 近日 / ラベル詳細は mock の一部のタスクだけを見せている (pen に合わせて Story 側で絞る)。
+// 15 調味料の補充 (D-06b 用) / 13 粗大ごみ / 12 ゴミ出し (D-05 では出ない) を外す。
+const withoutNo = (...nos: number[]) => tasks.filter((t) => !nos.includes(t.no));
+
+export const D04: Story = {
+  name: "D-04 今日",
+  render: () => navShell({ kind: "today" }, <TodayView tasks={withoutNo(15)} today={TODAY} />),
+};
+
+export const D04b: Story = {
+  name: "D-04 今日 (期限切れなし)",
+  render: () => navShell({ kind: "today" }, <TodayView tasks={withoutNo(15)} today={TODAY} hideOverdue />, 3),
+};
+
+export const D05: Story = {
+  name: "D-05 近日",
+  render: () => navShell({ kind: "upcoming" }, <UpcomingView tasks={withoutNo(12, 13, 15)} today={TODAY} />),
+};
+
+export const D06: Story = {
+  name: "D-06 フィルターとラベル",
+  render: () => navShell({ kind: "labels" }, <LabelsView labels={labels} filters={filters} counts={labelCounts} />),
+};
+
+export const D06b: Story = {
+  name: "D-06b ラベル詳細",
+  render: () => navShell({ kind: "labels" }, <LabelDetailView label="食品" tasks={tasks} />),
 };

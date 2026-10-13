@@ -19,7 +19,7 @@ export const sections: Section[] = [ { project: "買い物", name: "今週", ord
 
 export const tasks: Task[] = [
   { no: 1, project: "買い物", category: "今週", title: "牛乳と卵を買う", assignee: "たろう", priority: 1, progress: 0, due: "2026-10-14", dueTime: "15:00", note: "近所のスーパーで。卵は 10 個入り", labels: ["食品"], rrule: "FREQ=WEEKLY;BYDAY=SA", reminders: ["-0m","-30m"], order: 0, createdAt: "2026-10-10T09:00" },
-  { no: 2, project: "買い物", category: "今週", title: "洗剤の詰め替え", assignee: "たろう", priority: 3, progress: 0, due: "2026-10-18", labels: ["日用品"], reminders: [], order: 1, createdAt: "2026-10-10T09:00" },
+  { no: 2, project: "買い物", category: "今週", title: "洗剤の詰め替え", assignee: "たろう", priority: 3, progress: 0, due: "2026-10-17", labels: ["日用品"], reminders: [], order: 1, createdAt: "2026-10-10T09:00" },
   { no: 3, project: "買い物", category: "いつか", title: "新しいフライパン", assignee: "たろう", priority: 4, progress: 0, note: "28cm、IH 対応", labels: ["キッチン"], reminders: [], order: 0, createdAt: "2026-10-10T09:00" },
   { no: 4, project: "買い物", category: "今週", title: "牛乳 1L", assignee: "たろう", priority: 4, progress: 100, parentNo: 1, labels: [], reminders: [], order: 0, createdAt: "2026-10-10T09:00", completedAt: "2026-10-12T20:00" },
   { no: 5, project: "買い物", category: "今週", title: "卵 10 個入り", assignee: "たろう", priority: 4, progress: 0, parentNo: 1, labels: [], reminders: [], order: 1, createdAt: "2026-10-10T09:00" },
@@ -38,7 +38,15 @@ export const tasks: Task[] = [
   { no: 16, project: "買い物", category: "完了", title: "ティッシュ", assignee: "たろう", priority: 4, progress: 100, labels: [], reminders: [], order: 0, createdAt: "2026-10-01T09:00", completedAt: "2026-10-11T10:00" },
 ];
 
-export const counts = { inbox: 12, today: 5, 仕事: 8, 買い物: 4, 家のこと: 3, 読書: 2 } as const; // サイドバーの件数表示 (pen と同じ固定値)
+export type Counts = { inbox: number; today: number; [project: string]: number };
+export const counts: Counts = { inbox: 12, today: 5, 仕事: 8, 買い物: 4, 家のこと: 3, 読書: 2 }; // サイドバーの件数表示 (pen と同じ固定値)
+
+export const filters = [
+  { name: "今日 + 優先度高", count: 3, color: "var(--color-accent)" },
+  { name: "買い物 (今週)", count: 4, color: "var(--color-priority-2)" },
+];
+
+export const labelCounts: Record<string, number> = { 食品: 3, 日用品: 3, 急ぎ: 2, キッチン: 1 }; // pen D-06 の固定値
 
 export const LONG_TITLE = "来週の出張の準備として、ホテルと新幹線の予約を確認し、必要な書類を印刷してカバンに入れておく。名刺の残りも確認して補充する";
 
@@ -56,6 +64,41 @@ export function dateLabel(due?: string, today: string = TODAY): { label: string;
   if (diff === 1) return { label: "明日", tone: "success" };
   const [, m, d] = due.split("-").map(Number);
   const isSaturday = (toDayNumber(due) + 4) % 7 === 6; // epoch day 0 は木曜
-  if (diff >= 2 && diff <= 7 && isSaturday) return { label: "今週末", tone: "muted" };
+  if (diff >= 2 && diff <= 7 && isSaturday) return { label: "今週末", tone: "success" };
   return { label: `${m}月${d}日`, tone: diff < 0 ? "danger" : "muted" };
+}
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/** 曜日 (日=0 ... 土=6)。 */
+export function weekdayIndex(ymd: string): number {
+  return (toDayNumber(ymd) + 4) % 7; // epoch day 0 は木曜
+}
+
+/** "月曜日" 形式。 */
+export function weekdayLong(ymd: string): string {
+  return `${WEEKDAYS[weekdayIndex(ymd)]}曜日`;
+}
+
+/** "火" 形式。 */
+export function weekdayShort(ymd: string): string {
+  return WEEKDAYS[weekdayIndex(ymd)];
+}
+
+/** "10月13日" 形式。 */
+export function monthDay(ymd: string): string {
+  const [, m, d] = ymd.split("-").map(Number);
+  return `${m}月${d}日`;
+}
+
+/** ymd に n 日を足した ymd。 */
+export function addDays(ymd: string, n: number): string {
+  const dt = new Date((toDayNumber(ymd) + n) * 86_400_000);
+  const pad = (v: number) => String(v).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+
+/** 日数差 (a - b)。 */
+export function daysBetween(a: string, b: string): number {
+  return toDayNumber(a) - toDayNumber(b);
 }

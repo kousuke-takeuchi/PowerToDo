@@ -1,6 +1,5 @@
 import type React from "react";
 import { useState } from "react";
-import { ArrowUpDown, Ellipsis, LayoutList } from "lucide-react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
 import { TaskRow } from "../components/TaskRow";
@@ -8,6 +7,7 @@ import { LONG_TITLE, dateLabel } from "../mock/data";
 import type { Section, Task } from "../types/model";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
+import { PageHeader, titleStyle } from "./HeaderActions";
 import { SubtaskForm } from "./SubtaskForm";
 
 export type ProjectViewProps = {
@@ -25,34 +25,6 @@ export type ProjectViewProps = {
 const INVALID_TASK_NO = 2; // D-11c で要修正にする行 (洗剤の詰め替え)
 const INVALID_SUFFIX = "    ⚠ 要修正: 「終了」列が日付ではありません (値: 来週)";
 const FORM_SAMPLE_TITLE = "食パンの代わりにベーグル"; // D-01c の入力例 (Story で最初から開いているときだけ入れる)
-
-const smallButton: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "var(--space-1)",
-  padding: "4px 8px",
-  border: 0,
-  borderRadius: 6,
-  fontFamily: "var(--font-body)",
-  fontSize: 13,
-  lineHeight: "19px",
-  color: "var(--color-text-secondary)",
-  cursor: "pointer",
-};
-
-function HeaderAction({ icon: Icon, label }: { icon: React.ComponentType<{ size?: number }>; label?: string }) {
-  return (
-    <button
-      type="button"
-      aria-label={label ?? "その他"}
-      className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-      style={smallButton}
-    >
-      <Icon size={16} />
-      {label}
-    </button>
-  );
-}
 
 export function ProjectView({
   project,
@@ -192,14 +164,9 @@ export function ProjectView({
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "var(--font-body)" }}>
-        <h1 style={{ margin: 0, fontSize: 24, lineHeight: "35px", fontWeight: 700, color: "var(--color-text-primary)" }}>{project}</h1>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-1)" }}>
-          <HeaderAction icon={LayoutList} label="表示" />
-          <HeaderAction icon={ArrowUpDown} label="並び替え" />
-          <HeaderAction icon={Ellipsis} />
-        </div>
-      </div>
+      <PageHeader>
+        <h1 style={titleStyle}>{project}</h1>
+      </PageHeader>
       {body()}
     </>
   );
