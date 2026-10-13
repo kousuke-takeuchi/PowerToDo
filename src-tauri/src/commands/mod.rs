@@ -53,26 +53,34 @@ impl AppState {
         self.app_settings.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Writes everything still dirty, ignoring errors (used when the app quits).
-    pub fn flush_all(&self) {
+    /// Writes everything still dirty (used when the app quits). One failed write (say, a file
+    /// locked by Excel) does not stop the others; each failure is logged and returned as
+    /// `(project name or COMMON_KEY, error)`. Empty means everything was saved.
+    pub fn flush_all(&self) -> Vec<(String, AppError)> {
         self.saver.cancel_all();
-        if let Some(store) = self.lock_store().as_mut()
-            && let Err(e) = flush(store)
-        {
-            eprintln!("flush on exit failed: {e}");
+        let failures = self.lock_store().as_mut().map(flush).unwrap_or_default();
+        for (name, e) in &failures {
+            eprintln!("flush on exit failed for {name}: {e}");
         }
+        failures
     }
 }
 
-/// Saves the common workbook and every dirty project; stops at the first error.
-fn flush(store: &mut ProjectStore) -> AppResult<()> {
-    if store.common_dirty() {
-        store.save_common()?;
+/// Tries to save the common workbook and every dirty project, continuing past failures.
+/// Returns the failures as `(project name or COMMON_KEY, error)`.
+fn flush(store: &mut ProjectStore) -> Vec<(String, AppError)> {
+    let mut failures = Vec::new();
+    if store.common_dirty()
+        && let Err(e) = store.save_common()
+    {
+        failures.push((COMMON_KEY.to_string(), e));
     }
     for name in store.dirty_projects() {
-        store.save(&name)?;
+        if let Err(e) = store.save(&name) {
+            failures.push((name, e));
+        }
     }
-    Ok(())
+    failures
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,8 +259,11 @@ pub fn switch_data_dir(state: &AppState, path: &str) -> AppResult<AppStateDto> {
     }
     let dir = PathBuf::from(path);
     let mut store = state.lock_store();
-    if let Some(old) = store.as_mut() {
-        flush(old)?;
+    // Never leave a folder with unsaved edits: any failed write aborts the switch.
+    if let Some(old) = store.as_mut()
+        && let Some((_, e)) = flush(old).into_iter().next()
+    {
+        return Err(e);
     }
     let opened = ProjectStore::open(Paths::new(dir.clone()), now, true)?;
     let settings = AppSettings {
@@ -706,6 +717,46 @@ mod tests {
         // Back to the first folder: the task was written before leaving.
         let dto = switch_data_dir(&state, a.path().to_str().unwrap()).unwrap();
         assert_eq!(dto.projects[0].task_count, 1);
+    }
+
+    #[test]
+    fn flush_all_saves_every_dirty_project_even_if_one_write_fails() {
+        use crate::store::common_book::read_common_book;
+        use crate::store::project_book::read_project_book;
+
+        let app_dir = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = AppState::new(app_dir.path().to_path_buf());
+        switch_data_dir(&state, data.path().to_str().unwrap()).unwrap();
+        with_store(&state, |s| {
+            s.create_project("aaa", "")?;
+            s.create_project("bbb", "")?;
+            quick_add_in(s, "A の作業", "aaa", d("2026-10-14"))?;
+            quick_add_in(s, "B の作業", "bbb", d("2026-10-14"))?;
+            let mut settings = s.settings();
+            settings.display_name = "終了時".into();
+            s.update_settings(settings).map(|_| ())
+        })
+        .unwrap();
+
+        // "aaa" sorts first; make its file unwritable by putting a directory in its place.
+        let aaa = data.path().join("aaa.xlsx");
+        std::fs::remove_file(&aaa).unwrap();
+        std::fs::create_dir(&aaa).unwrap();
+
+        let failures = state.flush_all();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].0, "aaa");
+
+        let bbb = read_project_book(&data.path().join("bbb.xlsx")).unwrap();
+        assert_eq!(bbb.tasks.len(), 1);
+        assert_eq!(bbb.tasks[0].title, "B の作業");
+        let common = read_common_book(&data.path().join("_PowerToDo.xlsx")).unwrap();
+        assert_eq!(common.settings.display_name, "終了時");
+        let store = state.lock_store();
+        let store = store.as_ref().unwrap();
+        assert_eq!(store.dirty_projects(), vec!["aaa".to_string()]);
+        assert!(!store.common_dirty());
     }
 
     #[test]
