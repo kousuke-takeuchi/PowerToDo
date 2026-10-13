@@ -921,6 +921,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -1129,7 +1130,7 @@
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ"
+                          "content": "来週の出張の準備として、ホテルと新幹線の予約を確認し、必要な書類を印刷してカバンに入れておく。名刺の残りも確認して補充する"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -1621,6 +1622,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -2460,7 +2462,7 @@
                       "fill": "$text-primary",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "期限の 30 分前",
+                      "content": "2 件 (同時刻, 30 分前)",
                       "fontFamily": "$font-body",
                       "fontSize": 13,
                       "fontWeight": "normal"
@@ -3042,6 +3044,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -4009,6 +4012,7 @@
                   "ref": "rd1in",
                   "name": "Nav-今日",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "Byf8E": {
                       "icon": "calendar-check"
@@ -4501,11 +4505,11 @@
                       "id": "I8rQe",
                       "type": "ref",
                       "ref": "sESoO",
-                      "name": "Row-牛乳と卵を買う",
+                      "name": "Row-食パンを買う",
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "牛乳と卵を買う"
+                          "content": "食パンを買う"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -4757,6 +4761,7 @@
                   "ref": "rd1in",
                   "name": "Nav-今日",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "Byf8E": {
                       "icon": "calendar-check"
@@ -4765,7 +4770,7 @@
                       "content": "今日"
                     },
                     "OpYvr": {
-                      "content": "5"
+                      "content": "3"
                     }
                   }
                 },
@@ -5150,11 +5155,11 @@
                       "id": "HDWbz",
                       "type": "ref",
                       "ref": "sESoO",
-                      "name": "Row-牛乳と卵を買う",
+                      "name": "Row-食パンを買う",
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "牛乳と卵を買う"
+                          "content": "食パンを買う"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -5424,6 +5429,7 @@
                   "ref": "rd1in",
                   "name": "Nav-近日",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "Byf8E": {
                       "icon": "calendar-days"
@@ -6075,11 +6081,11 @@
                       "id": "u8bZW",
                       "type": "ref",
                       "ref": "sESoO",
-                      "name": "Row-牛乳と卵を買う",
+                      "name": "Row-食パンを買う",
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "牛乳と卵を買う"
+                          "content": "食パンを買う"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -6157,11 +6163,11 @@
                       "id": "a8gB7P",
                       "type": "ref",
                       "ref": "sESoO",
-                      "name": "Row-粗大ごみの申し込み",
+                      "name": "Row-牛乳と卵を買う",
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "粗大ごみの申し込み"
+                          "content": "牛乳と卵を買う"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -6176,7 +6182,7 @@
                           "enabled": false
                         },
                         "jI6gZ": {
-                          "content": "家のこと"
+                          "content": "買い物"
                         }
                       }
                     },
@@ -6469,6 +6475,7 @@
                   "ref": "rd1in",
                   "name": "Nav-フィルターとラベル",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "Byf8E": {
                       "icon": "layout-grid"
@@ -7009,7 +7016,7 @@
                               "id": "xMpuv",
                               "name": "Count",
                               "fill": "$text-muted",
-                              "content": "6",
+                              "content": "3",
                               "fontFamily": "$font-body",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -7364,6 +7371,7 @@
                   "ref": "rd1in",
                   "name": "Nav-フィルターとラベル",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "Byf8E": {
                       "icon": "layout-grid"
@@ -8109,6 +8117,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -9250,7 +9259,7 @@
               "width": "fill_container",
               "descendants": {
                 "o39xK": {
-                  "content": "来週月曜 15:00",
+                  "content": "明日 15:00",
                   "fill": "$text-primary"
                 }
               }
@@ -10035,7 +10044,6 @@
                       "name": "Day-2-13",
                       "width": 40,
                       "height": 32,
-                      "fill": "$accent",
                       "cornerRadius": 16,
                       "layout": "vertical",
                       "justifyContent": "center",
@@ -10045,11 +10053,11 @@
                           "type": "text",
                           "id": "S8Y5Ep",
                           "name": "D",
-                          "fill": "#FFFFFF",
+                          "fill": "$accent",
                           "content": "13",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
-                          "fontWeight": "normal"
+                          "fontWeight": "700"
                         }
                       ]
                     },
@@ -10059,6 +10067,7 @@
                       "name": "Day-2-14",
                       "width": 40,
                       "height": 32,
+                      "fill": "$accent",
                       "cornerRadius": 16,
                       "layout": "vertical",
                       "justifyContent": "center",
@@ -10068,7 +10077,7 @@
                           "type": "text",
                           "id": "Cknix",
                           "name": "D",
-                          "fill": "$text-primary",
+                          "fill": "#FFFFFF",
                           "content": "14",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
@@ -10934,6 +10943,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -12669,6 +12679,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -14588,6 +14599,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -15816,6 +15828,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -16613,13 +16626,16 @@
               "id": "RqVaH",
               "name": "Footer",
               "width": "fill_container",
-              "justifyContent": "space_between",
+              "justifyContent": "end",
               "alignItems": "center",
               "children": [
                 {
                   "type": "text",
                   "id": "kPsMj",
+                  "x": 0,
+                  "y": 8.5,
                   "name": "Skip",
+                  "enabled": false,
                   "fill": "$text-secondary",
                   "content": "あとで設定する",
                   "fontFamily": "$font-body",
@@ -16955,6 +16971,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -17211,7 +17228,8 @@
                           "type": "frame",
                           "id": "HpiJQ",
                           "name": "Card-牛乳と卵を買う",
-                          "width": "fill_container",
+                          "rotation": 2,
+                          "width": 270,
                           "fill": "$bg",
                           "cornerRadius": "$radius",
                           "stroke": "$border",
@@ -17219,12 +17237,12 @@
                           "effect": {
                             "type": "shadow",
                             "shadowType": "outer",
-                            "color": "#00000014",
+                            "color": "#00000033",
                             "offset": {
                               "x": 0,
-                              "y": 1
+                              "y": 8
                             },
-                            "blur": 3
+                            "blur": 24
                           },
                           "layout": "vertical",
                           "gap": "$space-2",
@@ -17437,6 +17455,15 @@
                               }
                             }
                           ]
+                        },
+                        {
+                          "type": "rectangle",
+                          "cornerRadius": 2,
+                          "id": "OBM5I",
+                          "name": "DropIndicator",
+                          "fill": "$accent",
+                          "width": "fill_container",
+                          "height": 3
                         },
                         {
                           "type": "frame",
@@ -17976,6 +18003,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -18538,6 +18566,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -19127,6 +19156,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -20295,6 +20325,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -20503,7 +20534,7 @@
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ"
+                          "content": "来週の出張の準備として、ホテルと新幹線の予約を確認し、必要な書類を印刷してカバンに入れておく。名刺の残りも確認して補充する"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -20998,6 +21029,7 @@
                   "ref": "L92HAh",
                   "name": "Pj-買い物",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "ZXjp0": {
                       "fill": "$priority-2"
@@ -21837,7 +21869,7 @@
                       "fill": "$text-primary",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "期限の 30 分前",
+                      "content": "2 件 (同時刻, 30 分前)",
                       "fontFamily": "$font-body",
                       "fontSize": 13,
                       "fontWeight": "normal"
@@ -22271,6 +22303,7 @@
                   "ref": "rd1in",
                   "name": "Nav-今日",
                   "width": "fill_container",
+                  "fill": "$bg-hover",
                   "descendants": {
                     "Byf8E": {
                       "icon": "calendar-check"
@@ -22763,11 +22796,11 @@
                       "id": "F1Q6Z",
                       "type": "ref",
                       "ref": "sESoO",
-                      "name": "Row-牛乳と卵を買う",
+                      "name": "Row-食パンを買う",
                       "width": "fill_container",
                       "descendants": {
                         "ODPIf": {
-                          "content": "牛乳と卵を買う"
+                          "content": "食パンを買う"
                         },
                         "PGwbs": {
                           "enabled": false
@@ -23189,6 +23222,9 @@
                 "DEucZ": {
                   "enabled": true
                 },
+                "DEucZ/t9NGEf": {
+                  "content": "今週末"
+                },
                 "aX3Zr": {
                   "enabled": false
                 },
@@ -23258,6 +23294,7 @@
               "width": "fill_container",
               "fill": "$success",
               "cornerRadius": 6,
+              "justifyContent": "space_between",
               "alignItems": "center",
               "children": [
                 {
@@ -23299,6 +23336,7 @@
                   "ref": "sESoO",
                   "name": "Row-スワイプ中",
                   "width": 260,
+                  "fill": "$bg",
                   "descendants": {
                     "ODPIf": {
                       "content": "食パン"
@@ -23359,7 +23397,21 @@
           "id": "rmTqp",
           "type": "ref",
           "ref": "j2jdfX",
-          "name": "TabBar"
+          "name": "TabBar",
+          "descendants": {
+            "n8u8O": {
+              "fill": "$text-secondary"
+            },
+            "FyLeU": {
+              "fill": "$text-secondary"
+            },
+            "afquV": {
+              "fill": "$accent"
+            },
+            "T1nvIe": {
+              "fill": "$accent"
+            }
+          }
         }
       ]
     },
@@ -23454,6 +23506,9 @@
                 "DEucZ": {
                   "enabled": true
                 },
+                "DEucZ/t9NGEf": {
+                  "content": "今週末"
+                },
                 "aX3Zr": {
                   "enabled": false
                 },
@@ -23523,6 +23578,7 @@
               "width": "fill_container",
               "fill": "$success",
               "cornerRadius": 6,
+              "justifyContent": "space_between",
               "alignItems": "center",
               "children": [
                 {
@@ -23564,6 +23620,7 @@
                   "ref": "sESoO",
                   "name": "Row-スワイプ中",
                   "width": 260,
+                  "fill": "$bg",
                   "descendants": {
                     "ODPIf": {
                       "content": "食パン"
@@ -23587,7 +23644,21 @@
           "id": "kHr61",
           "type": "ref",
           "ref": "j2jdfX",
-          "name": "TabBar"
+          "name": "TabBar",
+          "descendants": {
+            "n8u8O": {
+              "fill": "$text-secondary"
+            },
+            "FyLeU": {
+              "fill": "$text-secondary"
+            },
+            "afquV": {
+              "fill": "$accent"
+            },
+            "T1nvIe": {
+              "fill": "$accent"
+            }
+          }
         },
         {
           "type": "frame",
@@ -24511,6 +24582,29 @@
               }
             },
             {
+              "type": "frame",
+              "id": "eOekp",
+              "name": "RescheduleRow",
+              "width": "fill_container",
+              "padding": [
+                4,
+                0
+              ],
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "bjKLP",
+                  "name": "Reschedule",
+                  "fill": "$accent",
+                  "content": "再スケジュール",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
               "id": "JdX0T",
               "type": "ref",
               "ref": "sESoO",
@@ -24561,7 +24655,7 @@
                   "fill": "$danger"
                 },
                 "DEucZ/t9NGEf": {
-                  "content": "10月10日",
+                  "content": "昨日",
                   "fill": "$danger"
                 },
                 "aX3Zr": {
@@ -24597,11 +24691,11 @@
               "id": "Ibo0W",
               "type": "ref",
               "ref": "sESoO",
-              "name": "Row-牛乳と卵を買う",
+              "name": "Row-食パンを買う",
               "width": "fill_container",
               "descendants": {
                 "ODPIf": {
-                  "content": "牛乳と卵を買う"
+                  "content": "食パンを買う"
                 },
                 "PGwbs": {
                   "enabled": false
@@ -24619,7 +24713,8 @@
                   "enabled": false
                 },
                 "jI6gZ": {
-                  "enabled": false
+                  "enabled": false,
+                  "content": "買い物"
                 },
                 "fYhx0": {
                   "enabled": false
@@ -25063,17 +25158,20 @@
               "id": "NqtvS",
               "type": "ref",
               "ref": "sESoO",
-              "name": "Row-牛乳と卵を買う",
+              "name": "Row-食パンを買う",
               "width": "fill_container",
               "descendants": {
                 "ODPIf": {
-                  "content": "牛乳と卵を買う"
+                  "content": "食パンを買う"
                 },
                 "PGwbs": {
                   "enabled": false
                 },
                 "QTxVD": {
                   "enabled": false
+                },
+                "jI6gZ": {
+                  "content": "買い物"
                 },
                 "fYhx0": {
                   "enabled": false
@@ -25123,17 +25221,20 @@
               "id": "PngYZ",
               "type": "ref",
               "ref": "sESoO",
-              "name": "Row-粗大ごみの申し込み",
+              "name": "Row-牛乳と卵を買う",
               "width": "fill_container",
               "descendants": {
                 "ODPIf": {
-                  "content": "粗大ごみの申し込み"
+                  "content": "牛乳と卵を買う"
                 },
                 "PGwbs": {
                   "enabled": false
                 },
                 "QTxVD": {
                   "enabled": false
+                },
+                "jI6gZ": {
+                  "content": "買い物"
                 },
                 "fYhx0": {
                   "enabled": false
@@ -25331,6 +25432,9 @@
                 "DEucZ": {
                   "enabled": true
                 },
+                "DEucZ/t9NGEf": {
+                  "content": "今週末"
+                },
                 "aX3Zr": {
                   "enabled": false
                 },
@@ -25400,6 +25504,7 @@
               "width": "fill_container",
               "fill": "$success",
               "cornerRadius": 6,
+              "justifyContent": "space_between",
               "alignItems": "center",
               "children": [
                 {
@@ -25441,6 +25546,7 @@
                   "ref": "sESoO",
                   "name": "Row-スワイプ中",
                   "width": 260,
+                  "fill": "$bg",
                   "descendants": {
                     "ODPIf": {
                       "content": "食パン"
@@ -25464,7 +25570,21 @@
           "id": "J0T52G",
           "type": "ref",
           "ref": "j2jdfX",
-          "name": "TabBar"
+          "name": "TabBar",
+          "descendants": {
+            "n8u8O": {
+              "fill": "$text-secondary"
+            },
+            "FyLeU": {
+              "fill": "$text-secondary"
+            },
+            "afquV": {
+              "fill": "$accent"
+            },
+            "T1nvIe": {
+              "fill": "$accent"
+            }
+          }
         },
         {
           "type": "frame",
@@ -26335,7 +26455,725 @@
           "id": "uyXIv",
           "type": "ref",
           "ref": "j2jdfX",
-          "name": "TabBar"
+          "name": "TabBar",
+          "descendants": {
+            "n8u8O": {
+              "fill": "$text-secondary"
+            },
+            "FyLeU": {
+              "fill": "$text-secondary"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "b1Cmc3",
+      "x": 1560,
+      "y": 7686,
+      "name": "D-12b 初回起動 (Google 接続)",
+      "clip": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "$bg-sidebar",
+      "layout": "vertical",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "KXFFM",
+          "name": "Card",
+          "width": 560,
+          "fill": "$bg",
+          "cornerRadius": 16,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#00000022",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 32
+          },
+          "layout": "vertical",
+          "gap": "$space-6",
+          "padding": [
+            32,
+            40
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "L7r8yu",
+              "name": "Head",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "I0omQ",
+                  "name": "Logo",
+                  "width": 56,
+                  "height": 56,
+                  "fill": "$accent",
+                  "cornerRadius": 14,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "t4CUh",
+                      "name": "Check",
+                      "width": 28,
+                      "height": 28,
+                      "icon": "check",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "utTlH",
+                  "name": "Title",
+                  "fill": "$text-primary",
+                  "content": "PowerToDo へようこそ",
+                  "fontFamily": "$font-body",
+                  "fontSize": 22,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "ILfrV",
+                  "name": "Sub",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Google Drive と同期するには、Google Cloud で作成したクライアント ID を入力してログインします。あとからでも設定できます。",
+                  "textAlign": "center",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "R3GTm",
+              "name": "Steps",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "tGCvP",
+                  "name": "Step-1",
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "C04yDj",
+                      "name": "Num",
+                      "width": 22,
+                      "height": 22,
+                      "fill": "$bg-hover",
+                      "cornerRadius": 11,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "pOoZO",
+                          "name": "N",
+                          "fill": "$text-secondary",
+                          "content": "1",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "J006r",
+                      "name": "L",
+                      "fill": "$text-secondary",
+                      "content": "保存先",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "x4gSQ",
+                      "name": "Line",
+                      "fill": "$border",
+                      "width": 32,
+                      "height": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "CYo9j",
+                  "name": "Step-2",
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "hjy5I",
+                      "name": "Num",
+                      "width": 22,
+                      "height": 22,
+                      "fill": "$accent",
+                      "cornerRadius": 11,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "hmta4",
+                          "name": "N",
+                          "fill": "#FFFFFF",
+                          "content": "2",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "A9N1gB",
+                      "name": "L",
+                      "fill": "$text-primary",
+                      "content": "Google 接続",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "ax8EF",
+                      "name": "Line",
+                      "fill": "$border",
+                      "width": 32,
+                      "height": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "O3behc",
+                  "name": "Step-3",
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "q85VO",
+                      "name": "Num",
+                      "width": 22,
+                      "height": 22,
+                      "fill": "$bg-hover",
+                      "cornerRadius": 11,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Xi5vu",
+                          "name": "N",
+                          "fill": "$text-secondary",
+                          "content": "3",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "u4OX58",
+                      "name": "L",
+                      "fill": "$text-secondary",
+                      "content": "受信トレイ",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "l6kvM",
+              "name": "FolderPick",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "vC353",
+                  "name": "Label",
+                  "fill": "$text-primary",
+                  "content": "OAuth クライアント ID",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "H4ljjE",
+                  "name": "Row",
+                  "width": "fill_container",
+                  "gap": "$space-2",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "NzVaX",
+                      "type": "ref",
+                      "ref": "ryZIZ",
+                      "name": "Path",
+                      "width": "fill_container",
+                      "descendants": {
+                        "o39xK": {
+                          "content": "123-abc.apps.googleusercontent.com",
+                          "fill": "$text-primary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "FYqXH",
+                      "type": "ref",
+                      "ref": "E2lHu",
+                      "name": "Browse",
+                      "descendants": {
+                        "RbdS9": {
+                          "content": "Google でログイン"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "l9e2id",
+                  "name": "Hint",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "同期を使わない場合はスキップできます。",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "DOix3",
+              "name": "Footer",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "jgPNj",
+                  "name": "Skip",
+                  "fill": "$text-secondary",
+                  "content": "スキップ",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "id": "koAHA",
+                  "type": "ref",
+                  "ref": "pBoMx",
+                  "name": "Next",
+                  "descendants": {
+                    "inBhp": {
+                      "content": "次へ"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "m8xo8p",
+      "x": 3120,
+      "y": 7686,
+      "name": "D-12c 初回起動 (受信トレイ)",
+      "clip": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "$bg-sidebar",
+      "layout": "vertical",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "UnU2H",
+          "name": "Card",
+          "width": 560,
+          "fill": "$bg",
+          "cornerRadius": 16,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#00000022",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 32
+          },
+          "layout": "vertical",
+          "gap": "$space-6",
+          "padding": [
+            32,
+            40
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "v5lBIy",
+              "name": "Head",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "bFHaj",
+                  "name": "Logo",
+                  "width": 56,
+                  "height": 56,
+                  "fill": "$accent",
+                  "cornerRadius": 14,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "INK6r",
+                      "name": "Check",
+                      "width": 28,
+                      "height": 28,
+                      "icon": "check",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "y6OVaC",
+                  "name": "Title",
+                  "fill": "$text-primary",
+                  "content": "PowerToDo へようこそ",
+                  "fontFamily": "$font-body",
+                  "fontSize": 22,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "WgRzh",
+                  "name": "Sub",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "最初のプロジェクト「受信トレイ」を作成します。買い物メモなど、分類前のタスクはここに入ります。",
+                  "textAlign": "center",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "c9CN31",
+              "name": "Steps",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "TdKBC",
+                  "name": "Step-1",
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "YNIJy",
+                      "name": "Num",
+                      "width": 22,
+                      "height": 22,
+                      "fill": "$bg-hover",
+                      "cornerRadius": 11,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "d4MjLE",
+                          "name": "N",
+                          "fill": "$text-secondary",
+                          "content": "1",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "ZPqvT",
+                      "name": "L",
+                      "fill": "$text-secondary",
+                      "content": "保存先",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "vyt6g",
+                      "name": "Line",
+                      "fill": "$border",
+                      "width": 32,
+                      "height": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "DDJM4",
+                  "name": "Step-2",
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "OZVPQ",
+                      "name": "Num",
+                      "width": 22,
+                      "height": 22,
+                      "fill": "$bg-hover",
+                      "cornerRadius": 11,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "S658x",
+                          "name": "N",
+                          "fill": "$text-secondary",
+                          "content": "2",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "CCkp6",
+                      "name": "L",
+                      "fill": "$text-secondary",
+                      "content": "Google 接続",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "FbAhu",
+                      "name": "Line",
+                      "fill": "$border",
+                      "width": 32,
+                      "height": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "VrPVx",
+                  "name": "Step-3",
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "OwE4z",
+                      "name": "Num",
+                      "width": 22,
+                      "height": 22,
+                      "fill": "$accent",
+                      "cornerRadius": 11,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "FM6zs",
+                          "name": "N",
+                          "fill": "#FFFFFF",
+                          "content": "3",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "erhQm",
+                      "name": "L",
+                      "fill": "$text-primary",
+                      "content": "受信トレイ",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "UE9QN",
+              "name": "FolderPick",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space-2",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iUVnC",
+                  "name": "Label",
+                  "fill": "$text-primary",
+                  "content": "受信トレイのファイル名",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "wBijq",
+                  "name": "Row",
+                  "width": "fill_container",
+                  "gap": "$space-2",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "uhACe",
+                      "type": "ref",
+                      "ref": "ryZIZ",
+                      "name": "Path",
+                      "width": "fill_container",
+                      "descendants": {
+                        "o39xK": {
+                          "content": "受信トレイ.xlsx",
+                          "fill": "$text-primary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "qQTzm",
+                      "type": "ref",
+                      "ref": "E2lHu",
+                      "name": "Browse",
+                      "enabled": false,
+                      "descendants": {
+                        "RbdS9": {
+                          "content": "選択"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "w1xyhs",
+                  "name": "Hint",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Drive 上の PowerToDo フォルダに作成されます。",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "E30agp",
+              "name": "Footer",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "PxbOq",
+                  "x": 0,
+                  "y": 8.5,
+                  "name": "Skip",
+                  "enabled": false,
+                  "fill": "$text-secondary",
+                  "content": "あとで設定する",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "id": "YDfjl",
+                  "type": "ref",
+                  "ref": "pBoMx",
+                  "name": "Next",
+                  "descendants": {
+                    "inBhp": {
+                      "content": "はじめる"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
         }
       ]
     }
