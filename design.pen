@@ -259,6 +259,19 @@
       ],
       "children": [
         {
+          "type": "icon",
+          "id": "I2rcd",
+          "x": 0,
+          "y": 0,
+          "name": "Expand",
+          "enabled": false,
+          "width": 16,
+          "height": 16,
+          "icon": "chevron-right",
+          "library": "lucide",
+          "fill": "$text-muted"
+        },
+        {
           "id": "mL3ac",
           "type": "ref",
           "ref": "Y4bjY",
@@ -330,6 +343,38 @@
                   "fontFamily": "$font-body",
                   "fontSize": 12,
                   "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ZtImE",
+                  "x": 0,
+                  "y": 0,
+                  "name": "SubCount",
+                  "enabled": false,
+                  "gap": "$space-1",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "WTfho",
+                      "name": "Icon",
+                      "width": 12,
+                      "height": 12,
+                      "icon": "list-tree",
+                      "library": "lucide",
+                      "fill": "$text-muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "wfciA",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "1/3",
+                      "fontFamily": "$font-body",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             }
@@ -28976,6 +29021,2521 @@
               "fontWeight": "normal"
             }
           ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "TcQ6K",
+      "x": 3120,
+      "y": 9726,
+      "name": "D-01b サブタスク展開",
+      "clip": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "$bg",
+      "children": [
+        {
+          "type": "frame",
+          "id": "t1H2l",
+          "name": "Sidebar",
+          "width": 280,
+          "height": "fill_container",
+          "fill": "$bg-sidebar",
+          "layout": "vertical",
+          "gap": "$space-4",
+          "padding": [
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "Q00JP",
+              "name": "Account",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "nAjkC",
+                  "name": "Avatar",
+                  "fill": "$accent",
+                  "width": 28,
+                  "height": 28
+                },
+                {
+                  "type": "text",
+                  "id": "Gwq55",
+                  "name": "Name",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "ktakeuchi",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "id": "LutgX",
+                  "type": "ref",
+                  "ref": "fJ1ZV",
+                  "name": "Notifications",
+                  "descendants": {
+                    "k6ut1g": {
+                      "icon": "bell"
+                    }
+                  }
+                },
+                {
+                  "id": "bSbjb",
+                  "type": "ref",
+                  "ref": "fJ1ZV",
+                  "name": "Collapse",
+                  "descendants": {
+                    "k6ut1g": {
+                      "icon": "panel-left-close"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "AETYH",
+              "name": "AddTaskNav",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "padding": [
+                6,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "W0L12",
+                  "name": "Plus",
+                  "width": 20,
+                  "height": 20,
+                  "icon": "circle-plus",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "P9kGMn",
+                  "name": "Label",
+                  "fill": "$accent",
+                  "content": "タスクを追加",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SKerP",
+              "name": "Nav",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "id": "uBMQB",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-検索",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "search"
+                    },
+                    "GCMiA": {
+                      "content": "検索"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                },
+                {
+                  "id": "DSYIZ",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-受信トレイ",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "inbox"
+                    },
+                    "GCMiA": {
+                      "content": "受信トレイ"
+                    },
+                    "OpYvr": {
+                      "content": "12"
+                    }
+                  }
+                },
+                {
+                  "id": "CKNE1",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-今日",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "calendar-check"
+                    },
+                    "GCMiA": {
+                      "content": "今日"
+                    },
+                    "OpYvr": {
+                      "content": "5"
+                    }
+                  }
+                },
+                {
+                  "id": "D04zq",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-近日",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "calendar-days"
+                    },
+                    "GCMiA": {
+                      "content": "近日"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                },
+                {
+                  "id": "zZATO",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-フィルターとラベル",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "layout-grid"
+                    },
+                    "GCMiA": {
+                      "content": "フィルターとラベル"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "LcGAx",
+              "name": "Favorites",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "lHAz3",
+                  "name": "Heading",
+                  "fill": "$text-secondary",
+                  "content": "お気に入り",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700"
+                },
+                {
+                  "id": "eYHOz",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Fav-買い物",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-2"
+                    },
+                    "D02pdw": {
+                      "content": "買い物"
+                    },
+                    "WeUE4": {
+                      "content": "4"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "O5fPEV",
+              "name": "Projects",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "t9qM9b",
+                  "name": "ProjectsHeading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "nPsSb",
+                      "name": "Heading",
+                      "fill": "$text-secondary",
+                      "content": "マイプロジェクト",
+                      "fontFamily": "$font-body",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "id": "Wrz8a",
+                      "type": "ref",
+                      "ref": "fJ1ZV",
+                      "name": "AddProject",
+                      "descendants": {
+                        "k6ut1g": {
+                          "icon": "plus"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "uJk3Y",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-仕事",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-3"
+                    },
+                    "D02pdw": {
+                      "content": "仕事"
+                    },
+                    "WeUE4": {
+                      "content": "8"
+                    }
+                  }
+                },
+                {
+                  "id": "yChyJ",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-買い物",
+                  "width": "fill_container",
+                  "fill": "$bg-hover",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-2"
+                    },
+                    "D02pdw": {
+                      "content": "買い物"
+                    },
+                    "WeUE4": {
+                      "content": "4"
+                    }
+                  }
+                },
+                {
+                  "id": "Da1YP",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-家のこと",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$success"
+                    },
+                    "D02pdw": {
+                      "content": "家のこと"
+                    },
+                    "WeUE4": {
+                      "content": "3"
+                    }
+                  }
+                },
+                {
+                  "id": "aObut",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-読書",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-4"
+                    },
+                    "D02pdw": {
+                      "content": "読書"
+                    },
+                    "WeUE4": {
+                      "content": "2"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ndubc",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "I5dwW",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "f7nHi",
+          "name": "Main",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "yjseb",
+              "name": "Column",
+              "width": 800,
+              "layout": "vertical",
+              "gap": "$space-4",
+              "padding": [
+                40,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "H6KLA",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ICNo7",
+                      "name": "Title",
+                      "fill": "$text-primary",
+                      "content": "買い物",
+                      "fontFamily": "$font-body",
+                      "fontSize": 24,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "a4UH7",
+                      "name": "HeaderActions",
+                      "gap": "$space-1",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "k17TWI",
+                          "name": "HA-layout-list",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "p7jXY4",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "layout-list",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "LoR0S",
+                              "name": "Label",
+                              "fill": "$text-secondary",
+                              "content": "表示",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "PZy9W",
+                          "name": "HA-arrow-up-down",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "tqjGa",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "arrow-up-down",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "NGd1k",
+                              "name": "Label",
+                              "fill": "$text-secondary",
+                              "content": "並び替え",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Chbx0",
+                          "name": "HA-ellipsis",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "fquOg",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "ellipsis",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "R8z7qq",
+                  "name": "List",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "b4x2YC",
+                      "type": "ref",
+                      "ref": "TUMiy",
+                      "name": "Sec-今週",
+                      "width": "fill_container",
+                      "descendants": {
+                        "T7WfJl": {
+                          "content": "今週"
+                        },
+                        "IM2bg": {
+                          "content": "2"
+                        }
+                      }
+                    },
+                    {
+                      "id": "EE8LI",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-牛乳と卵を買う",
+                      "width": "fill_container",
+                      "descendants": {
+                        "I2rcd": {
+                          "enabled": true,
+                          "icon": "chevron-down",
+                          "fill": "$text-secondary"
+                        },
+                        "mL3ac": {
+                          "stroke": "$priority-1"
+                        },
+                        "ODPIf": {
+                          "content": "牛乳と卵を買う"
+                        },
+                        "PGwbs": {
+                          "content": "近所のスーパーで。卵は 10 個入り",
+                          "enabled": true
+                        },
+                        "DEucZ": {
+                          "enabled": true
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@食品"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        },
+                        "ZtImE": {
+                          "enabled": true
+                        },
+                        "wfciA": {
+                          "content": "1/3"
+                        }
+                      }
+                    },
+                    {
+                      "type": "frame",
+                      "id": "wvad5",
+                      "name": "Indent-牛乳 1L",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "iv6kT",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-牛乳 1L",
+                          "width": "fill_container",
+                          "descendants": {
+                            "mL3ac": {
+                              "stroke": "$success"
+                            },
+                            "mL3ac/V3PSX": {
+                              "opacity": 1,
+                              "fill": "$success"
+                            },
+                            "ODPIf": {
+                              "content": "牛乳 1L",
+                              "fill": "$text-muted"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": false
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "y1xJo",
+                      "name": "Indent-卵 10 個入り",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "fMcKl",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-卵 10 個入り",
+                          "width": "fill_container",
+                          "descendants": {
+                            "I2rcd": {
+                              "enabled": true,
+                              "icon": "chevron-down",
+                              "fill": "$text-secondary"
+                            },
+                            "ODPIf": {
+                              "content": "卵 10 個入り"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": true
+                            },
+                            "DEucZ": {
+                              "enabled": false
+                            },
+                            "aX3Zr": {
+                              "enabled": false
+                            },
+                            "sQke3": {
+                              "enabled": false
+                            },
+                            "jI6gZ": {
+                              "enabled": false
+                            },
+                            "ZtImE": {
+                              "enabled": true
+                            },
+                            "wfciA": {
+                              "content": "0/1"
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "niHYI",
+                      "name": "Indent-孫",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        64
+                      ],
+                      "children": [
+                        {
+                          "id": "UCe9B",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-卵は 10 個入り (特売)",
+                          "width": "fill_container",
+                          "descendants": {
+                            "ODPIf": {
+                              "content": "卵は 10 個入り (特売)"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": false
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "R9JuD",
+                      "name": "Indent-食パン",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "xNusF",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-食パン",
+                          "width": "fill_container",
+                          "descendants": {
+                            "ODPIf": {
+                              "content": "食パン"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": false
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "wuZ94",
+                      "name": "Indent-Add",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "bVJ1n",
+                          "type": "ref",
+                          "ref": "hJYgK",
+                          "name": "Add-サブタスク",
+                          "width": "fill_container",
+                          "descendants": {
+                            "cxWSa": {
+                              "content": "サブタスクを追加"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "e5sBJ7",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-洗剤の詰め替え",
+                      "width": "fill_container",
+                      "descendants": {
+                        "I2rcd": {
+                          "enabled": true,
+                          "icon": "chevron-right",
+                          "fill": "$text-secondary"
+                        },
+                        "mL3ac": {
+                          "stroke": "$priority-3"
+                        },
+                        "ODPIf": {
+                          "content": "洗剤の詰め替え"
+                        },
+                        "PGwbs": {
+                          "content": "",
+                          "enabled": false
+                        },
+                        "DEucZ": {
+                          "enabled": true
+                        },
+                        "DEucZ/t9NGEf": {
+                          "content": "今週末"
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@日用品"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        },
+                        "ZtImE": {
+                          "enabled": true
+                        },
+                        "wfciA": {
+                          "content": "0/2"
+                        }
+                      }
+                    },
+                    {
+                      "id": "QTOtE",
+                      "type": "ref",
+                      "ref": "hJYgK",
+                      "name": "Add-今週",
+                      "width": "fill_container"
+                    },
+                    {
+                      "id": "Gteg8",
+                      "type": "ref",
+                      "ref": "TUMiy",
+                      "name": "Sec-いつか",
+                      "width": "fill_container",
+                      "descendants": {
+                        "T7WfJl": {
+                          "content": "いつか"
+                        },
+                        "IM2bg": {
+                          "content": "1"
+                        }
+                      }
+                    },
+                    {
+                      "id": "penQF",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-新しいフライパン",
+                      "width": "fill_container",
+                      "descendants": {
+                        "mL3ac": {
+                          "stroke": "$priority-4"
+                        },
+                        "ODPIf": {
+                          "content": "新しいフライパン"
+                        },
+                        "PGwbs": {
+                          "content": "28cm、IH 対応",
+                          "enabled": true
+                        },
+                        "QTxVD": {
+                          "enabled": true
+                        },
+                        "DEucZ": {
+                          "enabled": false
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@キッチン"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        }
+                      }
+                    },
+                    {
+                      "id": "N2BniE",
+                      "type": "ref",
+                      "ref": "hJYgK",
+                      "name": "Add-いつか",
+                      "width": "fill_container"
+                    },
+                    {
+                      "type": "text",
+                      "id": "D84Nd",
+                      "name": "CompletedToggle",
+                      "fill": "$text-secondary",
+                      "content": "完了したタスクを表示",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "BR2Qt",
+      "x": 4680,
+      "y": 9726,
+      "name": "D-01c サブタスク追加フォーム",
+      "clip": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "$bg",
+      "children": [
+        {
+          "type": "frame",
+          "id": "YLTnU",
+          "name": "Sidebar",
+          "width": 280,
+          "height": "fill_container",
+          "fill": "$bg-sidebar",
+          "layout": "vertical",
+          "gap": "$space-4",
+          "padding": [
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "d0z6p",
+              "name": "Account",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "HaHDY",
+                  "name": "Avatar",
+                  "fill": "$accent",
+                  "width": 28,
+                  "height": 28
+                },
+                {
+                  "type": "text",
+                  "id": "ByFS3",
+                  "name": "Name",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "ktakeuchi",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "id": "jglWX",
+                  "type": "ref",
+                  "ref": "fJ1ZV",
+                  "name": "Notifications",
+                  "descendants": {
+                    "k6ut1g": {
+                      "icon": "bell"
+                    }
+                  }
+                },
+                {
+                  "id": "vs1xn",
+                  "type": "ref",
+                  "ref": "fJ1ZV",
+                  "name": "Collapse",
+                  "descendants": {
+                    "k6ut1g": {
+                      "icon": "panel-left-close"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "BiVgx",
+              "name": "AddTaskNav",
+              "width": "fill_container",
+              "gap": "$space-2",
+              "padding": [
+                6,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "DzQOB",
+                  "name": "Plus",
+                  "width": 20,
+                  "height": 20,
+                  "icon": "circle-plus",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "dbH4F",
+                  "name": "Label",
+                  "fill": "$accent",
+                  "content": "タスクを追加",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ghpja",
+              "name": "Nav",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "id": "EZFbd",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-検索",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "search"
+                    },
+                    "GCMiA": {
+                      "content": "検索"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                },
+                {
+                  "id": "jx6mS",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-受信トレイ",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "inbox"
+                    },
+                    "GCMiA": {
+                      "content": "受信トレイ"
+                    },
+                    "OpYvr": {
+                      "content": "12"
+                    }
+                  }
+                },
+                {
+                  "id": "AQoJp",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-今日",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "calendar-check"
+                    },
+                    "GCMiA": {
+                      "content": "今日"
+                    },
+                    "OpYvr": {
+                      "content": "5"
+                    }
+                  }
+                },
+                {
+                  "id": "iVtoM",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-近日",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "calendar-days"
+                    },
+                    "GCMiA": {
+                      "content": "近日"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                },
+                {
+                  "id": "EK4Qy",
+                  "type": "ref",
+                  "ref": "rd1in",
+                  "name": "Nav-フィルターとラベル",
+                  "width": "fill_container",
+                  "descendants": {
+                    "Byf8E": {
+                      "icon": "layout-grid"
+                    },
+                    "GCMiA": {
+                      "content": "フィルターとラベル"
+                    },
+                    "OpYvr": {
+                      "content": ""
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "m5cYfz",
+              "name": "Favorites",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "qLcZ4",
+                  "name": "Heading",
+                  "fill": "$text-secondary",
+                  "content": "お気に入り",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700"
+                },
+                {
+                  "id": "y8sd2n",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Fav-買い物",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-2"
+                    },
+                    "D02pdw": {
+                      "content": "買い物"
+                    },
+                    "WeUE4": {
+                      "content": "4"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "z26E7j",
+              "name": "Projects",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NgxHL",
+                  "name": "ProjectsHeading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JS0SG",
+                      "name": "Heading",
+                      "fill": "$text-secondary",
+                      "content": "マイプロジェクト",
+                      "fontFamily": "$font-body",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "id": "HKKPb",
+                      "type": "ref",
+                      "ref": "fJ1ZV",
+                      "name": "AddProject",
+                      "descendants": {
+                        "k6ut1g": {
+                          "icon": "plus"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "q0M07n",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-仕事",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-3"
+                    },
+                    "D02pdw": {
+                      "content": "仕事"
+                    },
+                    "WeUE4": {
+                      "content": "8"
+                    }
+                  }
+                },
+                {
+                  "id": "P9ivS",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-買い物",
+                  "width": "fill_container",
+                  "fill": "$bg-hover",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-2"
+                    },
+                    "D02pdw": {
+                      "content": "買い物"
+                    },
+                    "WeUE4": {
+                      "content": "4"
+                    }
+                  }
+                },
+                {
+                  "id": "Ch8Vz",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-家のこと",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$success"
+                    },
+                    "D02pdw": {
+                      "content": "家のこと"
+                    },
+                    "WeUE4": {
+                      "content": "3"
+                    }
+                  }
+                },
+                {
+                  "id": "Hq6r9",
+                  "type": "ref",
+                  "ref": "L92HAh",
+                  "name": "Pj-読書",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ZXjp0": {
+                      "fill": "$priority-4"
+                    },
+                    "D02pdw": {
+                      "content": "読書"
+                    },
+                    "WeUE4": {
+                      "content": "2"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "sVcNe",
+              "name": "Spacer",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical"
+            },
+            {
+              "id": "zaKFb",
+              "type": "ref",
+              "ref": "ejpEA",
+              "name": "SyncStatus",
+              "width": "fill_container"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "A9IT4T",
+          "name": "Main",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "zRACQ",
+              "name": "Column",
+              "width": 800,
+              "layout": "vertical",
+              "gap": "$space-4",
+              "padding": [
+                40,
+                0,
+                8,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "RqdZ1",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "jXZqL",
+                      "name": "Title",
+                      "fill": "$text-primary",
+                      "content": "買い物",
+                      "fontFamily": "$font-body",
+                      "fontSize": 24,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "tCqC2",
+                      "name": "HeaderActions",
+                      "gap": "$space-1",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "q5MMXl",
+                          "name": "HA-layout-list",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "FPNQP",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "layout-list",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "GjiGs",
+                              "name": "Label",
+                              "fill": "$text-secondary",
+                              "content": "表示",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Esg89",
+                          "name": "HA-arrow-up-down",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "iyiN1",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "arrow-up-down",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "ESGYr",
+                              "name": "Label",
+                              "fill": "$text-secondary",
+                              "content": "並び替え",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "bAhfF",
+                          "name": "HA-ellipsis",
+                          "cornerRadius": 6,
+                          "gap": "$space-1",
+                          "padding": [
+                            4,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "H1gOEp",
+                              "name": "Icon",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "ellipsis",
+                              "library": "lucide",
+                              "fill": "$text-secondary"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mouUB",
+                  "name": "List",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "oL8K7",
+                      "type": "ref",
+                      "ref": "TUMiy",
+                      "name": "Sec-今週",
+                      "width": "fill_container",
+                      "descendants": {
+                        "T7WfJl": {
+                          "content": "今週"
+                        },
+                        "IM2bg": {
+                          "content": "2"
+                        }
+                      }
+                    },
+                    {
+                      "id": "cEEpj",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-牛乳と卵を買う",
+                      "width": "fill_container",
+                      "descendants": {
+                        "I2rcd": {
+                          "enabled": true,
+                          "icon": "chevron-down",
+                          "fill": "$text-secondary"
+                        },
+                        "mL3ac": {
+                          "stroke": "$priority-1"
+                        },
+                        "ODPIf": {
+                          "content": "牛乳と卵を買う"
+                        },
+                        "PGwbs": {
+                          "content": "近所のスーパーで。卵は 10 個入り",
+                          "enabled": true
+                        },
+                        "DEucZ": {
+                          "enabled": true
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@食品"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        },
+                        "ZtImE": {
+                          "enabled": true
+                        },
+                        "wfciA": {
+                          "content": "1/3"
+                        }
+                      }
+                    },
+                    {
+                      "type": "frame",
+                      "id": "vYjfp",
+                      "name": "Indent-牛乳 1L",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "OdIxO",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-牛乳 1L",
+                          "width": "fill_container",
+                          "descendants": {
+                            "mL3ac": {
+                              "stroke": "$success"
+                            },
+                            "mL3ac/V3PSX": {
+                              "opacity": 1,
+                              "fill": "$success"
+                            },
+                            "ODPIf": {
+                              "content": "牛乳 1L",
+                              "fill": "$text-muted"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": false
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "c9IB4",
+                      "name": "Indent-卵 10 個入り",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "yUwZo",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-卵 10 個入り",
+                          "width": "fill_container",
+                          "descendants": {
+                            "I2rcd": {
+                              "enabled": true,
+                              "icon": "chevron-down",
+                              "fill": "$text-secondary"
+                            },
+                            "ODPIf": {
+                              "content": "卵 10 個入り"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": true
+                            },
+                            "DEucZ": {
+                              "enabled": false
+                            },
+                            "aX3Zr": {
+                              "enabled": false
+                            },
+                            "sQke3": {
+                              "enabled": false
+                            },
+                            "jI6gZ": {
+                              "enabled": false
+                            },
+                            "ZtImE": {
+                              "enabled": true
+                            },
+                            "wfciA": {
+                              "content": "0/1"
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "KayeO",
+                      "name": "Indent-孫",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        64
+                      ],
+                      "children": [
+                        {
+                          "id": "ZQT6B",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-卵は 10 個入り (特売)",
+                          "width": "fill_container",
+                          "descendants": {
+                            "ODPIf": {
+                              "content": "卵は 10 個入り (特売)"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": false
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "LUf02",
+                      "name": "Indent-食パン",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "id": "au9M2",
+                          "type": "ref",
+                          "ref": "sESoO",
+                          "name": "Sub-食パン",
+                          "width": "fill_container",
+                          "descendants": {
+                            "ODPIf": {
+                              "content": "食パン"
+                            },
+                            "PGwbs": {
+                              "enabled": false
+                            },
+                            "QTxVD": {
+                              "enabled": false
+                            },
+                            "fYhx0": {
+                              "enabled": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Q7fosr",
+                      "name": "Indent-Add",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "eUZAd",
+                          "name": "SubtaskForm",
+                          "width": "fill_container",
+                          "fill": "$bg",
+                          "cornerRadius": "$radius",
+                          "stroke": "$border",
+                          "strokeWidth": 1,
+                          "layout": "vertical",
+                          "gap": "$space-3",
+                          "padding": "$space-3",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "wRm6v",
+                              "name": "Input",
+                              "width": "fill_container",
+                              "gap": "$space-1",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "finHH",
+                                  "name": "InputText",
+                                  "fill": "$text-primary",
+                                  "content": "食パンの代わりにベーグル",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "id": "uZ4XI",
+                                  "name": "Caret",
+                                  "fill": "$text-primary",
+                                  "width": 1.5,
+                                  "height": 18
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "uMMA2",
+                              "name": "DescriptionInput",
+                              "fill": "$text-muted",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "説明",
+                              "fontFamily": "$font-body",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "I2iPh",
+                              "name": "Toolbar",
+                              "width": "fill_container",
+                              "gap": "$space-2",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "Y0j5Ii",
+                                  "name": "TB-calendar",
+                                  "cornerRadius": 6,
+                                  "stroke": "$border",
+                                  "strokeWidth": 1,
+                                  "gap": "$space-1",
+                                  "padding": [
+                                    4,
+                                    8
+                                  ],
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "k2Ud9",
+                                      "name": "Icon",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "calendar",
+                                      "library": "lucide",
+                                      "fill": "$text-secondary"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "fvHYd",
+                                      "name": "Label",
+                                      "fill": "$text-secondary",
+                                      "content": "期限",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 13,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "Lko62",
+                                  "name": "TB-flag",
+                                  "cornerRadius": 6,
+                                  "stroke": "$border",
+                                  "strokeWidth": 1,
+                                  "gap": "$space-1",
+                                  "padding": [
+                                    4,
+                                    8
+                                  ],
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "k0ZIPo",
+                                      "name": "Icon",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "flag",
+                                      "library": "lucide",
+                                      "fill": "$text-secondary"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "D4azx",
+                                      "name": "Label",
+                                      "fill": "$text-secondary",
+                                      "content": "優先度",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 13,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "IurgN",
+                                  "name": "TB-bell",
+                                  "cornerRadius": 6,
+                                  "stroke": "$border",
+                                  "strokeWidth": 1,
+                                  "gap": "$space-1",
+                                  "padding": [
+                                    4,
+                                    8
+                                  ],
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "M0ZZS",
+                                      "name": "Icon",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "bell",
+                                      "library": "lucide",
+                                      "fill": "$text-secondary"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "NoQ4o",
+                                      "name": "Label",
+                                      "fill": "$text-secondary",
+                                      "content": "リマインダー",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 13,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "RkyVI",
+                                  "name": "TB-tag",
+                                  "cornerRadius": 6,
+                                  "stroke": "$border",
+                                  "strokeWidth": 1,
+                                  "gap": "$space-1",
+                                  "padding": [
+                                    4,
+                                    8
+                                  ],
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "hTAWD",
+                                      "name": "Icon",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "tag",
+                                      "library": "lucide",
+                                      "fill": "$text-secondary"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "I9Q4J",
+                                      "name": "Label",
+                                      "fill": "$text-secondary",
+                                      "content": "ラベル",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 13,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "LxiJ2",
+                              "name": "Footer",
+                              "width": "fill_container",
+                              "gap": "$space-2",
+                              "justifyContent": "end",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "id": "L4yS0",
+                                  "type": "ref",
+                                  "ref": "E2lHu",
+                                  "name": "Cancel",
+                                  "descendants": {
+                                    "RbdS9": {
+                                      "content": "キャンセル"
+                                    }
+                                  }
+                                },
+                                {
+                                  "id": "i7Em8O",
+                                  "type": "ref",
+                                  "ref": "pBoMx",
+                                  "name": "Submit",
+                                  "descendants": {
+                                    "inBhp": {
+                                      "content": "サブタスクを追加"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "hKDdA",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-洗剤の詰め替え",
+                      "width": "fill_container",
+                      "descendants": {
+                        "I2rcd": {
+                          "enabled": true,
+                          "icon": "chevron-right",
+                          "fill": "$text-secondary"
+                        },
+                        "mL3ac": {
+                          "stroke": "$priority-3"
+                        },
+                        "ODPIf": {
+                          "content": "洗剤の詰め替え"
+                        },
+                        "PGwbs": {
+                          "content": "",
+                          "enabled": false
+                        },
+                        "DEucZ": {
+                          "enabled": true
+                        },
+                        "DEucZ/t9NGEf": {
+                          "content": "今週末"
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@日用品"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        },
+                        "ZtImE": {
+                          "enabled": true
+                        },
+                        "wfciA": {
+                          "content": "0/2"
+                        }
+                      }
+                    },
+                    {
+                      "id": "QVLvv",
+                      "type": "ref",
+                      "ref": "hJYgK",
+                      "name": "Add-今週",
+                      "width": "fill_container"
+                    },
+                    {
+                      "id": "AUB3V",
+                      "type": "ref",
+                      "ref": "TUMiy",
+                      "name": "Sec-いつか",
+                      "width": "fill_container",
+                      "descendants": {
+                        "T7WfJl": {
+                          "content": "いつか"
+                        },
+                        "IM2bg": {
+                          "content": "1"
+                        }
+                      }
+                    },
+                    {
+                      "id": "V9xq7Z",
+                      "type": "ref",
+                      "ref": "sESoO",
+                      "name": "Row-新しいフライパン",
+                      "width": "fill_container",
+                      "descendants": {
+                        "mL3ac": {
+                          "stroke": "$priority-4"
+                        },
+                        "ODPIf": {
+                          "content": "新しいフライパン"
+                        },
+                        "PGwbs": {
+                          "content": "28cm、IH 対応",
+                          "enabled": true
+                        },
+                        "QTxVD": {
+                          "enabled": true
+                        },
+                        "DEucZ": {
+                          "enabled": false
+                        },
+                        "aX3Zr": {
+                          "enabled": true
+                        },
+                        "aX3Zr/H1gB2v": {
+                          "content": "@キッチン"
+                        },
+                        "sQke3": {
+                          "enabled": false
+                        },
+                        "jI6gZ": {
+                          "enabled": false
+                        }
+                      }
+                    },
+                    {
+                      "id": "mDKNC",
+                      "type": "ref",
+                      "ref": "hJYgK",
+                      "name": "Add-いつか",
+                      "width": "fill_container"
+                    },
+                    {
+                      "type": "text",
+                      "id": "EMHGD",
+                      "name": "CompletedToggle",
+                      "fill": "$text-secondary",
+                      "content": "完了したタスクを表示",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "SLv3p",
+      "x": 3330,
+      "y": 13506,
+      "name": "M-01b サブタスク展開",
+      "clip": true,
+      "width": 390,
+      "height": 844,
+      "fill": "$bg",
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "wZ8hn",
+          "type": "ref",
+          "ref": "c46iZ5",
+          "name": "Header"
+        },
+        {
+          "type": "frame",
+          "id": "MIRR3",
+          "name": "Body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "padding": [
+            0,
+            16
+          ],
+          "children": [
+            {
+              "id": "LyjzW",
+              "type": "ref",
+              "ref": "TUMiy",
+              "name": "Sec-今週",
+              "width": "fill_container",
+              "descendants": {
+                "T7WfJl": {
+                  "content": "今週"
+                },
+                "IM2bg": {
+                  "content": "2"
+                }
+              }
+            },
+            {
+              "id": "kq7w7",
+              "type": "ref",
+              "ref": "sESoO",
+              "name": "Row-牛乳と卵を買う",
+              "width": "fill_container",
+              "descendants": {
+                "I2rcd": {
+                  "enabled": true,
+                  "icon": "chevron-down",
+                  "fill": "$text-secondary"
+                },
+                "ODPIf": {
+                  "content": "牛乳と卵を買う"
+                },
+                "PGwbs": {
+                  "enabled": false
+                },
+                "QTxVD": {
+                  "enabled": true
+                },
+                "DEucZ": {
+                  "enabled": true
+                },
+                "aX3Zr": {
+                  "enabled": false
+                },
+                "sQke3": {
+                  "enabled": false
+                },
+                "jI6gZ": {
+                  "enabled": false
+                },
+                "ZtImE": {
+                  "enabled": true
+                },
+                "wfciA": {
+                  "content": "1/3"
+                },
+                "fYhx0": {
+                  "enabled": false
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "xe5aM",
+              "name": "Indent-牛乳 1L",
+              "width": "fill_container",
+              "padding": [
+                0,
+                0,
+                0,
+                24
+              ],
+              "children": [
+                {
+                  "id": "zdyu1",
+                  "type": "ref",
+                  "ref": "sESoO",
+                  "name": "Sub-牛乳 1L",
+                  "width": "fill_container",
+                  "descendants": {
+                    "mL3ac": {
+                      "stroke": "$success"
+                    },
+                    "mL3ac/V3PSX": {
+                      "opacity": 1,
+                      "fill": "$success"
+                    },
+                    "ODPIf": {
+                      "content": "牛乳 1L",
+                      "fill": "$text-muted"
+                    },
+                    "PGwbs": {
+                      "enabled": false
+                    },
+                    "QTxVD": {
+                      "enabled": false
+                    },
+                    "fYhx0": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "fJccS",
+              "name": "Indent-卵 10 個入り",
+              "width": "fill_container",
+              "padding": [
+                0,
+                0,
+                0,
+                24
+              ],
+              "children": [
+                {
+                  "id": "CgeBm",
+                  "type": "ref",
+                  "ref": "sESoO",
+                  "name": "Sub-卵 10 個入り",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ODPIf": {
+                      "content": "卵 10 個入り"
+                    },
+                    "PGwbs": {
+                      "enabled": false
+                    },
+                    "QTxVD": {
+                      "enabled": false
+                    },
+                    "fYhx0": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "UhY4z",
+              "name": "Indent-食パン",
+              "width": "fill_container",
+              "padding": [
+                0,
+                0,
+                0,
+                24
+              ],
+              "children": [
+                {
+                  "id": "LuHMY",
+                  "type": "ref",
+                  "ref": "sESoO",
+                  "name": "Sub-食パン",
+                  "width": "fill_container",
+                  "descendants": {
+                    "ODPIf": {
+                      "content": "食パン"
+                    },
+                    "PGwbs": {
+                      "enabled": false
+                    },
+                    "QTxVD": {
+                      "enabled": false
+                    },
+                    "fYhx0": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SngiR",
+              "name": "Indent-Add",
+              "width": "fill_container",
+              "padding": [
+                0,
+                0,
+                0,
+                24
+              ],
+              "children": [
+                {
+                  "id": "vWC6U",
+                  "type": "ref",
+                  "ref": "hJYgK",
+                  "name": "Add-サブタスク",
+                  "width": "fill_container",
+                  "descendants": {
+                    "cxWSa": {
+                      "content": "サブタスクを追加"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "JNCVw",
+              "type": "ref",
+              "ref": "sESoO",
+              "name": "Row-洗剤の詰め替え",
+              "width": "fill_container",
+              "descendants": {
+                "ODPIf": {
+                  "content": "洗剤の詰め替え"
+                },
+                "PGwbs": {
+                  "enabled": false
+                },
+                "DEucZ": {
+                  "enabled": true
+                },
+                "DEucZ/t9NGEf": {
+                  "content": "今週末"
+                },
+                "aX3Zr": {
+                  "enabled": false
+                },
+                "sQke3": {
+                  "enabled": false
+                },
+                "jI6gZ": {
+                  "enabled": false
+                },
+                "fYhx0": {
+                  "enabled": false
+                }
+              }
+            },
+            {
+              "id": "sdLso",
+              "type": "ref",
+              "ref": "TUMiy",
+              "name": "Sec-いつか",
+              "width": "fill_container",
+              "descendants": {
+                "T7WfJl": {
+                  "content": "いつか"
+                },
+                "IM2bg": {
+                  "content": "1"
+                }
+              }
+            },
+            {
+              "id": "wo7D8",
+              "type": "ref",
+              "ref": "sESoO",
+              "name": "Row-新しいフライパン",
+              "width": "fill_container",
+              "descendants": {
+                "ODPIf": {
+                  "content": "新しいフライパン"
+                },
+                "PGwbs": {
+                  "enabled": false
+                },
+                "QTxVD": {
+                  "enabled": false
+                },
+                "DEucZ": {
+                  "enabled": false
+                },
+                "aX3Zr": {
+                  "enabled": false
+                },
+                "sQke3": {
+                  "enabled": false
+                },
+                "jI6gZ": {
+                  "enabled": false
+                },
+                "fYhx0": {
+                  "enabled": false
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "sQPWz",
+              "name": "SwipeDemo",
+              "width": "fill_container",
+              "fill": "$success",
+              "cornerRadius": 6,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "r3TVWQ",
+                  "name": "SwipeLabel",
+                  "gap": "$space-1",
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "SisaG",
+                      "name": "Icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "check",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "FceEC",
+                      "name": "Label",
+                      "fill": "#FFFFFF",
+                      "content": "完了",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "id": "Rb5Gt",
+                  "type": "ref",
+                  "ref": "sESoO",
+                  "name": "Row-スワイプ中",
+                  "width": 260,
+                  "fill": "$bg",
+                  "descendants": {
+                    "ODPIf": {
+                      "content": "食パン"
+                    },
+                    "PGwbs": {
+                      "enabled": false
+                    },
+                    "QTxVD": {
+                      "enabled": false
+                    },
+                    "fYhx0": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "W4VmWb",
+          "layoutPosition": "absolute",
+          "x": 318,
+          "y": 682,
+          "name": "FAB",
+          "width": 56,
+          "height": 56,
+          "fill": "$accent",
+          "cornerRadius": 28,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#00000044",
+            "offset": {
+              "x": 0,
+              "y": 4
+            },
+            "blur": 12
+          },
+          "layout": "vertical",
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "k2oQL",
+              "name": "Plus",
+              "width": 26,
+              "height": 26,
+              "icon": "plus",
+              "library": "lucide",
+              "fill": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "id": "ppAJB",
+          "type": "ref",
+          "ref": "j2jdfX",
+          "name": "TabBar",
+          "descendants": {
+            "n8u8O": {
+              "fill": "$text-secondary"
+            },
+            "FyLeU": {
+              "fill": "$text-secondary"
+            },
+            "afquV": {
+              "fill": "$accent"
+            },
+            "T1nvIe": {
+              "fill": "$accent"
+            }
+          }
+        },
+        {
+          "type": "icon",
+          "id": "G7sMzl",
+          "layoutPosition": "absolute",
+          "x": 318,
+          "y": 60,
+          "name": "HeaderSync",
+          "width": 18,
+          "height": 18,
+          "icon": "loader-circle",
+          "library": "lucide",
+          "fill": "$text-secondary"
         }
       ]
     }
