@@ -1,6 +1,615 @@
 {
   "version": "2.17",
-  "children": [],
+  "children": [
+    {
+      "type": "frame",
+      "id": "Y4bjY",
+      "x": 0,
+      "y": 0,
+      "name": "Checkbox",
+      "reusable": true,
+      "width": 20,
+      "height": 20,
+      "cornerRadius": 10,
+      "stroke": "$priority-4",
+      "strokeWidth": 1.5,
+      "layout": "vertical",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "ellipse",
+          "id": "V3PSX",
+          "name": "Ring",
+          "opacity": 0,
+          "fill": "$priority-4",
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "EgrNP",
+      "x": 64,
+      "y": 0,
+      "name": "PriorityChip",
+      "reusable": true,
+      "cornerRadius": 4,
+      "gap": "$space-1",
+      "padding": [
+        2,
+        6
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "WFMik",
+          "name": "Dot",
+          "width": 12,
+          "height": 12,
+          "icon": "flag",
+          "library": "lucide",
+          "fill": "$priority-1"
+        },
+        {
+          "type": "text",
+          "id": "AIBav",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "content": "P1",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "T52SnU",
+      "x": 164,
+      "y": 0,
+      "name": "LabelChip",
+      "reusable": true,
+      "cornerRadius": 4,
+      "gap": "$space-1",
+      "padding": [
+        2,
+        6
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "W6rUE",
+          "name": "Tag",
+          "width": 12,
+          "height": 12,
+          "icon": "tag",
+          "library": "lucide",
+          "fill": "$text-muted"
+        },
+        {
+          "type": "text",
+          "id": "H1gB2v",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "content": "@買い物",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "w6DzYx",
+      "x": 284,
+      "y": 0,
+      "name": "DateChip",
+      "reusable": true,
+      "gap": "$space-1",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "o38Onp",
+          "name": "Icon",
+          "width": 12,
+          "height": 12,
+          "icon": "calendar",
+          "library": "lucide",
+          "fill": "$success"
+        },
+        {
+          "type": "text",
+          "id": "t9NGEf",
+          "name": "Label",
+          "fill": "$success",
+          "content": "明日",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "JLPGL",
+      "x": 404,
+      "y": 0,
+      "name": "MoreChip",
+      "reusable": true,
+      "fill": "$bg-hover",
+      "cornerRadius": 4,
+      "padding": [
+        2,
+        6
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "AoQke",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "content": "+2",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "pBoMx",
+      "x": 484,
+      "y": 0,
+      "name": "Button",
+      "reusable": true,
+      "fill": "$accent",
+      "cornerRadius": "$radius",
+      "padding": [
+        8,
+        16
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "text",
+          "id": "inBhp",
+          "name": "Label",
+          "fill": "#FFFFFF",
+          "content": "タスクを追加",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "600"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "E2lHu",
+      "x": 624,
+      "y": 0,
+      "name": "ButtonSecondary",
+      "reusable": true,
+      "fill": "$bg-hover",
+      "cornerRadius": "$radius",
+      "padding": [
+        8,
+        16
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "text",
+          "id": "RbdS9",
+          "name": "Label",
+          "fill": "$text-primary",
+          "content": "キャンセル",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "fJ1ZV",
+      "x": 764,
+      "y": 0,
+      "name": "IconButton",
+      "reusable": true,
+      "width": 32,
+      "height": 32,
+      "cornerRadius": 6,
+      "layout": "vertical",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "k6ut1g",
+          "name": "Icon",
+          "width": 18,
+          "height": 18,
+          "icon": "ellipsis",
+          "library": "lucide",
+          "fill": "$text-secondary"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "sESoO",
+      "x": 0,
+      "y": 80,
+      "name": "TaskRow",
+      "reusable": true,
+      "width": 800,
+      "stroke": "$border",
+      "strokeWidth": {
+        "bottom": 1
+      },
+      "gap": "$space-3",
+      "padding": [
+        10,
+        0
+      ],
+      "children": [
+        {
+          "id": "mL3ac",
+          "type": "ref",
+          "ref": "Y4bjY",
+          "name": "Checkbox"
+        },
+        {
+          "type": "frame",
+          "id": "yfWfk",
+          "name": "Body",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": "$space-1",
+          "children": [
+            {
+              "type": "text",
+              "id": "ODPIf",
+              "name": "Title",
+              "fill": "$text-primary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "牛乳と卵を買う",
+              "fontFamily": "$font-body",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "PGwbs",
+              "name": "Description",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "近所のスーパーで。卵は 10 個入り",
+              "fontFamily": "$font-body",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "QTxVD",
+              "name": "Meta",
+              "gap": "$space-2",
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "DEucZ",
+                  "type": "ref",
+                  "ref": "w6DzYx",
+                  "name": "Date"
+                },
+                {
+                  "id": "aX3Zr",
+                  "type": "ref",
+                  "ref": "T52SnU",
+                  "name": "Label1"
+                },
+                {
+                  "id": "sQke3",
+                  "type": "ref",
+                  "ref": "JLPGL",
+                  "name": "More"
+                },
+                {
+                  "type": "text",
+                  "id": "jI6gZ",
+                  "name": "Project",
+                  "fill": "$text-muted",
+                  "content": "受信トレイ",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "fYhx0",
+          "name": "Actions",
+          "gap": "$space-1",
+          "alignItems": "center",
+          "children": [
+            {
+              "id": "g2t1lR",
+              "type": "ref",
+              "ref": "fJ1ZV",
+              "name": "Act-pencil",
+              "descendants": {
+                "k6ut1g": {
+                  "icon": "pencil"
+                }
+              }
+            },
+            {
+              "id": "FTMcf",
+              "type": "ref",
+              "ref": "fJ1ZV",
+              "name": "Act-calendar",
+              "descendants": {
+                "k6ut1g": {
+                  "icon": "calendar"
+                }
+              }
+            },
+            {
+              "id": "edeNg",
+              "type": "ref",
+              "ref": "fJ1ZV",
+              "name": "Act-message-square",
+              "descendants": {
+                "k6ut1g": {
+                  "icon": "message-square"
+                }
+              }
+            },
+            {
+              "id": "TGMJG",
+              "type": "ref",
+              "ref": "fJ1ZV",
+              "name": "Act-ellipsis",
+              "descendants": {
+                "k6ut1g": {
+                  "icon": "ellipsis"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "rd1in",
+      "x": 0,
+      "y": 180,
+      "name": "SidebarItem",
+      "reusable": true,
+      "width": 248,
+      "cornerRadius": 6,
+      "gap": "$space-2",
+      "padding": [
+        6,
+        10
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "Byf8E",
+          "name": "Icon",
+          "width": 18,
+          "height": 18,
+          "icon": "inbox",
+          "library": "lucide",
+          "fill": "$text-secondary"
+        },
+        {
+          "type": "text",
+          "id": "GCMiA",
+          "name": "Label",
+          "fill": "$text-primary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "受信トレイ",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "OpYvr",
+          "name": "Count",
+          "fill": "$text-muted",
+          "content": "12",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "L92HAh",
+      "x": 0,
+      "y": 230,
+      "name": "ProjectItem",
+      "reusable": true,
+      "width": 248,
+      "cornerRadius": 6,
+      "gap": "$space-2",
+      "padding": [
+        6,
+        10
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "ellipse",
+          "id": "ZXjp0",
+          "name": "Dot",
+          "fill": "$priority-3",
+          "width": 10,
+          "height": 10
+        },
+        {
+          "type": "text",
+          "id": "D02pdw",
+          "name": "Label",
+          "fill": "$text-primary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "仕事",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "WeUE4",
+          "name": "Count",
+          "fill": "$text-muted",
+          "content": "8",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "TUMiy",
+      "x": 0,
+      "y": 280,
+      "name": "SectionHeader",
+      "reusable": true,
+      "width": 800,
+      "stroke": "$border",
+      "strokeWidth": {
+        "bottom": 1
+      },
+      "gap": "$space-2",
+      "padding": [
+        12,
+        0,
+        8,
+        0
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "Hui4M",
+          "name": "Chevron",
+          "width": 16,
+          "height": 16,
+          "icon": "chevron-down",
+          "library": "lucide",
+          "fill": "$text-secondary"
+        },
+        {
+          "type": "text",
+          "id": "T7WfJl",
+          "name": "Title",
+          "fill": "$text-primary",
+          "content": "今週",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "IM2bg",
+          "name": "Count",
+          "fill": "$text-muted",
+          "content": "3",
+          "fontFamily": "$font-body",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "hJYgK",
+      "x": 0,
+      "y": 340,
+      "name": "AddTaskRow",
+      "reusable": true,
+      "width": 800,
+      "gap": "$space-3",
+      "padding": [
+        10,
+        0
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "iibMh",
+          "name": "Plus",
+          "width": 18,
+          "height": 18,
+          "icon": "plus",
+          "library": "lucide",
+          "fill": "$accent"
+        },
+        {
+          "type": "text",
+          "id": "cxWSa",
+          "name": "Label",
+          "fill": "$text-secondary",
+          "content": "タスクを追加",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "ryZIZ",
+      "x": 0,
+      "y": 390,
+      "name": "TextField",
+      "reusable": true,
+      "width": 400,
+      "cornerRadius": "$radius",
+      "stroke": "$border",
+      "strokeWidth": 1,
+      "padding": [
+        8,
+        12
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "text",
+          "id": "o39xK",
+          "name": "Placeholder",
+          "fill": "$text-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "タスク名",
+          "fontFamily": "$font-body",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      ]
+    }
+  ],
   "themes": {
     "mode": [
       "light",
