@@ -283,10 +283,9 @@ export const D09e: Story = {
   render: () => <SettingsScreen initialTarget="nas" syncState="off" />,
 };
 
-// pen の D-09f はサイドバー最下部が「同期オフ · 未ログイン」のまま (D-09e と同じ)。pen に合わせる。
 export const D09f: Story = {
   name: "D-09f 設定 (NAS 接続済み)",
-  render: () => <SettingsScreen initialTarget="nas" connected syncState="off" />,
+  render: () => <SettingsScreen initialTarget="nas" connected syncState="synced" lastSyncedAt="09:41" />,
 };
 
 function ConflictScreen() {
