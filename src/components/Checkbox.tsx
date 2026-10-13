@@ -3,6 +3,7 @@ export type CheckboxProps = {
   priority?: 1 | 2 | 3 | 4;
   onChange?: (checked: boolean) => void;
   size?: 20;
+  ariaLabel?: string;
 };
 
 const priorityVar = {
@@ -12,13 +13,14 @@ const priorityVar = {
   4: "var(--color-priority-4)",
 } as const;
 
-export function Checkbox({ checked, priority = 4, onChange, size = 20 }: CheckboxProps) {
+export function Checkbox({ checked, priority = 4, onChange, size = 20, ariaLabel }: CheckboxProps) {
   const color = checked ? "var(--color-success)" : priorityVar[priority];
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={checked}
+      aria-label={ariaLabel}
       onClick={() => onChange?.(!checked)}
       style={{
         width: size,

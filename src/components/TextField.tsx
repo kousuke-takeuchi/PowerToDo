@@ -14,19 +14,19 @@ export function TextField({ value, placeholder, onChange, type = "text", readOnl
       placeholder={placeholder}
       readOnly={readOnly}
       onChange={(e) => onChange?.(e.target.value)}
-      className="placeholder:text-[var(--color-text-muted)]"
+      className="outline-none border-[color:var(--color-border)] focus-visible:border-[color:var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
       style={{
         boxSizing: "border-box",
         width: "100%",
         padding: "7px 11px",
         borderRadius: "var(--radius)",
-        border: "1px solid var(--color-border)",
+        borderWidth: 1,
+        borderStyle: "solid",
         background: "transparent",
         color: "var(--color-text-primary)",
         fontFamily: "var(--font-body)",
         fontSize: 14,
         lineHeight: "20px",
-        outline: "none",
       }}
     />
   );

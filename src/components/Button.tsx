@@ -7,6 +7,7 @@ export type ButtonProps = {
   onClick?: () => void;
   disabled?: boolean;
   type?: "button" | "submit";
+  ariaLabel?: string;
 };
 
 export function Button({
@@ -16,6 +17,7 @@ export function Button({
   onClick,
   disabled,
   type = "button",
+  ariaLabel,
 }: ButtonProps) {
   if (variant === "icon") {
     return (
@@ -23,13 +25,13 @@ export function Button({
         type={type}
         onClick={onClick}
         disabled={disabled}
-        className="hover:bg-[var(--color-bg-hover)]"
+        aria-label={ariaLabel}
+        className="bg-transparent hover:bg-[var(--color-bg-hover)]"
         style={{
           width: 32,
           height: 32,
           borderRadius: 6,
           border: "none",
-          background: "transparent",
           display: "grid",
           placeItems: "center",
           padding: 0,
@@ -49,6 +51,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
       style={{
         display: "inline-flex",
         alignItems: "center",
