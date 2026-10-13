@@ -7,7 +7,25 @@ import { TextField } from "../components/TextField";
 import type { SyncTarget } from "./SettingsDialog";
 import { NasFields, hintStyle, labelStyle, syncTargetOptions } from "./SyncFields";
 
-export type OnboardingProps = { step: 1 | 2 | 3; target?: SyncTarget };
+export type OnboardingProps = {
+  step: 1 | 2 | 3;
+  target?: SyncTarget;
+  /** 実アプリ用 (Storybook では渡さない)。dataDir を渡すと step 1 の保存先欄は読み取り専用で、選んだ値を表示する ("" は未選択)。 */
+  dataDir?: string;
+  onPickFolder?: () => void;
+  /** step 1 の「次へ」。渡すと内部の画面遷移 (step 2 へ) の代わりに呼ばれる。 */
+  onNext?: () => void;
+  /** step 2 の「スキップ」。渡すと内部の画面遷移の代わりに呼ばれる。 */
+  onSkip?: () => void;
+  /** true の間「次へ」「選択」を無効にする。 */
+  busy?: boolean;
+  /** 失敗メッセージ (フッターの上に表示)。 */
+  error?: string;
+  /** 起動時の警告 (サブタイトルの下に表示)。 */
+  warning?: string;
+  /** true でウィンドウいっぱいに広げる (既定は絵コンテの 1440x900 固定)。 */
+  fill?: boolean;
+};
 
 const stepNames = ["保存先", "同期先", "受信トレイ"] as const;
 
@@ -76,10 +94,11 @@ const skipStyle: React.CSSProperties = {
  * step 1 保存先 / step 2 同期先 (セグメントで Google ログイン ⇔ NAS 入力) / step 3 受信トレイ。
  * step と同期先は props で初期値を受け、次へ / スキップ / ログイン / 接続 / セグメントは内部状態で動く (絵コンテの操作確認用で保存はしない)。
  */
-export function Onboarding({ step, target = "google" }: OnboardingProps) {
+export function Onboarding({ step, target = "google", dataDir, onPickFolder, onNext, onSkip, busy, error, warning, fill }: OnboardingProps) {
   const [cur, setCur] = useState<1 | 2 | 3>(step);
   const [sync, setSync] = useState<SyncTarget>(target);
-  const [dataDir, setDataDir] = useState("~/Library/Application Support/PowerToDo/data");
+  const [localDir, setLocalDir] = useState("~/Library/Application Support/PowerToDo/data");
+  const live = dataDir !== undefined;
   const [inbox, setInbox] = useState("受信トレイ.xlsx");
 
   let body: React.ReactNode;
@@ -89,13 +108,19 @@ export function Onboarding({ step, target = "google" }: OnboardingProps) {
       <Block label="データフォルダ" hint="Google Drive との同期は次のステップで設定できます。あとからでも変更できます。">
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <TextField value={dataDir} onChange={setDataDir} />
+            {live ? <TextField value={dataDir} placeholder="(アプリのデータフォルダ)" readOnly /> : <TextField value={localDir} onChange={setLocalDir} />}
           </div>
-          <Button variant="secondary">選択</Button>
+          <Button variant="secondary" onClick={onPickFolder} disabled={busy}>
+            選択
+          </Button>
         </div>
       </Block>
     );
-    footer = <Button onClick={() => setCur(2)}>次へ</Button>;
+    footer = (
+      <Button onClick={onNext ?? (() => setCur(2))} disabled={busy}>
+        次へ
+      </Button>
+    );
   } else if (cur === 2) {
     body = (
       <>
@@ -119,7 +144,7 @@ export function Onboarding({ step, target = "google" }: OnboardingProps) {
     );
     footer = (
       <>
-        <button type="button" onClick={() => setCur(3)} style={skipStyle}>
+        <button type="button" onClick={onSkip ?? (() => setCur(3))} style={skipStyle}>
           スキップ
         </button>
         {sync === "nas" && <Button onClick={() => setCur(3)}>接続して次へ</Button>}
@@ -138,8 +163,8 @@ export function Onboarding({ step, target = "google" }: OnboardingProps) {
   return (
     <div
       style={{
-        width: 1440,
-        height: 900,
+        width: fill ? "100%" : 1440,
+        height: fill ? "100vh" : 900,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -167,9 +192,19 @@ export function Onboarding({ step, target = "google" }: OnboardingProps) {
           </div>
           <h1 style={{ margin: 0, fontSize: 22, lineHeight: "32px", fontWeight: 700, color: "var(--color-text-primary)" }}>PowerToDo へようこそ</h1>
           <p style={{ margin: 0, textAlign: "center", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)" }}>{subs[cur]}</p>
+          {warning && (
+            <p role="status" style={{ margin: 0, textAlign: "center", fontSize: 13, lineHeight: "19px", color: "var(--color-danger)" }}>
+              {warning}
+            </p>
+          )}
         </div>
         <Steps current={cur} />
         {body}
+        {error && (
+          <div role="alert" style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-danger)" }}>
+            {error}
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: cur === 2 ? "space-between" : "flex-end", minHeight: 36 }}>{footer}</div>
       </div>
     </div>

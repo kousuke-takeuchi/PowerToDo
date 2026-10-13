@@ -1,3 +1,1 @@
-export default function App() {
-  return <div>PowerToDo</div>;
-}
+export { default } from "./app/App";

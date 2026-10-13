@@ -1,9 +1,9 @@
 import { FileX } from "lucide-react";
 import { Button } from "../components/Button";
 
-export type ErrorStateProps = { fileName: string; onRetry?: () => void; onReveal?: () => void };
+export type ErrorStateProps = { fileName: string; onRetry?: () => void; onReveal?: () => void; /** 追加の詳細 (実アプリのエラーメッセージ)。省略時は絵コンテと同じ表示。 */ detail?: string };
 
-export function ErrorState({ fileName, onRetry, onReveal }: ErrorStateProps) {
+export function ErrorState({ fileName, onRetry, onReveal, detail }: ErrorStateProps) {
   return (
     <div
       style={{
@@ -24,6 +24,9 @@ export function ErrorState({ fileName, onRetry, onReveal }: ErrorStateProps) {
       <div style={{ width: 480, textAlign: "center", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)" }}>
         ファイルが別のアプリで開かれているか、壊れています。このファイルは上書きしません。
       </div>
+      {detail && (
+        <div style={{ width: 480, textAlign: "center", fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)", wordBreak: "break-all" }}>{detail}</div>
+      )}
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <Button onClick={onRetry}>再試行</Button>
         <Button variant="secondary" onClick={onReveal}>
