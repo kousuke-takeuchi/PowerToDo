@@ -2,7 +2,7 @@ use chrono::{NaiveDate, NaiveTime};
 use serde::Serialize;
 
 use super::dates::{parse_date_word, parse_time_word, resolve};
-use super::model::Priority;
+use super::model::{Priority, serde_time};
 
 /// A recognised token. Offsets are `char` indices into the original text (not bytes).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -28,6 +28,7 @@ pub enum TokenKind {
 pub struct QuickAddResult {
     pub title: String,
     pub due: Option<NaiveDate>,
+    #[serde(with = "serde_time::option")]
     pub due_time: Option<NaiveTime>,
     pub priority: Option<Priority>,
     pub project: Option<String>,
@@ -480,7 +481,9 @@ mod tests {
         let r = run("x 明日 15:00");
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v["due"], "2026-10-14");
-        assert!(v.get("dueTime").is_some());
+        assert_eq!(v["dueTime"], "15:00");
         assert_eq!(v["spans"][0]["kind"], "date");
+        let none = serde_json::to_value(run("x")).unwrap();
+        assert!(none["dueTime"].is_null());
     }
 }
