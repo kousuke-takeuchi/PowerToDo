@@ -354,6 +354,13 @@ pub async fn get_project(name: String, state: State<'_, AppState>) -> AppResult<
     with_store(state.inner(), |s| s.view(&name))
 }
 
+/// Re-reads the project's file from disk (discarding unsaved in-memory changes). The way to
+/// retry a project that failed to load, or to pick up a fix made in Excel.
+#[tauri::command]
+pub async fn reload_project(name: String, state: State<'_, AppState>) -> AppResult<ProjectView> {
+    with_store(state.inner(), |s| s.reload(&name))
+}
+
 #[tauri::command]
 pub async fn create_project(
     name: String,

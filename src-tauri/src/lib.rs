@@ -26,6 +26,7 @@ pub fn run() {
             commands::retry_save,
             commands::list_projects,
             commands::get_project,
+            commands::reload_project,
             commands::create_project,
             commands::rename_project,
             commands::delete_project,
