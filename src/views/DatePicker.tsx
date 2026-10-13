@@ -40,19 +40,23 @@ const shiftMonth = (ymd: string, delta: number) => {
 };
 
 /** D-07: 日付ポップオーバーの中身。選択状態は内部で持ち、onChange で通知する。 */
-export function DatePicker({ value, time = "15:00", onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜" }: DatePickerProps) {
+export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜" }: DatePickerProps) {
   const [date, setDate] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
+  // pen では入力欄の "明日 15:00" は placeholder (muted)。ユーザーが選ぶ / 入力するまでは値を空にして placeholder で出す。
+  const [touched, setTouched] = useState(false);
   const [month, setMonth] = useState(monthStart(value ?? TODAY));
 
   const select = (d: string | undefined) => {
     setDate(d);
     setTyped(null);
+    setTouched(true);
     if (d) setMonth(monthStart(d));
-    onChange?.({ date: d, time });
+    // 時刻はタスクに有るときだけ渡す (既定の時刻を勝手に足さない)
+    onChange?.(time ? { date: d, time } : { date: d });
   };
 
-  const derived = date ? `${dateLabel(date)?.label ?? date} ${time}` : "";
+  const derived = date ? `${dateLabel(date)?.label ?? date}${time ? ` ${time}` : ""}` : "";
   const nextSaturday = addDays(TODAY, (6 - weekdayIndex(TODAY) + 7) % 7 || 7);
   const nextMonday = addDays(TODAY, ((1 - weekdayIndex(TODAY) + 7) % 7) || 7);
   const picks: { key: string; icon: React.ReactNode; color: string; label: string; value: string; date?: string }[] = [
@@ -75,7 +79,7 @@ export function DatePicker({ value, time = "15:00", onChange, onOpenRecurrence, 
 
   return (
     <PopoverShell label="日付">
-      <TextField value={typed ?? derived} placeholder="日付を入力" onChange={setTyped} />
+      <TextField value={typed ?? (touched ? derived : "")} placeholder={derived || "日付を入力"} onChange={setTyped} />
       <div style={{ display: "flex", flexDirection: "column" }}>
         {picks.map((p) => (
           <PopRow key={p.key} icon={p.icon} iconColor={p.color} onClick={() => select(p.date)} ariaLabel={p.label}>
@@ -144,7 +148,7 @@ export function DatePicker({ value, time = "15:00", onChange, onOpenRecurrence, 
       </div>
       <PopRow icon={<Clock3 size={16} />} borderTop>
         <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>時刻</span>
-        <span style={small("var(--color-text-primary)")}>{time}</span>
+        <span style={small(time ? "var(--color-text-primary)" : "var(--color-text-muted)")}>{time ?? "なし"}</span>
       </PopRow>
       <PopRow icon={<Repeat size={16} />} onClick={onOpenRecurrence}>
         <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>繰り返し</span>

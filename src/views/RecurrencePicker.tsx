@@ -23,9 +23,12 @@ export function recurrenceLabel(rrule?: string): string {
 export function RecurrencePicker({ value, onChange }: RecurrencePickerProps) {
   const [rrule, setRrule] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
+  // pen では入力欄の "毎週土曜" は placeholder (muted)。選ぶ / 入力するまでは値を空にして placeholder で出す。
+  const [touched, setTouched] = useState(false);
+  const current = rrule ? recurrenceLabel(rrule) : "";
   return (
     <PopoverShell label="繰り返し" gap="var(--space-2)">
-      <TextField value={typed ?? (rrule ? recurrenceLabel(rrule) : "")} placeholder="繰り返しを入力" onChange={setTyped} />
+      <TextField value={typed ?? (touched ? current : "")} placeholder={current || "繰り返しを入力"} onChange={setTyped} />
       {RECURRENCE_PRESETS.map((p) => (
         <PopRow
           key={p.rrule}
@@ -33,6 +36,7 @@ export function RecurrencePicker({ value, onChange }: RecurrencePickerProps) {
           onClick={() => {
             setRrule(p.rrule);
             setTyped(null);
+            setTouched(true);
           }}
         >
           <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -50,6 +54,7 @@ export function RecurrencePicker({ value, onChange }: RecurrencePickerProps) {
           onClick={() => {
             setRrule(undefined);
             setTyped(null);
+            setTouched(true);
             onChange?.(undefined);
           }}
         >

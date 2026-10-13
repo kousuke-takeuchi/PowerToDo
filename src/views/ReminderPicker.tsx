@@ -38,7 +38,8 @@ export function reminderSummary(reminders: string[]): string {
   return `${reminders.length} 件 (${reminders.map((c) => optionOf(c)?.short ?? c).join(", ")})`;
 }
 
-/** D-08: リマインダーポップオーバーの中身。候補を押すと追加済みへ移り、x で候補へ戻る。 */
+/** D-08: リマインダーポップオーバーの中身。候補を押すと追加済みへ移り、x で追加済みから外す。
+ * 候補は pen の固定 4 つ (CANDIDATES) なので、外したものが候補に戻るのはその 4 つだけ。既定の「期限と同時刻」などは戻らない。 */
 export function ReminderPicker({ reminders, onChange, dueTime = "15:00" }: ReminderPickerProps) {
   const [added, setAdded] = useState<string[]>(reminders);
   const [mode, setMode] = useState<"due" | "at">("due");

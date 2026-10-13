@@ -1,4 +1,4 @@
-import type { Task, Project, Label, Section } from "../types/model";
+import type { Task, Project, Label, Section, Comment } from "../types/model";
 
 export const TODAY = "2026-10-13"; // 火曜
 
@@ -47,6 +47,8 @@ export const filters = [
 ];
 
 export const labelCounts: Record<string, number> = { 食品: 3, 日用品: 3, 急ぎ: 2, キッチン: 1 }; // pen D-06 の固定値
+
+export const comments: Comment[] = [{ taskNo: 1, author: "たろう", at: "10/12 21:30", text: "先週は売り切れだった。開店直後に行く。" }]; // pen D-03 のコメント
 
 export const LONG_TITLE = "来週の出張の準備として、ホテルと新幹線の予約を確認し、必要な書類を印刷してカバンに入れておく。名刺の残りも確認して補充する";
 

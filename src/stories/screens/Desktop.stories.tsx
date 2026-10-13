@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { TODAY, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
+import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
 import { FixBanner } from "../../views/FixBanner";
 import { LabelDetailView } from "../../views/LabelDetailView";
@@ -147,6 +147,7 @@ function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProp
             subtasks={detailSubtasks}
             project={detailProject}
             section="今週"
+            comments={comments}
             initialPopover={initialPopover}
             onClose={() => setOpen(false)}
           />

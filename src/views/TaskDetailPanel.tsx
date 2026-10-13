@@ -7,10 +7,11 @@ import { Checkbox } from "../components/Checkbox";
 import { TaskRow } from "../components/TaskRow";
 import { TextField } from "../components/TextField";
 import { dateLabel } from "../mock/data";
-import type { Project, Task } from "../types/model";
+import type { Comment, Project, Task } from "../types/model";
 import { DatePicker } from "./DatePicker";
 import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
+import { useDone } from "./useDone";
 
 export type TaskDetailPanelProps = {
   task: Task;
@@ -19,6 +20,8 @@ export type TaskDetailPanelProps = {
   section?: string;
   initialPopover?: "date" | "recurrence" | "reminder";
   onClose?: () => void;
+  /** コメント一覧。task.no と同じ taskNo のものだけ表示する。 */
+  comments?: Comment[];
 };
 
 type Popover = NonNullable<TaskDetailPanelProps["initialPopover"]>;
@@ -81,18 +84,19 @@ function PropRow({
   );
 }
 
-/** D-03: 右側のタスク詳細パネル (400)。期限 / リマインダー / 繰り返しの行でポップオーバーを開閉する。 */
-export function TaskDetailPanel({ task, subtasks, project, section, initialPopover, onClose }: TaskDetailPanelProps) {
+/** D-03: 右側のタスク詳細パネル (400)。期限 / リマインダー / 繰り返しの行でポップオーバーを開閉する。
+ * Esc はポップオーバーが開いていれば閉じ、無ければパネルを閉じる (onClose)。 */
+export function TaskDetailPanel({ task, subtasks, project, section, initialPopover, onClose, comments = [] }: TaskDetailPanelProps) {
   const [popover, setPopover] = useState<Popover | null>(initialPopover ?? null);
   const [done, setDone] = useState(task.progress === 100);
   const [due, setDue] = useState(task.due);
   const [time, setTime] = useState(task.dueTime);
   const [rrule, setRrule] = useState(task.rrule);
   const [reminders, setReminders] = useState(task.reminders);
-  const [subDone, setSubDone] = useState<Map<number, boolean>>(() => new Map());
+  const sub = useDone();
+  const taskComments = comments.filter((c) => c.taskNo === task.no);
   const toggle = (p: Popover) => setPopover((cur) => (cur === p ? null : p));
 
-  const isSubDone = (t: Task) => subDone.get(t.no) ?? t.progress === 100;
   const dueInfo = dateLabel(due);
   const dueText = dueInfo ? `${dueInfo.label}${time ? ` ${time}` : ""}` : "なし";
   const dueColor =
@@ -100,7 +104,15 @@ export function TaskDetailPanel({ task, subtasks, project, section, initialPopov
 
   return (
     <div
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        if (popover) setPopover(null);
+        else onClose?.();
+      }}
       style={{
+        outline: "none",
         position: "relative",
         height: "100%",
         boxSizing: "border-box",
@@ -154,16 +166,16 @@ export function TaskDetailPanel({ task, subtasks, project, section, initialPopov
 
       <div>
         <div style={heading}>
-          サブタスク {subtasks.filter(isSubDone).length}/{subtasks.length}
+          サブタスク {subtasks.filter(sub.isDone).length}/{subtasks.length}
         </div>
         {subtasks.map((t) => (
           <TaskRow
             key={t.no}
             title={t.title}
-            done={isSubDone(t)}
+            done={sub.isDone(t)}
             priority={t.priority}
             hideActions
-            onToggleDone={() => setSubDone((m) => new Map(m).set(t.no, !isSubDone(t)))}
+            onToggleDone={() => sub.toggle(t)}
           />
         ))}
         <AddTaskRow label="サブタスクを追加" />
@@ -171,13 +183,15 @@ export function TaskDetailPanel({ task, subtasks, project, section, initialPopov
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         <div style={heading}>コメント</div>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <span aria-hidden style={{ width: 24, height: 24, borderRadius: 12, background: "var(--color-accent)", flex: "0 0 auto" }} />
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>たろう  10/12 21:30</span>
-            <span style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>先週は売り切れだった。開店直後に行く。</span>
+        {taskComments.map((c, i) => (
+          <div key={i} style={{ display: "flex", gap: "var(--space-2)" }}>
+            <span aria-hidden style={{ width: 24, height: 24, borderRadius: 12, background: "var(--color-accent)", flex: "0 0 auto" }} />
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{`${c.author}  ${c.at}`}</span>
+              <span style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>{c.text}</span>
+            </div>
           </div>
-        </div>
+        ))}
         <TextField placeholder="コメント" />
       </div>
 

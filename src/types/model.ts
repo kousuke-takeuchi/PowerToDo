@@ -8,3 +8,4 @@ export interface Project { name: string; color: string; order: number; favorite:
 export interface Label { name: string; color: string; order: number; }
 export interface Section { project: string; name: string; order: number; collapsed?: boolean; }
 export interface SyncInfo { state: SyncState; lastSyncedAt?: string; target: "google" | "nas" | "none"; account?: string; }
+export interface Comment { taskNo: number; author: string; at: string; text: string; }
