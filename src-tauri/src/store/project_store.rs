@@ -425,9 +425,20 @@ impl ProjectStore {
         })
     }
 
-    /// Re-reads the project's file, discarding unsaved changes in memory. Also the way to
-    /// retry a project that failed to load.
+    /// Re-reads the project's file. Also the way to retry a project that failed to load.
+    /// Refuses (`Invalid`) while the project has unsaved changes, so a reload never drops
+    /// edits silently; `reload_discarding` is the explicit "throw them away" variant.
     pub fn reload(&mut self, name: &str) -> AppResult<ProjectView> {
+        if self.dirty.contains(name) {
+            return Err(invalid(
+                "未保存の変更があります。破棄して読み直す場合は確認してください。",
+            ));
+        }
+        self.reload_discarding(name)
+    }
+
+    /// Re-reads the project's file, discarding any unsaved changes in memory.
+    pub fn reload_discarding(&mut self, name: &str) -> AppResult<ProjectView> {
         if !self.common.projects.iter().any(|p| p.name == name) {
             return Err(not_found(format!("プロジェクト「{name}」がありません")));
         }
@@ -1793,6 +1804,27 @@ mod tests {
         e.store.reload(INBOX).unwrap();
         let v = e.store.add_task(INBOX, input("next")).unwrap();
         assert_eq!(nos(&v), vec![1, 2, 3, 4, 6]);
+    }
+
+    #[test]
+    fn reload_refuses_unsaved_changes_unless_discarding() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("保存済み")).unwrap();
+        e.store.save(INBOX).unwrap();
+        e.store.add_task(INBOX, input("未保存")).unwrap();
+        assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);
+
+        let err = e.store.reload(INBOX).unwrap_err();
+        assert!(matches!(err, AppError::Invalid { .. }), "{err:?}");
+        // Nothing was dropped.
+        assert_eq!(e.store.view(INBOX).unwrap().tasks.len(), 2);
+        assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);
+
+        let v = e.store.reload_discarding(INBOX).unwrap();
+        assert_eq!(nos(&v), vec![1]);
+        assert!(e.store.dirty_projects().is_empty());
+        // Clean again, so a plain reload works.
+        assert!(e.store.reload(INBOX).is_ok());
     }
 
     #[test]
