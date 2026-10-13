@@ -66,6 +66,8 @@ const quickAddTokens = [
   { text: "@食品", kind: "label" as const },
 ];
 
+const shoppingColor = projects.find((p) => p.name === "買い物")?.color;
+
 function QuickAddScreen() {
   const [open, setOpen] = useState(true);
   return (
@@ -81,7 +83,18 @@ function QuickAddScreen() {
         />
       }
       syncState="synced"
-      overlay={<QuickAddDialog open={open} tokens={quickAddTokens} project="買い物" section="今週" onClose={() => setOpen(false)} />}
+      overlay={
+        open ? (
+          <QuickAddDialog
+            open
+            tokens={quickAddTokens}
+            project="買い物"
+            projectColor={shoppingColor}
+            section="今週"
+            onClose={() => setOpen(false)}
+          />
+        ) : undefined
+      }
     >
       <ProjectView project="買い物" tasks={shopping} sections={sections} />
     </AppShell>

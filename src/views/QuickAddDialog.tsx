@@ -1,8 +1,7 @@
 import { Bell, Calendar, ChevronDown, Ellipsis, Flag, Tag } from "lucide-react";
 import type React from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "../components/Button";
-import { projects } from "../mock/data";
 
 export type QuickAddToken = { text: string; kind?: "date" | "priority" | "project" | "label" };
 
@@ -11,6 +10,8 @@ export type QuickAddDialogProps = {
   tokens: QuickAddToken[];
   project: string;
   section?: string;
+  /** プロジェクトのドット色。未指定は muted。 */
+  projectColor?: string;
   onClose?: () => void;
 };
 
@@ -54,8 +55,26 @@ function ToolbarChip({ icon: Icon, label, color = "var(--color-text-secondary)" 
  * クイック追加ダイアログ (D-02)。AppShell の overlay スロットに入れる。
  * 背面の scrim (#00000055) + 幅 560 のダイアログ (上 160)。キャンセル / scrim クリック / Esc で onClose。保存はしない。
  * トークンは kind で色分けし、ツールバーの 4 チップも同じトークンから文言を取る。
+ * 開いたら「説明」入力にフォーカスし、閉じたら開く前にフォーカスしていた要素へ戻す。
+ * scrim は pointerEvents: "auto" (AppShell の overlay ラッパーは "none")。
  */
-export function QuickAddDialog({ open, tokens, project, section, onClose }: QuickAddDialogProps) {
+export function QuickAddDialog({ open, tokens, project, section, projectColor = "var(--color-text-muted)", onClose }: QuickAddDialogProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    // StrictMode の再実行でダイアログ内の要素を戻り先にしないよう、外側の要素だけ覚える。
+    const inside = inputRef.current?.closest('[role="dialog"]')?.contains(active) ?? false;
+    if (active instanceof HTMLElement && !inside) restoreRef.current = active;
+    inputRef.current?.focus();
+    return () => {
+      const el = restoreRef.current;
+      if (el?.isConnected) el.focus();
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -72,7 +91,6 @@ export function QuickAddDialog({ open, tokens, project, section, onClose }: Quic
   const priorityText = of("priority");
   const labelText = of("label");
   const priorityNo = priorityText?.match(/[1-4]/)?.[0];
-  const dotColor = projects.find((p) => p.name === project)?.color ?? "var(--color-text-muted)";
 
   return (
     <div
@@ -89,6 +107,7 @@ export function QuickAddDialog({ open, tokens, project, section, onClose }: Quic
         alignItems: "center",
         paddingTop: 160,
         background: "var(--color-scrim)",
+        pointerEvents: "auto",
         fontFamily: "var(--font-body)",
       }}
     >
@@ -121,9 +140,10 @@ export function QuickAddDialog({ open, tokens, project, section, onClose }: Quic
               </span>
             ),
           )}
-          <span aria-hidden style={{ width: 1.5, height: 20, background: "var(--color-text-primary)", flex: "0 0 auto" }} />
+          <span aria-hidden style={{ width: 2, height: 20, background: "var(--color-text-primary)", flex: "0 0 auto" }} />
         </div>
         <input
+          ref={inputRef}
           aria-label="説明"
           placeholder="説明"
           className="placeholder:text-[var(--color-text-muted)]"
@@ -171,7 +191,7 @@ export function QuickAddDialog({ open, tokens, project, section, onClose }: Quic
               cursor: "pointer",
             }}
           >
-            <span aria-hidden style={{ width: 10, height: 10, borderRadius: 5, background: dotColor, flex: "0 0 auto" }} />
+            <span aria-hidden style={{ width: 10, height: 10, borderRadius: 5, background: projectColor, flex: "0 0 auto" }} />
             {section ? `${project} / ${section}` : project}
             <ChevronDown size={14} color="var(--color-text-secondary)" />
           </button>
