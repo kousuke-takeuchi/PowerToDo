@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, errorMessage } from "../api/client";
+import { api, errorMessage, isAppError } from "../api/client";
+import { confirm } from "../api/dialogs";
 import type { Counts } from "../mock/data";
 import type { AppStateDto, ProjectSummary, QuickAddResult } from "../types/model";
 import { AppShell } from "../views/AppShell";
@@ -149,12 +150,15 @@ export function Main({ app }: { app: AppStateDto }) {
   // 読み込みに失敗したプロジェクトは未保存の変更を持たないので、確認なしで再試行する。
   const retryLoad = () => void p.reload().catch(() => undefined);
 
-  // 「再読み込み」(FixBanner): 未保存の変更があると reload_project は断る。確認できたら破棄して読み直す。
+  // 「再読み込み」(FixBanner): 未保存の変更があると reload_project は `unsaved` で断る。確認できたら破棄して読み直す。
+  // window.confirm は dialog プラグインが非同期版に置き換えるので使わない (src/api/dialogs.ts)。
   const reloadProject = async () => {
     try {
       await p.reload();
-    } catch {
-      if (window.confirm("未保存の変更を破棄して読み直しますか？")) await p.reload(true).catch(() => undefined);
+    } catch (e) {
+      if (!isAppError(e) || e.kind !== "unsaved") return;
+      const ok = await confirm("未保存の変更を破棄して読み直しますか？", "再読み込み").catch(() => false);
+      if (ok) await p.reload(true).catch(() => undefined);
     }
   };
 
