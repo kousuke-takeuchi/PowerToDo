@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { TabBar } from "../../components/TabBar";
 import type { TabBarProps } from "../../components/TabBar";
@@ -20,6 +21,9 @@ export type MobileShellProps = {
  * overflow: hidden はルートだけ。body はクリップしない。
  */
 export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay }: MobileShellProps) {
+  // 選択中のタブはシェルが持つ (見た目だけ。画面遷移は Story を切り替える)。tab が変わったらそれに合わせる。
+  const [cur, setCur] = useState(tab);
+  useEffect(() => setCur(tab), [tab]);
   return (
     <div
       style={{
@@ -38,7 +42,13 @@ export function MobileShell({ header, children, tab, onTabChange, fab, onFab, ov
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{children}</div>
       {tab !== undefined && (
         <div style={{ position: "relative", zIndex: 1, flex: "0 0 auto" }}>
-          <TabBar active={tab === "none" ? undefined : tab} onChange={onTabChange} />
+          <TabBar
+            active={cur === "none" ? undefined : cur}
+            onChange={(id) => {
+              setCur(id);
+              onTabChange?.(id);
+            }}
+          />
         </div>
       )}
       {fab && (

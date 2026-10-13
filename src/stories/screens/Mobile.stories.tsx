@@ -18,8 +18,6 @@ type Story = StoryObj<typeof meta>;
 
 // pen の「買い物」プロジェクトは 今週 に 2 件。mock の「食パンを買う」(no 8) は M-04 今日 / M-05 近日 用なので、プロジェクト画面からは外す。
 const shopping = tasks.filter((t) => t.no !== 8);
-// pen の M-02 は背景の行に件数バッジが無い (M-01 より古い)。
-const shoppingFlat = shopping.filter((t) => t.parentNo === undefined);
 const byNo = (...nos: number[]) => nos.map((n) => tasks.find((t) => t.no === n)!);
 
 export const M01: Story = {
@@ -35,7 +33,7 @@ export const M01b: Story = {
 // M-02 / M-06 は M-01 の上に層を重ねたもの。FAB / ハンバーガーで開き直せて、scrim をタップすると M-01 に戻る。
 export const M02: Story = {
   name: "M-02 クイック追加",
-  render: () => <MobileProjectView project="買い物" tasks={shoppingFlat} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" showSync={false} />,
+  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" />,
 };
 
 export const M03: Story = {
@@ -69,7 +67,7 @@ export const M05: Story = {
 
 export const M06: Story = {
   name: "M-06 ドロワー",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="drawer" swipeTitle="食パン" showSync={false} />,
+  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="drawer" swipeTitle="食パン" />,
 };
 
 export const M07: Story = {

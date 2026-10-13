@@ -17,6 +17,7 @@ const preview: Preview = {
   initialGlobals: { theme: "light", viewport: { value: "desktop", isRotated: false } },
   parameters: {
     viewport: { options: viewports },
+    options: { storySort: { order: ["Screens", ["Desktop", "Dark", "Mobile"], "Components", "Foundation"] } },
     layout: "fullscreen",
     backgrounds: { disable: true },
     controls: {

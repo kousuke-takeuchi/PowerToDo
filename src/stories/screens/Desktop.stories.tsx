@@ -33,7 +33,7 @@ type Story = StoryObj<typeof meta>;
 // pen の「買い物」プロジェクトは 今週 に 2 件 (牛乳と卵を買う / 洗剤の詰め替え)。
 // mock の「食パンを買う」(no 8) は D-04 今日 用なので、プロジェクト画面の Story からは外す。
 const shopping = tasks.filter((t) => t.no !== 8);
-// D-11c / D-13 に加え、D-01 系以外の「買い物」背景 (D-02 / D-03 / D-07 / D-08 / D-09 系) も、pen は件数バッジとシェブロンを出さない (pen どおり)。
+// D-11c (要修正行) と D-13 は件数バッジとシェブロンを出さない (pen どおり)。
 const shoppingFlat = shopping.filter((t) => t.parentNo === undefined);
 
 const sidebar = (
@@ -102,7 +102,7 @@ function QuickAddScreen() {
         ) : undefined
       }
     >
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
     </AppShell>
   );
 }
@@ -112,42 +112,46 @@ export const D02: Story = {
   render: () => <QuickAddScreen />,
 };
 
-export const D10: Story = {
-  name: "D-10 ボード",
-  render: () => (
-    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
-      <BoardView project="買い物" tasks={shopping} sections={sections} dragging={1} />
+// D-03 系: pen の詳細パネルは「牛乳と卵を買う」。mock の task 1 に pen 固有の説明文とラベル 2 つを足して渡す
+// (D-01 の行は mock のまま。パネルだけ pen に合わせる)。
+const detailTask = {
+  ...tasks[0],
+  note: "近所のスーパーで。卵は 10 個入り。ポイントカードを忘れない。",
+  labels: ["食品", "急ぎ"],
+};
+const detailProject = projects.find((p) => p.name === "買い物")!;
+
+function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProps["initialPopover"] }) {
+  // 行をクリックするとその行のパネルを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
+  const [openNo, setOpenNo] = useState<number | null>(detailTask.no);
+  const shown = openNo === null ? undefined : openNo === detailTask.no ? detailTask : tasks.find((t) => t.no === openNo);
+  return (
+    <AppShell
+      sidebar={sidebar}
+      syncState="synced"
+      panel={
+        shown ? (
+          <TaskDetailPanel
+            key={shown.no}
+            task={shown}
+            subtasks={tasks.filter((t) => t.parentNo === shown.no)}
+            project={detailProject}
+            section={shown.category ?? undefined}
+            comments={comments}
+            initialPopover={shown.no === detailTask.no ? initialPopover : undefined}
+            onClose={() => setOpenNo(null)}
+          />
+        ) : undefined
+      }
+    >
+      <ProjectView project="買い物" tasks={shopping} sections={sections} onOpenTask={(t) => setOpenNo(t.no)} />
     </AppShell>
-  ),
-};
+  );
+}
 
-export const D11a: Story = {
-  name: "D-11a 空のプロジェクト",
-  render: () => <Screen state="empty" />,
-};
-
-export const D11b: Story = {
-  name: "D-11b 読み込みエラー",
-  render: () => <Screen state="error" />,
-};
-
-export const D11c: Story = {
-  name: "D-11c 要修正行",
-  render: () => (
-    <AppShell sidebar={sidebar} syncState="synced" banner={<FixBanner />}>
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} state="invalid" />
-    </AppShell>
-  ),
-};
-
-export const D13: Story = {
-  name: "D-13 最小ウィンドウ 960x600",
-  globals: { viewport: { value: "min", isRotated: false } },
-  render: () => (
-    <AppShell width={960} sidebar={sidebar} syncState="synced">
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} showActions />
-    </AppShell>
-  ),
+export const D03: Story = {
+  name: "D-03 タスク詳細",
+  render: () => <DetailScreen />,
 };
 
 function navShell(active: SidebarProps["active"], children: React.ReactNode, todayCount: number = counts.today) {
@@ -190,48 +194,6 @@ export const D06b: Story = {
   render: () => navShell({ kind: "labels" }, <LabelDetailView label="食品" tasks={tasks} />),
 };
 
-// D-03 系: pen の詳細パネルは「牛乳と卵を買う」。mock の task 1 に pen 固有の説明文とラベル 2 つを足して渡す
-// (D-01 の行は mock のまま。パネルだけ pen に合わせる)。
-const detailTask = {
-  ...tasks[0],
-  note: "近所のスーパーで。卵は 10 個入り。ポイントカードを忘れない。",
-  labels: ["食品", "急ぎ"],
-};
-const detailProject = projects.find((p) => p.name === "買い物")!;
-
-function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProps["initialPopover"] }) {
-  // 行をクリックするとその行のパネルを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
-  const [openNo, setOpenNo] = useState<number | null>(detailTask.no);
-  const shown = openNo === null ? undefined : openNo === detailTask.no ? detailTask : tasks.find((t) => t.no === openNo);
-  return (
-    <AppShell
-      sidebar={sidebar}
-      syncState="synced"
-      panel={
-        shown ? (
-          <TaskDetailPanel
-            key={shown.no}
-            task={shown}
-            subtasks={tasks.filter((t) => t.parentNo === shown.no)}
-            project={detailProject}
-            section={shown.category ?? undefined}
-            comments={comments}
-            initialPopover={shown.no === detailTask.no ? initialPopover : undefined}
-            onClose={() => setOpenNo(null)}
-          />
-        ) : undefined
-      }
-    >
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} onOpenTask={(t) => setOpenNo(t.no)} />
-    </AppShell>
-  );
-}
-
-export const D03: Story = {
-  name: "D-03 タスク詳細",
-  render: () => <DetailScreen />,
-};
-
 export const D07: Story = {
   name: "D-07 日付ピッカー",
   render: () => <DetailScreen initialPopover="date" />,
@@ -272,7 +234,7 @@ function SettingsScreen({ initialTarget, connected, syncState, lastSyncedAt }: {
       syncState={syncState}
       overlay={open ? <SettingsDialog open initialTarget={initialTarget} connected={connected} onClose={() => setOpen(false)} /> : undefined}
     >
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
     </AppShell>
   );
 }
@@ -282,9 +244,32 @@ export const D09: Story = {
   render: () => <SettingsScreen initialTarget="google" syncState="off" />,
 };
 
+function ConflictScreen() {
+  const [shown, setShown] = useState(true);
+  return (
+    <AppShell
+      sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState="error" />}
+      syncState="error"
+      banner={shown ? <ConflictBanner fileName="買い物.xlsx" conflictName="買い物 (競合 2026-10-13 0941).xlsx" onClose={() => setShown(false)} /> : undefined}
+    >
+      <ProjectView project="買い物" tasks={shopping} sections={sections} />
+    </AppShell>
+  );
+}
+
+export const D09b: Story = {
+  name: "D-09b 競合バナー",
+  render: () => <ConflictScreen />,
+};
+
 export const D09c: Story = {
   name: "D-09c 設定 (接続済み)",
   render: () => <SettingsScreen initialTarget="google" connected syncState="synced" lastSyncedAt="09:41" />,
+};
+
+export const D09d: Story = {
+  name: "D-09d 同期状態一覧",
+  render: () => <SyncSamples />,
 };
 
 export const D09e: Story = {
@@ -297,27 +282,32 @@ export const D09f: Story = {
   render: () => <SettingsScreen initialTarget="nas" connected syncState="synced" lastSyncedAt="09:41" />,
 };
 
-function ConflictScreen() {
-  const [shown, setShown] = useState(true);
-  return (
-    <AppShell
-      sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState="error" />}
-      syncState="error"
-      banner={shown ? <ConflictBanner fileName="買い物.xlsx" conflictName="買い物 (競合 2026-10-13 0941).xlsx" onClose={() => setShown(false)} /> : undefined}
-    >
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
+export const D10: Story = {
+  name: "D-10 ボード",
+  render: () => (
+    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
+      <BoardView project="買い物" tasks={shopping} sections={sections} dragging={1} />
     </AppShell>
-  );
-}
-
-export const D09b: Story = {
-  name: "D-09b 競合バナー",
-  render: () => <ConflictScreen />,
+  ),
 };
 
-export const D09d: Story = {
-  name: "D-09d 同期状態一覧",
-  render: () => <SyncSamples />,
+export const D11a: Story = {
+  name: "D-11a 空のプロジェクト",
+  render: () => <Screen state="empty" />,
+};
+
+export const D11b: Story = {
+  name: "D-11b 読み込みエラー",
+  render: () => <Screen state="error" />,
+};
+
+export const D11c: Story = {
+  name: "D-11c 要修正行",
+  render: () => (
+    <AppShell sidebar={sidebar} syncState="synced" banner={<FixBanner />}>
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} state="invalid" />
+    </AppShell>
+  ),
 };
 
 export const D12: Story = {
@@ -338,4 +328,14 @@ export const D12c: Story = {
 export const D12d: Story = {
   name: "D-12d 初回起動 (NAS)",
   render: () => <Onboarding step={2} target="nas" />,
+};
+
+export const D13: Story = {
+  name: "D-13 最小ウィンドウ 960x600",
+  globals: { viewport: { value: "min", isRotated: false } },
+  render: () => (
+    <AppShell width={960} sidebar={sidebar} syncState="synced">
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} showActions />
+    </AppShell>
+  ),
 };

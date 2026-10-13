@@ -57,7 +57,7 @@ export function Sidebar({ active, counts: c, projects, syncState, lastSyncedAt, 
         <button
           type="button"
           onClick={onOpenSettings}
-          aria-label="アカウント"
+          aria-label="アカウントと設定"
           style={{
             flex: 1,
             minWidth: 0,
