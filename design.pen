@@ -15361,7 +15361,7 @@
                           "id": "mwqIn",
                           "name": "Label",
                           "fill": "$text-primary",
-                          "content": "Google Drive",
+                          "content": "同期",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -27128,7 +27128,7 @@
                   "fill": "$text-secondary",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Google アカウントでログインすると、Google Drive と同期できます。あとからでも設定できます。",
+                  "content": "同期先を選ぶと、ほかの端末とタスクを同期できます。あとからでも設定できます。",
                   "textAlign": "center",
                   "fontFamily": "$font-body",
                   "fontSize": 13,
@@ -27232,7 +27232,7 @@
                       "id": "A9N1gB",
                       "name": "L",
                       "fill": "$text-primary",
-                      "content": "Google 接続",
+                      "content": "同期先",
                       "fontFamily": "$font-body",
                       "fontSize": 13,
                       "fontWeight": "normal"
@@ -28662,7 +28662,7 @@
                           "id": "a4m3q",
                           "name": "Label",
                           "fill": "$text-primary",
-                          "content": "Google Drive",
+                          "content": "同期",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -32848,7 +32848,7 @@
                           "id": "HVOpe",
                           "name": "Label",
                           "fill": "$text-primary",
-                          "content": "Google Drive",
+                          "content": "同期",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -33377,7 +33377,7 @@
                               "name": "ChooseFolder",
                               "descendants": {
                                 "RbdS9": {
-                                  "content": "Drive フォルダを変更"
+                                  "content": "フォルダを変更"
                                 }
                               }
                             }
@@ -34264,7 +34264,7 @@
                           "id": "klI98",
                           "name": "Label",
                           "fill": "$text-primary",
-                          "content": "Google Drive",
+                          "content": "同期",
                           "fontFamily": "$font-body",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -34837,7 +34837,7 @@
                   "fill": "$text-secondary",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Google アカウントでログインすると、Google Drive と同期できます。あとからでも設定できます。",
+                  "content": "同期先を選ぶと、ほかの端末とタスクを同期できます。あとからでも設定できます。",
                   "textAlign": "center",
                   "fontFamily": "$font-body",
                   "fontSize": 13,
@@ -34941,7 +34941,7 @@
                       "id": "zo5xC",
                       "name": "L",
                       "fill": "$text-primary",
-                      "content": "Google 接続",
+                      "content": "同期先",
                       "fontFamily": "$font-body",
                       "fontSize": 13,
                       "fontWeight": "normal"
