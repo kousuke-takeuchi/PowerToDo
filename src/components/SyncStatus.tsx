@@ -32,7 +32,7 @@ export function SyncStatus({ state, lastSyncedAt, compact, onClick }: SyncStatus
         animation: d.spin ? "spin 1s linear infinite" : undefined,
       }}
     >
-      <d.Icon size={14} />
+      <d.Icon size={compact ? 16 : 14} />
     </span>
   );
   return (

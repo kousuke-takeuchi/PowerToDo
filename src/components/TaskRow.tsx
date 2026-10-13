@@ -47,7 +47,7 @@ export function TaskRow(p: TaskRowProps) {
         gap: "var(--space-3)",
         alignItems: "flex-start",
         padding: "10px 0",
-        borderBottom: "1px solid var(--color-border)",
+        boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側 (高さに加算しない)
         marginLeft: indentPx,
         fontFamily: "var(--font-body)",
       }}

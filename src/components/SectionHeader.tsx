@@ -19,7 +19,7 @@ export function SectionHeader({ title, count, collapsed, onToggle, showChevron =
         alignItems: "center",
         gap: "var(--space-2)",
         padding: "12px 0 8px 0",
-        borderBottom: "1px solid var(--color-border)",
+        boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側 (高さに加算しない)
         fontFamily: "var(--font-body)",
       }}
     >

@@ -33,6 +33,8 @@ export const tasks: Task[] = [
   { no: 13, project: "家のこと", category: null, title: "粗大ごみの申し込み", assignee: "たろう", priority: 3, progress: 0, due: "2026-10-14", labels: [], reminders: [], order: 2, createdAt: "2026-10-01T09:00" },
   { no: 14, project: "読書", category: null, title: "読書会の課題本を読み終える", assignee: "たろう", priority: 4, progress: 0, due: "2026-10-16", labels: [], reminders: [], order: 0, createdAt: "2026-10-01T09:00" },
   { no: 15, project: "家のこと", category: null, title: "調味料の補充", assignee: "たろう", priority: 4, progress: 0, due: "2026-10-13", labels: ["食品"], reminders: [], order: 3, createdAt: "2026-10-01T09:00" },
+  { no: 17, project: "買い物", category: "今週", title: "洗剤 (詰め替え用)", assignee: "たろう", priority: 4, progress: 0, parentNo: 2, labels: [], reminders: [], order: 0, createdAt: "2026-10-10T09:00" },
+  { no: 18, project: "買い物", category: "今週", title: "柔軟剤", assignee: "たろう", priority: 4, progress: 0, parentNo: 2, labels: [], reminders: [], order: 1, createdAt: "2026-10-10T09:00" },
   { no: 16, project: "買い物", category: "完了", title: "ティッシュ", assignee: "たろう", priority: 4, progress: 100, labels: [], reminders: [], order: 0, createdAt: "2026-10-01T09:00", completedAt: "2026-10-11T10:00" },
 ];
 
