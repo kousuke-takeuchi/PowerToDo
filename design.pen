@@ -35282,6 +35282,175 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "k6SP0Y",
+      "x": 0,
+      "y": -1300,
+      "name": "AppIcon A (赤地・白チェック)",
+      "clip": true,
+      "width": 1024,
+      "height": 1024,
+      "fill": "$accent",
+      "cornerRadius": 224,
+      "layout": "none",
+      "children": [
+        {
+          "type": "path",
+          "id": "jOP8M",
+          "x": 195.5507,
+          "y": 329.6273,
+          "geometry": "M297.70926 0l-230.64974 0c-37.71318 0-67.05952 30.34534-67.05952 68.8078l0 226.27905c0 37.46338 30.84489 68.68293 67.05952 68.68293l230.64974 0c36.08975 0 67.93365-30.59522 67.93365-68.68293l0-226.27905c0-38.46246-30.84484-68.8078-67.93365-68.8078z",
+          "width": 365.6429,
+          "height": 363.7698,
+          "stroke": "#ffffff",
+          "strokeWidth": 41.76958439024391
+        },
+        {
+          "type": "path",
+          "id": "sAvgs",
+          "x": 282.9654,
+          "y": 443.89070000000004,
+          "geometry": "M0 70.68097l64.31218 63.93762 134.61855-134.61859",
+          "width": 198.9307,
+          "height": 134.6186,
+          "stroke": "#ffffff",
+          "strokeWidth": 65.79574634146341,
+          "strokeLinejoin": "round",
+          "strokeLinecap": "round"
+        },
+        {
+          "type": "path",
+          "id": "ePEnD",
+          "x": 635.8707,
+          "y": 410.67319999999995,
+          "geometry": "M0 0l192.93658 0",
+          "width": 192.9366,
+          "height": 0,
+          "stroke": "#ffffff",
+          "strokeWidth": 43.147488780487805,
+          "strokeLinecap": "round"
+        },
+        {
+          "type": "path",
+          "id": "iA4Wh",
+          "x": 635.8707,
+          "y": 516.4449,
+          "geometry": "M0 0l192.93658 0",
+          "width": 192.9366,
+          "height": 0,
+          "stroke": "#ffffff",
+          "strokeWidth": 43.147488780487805,
+          "strokeLinecap": "round"
+        },
+        {
+          "type": "path",
+          "id": "PYwyx",
+          "x": 635.8707,
+          "y": 621.8419,
+          "geometry": "M0 0l192.93658 0",
+          "width": 192.9366,
+          "height": 0,
+          "stroke": "#ffffff",
+          "strokeWidth": 43.147488780487805,
+          "strokeLinecap": "round"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "bTOYl",
+      "x": 1224,
+      "y": -1300,
+      "name": "AppIcon B (白地・赤チェック)",
+      "clip": true,
+      "width": 1024,
+      "height": 1024,
+      "fill": "#FFFFFF",
+      "cornerRadius": 224,
+      "stroke": "$border",
+      "strokeWidth": 4,
+      "layout": "none",
+      "children": [
+        {
+          "type": "rectangle",
+          "id": "IUeCW",
+          "x": 0,
+          "y": 0,
+          "fill": "#ffffffa6",
+          "width": 1024,
+          "height": 1024
+        },
+        {
+          "type": "path",
+          "id": "t37yWY",
+          "x": 356.608,
+          "y": 53.632,
+          "geometry": "M0 0l0 916.73596",
+          "width": 0,
+          "height": 916.736,
+          "stroke": "#EBEBED",
+          "strokeWidth": 7.3142911999999995
+        },
+        {
+          "type": "path",
+          "id": "JrM6U",
+          "x": 665.984,
+          "y": 53.632,
+          "geometry": "M0 0l0 916.73596",
+          "width": 0,
+          "height": 916.736,
+          "stroke": "#EBEBED",
+          "strokeWidth": 7.3142911999999995
+        },
+        {
+          "type": "path",
+          "id": "Xt291",
+          "x": 71.04,
+          "y": 319.744,
+          "geometry": "M0 0l881.79205 0",
+          "width": 881.792,
+          "height": 0,
+          "stroke": "#EBEBED",
+          "strokeWidth": 7.3142911999999995
+        },
+        {
+          "type": "path",
+          "id": "snXSW",
+          "x": 71.04,
+          "y": 672.256,
+          "geometry": "M0 0l881.79205 0",
+          "width": 881.792,
+          "height": 0,
+          "stroke": "#EBEBED",
+          "strokeWidth": 7.3142911999999995
+        },
+        {
+          "type": "path",
+          "id": "DoeVZ",
+          "x": 190.848,
+          "y": 174.976,
+          "geometry": "M529.27997 0l-417.40798 0c-64.63999 0-111.87199 48.38402-111.87199 114.304l0 439.42403c0 65.91998 51.2 113.27997 111.87199 113.27997l417.40798 0c63.104 0 112.64001-49.27997 112.64001-114.30402l0-439.16795c0-64.76802-49.53601-113.53603-112.64001-113.53603z",
+          "width": 641.92,
+          "height": 667.008,
+          "stroke": "#E1483A",
+          "strokeWidth": 51.2
+        },
+        {
+          "type": "path",
+          "id": "gVcUy",
+          "x": 344.064,
+          "y": 390.912,
+          "geometry": "M0 104.31998l122.112 121.47204 224.51199-225.79202",
+          "width": 346.624,
+          "height": 225.792,
+          "stroke": "#E1483A",
+          "strokeWidth": 87.771392,
+          "strokeLinejoin": "round",
+          "strokeLinecap": "round"
+        }
+      ]
     }
   ],
   "themes": {
