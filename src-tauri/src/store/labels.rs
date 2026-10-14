@@ -23,6 +23,16 @@ fn same_name(a: &str, b: &str) -> bool {
 }
 
 impl ProjectStore {
+    /// The `order` for a label appended after every sheet label.
+    fn next_label_order(&self) -> u32 {
+        self.common
+            .labels
+            .iter()
+            .map(|l| l.order + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Labels from the common workbook (sheet order) followed by names that only appear on
     /// tasks (name order, default color).
     pub fn labels_union(&self) -> Vec<Label> {
@@ -35,7 +45,7 @@ impl ProjectStore {
             .collect();
         extra.sort();
         extra.dedup();
-        let base = out.iter().map(|l| l.order + 1).max().unwrap_or(0);
+        let base = self.next_label_order();
         for (i, name) in extra.into_iter().enumerate() {
             out.push(Label {
                 name,
@@ -53,7 +63,7 @@ impl ProjectStore {
             .unwrap_or_else(|| Label {
                 name: name.to_string(),
                 color: DEFAULT_COLOR.into(),
-                order: self.common.labels.len() as u32,
+                order: self.next_label_order(),
             })
     }
 
@@ -69,13 +79,7 @@ impl ProjectStore {
         let label = Label {
             name: name.to_string(),
             color: DEFAULT_COLOR.into(),
-            order: self
-                .common
-                .labels
-                .iter()
-                .map(|l| l.order + 1)
-                .max()
-                .unwrap_or(0),
+            order: self.next_label_order(),
         };
         self.common.labels.push(label.clone());
         self.common_dirty = true;
@@ -143,10 +147,16 @@ impl ProjectStore {
         {
             return Err(invalid(format!("ラベル「{new_name}」は既にあります")));
         }
+        if new_name == name {
+            return Ok((self.label_by_name(name), Vec::new()));
+        }
         self.ensure_sheet_label(name);
         let l = self.sheet_label_mut(name).expect("just ensured");
         l.name = new_name.clone();
         let label = l.clone();
+        if let Some(extra) = self.common.label_extra.remove(name) {
+            self.common.label_extra.insert(new_name.clone(), extra);
+        }
         self.common_dirty = true;
         let changed = self.edit_all_projects(|t| {
             let mut hit = false;
@@ -164,6 +174,7 @@ impl ProjectStore {
     pub fn delete_label(&mut self, name: &str) -> AppResult<Vec<String>> {
         let before = self.common.labels.len();
         self.common.labels.retain(|l| l.name != name);
+        self.common.label_extra.remove(name);
         if self.common.labels.len() != before {
             self.common_dirty = true;
         }
@@ -195,7 +206,9 @@ impl ProjectStore {
 mod tests {
     use super::super::paths::Paths;
     use super::super::project_store::ProjectStore;
+    use crate::domain::dates::business_days;
     use crate::domain::{TaskInput, TaskPatch};
+    use crate::store::common_book::read_common_book;
     use chrono::{NaiveDate, NaiveDateTime};
 
     fn clock() -> NaiveDateTime {
@@ -290,8 +303,19 @@ mod tests {
     fn reschedule_overdue_moves_only_overdue_open_top_level_and_keeps_time() {
         let (_d, mut s) = store();
         let d = |y, m, dd| NaiveDate::from_ymd_opt(y, m, dd).unwrap();
-        s.add_task("受信トレイ", input("old", &[], Some(d(2026, 10, 1))))
+        let v = s
+            .add_task("受信トレイ", input("old", &[], Some(d(2026, 10, 1))))
             .unwrap();
+        let old_no = v.tasks[0].no;
+        s.update_task(
+            "受信トレイ",
+            old_no,
+            TaskPatch {
+                start: Some(Some(d(2026, 9, 28))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let v = s
             .add_task("仕事", input("old-timed", &[], Some(d(2026, 10, 5))))
             .unwrap();
@@ -307,6 +331,14 @@ mod tests {
         .unwrap();
         s.add_task("仕事", input("today", &[], Some(d(2026, 10, 13))))
             .unwrap();
+        let v = s
+            .add_task("仕事", input("done", &[], Some(d(2026, 10, 2))))
+            .unwrap();
+        let done_no = v.tasks.iter().find(|t| t.title == "done").unwrap().no;
+        s.complete_task("仕事", done_no, true).unwrap();
+        let mut child = input("child", &[], Some(d(2026, 10, 3)));
+        child.parent_no = Some(no);
+        s.add_task("仕事", child).unwrap();
         s.save("受信トレイ").unwrap();
         s.save("仕事").unwrap();
         let changed = s
@@ -314,15 +346,21 @@ mod tests {
             .unwrap();
         assert_eq!(changed, vec!["仕事", "受信トレイ"]);
         let tasks = s.all_tasks();
-        let timed = tasks.iter().find(|t| t.title == "old-timed").unwrap();
+        let by = |title: &str| tasks.iter().find(|t| t.title == title).unwrap();
+        let timed = by("old-timed");
         assert_eq!(timed.due, Some(d(2026, 10, 14)));
         assert_eq!(
             timed.due_time.map(|t| t.format("%H:%M").to_string()),
             Some("15:00".into())
         );
+        assert_eq!(by("today").due, Some(d(2026, 10, 13)));
+        assert_eq!(by("done").due, Some(d(2026, 10, 2)));
+        assert_eq!(by("child").due, Some(d(2026, 10, 3)));
+        let old = by("old");
+        assert_eq!(old.due, Some(d(2026, 10, 14)));
         assert_eq!(
-            tasks.iter().find(|t| t.title == "today").unwrap().due,
-            Some(d(2026, 10, 13))
+            old.days,
+            Some(business_days(d(2026, 9, 28), d(2026, 10, 14), &[]))
         );
     }
 
@@ -339,5 +377,42 @@ mod tests {
             .reschedule_overdue(d(2026, 10, 13), d(2026, 10, 14))
             .unwrap();
         assert_eq!(changed, vec!["受信トレイ"]);
+    }
+
+    #[test]
+    fn rename_and_delete_label_move_extra_columns() {
+        let (_d, mut s) = store();
+        s.add_label("食品", "var(--color-success)").unwrap();
+        s.add_label("急ぎ", "var(--color-success)").unwrap();
+        s.common.label_columns = vec!["説明".to_string()];
+        for (name, text) in [("食品", "買い物"), ("急ぎ", "今日中")] {
+            s.common.label_extra.insert(
+                name.to_string(),
+                [("説明".to_string(), text.to_string())].into(),
+            );
+        }
+        s.save_common().unwrap();
+        s.rename_label("食品", "食べ物").unwrap();
+        s.delete_label("急ぎ").unwrap();
+        s.save_common().unwrap();
+        let book = read_common_book(&s.paths().common()).unwrap();
+        assert_eq!(book.label_extra["食べ物"]["説明"], "買い物");
+        assert!(!book.label_extra.contains_key("食品"));
+        assert!(!book.label_extra.contains_key("急ぎ"));
+        assert!(!s.common.label_extra.contains_key("急ぎ"));
+    }
+
+    #[test]
+    fn rename_label_to_same_name_is_a_no_op() {
+        let (_d, mut s) = store();
+        s.add_label("食品", "var(--color-success)").unwrap();
+        s.add_task("仕事", input("a", &["食品"], None)).unwrap();
+        s.save("仕事").unwrap();
+        s.save_common().unwrap();
+        let (label, changed) = s.rename_label("食品", "食品").unwrap();
+        assert_eq!(label.name, "食品");
+        assert!(changed.is_empty());
+        assert!(s.dirty_projects().is_empty());
+        assert!(!s.common_dirty());
     }
 }
