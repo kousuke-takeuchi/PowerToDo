@@ -20,7 +20,7 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Serialize;
 
 use super::common_book::{CommonBook, Settings, read_common_book, write_common_book};
-use super::external::{Fingerprint, fingerprint};
+use super::external::{Fingerprint, Verdict, fingerprint, verdict};
 use super::paths::{Paths, validate_project_name};
 use super::project_book::{
     ProjectBook, created_at_sentinel, read_project_book, write_project_book,
@@ -334,28 +334,32 @@ impl ProjectStore {
     /// does this).
     fn load_from_disk(&mut self, name: &str) -> LoadedProject {
         self.dirty.remove(name);
-        let path = match self.paths.project(name) {
-            Ok(p) => p,
-            Err(e) => return LoadedProject::Failed(e.to_string()),
-        };
+        match self.read_normalized(name) {
+            Ok((book, changed)) => {
+                if changed {
+                    self.dirty.insert(name.to_string());
+                }
+                LoadedProject::Ok(book)
+            }
+            Err(message) => LoadedProject::Failed(message),
+        }
+    }
+
+    /// The reading half of `load_from_disk`: the normalized book and whether normalization
+    /// changed anything. Leaves the store's books and dirty flags alone, so a failure can be
+    /// ignored by the caller. On success it records the file's fingerprint and raises the
+    /// high-water mark.
+    fn read_normalized(&mut self, name: &str) -> Result<(ProjectBook, bool), String> {
+        let path = self.paths.project(name).map_err(|e| e.to_string())?;
         if !path.exists() {
             if name != INBOX {
-                return LoadedProject::Failed(format!(
-                    "ファイルが見つかりません: {}",
-                    path.display()
-                ));
+                return Err(format!("ファイルが見つかりません: {}", path.display()));
             }
             let book = self.empty_book(name);
-            if let Err(e) =
-                write_project_book(&path, &book, self.now().date(), &self.common.holidays)
-            {
-                return LoadedProject::Failed(e.to_string());
-            }
+            write_project_book(&path, &book, self.now().date(), &self.common.holidays)
+                .map_err(|e| e.to_string())?;
         }
-        let mut book = match read_project_book(&path) {
-            Ok(b) => b,
-            Err(e) => return LoadedProject::Failed(e.to_string()),
-        };
+        let mut book = read_project_book(&path).map_err(|e| e.to_string())?;
         // What we just read is the state we know about.
         self.record_written(name, &path);
 
@@ -383,10 +387,7 @@ impl ProjectStore {
             let h = self.high_water.entry(name.to_string()).or_insert(0);
             *h = (*h).max(max);
         }
-        if changed {
-            self.dirty.insert(name.to_string());
-        }
-        LoadedProject::Ok(book)
+        Ok((book, changed))
     }
 
     fn empty_book(&self, name: &str) -> ProjectBook {
@@ -498,7 +499,7 @@ impl ProjectStore {
         self.common.projects.push(project.clone());
         self.books.insert(name.to_string(), LoadedProject::Ok(book));
         self.common_dirty = true;
-        let _ = self.save_common();
+        self.save_common_unless_held();
         Ok(self.summary(&project))
     }
 
@@ -561,7 +562,7 @@ impl ProjectStore {
             self.high_water.insert(new_name.to_string(), h);
         }
         self.common_dirty = true;
-        let _ = self.save_common();
+        self.save_common_unless_held();
         Ok(self.summary(&self.common.projects[idx]))
     }
 
@@ -601,7 +602,7 @@ impl ProjectStore {
         self.last_written.remove(name);
         self.held.remove(name);
         self.common_dirty = true;
-        let _ = self.save_common();
+        self.save_common_unless_held();
         Ok(())
     }
 
@@ -1124,6 +1125,83 @@ impl ProjectStore {
     }
 
     // ---- external changes (仕様 §5) ----
+
+    /// The immediate write of the common workbook after create / rename / delete. While the
+    /// common workbook is held (Excel changed it and the user has not chosen) it is not
+    /// written: the dirty flag stays and the banner's choice decides.
+    fn save_common_unless_held(&mut self) {
+        if !self.is_held(COMMON_KEY) {
+            let _ = self.save_common();
+        }
+    }
+
+    /// The file for `key` (a project name or `"_common"`) differs from what we last wrote or
+    /// read. Check this right before writing: the file may have been replaced by an external
+    /// save that the watcher has not reported yet, and writing would overwrite it. A missing
+    /// file is not a conflict (writing recreates it).
+    pub fn changed_on_disk(&self, key: &str) -> bool {
+        let path = if key == COMMON_KEY {
+            self.paths.common()
+        } else {
+            match self.paths.project(key) {
+                Ok(p) => p,
+                Err(_) => return false,
+            }
+        };
+        verdict(self.recorded(key), fingerprint(&path)) == Verdict::Changed
+    }
+
+    /// Accepts the file's current state as known without reading it, so the next write goes
+    /// through (the user chose to overwrite the external change).
+    pub fn accept_disk_state(&mut self, key: &str) {
+        let path = if key == COMMON_KEY {
+            self.paths.common()
+        } else {
+            match self.paths.project(key) {
+                Ok(p) => p,
+                Err(_) => return,
+            }
+        };
+        self.record_written(key, &path);
+    }
+
+    /// Re-reads a project after an external change. Unlike `reload_discarding`, a file that
+    /// cannot be read (Excel mid-save, a broken file) changes nothing: the old book, its
+    /// unsaved-changes flag and its fingerprint stay, and the error is returned. On success
+    /// unsaved edits are dropped (the caller decided that).
+    pub fn reload_external(&mut self, name: &str) -> AppResult<()> {
+        if !self.common.projects.iter().any(|p| p.name == name) {
+            return Err(not_found(format!("プロジェクト「{name}」がありません")));
+        }
+        let (book, changed) = self
+            .read_normalized(name)
+            .map_err(|message| AppError::Corrupt { message })?;
+        self.books.insert(name.to_string(), LoadedProject::Ok(book));
+        self.dirty.remove(name);
+        if changed {
+            self.dirty.insert(name.to_string());
+        }
+        Ok(())
+    }
+
+    /// The data folder itself is gone: every project is missing and nothing can be held.
+    pub fn mark_all_missing(&mut self) {
+        let names: Vec<String> = self.books.keys().cloned().collect();
+        for name in names {
+            self.mark_missing(&name);
+        }
+        self.held.clear();
+    }
+
+    /// `path` is the file of a listed project, reached under another spelling (the case of the
+    /// name after a case-only rename, a different Unicode normalization). Not a new file.
+    pub fn is_listed_project_file(&self, path: &Path) -> bool {
+        self.common.projects.iter().any(|p| {
+            self.paths
+                .project(&p.name)
+                .is_ok_and(|listed| same_file(&listed, path))
+        })
+    }
 
     /// Remembers the file's current size and modification time as "our" state. Call right after
     /// writing or reading a workbook (`key` is the project name or `"_common"`). A file that
