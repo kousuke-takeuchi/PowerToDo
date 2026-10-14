@@ -29,7 +29,7 @@ use crate::domain::ids::next_no;
 use crate::domain::{INBOX, InvalidRow, Label, Project, Section, Task, TaskInput, TaskPatch};
 use crate::error::{AppError, AppResult};
 
-const DEFAULT_COLOR: &str = "var(--color-text-muted)";
+pub(super) const DEFAULT_COLOR: &str = "var(--color-text-muted)";
 
 #[derive(Debug, Clone)]
 pub enum LoadedProject {
@@ -64,10 +64,10 @@ pub struct ProjectView {
 
 pub struct ProjectStore {
     paths: Paths,
-    common: CommonBook,
-    books: BTreeMap<String, LoadedProject>,
-    dirty: BTreeSet<String>,
-    common_dirty: bool,
+    pub(super) common: CommonBook,
+    pub(super) books: BTreeMap<String, LoadedProject>,
+    pub(super) dirty: BTreeSet<String>,
+    pub(super) common_dirty: bool,
     high_water: BTreeMap<String, u32>,
     clock: Box<dyn Fn() -> NaiveDateTime + Send>,
 }
@@ -79,7 +79,7 @@ struct Ctx {
     high_water: u32,
 }
 
-fn invalid(message: impl Into<String>) -> AppError {
+pub(super) fn invalid(message: impl Into<String>) -> AppError {
     AppError::Invalid {
         message: message.into(),
     }
@@ -117,7 +117,7 @@ fn normalize_due(t: &mut Task) {
     }
 }
 
-fn recompute_days(book: &mut ProjectBook, holidays: &[NaiveDate]) {
+pub(super) fn recompute_days(book: &mut ProjectBook, holidays: &[NaiveDate]) {
     for t in &mut book.tasks {
         t.days = match (t.start, t.due) {
             (Some(s), Some(d)) => Some(business_days(s, d, holidays)),
@@ -1030,6 +1030,27 @@ impl ProjectStore {
         let mut labels = self.common.labels.clone();
         labels.sort_by(|a, b| (a.order, &a.name).cmp(&(b.order, &b.name)));
         labels
+    }
+
+    /// Tasks of every project that loaded, in project order (仕様 §2). Failed projects are left out.
+    pub fn all_tasks(&self) -> Vec<Task> {
+        self.summaries()
+            .iter()
+            .filter_map(|p| match self.books.get(&p.name) {
+                Some(LoadedProject::Ok(b)) => Some(b.tasks.iter().cloned()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Names of the projects whose workbook loaded, in project order.
+    pub fn loaded_names(&self) -> Vec<String> {
+        self.summaries()
+            .into_iter()
+            .filter(|p| p.load_error.is_none())
+            .map(|p| p.name)
+            .collect()
     }
 
     // ---- saving ----
