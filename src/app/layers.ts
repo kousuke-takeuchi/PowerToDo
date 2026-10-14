@@ -11,24 +11,44 @@ import { isImeKey } from "./keys";
  */
 type Layer = { close: () => void };
 const stack: Layer[] = [];
+/** Called on Esc when no layer is open (clears the keyboard row focus). See `setEscFallback`. */
+let fallback: (() => void) | null = null;
+let listening = false;
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.key !== "Escape" || isImeKey(e)) return;
   const top = stack[stack.length - 1];
-  if (!top) return;
+  if (!top) {
+    fallback?.();
+    return;
+  }
   e.preventDefault();
   top.close();
+}
+
+/** The listener is registered while there is a layer or a fallback. */
+function syncListener() {
+  const want = stack.length > 0 || fallback !== null;
+  if (want && !listening) window.addEventListener("keydown", onKeyDown);
+  else if (!want && listening) window.removeEventListener("keydown", onKeyDown);
+  listening = want;
+}
+
+/** Sets what Esc does when no layer is open (`null` removes it). */
+export function setEscFallback(fn: (() => void) | null): void {
+  fallback = fn;
+  syncListener();
 }
 
 /** Registers `close` as the new topmost layer. Call the returned function to remove it. */
 export function pushLayer(close: () => void): () => void {
   const layer: Layer = { close };
-  if (stack.length === 0) window.addEventListener("keydown", onKeyDown);
   stack.push(layer);
+  syncListener();
   return () => {
     const i = stack.indexOf(layer);
     if (i >= 0) stack.splice(i, 1);
-    if (stack.length === 0) window.removeEventListener("keydown", onKeyDown);
+    syncListener();
   };
 }
 

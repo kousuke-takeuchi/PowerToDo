@@ -29,6 +29,8 @@ tauri-plugin-dialog = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time"] }
+unicode-normalization = "0.1"
+notify = "8.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

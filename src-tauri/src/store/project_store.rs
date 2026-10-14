@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Serialize;
 
-use super::common_book::{CommonBook, Settings, read_common_book, write_common_book};
+use super::common_book::{COMMON_FILE, CommonBook, Settings, read_common_book, write_common_book};
+use super::external::{Fingerprint, Verdict, fingerprint, verdict};
 use super::paths::{Paths, validate_project_name};
 use super::project_book::{
     ProjectBook, created_at_sentinel, read_project_book, write_project_book,
@@ -29,7 +30,7 @@ use crate::domain::ids::next_no;
 use crate::domain::{INBOX, InvalidRow, Label, Project, Section, Task, TaskInput, TaskPatch};
 use crate::error::{AppError, AppResult};
 
-const DEFAULT_COLOR: &str = "var(--color-text-muted)";
+pub(super) const DEFAULT_COLOR: &str = "var(--color-text-muted)";
 
 #[derive(Debug, Clone)]
 pub enum LoadedProject {
@@ -64,13 +65,22 @@ pub struct ProjectView {
 
 pub struct ProjectStore {
     paths: Paths,
-    common: CommonBook,
-    books: BTreeMap<String, LoadedProject>,
-    dirty: BTreeSet<String>,
-    common_dirty: bool,
+    pub(super) common: CommonBook,
+    pub(super) books: BTreeMap<String, LoadedProject>,
+    pub(super) dirty: BTreeSet<String>,
+    pub(super) common_dirty: bool,
     high_water: BTreeMap<String, u32>,
+    /// What each workbook looked like on disk right after we last wrote or read it, keyed by
+    /// project name or `"_common"`. A watcher event whose file still matches is our own write.
+    last_written: BTreeMap<String, Fingerprint>,
+    /// Projects (or `"_common"`) whose file changed on disk while they had unsaved edits. Not
+    /// written until the user chooses to reload or overwrite.
+    held: BTreeSet<String>,
     clock: Box<dyn Fn() -> NaiveDateTime + Send>,
 }
+
+/// Key of the common workbook in `last_written` / `held` (same as the saver's key).
+const COMMON_KEY: &str = "_common";
 
 /// Values a mutation needs besides the book itself.
 struct Ctx {
@@ -79,7 +89,7 @@ struct Ctx {
     high_water: u32,
 }
 
-fn invalid(message: impl Into<String>) -> AppError {
+pub(super) fn invalid(message: impl Into<String>) -> AppError {
     AppError::Invalid {
         message: message.into(),
     }
@@ -117,7 +127,7 @@ fn normalize_due(t: &mut Task) {
     }
 }
 
-fn recompute_days(book: &mut ProjectBook, holidays: &[NaiveDate]) {
+pub(super) fn recompute_days(book: &mut ProjectBook, holidays: &[NaiveDate]) {
     for t in &mut book.tasks {
         t.days = match (t.start, t.due) {
             (Some(s), Some(d)) => Some(business_days(s, d, holidays)),
@@ -186,7 +196,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// Files that are not project workbooks: Excel lock files (`~$`), our temp files (`.`), and
 /// the common workbook / other reserved names (`_`).
-fn adoptable_stem(path: &Path) -> Option<String> {
+pub(super) fn adoptable_stem(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     if !ext.eq_ignore_ascii_case("xlsx") {
         return None;
@@ -233,8 +243,13 @@ impl ProjectStore {
             dirty: BTreeSet::new(),
             common_dirty: is_new,
             high_water: BTreeMap::new(),
+            last_written: BTreeMap::new(),
+            held: BTreeSet::new(),
             clock: Box::new(clock),
         };
+        if !is_new {
+            store.record_written(COMMON_KEY, &common_path);
+        }
 
         if !store.common.projects.iter().any(|p| p.name == INBOX) {
             store.common.projects.insert(
@@ -319,28 +334,34 @@ impl ProjectStore {
     /// does this).
     fn load_from_disk(&mut self, name: &str) -> LoadedProject {
         self.dirty.remove(name);
-        let path = match self.paths.project(name) {
-            Ok(p) => p,
-            Err(e) => return LoadedProject::Failed(e.to_string()),
-        };
+        match self.read_normalized(name) {
+            Ok((book, changed)) => {
+                if changed {
+                    self.dirty.insert(name.to_string());
+                }
+                LoadedProject::Ok(book)
+            }
+            Err(message) => LoadedProject::Failed(message),
+        }
+    }
+
+    /// The reading half of `load_from_disk`: the normalized book and whether normalization
+    /// changed anything. Leaves the store's books and dirty flags alone, so a failure can be
+    /// ignored by the caller. On success it records the file's fingerprint and raises the
+    /// high-water mark.
+    fn read_normalized(&mut self, name: &str) -> Result<(ProjectBook, bool), String> {
+        let path = self.paths.project(name).map_err(|e| e.to_string())?;
         if !path.exists() {
             if name != INBOX {
-                return LoadedProject::Failed(format!(
-                    "ファイルが見つかりません: {}",
-                    path.display()
-                ));
+                return Err(format!("ファイルが見つかりません: {}", path.display()));
             }
             let book = self.empty_book(name);
-            if let Err(e) =
-                write_project_book(&path, &book, self.now().date(), &self.common.holidays)
-            {
-                return LoadedProject::Failed(e.to_string());
-            }
+            write_project_book(&path, &book, self.now().date(), &self.common.holidays)
+                .map_err(|e| e.to_string())?;
         }
-        let mut book = match read_project_book(&path) {
-            Ok(b) => b,
-            Err(e) => return LoadedProject::Failed(e.to_string()),
-        };
+        let mut book = read_project_book(&path).map_err(|e| e.to_string())?;
+        // What we just read is the state we know about.
+        self.record_written(name, &path);
 
         let now = self.now();
         let mut changed = book.project != name;
@@ -366,10 +387,7 @@ impl ProjectStore {
             let h = self.high_water.entry(name.to_string()).or_insert(0);
             *h = (*h).max(max);
         }
-        if changed {
-            self.dirty.insert(name.to_string());
-        }
-        LoadedProject::Ok(book)
+        Ok((book, changed))
     }
 
     fn empty_book(&self, name: &str) -> ProjectBook {
@@ -469,6 +487,7 @@ impl ProjectStore {
         }
         let book = self.empty_book(name);
         write_project_book(&path, &book, self.now().date(), &self.common.holidays)?;
+        self.record_written(name, &path);
 
         let project = Project {
             name: name.to_string(),
@@ -480,7 +499,7 @@ impl ProjectStore {
         self.common.projects.push(project.clone());
         self.books.insert(name.to_string(), LoadedProject::Ok(book));
         self.common_dirty = true;
-        let _ = self.save_common();
+        self.save_common_unless_held();
         Ok(self.summary(&project))
     }
 
@@ -511,6 +530,12 @@ impl ProjectStore {
         if old_path.exists() {
             std::fs::rename(&old_path, &new_path)?;
         }
+        // The renamed file is the same file: carry over what we know about it.
+        self.last_written.remove(name);
+        self.record_written(new_name, &new_path);
+        if self.held.remove(name) {
+            self.held.insert(new_name.to_string());
+        }
 
         self.common.projects[idx].name = new_name.to_string();
         if let Some(extra) = self.common.project_extra.remove(name) {
@@ -537,7 +562,7 @@ impl ProjectStore {
             self.high_water.insert(new_name.to_string(), h);
         }
         self.common_dirty = true;
-        let _ = self.save_common();
+        self.save_common_unless_held();
         Ok(self.summary(&self.common.projects[idx]))
     }
 
@@ -574,8 +599,10 @@ impl ProjectStore {
         self.books.remove(name);
         self.dirty.remove(name);
         self.high_water.remove(name);
+        self.last_written.remove(name);
+        self.held.remove(name);
         self.common_dirty = true;
-        let _ = self.save_common();
+        self.save_common_unless_held();
         Ok(())
     }
 
@@ -1032,6 +1059,27 @@ impl ProjectStore {
         labels
     }
 
+    /// Tasks of every project that loaded, in project order (仕様 §2). Failed projects are left out.
+    pub fn all_tasks(&self) -> Vec<Task> {
+        self.summaries()
+            .iter()
+            .filter_map(|p| match self.books.get(&p.name) {
+                Some(LoadedProject::Ok(b)) => Some(b.tasks.iter().cloned()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Names of the projects whose workbook loaded, in project order.
+    pub fn loaded_names(&self) -> Vec<String> {
+        self.summaries()
+            .into_iter()
+            .filter(|p| p.load_error.is_none())
+            .map(|p| p.name)
+            .collect()
+    }
+
     // ---- saving ----
 
     pub fn dirty_projects(&self) -> Vec<String> {
@@ -1055,6 +1103,7 @@ impl ProjectStore {
             Some(LoadedProject::Failed(m)) => return Err(load_failed(name, m)),
             None => return Err(not_found(format!("プロジェクト「{name}」がありません"))),
         }
+        self.record_written(name, &path);
         self.dirty.remove(name);
         // Invalid rows are written after the valid tasks, so their row numbers moved.
         if let Ok(fresh) = read_project_book(&path)
@@ -1068,8 +1117,265 @@ impl ProjectStore {
     }
 
     pub fn save_common(&mut self) -> AppResult<()> {
-        write_common_book(&self.paths.common(), &self.common)?;
+        let path = self.paths.common();
+        write_common_book(&path, &self.common)?;
+        self.record_written(COMMON_KEY, &path);
         self.common_dirty = false;
+        Ok(())
+    }
+
+    // ---- external changes (仕様 §5) ----
+
+    /// The immediate write of the common workbook after create / rename / delete. While the
+    /// common workbook is held (Excel changed it and the user has not chosen) it is not
+    /// written: the dirty flag stays and the banner's choice decides. When the file changed on
+    /// disk since we last wrote or read it (an external save the watcher has not reported yet),
+    /// it is not written either but held, like `TauriSink::save` does; the caller sees the new
+    /// hold through `is_held("_common")` and tells the UI.
+    fn save_common_unless_held(&mut self) {
+        if self.is_held(COMMON_KEY) {
+            return;
+        }
+        if self.changed_on_disk(COMMON_KEY) {
+            self.hold(COMMON_KEY);
+            return;
+        }
+        let _ = self.save_common();
+    }
+
+    /// Keys (project names and `"_common"`) whose in-memory edits cannot be written to their own
+    /// file on quit: held ones, and dirty ones whose file changed on disk since our last write
+    /// or read. `write_recovery_copy` keeps them.
+    pub fn unsavable_keys(&self) -> Vec<String> {
+        let mut keys: BTreeSet<String> = self.held.clone();
+        if self.common_dirty && self.changed_on_disk(COMMON_KEY) {
+            keys.insert(COMMON_KEY.to_string());
+        }
+        for name in &self.dirty {
+            if self.changed_on_disk(name) {
+                keys.insert(name.clone());
+            }
+        }
+        keys.into_iter().collect()
+    }
+
+    /// Writes the in-memory workbook of `key` (a project name or `"_common"`) to
+    /// `archive/<name> (未保存 YYYYMMDD-HHMM).xlsx` (`archive/_PowerToDo (未保存 …).xlsx` for the
+    /// common workbook; `-2`, `-3`, … when the name is taken) and returns its path. Used on quit
+    /// for edits that cannot go to their own file without overwriting an external change: the
+    /// file is left as it is and the edits are kept next to it. Nothing in the store changes.
+    pub fn write_recovery_copy(&self, key: &str, now: NaiveDateTime) -> AppResult<PathBuf> {
+        let stem = if key == COMMON_KEY {
+            COMMON_FILE.trim_end_matches(".xlsx").to_string()
+        } else {
+            validate_project_name(key)?;
+            match self.books.get(key) {
+                Some(LoadedProject::Ok(_)) => {}
+                Some(LoadedProject::Failed(m)) => return Err(load_failed(key, m)),
+                None => return Err(not_found(format!("プロジェクト「{key}」がありません"))),
+            }
+            key.to_string()
+        };
+        let dir = self.paths.archive_dir();
+        std::fs::create_dir_all(&dir)?;
+        let stamp = now.format("%Y%m%d-%H%M").to_string();
+        let mut dest = dir.join(format!("{stem} (未保存 {stamp}).xlsx"));
+        let mut n = 2;
+        while dest.exists() {
+            dest = dir.join(format!("{stem} (未保存 {stamp}-{n}).xlsx"));
+            n += 1;
+        }
+        // Both writers go through a temp file in `archive/` and rename it into place.
+        if key == COMMON_KEY {
+            write_common_book(&dest, &self.common)?;
+        } else if let Some(LoadedProject::Ok(book)) = self.books.get(key) {
+            write_project_book(&dest, book, now.date(), &self.common.holidays)?;
+        }
+        Ok(dest)
+    }
+
+    /// The file for `key` (a project name or `"_common"`) differs from what we last wrote or
+    /// read. Check this right before writing: the file may have been replaced by an external
+    /// save that the watcher has not reported yet, and writing would overwrite it. A missing
+    /// file is not a conflict (writing recreates it).
+    pub fn changed_on_disk(&self, key: &str) -> bool {
+        let path = if key == COMMON_KEY {
+            self.paths.common()
+        } else {
+            match self.paths.project(key) {
+                Ok(p) => p,
+                Err(_) => return false,
+            }
+        };
+        verdict(self.recorded(key), fingerprint(&path)) == Verdict::Changed
+    }
+
+    /// Accepts the file's current state as known without reading it, so the next write goes
+    /// through (the user chose to overwrite the external change).
+    pub fn accept_disk_state(&mut self, key: &str) {
+        let path = if key == COMMON_KEY {
+            self.paths.common()
+        } else {
+            match self.paths.project(key) {
+                Ok(p) => p,
+                Err(_) => return,
+            }
+        };
+        self.record_written(key, &path);
+    }
+
+    /// Re-reads a project after an external change. Unlike `reload_discarding`, a file that
+    /// cannot be read (Excel mid-save, a broken file) changes nothing: the old book, its
+    /// unsaved-changes flag and its fingerprint stay, and the error is returned. On success
+    /// unsaved edits are dropped (the caller decided that).
+    pub fn reload_external(&mut self, name: &str) -> AppResult<()> {
+        if !self.common.projects.iter().any(|p| p.name == name) {
+            return Err(not_found(format!("プロジェクト「{name}」がありません")));
+        }
+        let (book, changed) = self
+            .read_normalized(name)
+            .map_err(|message| AppError::Corrupt { message })?;
+        self.books.insert(name.to_string(), LoadedProject::Ok(book));
+        self.dirty.remove(name);
+        if changed {
+            self.dirty.insert(name.to_string());
+        }
+        Ok(())
+    }
+
+    /// The data folder itself is gone: every project is missing and nothing can be held.
+    pub fn mark_all_missing(&mut self) {
+        let names: Vec<String> = self.books.keys().cloned().collect();
+        for name in names {
+            self.mark_missing(&name);
+        }
+        self.held.clear();
+    }
+
+    /// `path` is the file of a listed project, reached under another spelling (the case of the
+    /// name after a case-only rename, a different Unicode normalization). Not a new file.
+    pub fn is_listed_project_file(&self, path: &Path) -> bool {
+        self.common.projects.iter().any(|p| {
+            self.paths
+                .project(&p.name)
+                .is_ok_and(|listed| same_file(&listed, path))
+        })
+    }
+
+    /// Remembers the file's current size and modification time as "our" state. Call right after
+    /// writing or reading a workbook (`key` is the project name or `"_common"`). A file that
+    /// cannot be inspected clears the record.
+    pub fn record_written(&mut self, key: &str, path: &Path) {
+        match fingerprint(path) {
+            Some(f) => {
+                self.last_written.insert(key.to_string(), f);
+            }
+            None => {
+                self.last_written.remove(key);
+            }
+        }
+    }
+
+    pub fn recorded(&self, key: &str) -> Option<&Fingerprint> {
+        self.last_written.get(key)
+    }
+
+    pub fn is_held(&self, name: &str) -> bool {
+        self.held.contains(name)
+    }
+
+    pub fn hold(&mut self, name: &str) {
+        self.held.insert(name.to_string());
+    }
+
+    pub fn release(&mut self, name: &str) {
+        self.held.remove(name);
+    }
+
+    pub fn held_projects(&self) -> Vec<String> {
+        self.held.iter().cloned().collect()
+    }
+
+    /// The file disappeared under us (deleted, or moved away by hand). Unsaved edits are
+    /// dropped with it; the project shows as failed to load until the file comes back.
+    pub fn mark_missing(&mut self, name: &str) {
+        if self.books.contains_key(name) {
+            self.dirty.remove(name);
+            self.held.remove(name);
+            self.last_written.remove(name);
+            self.books.insert(
+                name.to_string(),
+                LoadedProject::Failed("ファイルが見つかりません".into()),
+            );
+        }
+    }
+
+    /// A new `<name>.xlsx` appeared: list it in the common workbook (which becomes dirty) and
+    /// load it.
+    pub fn adopt_new_file(&mut self, name: &str) -> AppResult<ProjectSummary> {
+        if !self.common.projects.iter().any(|p| p.name == name) {
+            let order = self.next_project_order();
+            self.common.projects.push(Project {
+                name: name.into(),
+                color: DEFAULT_COLOR.into(),
+                order,
+                favorite: false,
+                inbox: false,
+            });
+            self.common_dirty = true;
+        }
+        let loaded = self.load_from_disk(name);
+        self.books.insert(name.to_string(), loaded);
+        let p = self
+            .common
+            .projects
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+            .expect("listed above");
+        Ok(self.summary(&p))
+    }
+
+    /// Re-reads the common workbook (labels, colors, holidays, settings), discarding unsaved
+    /// edits to it. Projects loaded here but no longer listed in the file are kept and
+    /// re-listed (so the common workbook comes back dirty); `.xlsx` files that are listed or
+    /// new but not loaded yet are loaded. The common workbook is clean afterwards unless that
+    /// re-listing happened.
+    pub fn reload_common(&mut self) -> AppResult<()> {
+        let path = self.paths.common();
+        let fresh = read_common_book(&path)?;
+        let unlisted: Vec<Project> = self
+            .common
+            .projects
+            .iter()
+            .filter(|p| !fresh.projects.iter().any(|f| f.name == p.name))
+            .cloned()
+            .collect();
+        self.common = fresh;
+        self.common_dirty = false;
+        self.record_written(COMMON_KEY, &path);
+        if !unlisted.is_empty() {
+            self.common.projects.extend(unlisted);
+            self.common_dirty = true;
+        }
+        self.adopt_unlisted();
+        let to_load: Vec<String> = self
+            .common
+            .projects
+            .iter()
+            .map(|p| p.name.clone())
+            .filter(|n| !self.books.contains_key(n))
+            .collect();
+        for name in to_load {
+            let loaded = self.load_from_disk(&name);
+            self.books.insert(name, loaded);
+        }
+        let holidays = self.common.holidays.clone();
+        for b in self.books.values_mut() {
+            if let LoadedProject::Ok(book) = b {
+                recompute_days(book, &holidays);
+            }
+        }
         Ok(())
     }
 }
@@ -1259,7 +1565,12 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
 
         let err = e.store.save("仕事").unwrap_err();
-        assert!(matches!(err, AppError::Io { .. }), "{err:?}");
+        // Unix reports the rename over a directory as a plain I/O error; Windows returns
+        // ERROR_ACCESS_DENIED (os error 5), which maps to `Locked`. Either way the save fails.
+        assert!(
+            matches!(err, AppError::Io { .. } | AppError::Locked { .. }),
+            "{err:?}"
+        );
         assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
         assert_eq!(nos(&e.store.view("仕事").unwrap()), vec![1]);
 
@@ -1304,6 +1615,68 @@ mod tests {
         e.store.delete_project("仕事").unwrap();
         let n = std::fs::read_dir(e.data().join("archive")).unwrap().count();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn held_edits_are_kept_in_a_recovery_copy() {
+        use crate::store::common_book::read_common_book;
+
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.save("仕事").unwrap();
+        e.store.add_task("仕事", input("未保存の作業")).unwrap();
+        e.store.hold("仕事");
+        assert_eq!(e.store.unsavable_keys(), vec!["仕事".to_string()]);
+
+        let now = dt("2026-10-14T18:05");
+        let path = e.store.write_recovery_copy("仕事", now).unwrap();
+        assert_eq!(
+            path,
+            e.data()
+                .join("archive")
+                .join("仕事 (未保存 20261014-1805).xlsx")
+        );
+        let copy = read_project_book(&path).unwrap();
+        assert_eq!(copy.tasks.len(), 1);
+        assert_eq!(copy.tasks[0].title, "未保存の作業");
+        // The project's own file is untouched and the store still holds the edits.
+        assert!(
+            read_project_book(&e.data().join("仕事.xlsx"))
+                .unwrap()
+                .tasks
+                .is_empty()
+        );
+        assert!(e.store.is_held("仕事"));
+        assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
+
+        // Same minute again: a second copy, not an overwrite.
+        let again = e.store.write_recovery_copy("仕事", now).unwrap();
+        assert_eq!(
+            again,
+            e.data()
+                .join("archive")
+                .join("仕事 (未保存 20261014-1805-2).xlsx")
+        );
+
+        // The common workbook is copied under the common file's name.
+        let mut settings = e.store.settings();
+        settings.display_name = "回復".into();
+        e.store.update_settings(settings).unwrap();
+        let common = e.store.write_recovery_copy("_common", now).unwrap();
+        assert_eq!(
+            common,
+            e.data()
+                .join("archive")
+                .join("_PowerToDo (未保存 20261014-1805).xlsx")
+        );
+        assert_eq!(
+            read_common_book(&common).unwrap().settings.display_name,
+            "回復"
+        );
+        assert!(matches!(
+            e.store.write_recovery_copy("無い", now),
+            Err(AppError::NotFound { .. })
+        ));
     }
 
     #[test]
@@ -1845,7 +2218,12 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
 
         let err = e.store.delete_project("仕事").unwrap_err();
-        assert!(matches!(err, AppError::Io { .. }), "{err:?}");
+        // Unix reports the rename over a directory as a plain I/O error; Windows returns
+        // ERROR_ACCESS_DENIED (os error 5), which maps to `Locked`. Either way the save fails.
+        assert!(
+            matches!(err, AppError::Io { .. } | AppError::Locked { .. }),
+            "{err:?}"
+        );
         assert!(e.store.summaries().iter().any(|s| s.name == "仕事"));
         assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
         assert_eq!(nos(&e.store.view("仕事").unwrap()), vec![1]);

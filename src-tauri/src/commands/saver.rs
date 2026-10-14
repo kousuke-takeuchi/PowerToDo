@@ -99,6 +99,21 @@ impl Saver {
         run(sink.as_ref(), key, self.retry_gap).await
     }
 
+    /// Drops the pending timer for `key` (nothing is written until something schedules it
+    /// again). Safe to call from any thread.
+    pub fn cancel(&self, key: &str) {
+        if let Some(handle) = self.lock_pending().remove(key) {
+            handle.abort();
+        }
+    }
+
+    /// A save for `key` is waiting for its timer or running right now.
+    pub fn is_pending(&self, key: &str) -> bool {
+        self.lock_pending()
+            .get(key)
+            .is_some_and(|h| !h.is_finished())
+    }
+
     /// Drops every pending timer (used before the store is replaced or flushed).
     pub fn cancel_all(&self) {
         for (_, handle) in self.lock_pending().drain() {
@@ -220,6 +235,25 @@ mod tests {
                 ("p".into(), SaveState::Saved),
             ]
         );
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn cancel_drops_only_that_keys_pending_save() {
+        let saver = Saver::with_debounce(MS(1000));
+        let sink = FakeSink::new(0);
+        saver.schedule_with(sink.clone(), "a".into());
+        saver.schedule_with(sink.clone(), "b".into());
+        assert!(saver.is_pending("a") && saver.is_pending("b"));
+        saver.cancel("a");
+        assert!(!saver.is_pending("a"));
+        assert!(saver.is_pending("b"));
+        tokio::time::sleep(MS(1100)).await;
+        assert_eq!(sink.calls(), 1);
+        assert!(!saver.is_pending("b"), "a finished save is not pending");
+        // Nothing comes back on its own.
+        tokio::time::sleep(MS(5000)).await;
+        assert_eq!(sink.calls(), 1);
+        saver.cancel("never-scheduled");
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]

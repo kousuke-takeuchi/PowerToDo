@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage, isAppError } from "../api/client";
-import { onProjectChanged, onSaveStatus } from "../api/events";
+import { onProjectChanged, onProjectsChanged, onSaveStatus } from "../api/events";
 import type { ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
 
 export type UseProjectOptions = {
@@ -74,6 +74,9 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
 
   // `project-changed` (a change that did not come through this hook): re-read the in-memory state.
   useEffect(() => onProjectChanged((n) => n === name && void load(() => api.getProject(name), true)), [name, load]);
+
+  // `projects-changed` (the project list changed as a whole; this project may be gone): re-read.
+  useEffect(() => onProjectsChanged(() => void load(() => api.getProject(name), true)), [name, load]);
 
   // A save finished: the file's row numbers (invalid rows) may have changed with it, so re-read the in-memory view.
   useEffect(

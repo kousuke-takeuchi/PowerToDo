@@ -1,25 +1,39 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmAction, confirmDiscard } from "../api/dialogs";
+import { onProjectChanged, onProjectsChanged, onWatchFailed } from "../api/events";
 import type { Counts } from "../mock/data";
-import type { AppStateDto, ProjectSummary, QuickAddResult } from "../types/model";
+import type { AppStateDto, CountsDto, LabelsDto, LabelViewDto, ProjectSummary, QuickAddResult, Task, TodayViewDto, UpcomingDto } from "../types/model";
 import { Collapse, useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
-import { EmptyState } from "../views/EmptyState";
+import { ExternalChangeBanner } from "../views/ExternalChangeBanner";
 import { FixBanner } from "../views/FixBanner";
 import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
+import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
+import { taskKey } from "../views/crossList";
+import type { ExpandApi } from "../views/ProjectView";
+import { LabelDetailView } from "../views/LabelDetailView";
+import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
+import { TodayView } from "../views/TodayView";
+import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
-import { isImeKey } from "./keys";
-import { useEscLayer } from "./layers";
+import { addDays } from "./dates";
+import { setEscFallback, useEscLayer } from "./layers";
 import { spansToTokens } from "./quickAddTokens";
 import { NoticeBanner, SaveBanner } from "./SaveBanner";
+import type { RowHandlers } from "./shortcuts";
+import { useShortcuts } from "./shortcuts";
+import { useCrossActions, useCrossView } from "./useCrossView";
+import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useProject } from "./useProject";
+import { useRowFocus } from "./useRowFocus";
+import { useSearch } from "./useSearch";
 import { useSaveErrors } from "./useSaveStatus";
 import { useSettingsPanes } from "./useSettingsPanes";
 
@@ -28,7 +42,7 @@ type Flash = { text: string; tone: "error" | "info" };
 type QuickAddState = { open: boolean; text: string; busy: boolean; error?: string; parsed?: { text: string; result: QuickAddResult } };
 
 const QA_CLOSED: QuickAddState = { open: false, text: "", busy: false };
-/** 新しいプロジェクトの色は順番に割り当てる (色の選択 UI は Phase 1 では出さない)。 */
+/** 新しいプロジェクトの色は順番に割り当てる。ラベルの「色」メニューの候補も同じ (新しいラベルは既定色、仕様 §3.3)。 */
 const PALETTE = [
   "var(--color-priority-3)",
   "var(--color-success)",
@@ -36,7 +50,6 @@ const PALETTE = [
   "var(--color-priority-4)",
   "var(--color-priority-1)",
 ];
-const PHASE2_TITLE: Record<string, string> = { today: "今日", upcoming: "近日", labels: "フィルターとラベル" };
 
 /** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
 export function Main({ app }: { app: AppStateDto }) {
@@ -52,14 +65,36 @@ export function Main({ app }: { app: AppStateDto }) {
   const [flash, setFlash] = useState<Flash | null>(null);
   const [qa, setQa] = useState<QuickAddState>(QA_CLOSED);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // キーボードのフォーカス行: 画面に出ている行のキー (表示順) は各ビューが知らせる。ナビゲーションで外れる。
+  const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
+  const reportKeys = useCallback(
+    (keys: string[]) => setVisibleKeys((prev) => (prev.length === keys.length && prev.every((k, i) => k === keys[i]) ? prev : keys)),
+    [],
+  );
+  const focus = useRowFocus(visibleKeys);
+  const clearFocus = focus.clear;
+  const expandApi = useRef<ExpandApi | null>(null);
+  const search = useSearch(searchOpen);
+  const [searchSel, setSearchSel] = useState(0);
+  // 選択位置: 開くとき / 検索条件が変わったときは先頭、結果が入れ替わっただけ (チェック後の再取得) なら範囲内に収める。
+  useEffect(() => {
+    if (searchOpen) setSearchSel(0);
+  }, [searchOpen]);
+  useEffect(() => setSearchSel((s) => Math.min(s, Math.max(search.hits.length - 1, 0))), [search.hits]);
+
+  // サイドバーの「今日」の件数 (期限が今日以前の未完了。project-changed / 保存完了でも更新される)。
+  const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
+  const refreshCounts = countsData.refresh;
 
   const refreshSummaries = useCallback(async () => {
+    refreshCounts();
     try {
       setSummaries(await api.listProjects());
     } catch {
       // サイドバーの件数が古いままになるだけ。次の操作でまた更新する。
     }
-  }, []);
+  }, [refreshCounts]);
 
   const loadDisplayName = useCallback(() => {
     api
@@ -73,18 +108,89 @@ export function Main({ app }: { app: AppStateDto }) {
     loadDisplayName();
   }, [refreshSummaries, loadDisplayName]);
 
-  const placeholder = nav.kind === "today" || nav.kind === "upcoming" || nav.kind === "labels";
+  // 受信トレイ / プロジェクトの画面だけがタスク詳細・要修正の帯を持つ。今日 / 近日 / ラベル詳細 / フィルターとラベルは
+  // 横断ビュー (useProject は受信トレイを読み続ける)。
+  const projectScreen = nav.kind === "inbox" || nav.kind === "project";
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
   const p = useProject(current, { onMutated: refreshSummaries });
   const view = p.view;
   const { reduced, t } = useMotionTiming();
 
   const showError = useCallback((e: unknown) => setFlash({ text: errorMessage(e), tone: "error" }), []);
-  const navigate = useCallback((target: Nav) => {
-    setNav(target);
-    setOpenNo(null);
-    setDrawer(false);
-  }, []);
+  const ext = useExternalChanges(showError);
+  const readFailures = useExternalReadFailures();
+
+  // Excel など外での変更の取り込み / ファイル構成の変化 / 監視の失敗 (バックエンドのイベント)。
+  useEffect(
+    () =>
+      onProjectChanged((name, reason) => {
+        if (reason === "external") setFlash({ text: `「${name}」の Excel での変更を取り込みました`, tone: "info" });
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      onProjectsChanged(() => {
+        void refreshSummaries();
+        loadDisplayName();
+      }),
+    [refreshSummaries, loadDisplayName],
+  );
+  // 監視の失敗は app_state / set_data_dir の中で起きる (この画面がイベントを聞く前) ので、起動時は DTO の watchError で出す。
+  // あとからの失敗 (データフォルダの変更) はイベントで受ける。
+  const watchFailed = useCallback(
+    (m: string) => setFlash({ text: `ファイルの変更監視を開始できません (${m})。Excel で直した内容は再読み込みで取り込めます`, tone: "error" }),
+    [],
+  );
+  useEffect(() => {
+    if (app.watchError) watchFailed(app.watchError);
+  }, [app.watchError, watchFailed]);
+  useEffect(() => onWatchFailed(watchFailed), [watchFailed]);
+  const navigate = useCallback(
+    (target: Nav) => {
+      setNav(target);
+      setOpenNo(null);
+      setDrawer(false);
+      clearFocus();
+    },
+    [clearFocus],
+  );
+  const failed = summaries.filter((s) => s.loadError).map((s) => s.name);
+
+  // ---- 横断ビュー (今日 / 近日 / ラベル詳細): 表示中のビューだけ取得する ----
+  const inactive = () => Promise.resolve(null);
+  const todayData = useCrossView<TodayViewDto | null>(nav.kind === "today" ? () => api.todayView(today) : inactive, [nav.kind === "today", today]);
+  const [upFrom, setUpFrom] = useState(today);
+  const [upDays, setUpDays] = useState(7);
+  useEffect(() => {
+    if (nav.kind !== "upcoming") {
+      setUpFrom(today);
+      setUpDays(7);
+    }
+  }, [nav.kind, today]);
+  const upcomingData = useCrossView<UpcomingDto | null>(
+    nav.kind === "upcoming" ? () => api.upcomingView(upFrom, upDays) : inactive,
+    [nav.kind === "upcoming", upFrom, upDays],
+  );
+  // 「さらに 7 日」や月ジャンプで取り直す間は、前のグループを出したままにする (空表示と先頭へのスクロールを避ける)。
+  const lastUpcoming = useRef<UpcomingDto | null>(null);
+  if (nav.kind !== "upcoming") lastUpcoming.current = null;
+  else if (upcomingData.data) lastUpcoming.current = upcomingData.data;
+  const labelName = nav.kind === "label" ? nav.name : undefined;
+  const labelData = useCrossView<LabelViewDto | null>(labelName ? () => api.labelView(labelName) : inactive, [labelName]);
+  const labelsData = useCrossView<LabelsDto | null>(nav.kind === "labels" ? () => api.labels() : inactive, [nav.kind === "labels"]);
+  const refreshAll = () => {
+    todayData.refresh();
+    upcomingData.refresh();
+    labelData.refresh();
+    void refreshSummaries(); // 件数 (今日 / プロジェクト) も更新する
+  };
+  const cross = useCrossActions(refreshAll, showError, app.inbox);
+  /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
+  const openCross = (t: Task) => {
+    navigate(t.project === app.inbox ? { kind: "inbox" } : { kind: "project", name: t.project });
+    setOpenNo(t.no);
+  };
   const openQuickAdd = useCallback(() => setQa((s) => (s.open ? s : { ...QA_CLOSED, open: true })), []);
   const closeQuickAdd = useCallback(() => setQa(QA_CLOSED), []);
 
@@ -95,19 +201,85 @@ export function Main({ app }: { app: AppStateDto }) {
     return () => window.clearTimeout(id);
   }, [flash]);
 
-  // q: クイック追加 (入力欄にフォーカスがあるとき、修飾キー付き、IME 変換中は除く)
+  // ---- キーボード操作 (shortcuts.ts)。フォーカス行のタスクは、いま出ているビューのデータから探す ----
+  const focusedTask = (() => {
+    const k = focus.focusedKey;
+    if (k === null) return undefined;
+    const pool: Task[] =
+      nav.kind === "today"
+        ? [...(todayData.data?.overdue ?? []), ...(todayData.data?.today ?? [])]
+        : nav.kind === "upcoming"
+          ? (lastUpcoming.current?.days.flatMap((d) => d.tasks) ?? [])
+          : nav.kind === "label"
+            ? (labelData.data?.tasks ?? [])
+            : projectScreen && view && view.project.name === current
+              ? view.tasks
+              : [];
+    return pool.find((t) => taskKey(t) === k);
+  })();
+  /** そのプロジェクトの画面に出ている行か (useProject 経由で更新する) 。今日 / 近日 / ラベルの行は cross 経由。 */
+  const onProjectScreen = (t: Task) => projectScreen && t.project === current;
+  const actOn = {
+    toggleDone: (t: Task) => (onProjectScreen(t) ? void p.completeTask(t.no, t.progress !== 100) : void cross.toggleDone(t, t.progress !== 100)),
+    setPriority: (t: Task, priority: 1 | 2 | 3 | 4) =>
+      onProjectScreen(t) ? void p.updateTask(t.no, { priority }) : void cross.setPriority(t, priority),
+    // dueTime は触らない (時刻は保つ)
+    setDue: (t: Task, due: string) => (onProjectScreen(t) ? void p.updateTask(t.no, { due }) : void cross.setDue(t, due)),
+  };
+  const deleteAny = async (t: Task) => {
+    // プロジェクト画面は実際に子があるときだけ。横断ビューは子を一覧に出さないので、親タスクなら常に添える。
+    const hasSubtasks = onProjectScreen(t) ? !!view?.tasks.some((x) => x.parentNo === t.no) : t.parentNo === undefined;
+    const ok = await confirmAction(`「${t.title}」を削除します。${hasSubtasks ? "サブタスクも削除されます。" : ""}`, {
+      title: "タスクの削除",
+      okLabel: "削除",
+    }).catch(() => false);
+    if (!ok) return;
+    if (onProjectScreen(t)) {
+      if (openNo === t.no) setOpenNo(null);
+      void p.deleteTask(t.no);
+    } else {
+      void cross.remove(t);
+    }
+  };
+  const openAny = (t: Task) => {
+    if (onProjectScreen(t)) {
+      setOpenNo(t.no);
+      focus.set(taskKey(t));
+    } else {
+      openCross(t);
+    }
+  };
+  const row: RowHandlers | null = visibleKeys.length
+    ? {
+        hasFocus: !!focusedTask,
+        up: () => focus.move(-1),
+        down: () => focus.move(1),
+        open: () => focusedTask && openAny(focusedTask),
+        toggleDone: () => focusedTask && actOn.toggleDone(focusedTask),
+        remove: () => focusedTask && void deleteAny(focusedTask),
+        setPriority: (pr) => focusedTask && actOn.setPriority(focusedTask, pr),
+        dueToday: () => focusedTask && actOn.setDue(focusedTask, today),
+        dueTomorrow: () => focusedTask && actOn.setDue(focusedTask, addDays(today, 1)),
+        expand: () => focusedTask && expandApi.current?.expand(focusedTask.no),
+        collapse: () => focusedTask && expandApi.current?.collapse(focusedTask.no),
+        clear: focus.clear,
+      }
+    : null;
+  useShortcuts({
+    quickAdd: openQuickAdd,
+    search: () => setSearchOpen(true),
+    goToday: () => navigate({ kind: "today" }),
+    goUpcoming: () => navigate({ kind: "upcoming" }),
+    goInbox: () => navigate({ kind: "inbox" }),
+    goLabels: () => navigate({ kind: "labels" }),
+    row,
+    enabled: !qa.open && !searchOpen && !settingsOpen,
+  });
+  // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // isImeKey: see keys.ts (WebKit's committing keydown arrives with isComposing false but keyCode 229)
-      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || isImeKey(e) || settingsOpen) return;
-      const t = e.target instanceof HTMLElement ? e.target : null;
-      if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
-      e.preventDefault();
-      openQuickAdd();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [openQuickAdd, settingsOpen]);
+    setEscFallback(clearFocus);
+    return () => setEscFallback(null);
+  }, [clearFocus]);
 
   // 狭い幅のドロワー: Esc で閉じる (Esc レイヤー。上に開いたものがあればそちらが先に閉じる)。幅が戻ったら閉じる。
   useEffect(() => {
@@ -163,6 +335,9 @@ export function Main({ app }: { app: AppStateDto }) {
       navigate({ kind: "project", name: renamed.name });
     } catch (e) {
       showError(e);
+    } finally {
+      // 保留中のプロジェクトは新しい名前で保留され直す (共通設定が保留になることもある)
+      void ext.refresh();
     }
   };
 
@@ -181,11 +356,31 @@ export function Main({ app }: { app: AppStateDto }) {
     }
   };
 
+  const deleteLabel = async (name: string) => {
+    const ok = await confirmAction(`ラベル「${name}」を削除します。付いているタスクからも外れます。`, {
+      title: "ラベルの削除",
+      okLabel: "削除",
+    }).catch(() => false);
+    if (!ok) return;
+    try {
+      await api.deleteLabel(name);
+      labelsData.refresh();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
   // データフォルダが変わった: 開いていたプロジェクトは新しいフォルダに無いかもしれないので、受信トレイに戻して読み直す。
   // 古いフォルダの保存失敗 / 通知の帯はもう当てはまらないので消す。
   const dataDirChanged = () => {
     clearSaveErrors();
+    readFailures.clear();
     setFlash(null);
+    // set_data_dir の中で出た watch-failed のフラッシュは上で消えるので、状態を聞き直して出す
+    void api
+      .watchStatus()
+      .then((m) => m && watchFailed(m))
+      .catch(() => undefined);
     p.clearNotice();
     navigate({ kind: "inbox" });
     if (current === app.inbox) void p.reload().catch(() => undefined); // 名前が変わらないと useProject は読み直さない
@@ -201,10 +396,15 @@ export function Main({ app }: { app: AppStateDto }) {
   });
 
   // 読み込みに失敗したプロジェクトは未保存の変更を持たないので、確認なしで再試行する。
-  const retryLoad = () => void p.reload().catch(() => undefined);
+  const retryLoad = () =>
+    void p
+      .reload()
+      .catch(() => undefined)
+      .finally(() => void ext.refresh());
 
   // 「再読み込み」(FixBanner): 未保存の変更があると reload_project は `unsaved` で断る。確認できたら破棄して読み直す。
   // window.confirm は dialog プラグインが非同期版に置き換えるので使わない (src/api/dialogs.ts)。
+  // reload_project は保留も解くので、終わったら保留の一覧を取り直す。
   const reloadProject = async () => {
     try {
       await p.reload();
@@ -212,14 +412,16 @@ export function Main({ app }: { app: AppStateDto }) {
       if (!isAppError(e) || e.kind !== "unsaved") return;
       const ok = await confirmDiscard("未保存の変更を破棄して読み直しますか？", "再読み込み").catch(() => false);
       if (ok) await p.reload(true).catch(() => undefined);
+    } finally {
+      void ext.refresh();
     }
   };
 
   const counts: Counts = useMemo(() => {
     const byName = Object.fromEntries(summaries.map((s) => [s.name, s.taskCount]));
     const inbox = summaries.find((s) => s.inbox);
-    return { ...byName, inbox: inbox?.taskCount ?? 0, today: 0 }; // 今日の件数は Phase 2
-  }, [summaries]);
+    return { ...byName, inbox: inbox?.taskCount ?? 0, today: countsData.data?.today ?? 0 };
+  }, [summaries, countsData.data]);
 
   const sidebar = (
     <Sidebar
@@ -232,6 +434,10 @@ export function Main({ app }: { app: AppStateDto }) {
       onAddTask={() => {
         setDrawer(false);
         openQuickAdd();
+      }}
+      onSearch={() => {
+        setDrawer(false);
+        setSearchOpen(true);
       }}
       onCreateProject={(name) => void createProject(name)}
       onOpenSettings={() => {
@@ -248,9 +454,10 @@ export function Main({ app }: { app: AppStateDto }) {
   const qaColor = summaries.find((s) => s.name === qaProject)?.color;
 
   // ---- タスク詳細 ----
-  const openTask = view && openNo !== null ? view.tasks.find((t) => t.no === openNo) : undefined;
+  // useProject は名前が変わった直後の 1 描画だけ前のプロジェクトの view を持つので、名前で確かめる
+  const openTask = view && view.project.name === current && openNo !== null ? view.tasks.find((t) => t.no === openNo) : undefined;
   const panel =
-    !placeholder && view && openTask ? (
+    projectScreen && view && openTask ? (
       <TaskDetailPanel
         key={`${current}/${openTask.no}`}
         task={openTask}
@@ -272,8 +479,100 @@ export function Main({ app }: { app: AppStateDto }) {
 
   // ---- 本文 ----
   let body: React.ReactNode;
-  if (placeholder) {
-    body = <EmptyState title={PHASE2_TITLE[nav.kind]} message="Phase 2 で実装" hideAction />;
+  const loading = <div style={{ padding: "var(--space-6) 0", color: "var(--color-text-secondary)", fontSize: 14 }}>読み込み中…</div>;
+  const failure = (message: string) => (
+    <div role="alert" style={{ padding: "var(--space-6) 0", color: "var(--color-danger)", fontSize: 14 }}>
+      {message}
+    </div>
+  );
+  if (nav.kind === "labels") {
+    const d = labelsData.data;
+    body = labelsData.error ? (
+      failure(labelsData.error)
+    ) : !d ? (
+      loading
+    ) : (
+      <LabelsView
+        labels={d.labels}
+        filters={[]}
+        counts={d.counts}
+        palette={PALETTE}
+        onOpenLabel={(name) => navigate({ kind: "label", name })}
+        onAddLabel={(name) =>
+          void api
+            .addLabel(name, "var(--color-text-muted)")
+            .then(labelsData.refresh)
+            .catch(showError)
+        }
+        onRenameLabel={(name, newName) => void api.renameLabel(name, newName).then(labelsData.refresh).catch(showError)}
+        onChangeColor={(name, color) => void api.updateLabel(name, color).then(labelsData.refresh).catch(showError)}
+        onDeleteLabel={(name) => void deleteLabel(name)}
+        onAddFilter={() => setFlash({ text: "フィルターは Phase 5 で実装します", tone: "info" })}
+      />
+    );
+  } else if (nav.kind === "today") {
+    const d = todayData.data;
+    body = todayData.error ? (
+      failure(todayData.error)
+    ) : !d ? (
+      loading
+    ) : (
+      <TodayView
+        tasks={[...d.overdue, ...d.today]}
+        today={today}
+        hideOverdue={d.overdue.length === 0}
+        onToggleDone={cross.toggleDone}
+        onOpenTask={openCross}
+        focusedKey={focus.focusedKey ?? undefined}
+        onVisibleKeys={reportKeys}
+        onAddTask={(title) => void cross.addToInbox({ title, due: today })}
+        onReschedule={(due) => void api.rescheduleOverdue(today, due).catch(showError).finally(refreshAll)}
+        hiddenProjects={failed}
+      />
+    );
+  } else if (nav.kind === "upcoming") {
+    const d = lastUpcoming.current;
+    body = upcomingData.error ? (
+      failure(upcomingData.error)
+    ) : !d ? (
+      loading
+    ) : (
+      <UpcomingView
+        tasks={[]}
+        today={today}
+        days={d.days}
+        onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
+        onJumpTo={(from) => {
+          setUpFrom(from);
+          setUpDays(7);
+        }}
+        onToggleDone={cross.toggleDone}
+        onOpenTask={openCross}
+        focusedKey={focus.focusedKey ?? undefined}
+        onVisibleKeys={reportKeys}
+        onAddTask={(date, title) => void cross.addToInbox({ title, due: date })}
+        hiddenProjects={failed}
+      />
+    );
+  } else if (nav.kind === "label") {
+    const d = labelData.data;
+    body = labelData.error ? (
+      failure(labelData.error)
+    ) : !d || !labelName ? (
+      loading
+    ) : (
+      <LabelDetailView
+        label={d.label.name}
+        tasks={d.tasks}
+        today={today}
+        onToggleDone={cross.toggleDone}
+        onOpenTask={openCross}
+        focusedKey={focus.focusedKey ?? undefined}
+        onVisibleKeys={reportKeys}
+        onAddTask={(title) => void cross.addToInbox({ title, labels: [labelName] })}
+        hiddenProjects={failed}
+      />
+    );
   } else if (p.error) {
     body = (
       <ProjectView
@@ -287,7 +586,7 @@ export function Main({ app }: { app: AppStateDto }) {
       />
     );
   } else if (!view) {
-    body = <div style={{ padding: "var(--space-6) 0", color: "var(--color-text-secondary)", fontSize: 14 }}>読み込み中…</div>;
+    body = loading;
   } else {
     body = (
       <ProjectView
@@ -297,7 +596,10 @@ export function Main({ app }: { app: AppStateDto }) {
         sections={view.sections}
         today={today}
         invalidRows={view.invalidRows}
-        onOpenTask={(t) => setOpenNo(t.no)}
+        focusedKey={focus.focusedKey ?? undefined}
+        onVisibleKeys={reportKeys}
+        onExpandApi={(api) => (expandApi.current = api)}
+        onOpenTask={(t) => openAny(t)}
         onToggleDone={(t, done) => void p.completeTask(t.no, done)}
         onAddTask={(section, title) => void p.addTask({ title, section })}
         onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
@@ -313,7 +615,7 @@ export function Main({ app }: { app: AppStateDto }) {
     );
   }
 
-  const invalidCount = !placeholder && !p.error && view ? view.invalidRows.length : 0;
+  const invalidCount = projectScreen && !p.error && view ? view.invalidRows.length : 0;
   // 帯は上から 8px 降りてくる + フェードで出て、消えるときはフェードしながら畳む (150ms)。最初の描画では動かさない。
   const banner = (
     <AnimatePresence initial={false}>
@@ -321,6 +623,23 @@ export function Main({ app }: { app: AppStateDto }) {
       {Object.entries(saveErrors).map(([project, message]) => (
         <Collapse key={`save-${project}`} duration={0.15} enterY={-8}>
           <SaveBanner message={message} onRetry={() => void api.retrySave(project).catch(() => undefined)} />
+        </Collapse>
+      ))}
+      {Object.entries(readFailures.failures).map(([project, message]) => (
+        <Collapse key={`read-${project}`} duration={0.15} enterY={-8}>
+          <NoticeBanner
+            message={`「${project === "_common" ? "共通設定" : project}」の Excel の変更を読み込めません: ${message}`}
+            onDismiss={() => readFailures.dismiss(project)}
+          />
+        </Collapse>
+      ))}
+      {ext.held.map((project) => (
+        <Collapse key={`ext-${project}`} duration={0.15} enterY={-8}>
+          <ExternalChangeBanner
+            fileName={heldFileName(project)}
+            onReload={() => void ext.resolve(project, "reload")}
+            onOverwrite={() => void ext.resolve(project, "overwrite")}
+          />
         </Collapse>
       ))}
       {invalidCount > 0 && (
@@ -386,6 +705,38 @@ export function Main({ app }: { app: AppStateDto }) {
         error={qa.error}
         onClose={closeQuickAdd}
       />
+      <SearchDialog
+        open={searchOpen}
+        query={search.query}
+        onChangeQuery={(q) => {
+          search.setQuery(q);
+          setSearchSel(0);
+        }}
+        includeDone={search.includeDone}
+        onToggleIncludeDone={() => {
+          search.toggleIncludeDone();
+          setSearchSel(0);
+        }}
+        hits={search.hits}
+        selected={searchSel}
+        onSelect={setSearchSel}
+        onOpen={(h) => {
+          setSearchOpen(false);
+          openCross(h.task);
+        }}
+        onToggleDone={(h, done) =>
+          void api
+            .completeTask(h.task.project, h.task.no, done)
+            .then(() => {
+              search.refresh();
+              refreshAll();
+            })
+            .catch(showError)
+        }
+        onClose={() => setSearchOpen(false)}
+        today={today}
+        busy={search.busy}
+      />
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
         open={settingsOpen}
@@ -408,7 +759,8 @@ export function Main({ app }: { app: AppStateDto }) {
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,
         onNavigate: (t) => {
-          if (t !== "search") navigate({ kind: t });
+          if (t === "search") setSearchOpen(true);
+          else navigate({ kind: t });
         },
       }}
       banner={banner}

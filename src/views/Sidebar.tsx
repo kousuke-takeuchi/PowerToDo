@@ -13,13 +13,15 @@ import type { counts } from "../mock/data";
 import type { Project } from "../types/model";
 
 export type SidebarProps = {
-  active: { kind: "inbox" | "today" | "upcoming" | "labels" | "project"; name?: string };
+  active: { kind: "inbox" | "today" | "upcoming" | "labels" | "project" | "label"; name?: string };
   counts: typeof counts;
   projects: Project[];
   syncState: SyncState;
   lastSyncedAt?: string;
   onNavigate?: (target: SidebarProps["active"]) => void;
   onAddTask?: () => void;
+  /** 「検索」をクリックしたとき。 */
+  onSearch?: () => void;
   /** アカウント (アバター + 名前) をクリックしたとき。設定ダイアログを開き直す Story が渡す。 */
   onOpenSettings?: () => void;
   /** 渡すとマイプロジェクトの「+」が名前入力欄を開き、Enter でこれを呼ぶ (Esc で閉じる)。 */
@@ -43,6 +45,7 @@ export function Sidebar({
   lastSyncedAt,
   onNavigate,
   onAddTask,
+  onSearch,
   onOpenSettings,
   onCreateProject,
   displayName = "たろう",
@@ -66,7 +69,7 @@ export function Sidebar({
   };
   useEscLayer(creating && onCreateProject !== undefined, closeCreate);
   const countOf = (name: string) => (c as Record<string, number>)[name];
-  const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind;
+  const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind || (kind === "labels" && current.kind === "label");
   const mine = projects.filter((p) => !p.inbox);
   const favorites = projects.filter((p) => p.favorite);
   return (
@@ -133,7 +136,7 @@ export function Sidebar({
       </button>
 
       <nav aria-label="ナビゲーション" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <SidebarItem icon={Search} label="検索" />
+        <SidebarItem icon={Search} label="検索" onClick={onSearch} />
         <SidebarItem
           icon={Inbox}
           label="受信トレイ"
