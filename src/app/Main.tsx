@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmAction, confirmDiscard } from "../api/dialogs";
 import type { Counts } from "../mock/data";
-import type { AppStateDto, ProjectSummary, QuickAddResult } from "../types/model";
+import type { AppStateDto, CountsDto, LabelViewDto, ProjectSummary, QuickAddResult, Task, TodayViewDto, UpcomingDto } from "../types/model";
 import { Collapse, useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
 import { EmptyState } from "../views/EmptyState";
@@ -11,14 +11,18 @@ import { FixBanner } from "../views/FixBanner";
 import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
+import { LabelDetailView } from "../views/LabelDetailView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
+import { TodayView } from "../views/TodayView";
+import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
 import { isImeKey } from "./keys";
 import { useEscLayer } from "./layers";
 import { spansToTokens } from "./quickAddTokens";
 import { NoticeBanner, SaveBanner } from "./SaveBanner";
+import { useCrossActions, useCrossView } from "./useCrossView";
 import { useProject } from "./useProject";
 import { useSaveErrors } from "./useSaveStatus";
 import { useSettingsPanes } from "./useSettingsPanes";
@@ -36,7 +40,6 @@ const PALETTE = [
   "var(--color-priority-4)",
   "var(--color-priority-1)",
 ];
-const PHASE2_TITLE: Record<string, string> = { today: "今日", upcoming: "近日", labels: "フィルターとラベル" };
 
 /** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
 export function Main({ app }: { app: AppStateDto }) {
@@ -53,13 +56,18 @@ export function Main({ app }: { app: AppStateDto }) {
   const [qa, setQa] = useState<QuickAddState>(QA_CLOSED);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // サイドバーの「今日」の件数 (期限が今日以前の未完了。project-changed / 保存完了でも更新される)。
+  const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
+  const refreshCounts = countsData.refresh;
+
   const refreshSummaries = useCallback(async () => {
+    refreshCounts();
     try {
       setSummaries(await api.listProjects());
     } catch {
       // サイドバーの件数が古いままになるだけ。次の操作でまた更新する。
     }
-  }, []);
+  }, [refreshCounts]);
 
   const loadDisplayName = useCallback(() => {
     api
@@ -73,7 +81,9 @@ export function Main({ app }: { app: AppStateDto }) {
     loadDisplayName();
   }, [refreshSummaries, loadDisplayName]);
 
-  const placeholder = nav.kind === "today" || nav.kind === "upcoming" || nav.kind === "labels";
+  // 受信トレイ / プロジェクトの画面だけがタスク詳細・要修正の帯を持つ。今日 / 近日 / ラベル詳細は横断ビュー
+  // (useProject は受信トレイを読み続ける)。「フィルターとラベル」は Phase 2 の Task 6 まで仮置き。
+  const projectScreen = nav.kind === "inbox" || nav.kind === "project";
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
   const p = useProject(current, { onMutated: refreshSummaries });
   const view = p.view;
@@ -85,6 +95,44 @@ export function Main({ app }: { app: AppStateDto }) {
     setOpenNo(null);
     setDrawer(false);
   }, []);
+  const failed = summaries.filter((s) => s.loadError).map((s) => s.name);
+
+  // ---- 横断ビュー (今日 / 近日 / ラベル詳細): 表示中のビューだけ取得する ----
+  const inactive = () => Promise.resolve(null);
+  const todayData = useCrossView<TodayViewDto | null>(nav.kind === "today" ? () => api.todayView(today) : inactive, [nav.kind === "today", today]);
+  const [upFrom, setUpFrom] = useState(today);
+  const [upDays, setUpDays] = useState(7);
+  useEffect(() => {
+    if (nav.kind !== "upcoming") {
+      setUpFrom(today);
+      setUpDays(7);
+    }
+  }, [nav.kind, today]);
+  const upcomingData = useCrossView<UpcomingDto | null>(
+    nav.kind === "upcoming" ? () => api.upcomingView(upFrom, upDays) : inactive,
+    [nav.kind === "upcoming", upFrom, upDays],
+  );
+  // 「さらに 7 日」や月ジャンプで取り直す間は、前のグループを出したままにする (空表示と先頭へのスクロールを避ける)。
+  const lastUpcoming = useRef<UpcomingDto | null>(null);
+  if (nav.kind !== "upcoming") lastUpcoming.current = null;
+  else if (upcomingData.data) lastUpcoming.current = upcomingData.data;
+  const labelName = nav.kind === "label" ? nav.name : undefined;
+  const labelData = useCrossView<LabelViewDto | null>(labelName ? () => api.labelView(labelName) : inactive, [labelName]);
+  const cross = useCrossActions(
+    () => {
+      todayData.refresh();
+      upcomingData.refresh();
+      labelData.refresh();
+      void refreshSummaries();
+    },
+    showError,
+    app.inbox,
+  );
+  /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
+  const openCross = (t: Task) => {
+    navigate(t.project === app.inbox ? { kind: "inbox" } : { kind: "project", name: t.project });
+    setOpenNo(t.no);
+  };
   const openQuickAdd = useCallback(() => setQa((s) => (s.open ? s : { ...QA_CLOSED, open: true })), []);
   const closeQuickAdd = useCallback(() => setQa(QA_CLOSED), []);
 
@@ -218,8 +266,8 @@ export function Main({ app }: { app: AppStateDto }) {
   const counts: Counts = useMemo(() => {
     const byName = Object.fromEntries(summaries.map((s) => [s.name, s.taskCount]));
     const inbox = summaries.find((s) => s.inbox);
-    return { ...byName, inbox: inbox?.taskCount ?? 0, today: 0 }; // 今日の件数は Phase 2
-  }, [summaries]);
+    return { ...byName, inbox: inbox?.taskCount ?? 0, today: countsData.data?.today ?? 0 };
+  }, [summaries, countsData.data]);
 
   const sidebar = (
     <Sidebar
@@ -248,9 +296,10 @@ export function Main({ app }: { app: AppStateDto }) {
   const qaColor = summaries.find((s) => s.name === qaProject)?.color;
 
   // ---- タスク詳細 ----
-  const openTask = view && openNo !== null ? view.tasks.find((t) => t.no === openNo) : undefined;
+  // useProject は名前が変わった直後の 1 描画だけ前のプロジェクトの view を持つので、名前で確かめる
+  const openTask = view && view.project.name === current && openNo !== null ? view.tasks.find((t) => t.no === openNo) : undefined;
   const panel =
-    !placeholder && view && openTask ? (
+    projectScreen && view && openTask ? (
       <TaskDetailPanel
         key={`${current}/${openTask.no}`}
         task={openTask}
@@ -272,8 +321,71 @@ export function Main({ app }: { app: AppStateDto }) {
 
   // ---- 本文 ----
   let body: React.ReactNode;
-  if (placeholder) {
-    body = <EmptyState title={PHASE2_TITLE[nav.kind]} message="Phase 2 で実装" hideAction />;
+  const loading = <div style={{ padding: "var(--space-6) 0", color: "var(--color-text-secondary)", fontSize: 14 }}>読み込み中…</div>;
+  const failure = (message: string) => (
+    <div role="alert" style={{ padding: "var(--space-6) 0", color: "var(--color-danger)", fontSize: 14 }}>
+      {message}
+    </div>
+  );
+  if (nav.kind === "labels") {
+    body = <EmptyState title="フィルターとラベル" message="Phase 2 で実装" hideAction />;
+  } else if (nav.kind === "today") {
+    const d = todayData.data;
+    body = todayData.error ? (
+      failure(todayData.error)
+    ) : !d ? (
+      loading
+    ) : (
+      <TodayView
+        tasks={[...d.overdue, ...d.today]}
+        today={today}
+        hideOverdue={d.overdue.length === 0}
+        onToggleDone={cross.toggleDone}
+        onOpenTask={openCross}
+        onAddTask={(title) => void cross.addToInbox({ title, due: today })}
+        onReschedule={(due) => void api.rescheduleOverdue(today, due).then(() => todayData.refresh()).catch(showError)}
+        hiddenProjects={failed}
+      />
+    );
+  } else if (nav.kind === "upcoming") {
+    const d = lastUpcoming.current;
+    body = upcomingData.error ? (
+      failure(upcomingData.error)
+    ) : !d ? (
+      loading
+    ) : (
+      <UpcomingView
+        tasks={[]}
+        today={today}
+        days={d.days}
+        onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
+        onJumpTo={(from) => {
+          setUpFrom(from);
+          setUpDays(7);
+        }}
+        onToggleDone={cross.toggleDone}
+        onOpenTask={openCross}
+        onAddTask={(date, title) => void cross.addToInbox({ title, due: date })}
+        hiddenProjects={failed}
+      />
+    );
+  } else if (nav.kind === "label") {
+    const d = labelData.data;
+    body = labelData.error ? (
+      failure(labelData.error)
+    ) : !d || !labelName ? (
+      loading
+    ) : (
+      <LabelDetailView
+        label={d.label.name}
+        tasks={d.tasks}
+        today={today}
+        onToggleDone={cross.toggleDone}
+        onOpenTask={openCross}
+        onAddTask={(title) => void cross.addToInbox({ title, labels: [labelName] })}
+        hiddenProjects={failed}
+      />
+    );
   } else if (p.error) {
     body = (
       <ProjectView
@@ -287,7 +399,7 @@ export function Main({ app }: { app: AppStateDto }) {
       />
     );
   } else if (!view) {
-    body = <div style={{ padding: "var(--space-6) 0", color: "var(--color-text-secondary)", fontSize: 14 }}>読み込み中…</div>;
+    body = loading;
   } else {
     body = (
       <ProjectView
@@ -313,7 +425,7 @@ export function Main({ app }: { app: AppStateDto }) {
     );
   }
 
-  const invalidCount = !placeholder && !p.error && view ? view.invalidRows.length : 0;
+  const invalidCount = projectScreen && !p.error && view ? view.invalidRows.length : 0;
   // 帯は上から 8px 降りてくる + フェードで出て、消えるときはフェードしながら畳む (150ms)。最初の描画では動かさない。
   const banner = (
     <AnimatePresence initial={false}>

@@ -29,3 +29,8 @@ export function onSaveStatus(cb: (s: SaveStatus) => void): () => void {
 export function onProjectChanged(cb: (name: string, reason: ChangeReason) => void): () => void {
   return subscribe<{ name: string; reason: ChangeReason }>("project-changed", (p) => cb(p.name, p.reason));
 }
+
+/** `projects-changed` (project list or labels changed as a whole, e.g. a label rename that touched several projects). */
+export function onProjectsChanged(cb: () => void): () => void {
+  return subscribe<Record<string, never>>("projects-changed", () => cb());
+}
