@@ -3,15 +3,15 @@ import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmAction, confirmDiscard } from "../api/dialogs";
 import type { Counts } from "../mock/data";
-import type { AppStateDto, CountsDto, LabelViewDto, ProjectSummary, QuickAddResult, Task, TodayViewDto, UpcomingDto } from "../types/model";
+import type { AppStateDto, CountsDto, LabelsDto, LabelViewDto, ProjectSummary, QuickAddResult, Task, TodayViewDto, UpcomingDto } from "../types/model";
 import { Collapse, useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
-import { EmptyState } from "../views/EmptyState";
 import { FixBanner } from "../views/FixBanner";
 import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
 import { LabelDetailView } from "../views/LabelDetailView";
+import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
@@ -118,6 +118,7 @@ export function Main({ app }: { app: AppStateDto }) {
   else if (upcomingData.data) lastUpcoming.current = upcomingData.data;
   const labelName = nav.kind === "label" ? nav.name : undefined;
   const labelData = useCrossView<LabelViewDto | null>(labelName ? () => api.labelView(labelName) : inactive, [labelName]);
+  const labelsData = useCrossView<LabelsDto | null>(nav.kind === "labels" ? () => api.labels() : inactive, [nav.kind === "labels"]);
   const refreshAll = () => {
     todayData.refresh();
     upcomingData.refresh();
@@ -226,6 +227,20 @@ export function Main({ app }: { app: AppStateDto }) {
     }
   };
 
+  const deleteLabel = async (name: string) => {
+    const ok = await confirmAction(`ラベル「${name}」を削除します。付いているタスクからも外れます。`, {
+      title: "ラベルの削除",
+      okLabel: "削除",
+    }).catch(() => false);
+    if (!ok) return;
+    try {
+      await api.deleteLabel(name);
+      labelsData.refresh();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
   // データフォルダが変わった: 開いていたプロジェクトは新しいフォルダに無いかもしれないので、受信トレイに戻して読み直す。
   // 古いフォルダの保存失敗 / 通知の帯はもう当てはまらないので消す。
   const dataDirChanged = () => {
@@ -325,7 +340,30 @@ export function Main({ app }: { app: AppStateDto }) {
     </div>
   );
   if (nav.kind === "labels") {
-    body = <EmptyState title="フィルターとラベル" message="Phase 2 で実装" hideAction />;
+    const d = labelsData.data;
+    body = labelsData.error ? (
+      failure(labelsData.error)
+    ) : !d ? (
+      loading
+    ) : (
+      <LabelsView
+        labels={d.labels}
+        filters={[]}
+        counts={d.counts}
+        palette={PALETTE}
+        onOpenLabel={(name) => navigate({ kind: "label", name })}
+        onAddLabel={(name) =>
+          void api
+            .addLabel(name, PALETTE[d.labels.length % PALETTE.length])
+            .then(labelsData.refresh)
+            .catch(showError)
+        }
+        onRenameLabel={(name, newName) => void api.renameLabel(name, newName).then(labelsData.refresh).catch(showError)}
+        onChangeColor={(name, color) => void api.updateLabel(name, color).then(labelsData.refresh).catch(showError)}
+        onDeleteLabel={(name) => void deleteLabel(name)}
+        onAddFilter={() => setFlash({ text: "フィルターは Phase 5 で実装します", tone: "info" })}
+      />
+    );
   } else if (nav.kind === "today") {
     const d = todayData.data;
     body = todayData.error ? (
