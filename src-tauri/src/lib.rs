@@ -168,8 +168,9 @@ pub fn run() {
         }
         // Edits are written 1 s after the last change; do not lose the last second on quit.
         // Edits that cannot be written to their own file (held, or the file changed on disk)
-        // go to a recovery copy in `archive/`: the Dock's Quit or a logout reaches only this
-        // event, without `ExitRequested`, so the UI never got to ask.
+        // go to a recovery copy in `archive/` (in `<app data>/recovery/` when `archive/` cannot
+        // be written): the Dock's Quit or a logout reaches only this event, without
+        // `ExitRequested`, so the UI never got to ask.
         tauri::RunEvent::Exit => {
             if let Some(state) = handle.try_state::<AppState>() {
                 state.flush_all();

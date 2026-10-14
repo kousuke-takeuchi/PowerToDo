@@ -570,9 +570,9 @@ impl ProjectStore {
     /// removes the project from the common workbook. Unsaved changes are written first so the
     /// archive holds the latest state; if that write fails, its error is returned and the
     /// project is left as it was (still listed, still dirty, file not moved). A project that
-    /// is held, or whose file changed on disk since we read it, is refused (`Unsaved`) without
-    /// writing: saving first would overwrite the external change, and archiving the file would
-    /// take the external change away before the user chose.
+    /// is held, or has unsaved edits while its file changed on disk since we read it, is refused
+    /// (`Unsaved`) without writing: saving first would overwrite the external change, and
+    /// archiving the file would take the external change away before the user chose.
     pub fn delete_project(&mut self, name: &str) -> AppResult<()> {
         if name == INBOX {
             return Err(invalid("受信トレイは削除できません"));
@@ -580,7 +580,10 @@ impl ProjectStore {
         if !self.common.projects.iter().any(|p| p.name == name) {
             return Err(not_found(format!("プロジェクト「{name}」がありません")));
         }
-        if self.is_held(name) || self.changed_on_disk(name) {
+        // A clean project has nothing of ours to overwrite, and archiving moves the file as it
+        // is (a file that failed to load has no recorded fingerprint, so it always reads as
+        // "changed": it must stay deletable). Only unsaved edits make the disk state matter.
+        if self.is_held(name) || (self.dirty.contains(name) && self.changed_on_disk(name)) {
             return Err(AppError::Unsaved {
                 message: format!(
                     "「{name}」は Excel で変更されています。帯の操作で解決してから削除してください"
@@ -1200,7 +1203,13 @@ impl ProjectStore {
             Ok(path) => Ok(path),
             Err(first) => self
                 .write_recovery_copy_in(key, &stem, now, fallback_dir)
-                .map_err(|_| first),
+                .map_err(|second| {
+                    eprintln!(
+                        "recovery copy of {key}: fallback {} failed too: {second}",
+                        fallback_dir.display()
+                    );
+                    first
+                }),
         }
     }
 
@@ -2314,6 +2323,23 @@ mod tests {
         );
         assert!(!e.data().join("archive").exists());
         assert!(e.store.summaries().iter().any(|s| s.name == "仕事"));
+    }
+
+    #[test]
+    fn delete_project_archives_a_file_that_failed_to_load() {
+        let mut e = env();
+        e.store.create_project("壊れた", "c").unwrap();
+        e.store.save("壊れた").unwrap();
+        let path = e.data().join("壊れた.xlsx");
+        std::fs::write(&path, b"not a workbook").unwrap();
+        assert!(e.store.reload_discarding("壊れた").is_err());
+        assert!(e.store.dirty_projects().is_empty());
+
+        e.store.delete_project("壊れた").unwrap();
+        assert!(!path.exists());
+        let n = std::fs::read_dir(e.data().join("archive")).unwrap().count();
+        assert_eq!(n, 1, "the broken file was moved to archive/");
+        assert!(e.store.summaries().iter().all(|s| s.name != "壊れた"));
     }
 
     #[test]

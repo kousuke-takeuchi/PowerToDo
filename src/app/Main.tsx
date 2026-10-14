@@ -354,9 +354,10 @@ export function Main({ app }: { app: AppStateDto }) {
       await api.deleteProject(current);
       await refreshSummaries();
       navigate({ kind: "inbox" });
-      void ext.refresh();
     } catch (e) {
       showError(e);
+    } finally {
+      void ext.refresh();
     }
   };
 
