@@ -1,10 +1,12 @@
 import type React from "react";
 import { useState } from "react";
 import { Check } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../../components/AddTaskRow";
 import { MobileHeader } from "../../components/MobileHeader";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
+import { Collapse } from "../../motion";
 import { counts as mockCounts, dateLabel, projects as mockProjects } from "../../mock/data";
 import type { Project, Section, Task } from "../../types/model";
 import { useDone } from "../useDone";
@@ -102,16 +104,18 @@ export function MobileProjectView({
           onToggleDone={() => toggle(t)}
           onToggleExpand={() => toggleExpand(t.no)}
         />
-        {open && (
-          <>
-            {kids.map((k) => (
-              <TaskRow key={k.no} variant="mobile" indent={1} title={k.title} done={isDone(k)} priority={4} onToggleDone={() => toggle(k)} />
-            ))}
-            <div style={{ marginLeft: 24 }}>
-              <AddTaskRow label="サブタスクを追加" onClick={() => setOverlay("quickAdd")} />
-            </div>
-          </>
-        )}
+        <AnimatePresence initial={false}>
+          {open && (
+            <Collapse key="subtasks">
+              {kids.map((k) => (
+                <TaskRow key={k.no} variant="mobile" indent={1} title={k.title} done={isDone(k)} priority={4} onToggleDone={() => toggle(k)} />
+              ))}
+              <div style={{ marginLeft: 24 }}>
+                <AddTaskRow label="サブタスクを追加" onClick={() => setOverlay("quickAdd")} />
+              </div>
+            </Collapse>
+          )}
+        </AnimatePresence>
       </div>
     );
   };
@@ -126,11 +130,10 @@ export function MobileProjectView({
       fab={overlay === "none"}
       onFab={() => setOverlay("quickAdd")}
       overlay={
-        overlay === "quickAdd" ? (
-          <MobileQuickAddSheet tokens={quickAddTokens} onClose={() => setOverlay("none")} />
-        ) : overlay === "drawer" ? (
-          <Drawer counts={mockCounts} projects={projects} syncState="syncing" onClose={() => setOverlay("none")} />
-        ) : undefined
+        <AnimatePresence initial={false}>
+          {overlay === "quickAdd" && <MobileQuickAddSheet key="quickAdd" tokens={quickAddTokens} onClose={() => setOverlay("none")} />}
+          {overlay === "drawer" && <Drawer key="drawer" counts={mockCounts} projects={projects} syncState="syncing" onClose={() => setOverlay("none")} />}
+        </AnimatePresence>
       }
     >
       <div style={{ padding: "0 16px" }}>

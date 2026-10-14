@@ -1,10 +1,12 @@
 import type React from "react";
-import { ChevronDown, ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree } from "lucide-react";
+import { motion } from "motion/react";
+import { ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree } from "lucide-react";
 import { Checkbox } from "./Checkbox";
 import { DateChip } from "./DateChip";
 import { LabelChip } from "./LabelChip";
 import { MoreChip } from "./MoreChip";
 import { Button } from "./Button";
+import { EASE_CSS, useMotionTiming } from "../motion";
 
 export type TaskRowProps = {
   title: string;
@@ -41,7 +43,19 @@ const subCountStyle: React.CSSProperties = {
 export function TaskRow(p: TaskRowProps) {
   const mobile = p.variant === "mobile";
   const indentPx = (p.indent ?? 0) * (mobile ? 24 : 32);
-  const Chevron = p.subtasks?.expanded ? ChevronDown : ChevronRight;
+  const { reduced, t } = useMotionTiming();
+  // 開閉はアイコンの差し替えではなく、右向きのシェブロンを 90° 回して表す。最初の描画では回すアニメーションをしない。
+  const chevron = (size: number) => (
+    <motion.span
+      aria-hidden
+      initial={false}
+      animate={{ rotate: p.subtasks?.expanded ? 90 : 0 }}
+      transition={t(0.2)}
+      style={{ display: "inline-flex" }}
+    >
+      <ChevronRight size={size} />
+    </motion.span>
+  );
   return (
     <div
       className="group"
@@ -79,7 +93,7 @@ export function TaskRow(p: TaskRowProps) {
             cursor: "pointer",
           }}
         >
-          <Chevron size={16} />
+          {chevron(16)}
         </button>
       )}
       <div style={{ display: "flex", flex: "0 0 auto" }} onClick={(e) => e.stopPropagation()}>
@@ -123,7 +137,7 @@ export function TaskRow(p: TaskRowProps) {
                 >
                   <ListTree size={12} color="var(--color-text-muted)" />
                   {p.subtasks.done}/{p.subtasks.total}
-                  <Chevron size={12} />
+                  {chevron(12)}
                 </button>
               ) : (
                 <span style={subCountStyle}>
@@ -136,7 +150,13 @@ export function TaskRow(p: TaskRowProps) {
       </div>
       {!mobile && !p.hideActions && (
         <div
-          style={{ display: "flex", gap: "var(--space-1)", alignItems: "center", opacity: p.showActions ? 1 : undefined }}
+          style={{
+            display: "flex",
+            gap: "var(--space-1)",
+            alignItems: "center",
+            opacity: p.showActions ? 1 : undefined,
+            transition: reduced ? undefined : `opacity 120ms ${EASE_CSS}`,
+          }}
           onClick={(e) => e.stopPropagation()}
           className={p.showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}
         >

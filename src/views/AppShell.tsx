@@ -1,4 +1,6 @@
 import type React from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useMotionTiming } from "../motion";
 import type { SyncState } from "../components/SyncStatus";
 import { SidebarRail } from "./SidebarRail";
 import type { SidebarRailProps } from "./SidebarRail";
@@ -20,6 +22,7 @@ export type AppShellProps = {
 };
 
 const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
+const PANEL_WIDTH = 400;
 
 /**
  * デスクトップのシェル。1440: Sidebar 280 + Main (Column 最大 800 中央) + 任意の panel 400。
@@ -30,6 +33,7 @@ const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
 export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, syncState = "synced", fill, rail: railProps }: AppShellProps) {
   const wide = width === 1440;
   const rail = width === 960;
+  const { reduced, t } = useMotionTiming();
   return (
     <div
       style={{
@@ -72,19 +76,33 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
           {children}
         </div>
       </main>
-      {panel && (
-        <aside
-          style={{
-            flex: "0 0 400px",
-            width: 400,
-            height: "100%",
-            borderLeft: "1px solid var(--color-border)",
-            background: "var(--color-bg)",
-          }}
-        >
-          {panel}
-        </aside>
-      )}
+      {/* 詳細パネル: 右から x 24 -> 0 + フェード (200ms)。幅も 0 <-> 400 で動かし、本文の列が開閉に合わせて縮む / 広がる。
+          中身は幅 400 のまま右寄せ (アニメーション中だけ overflow: hidden)。最初から開いている描画 (Storybook) では動かさない。 */}
+      <AnimatePresence initial={false}>
+        {panel && (
+          <motion.aside
+            key="panel"
+            initial={{ opacity: 0, x: reduced ? 0 : 24, width: 0, overflow: "hidden" }}
+            animate={{ opacity: 1, x: 0, width: PANEL_WIDTH, transitionEnd: { overflow: "visible" } }}
+            exit={{ opacity: 0, x: reduced ? 0 : 24, width: 0, overflow: "hidden" }}
+            transition={t(0.2)}
+            style={{ flex: "0 0 auto", height: "100%", display: "flex", justifyContent: "flex-end" }}
+          >
+            <div
+              style={{
+                flex: `0 0 ${PANEL_WIDTH}px`,
+                width: PANEL_WIDTH,
+                height: "100%",
+                boxSizing: "border-box",
+                borderLeft: "1px solid var(--color-border)",
+                background: "var(--color-bg)",
+              }}
+            >
+              {panel}
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
       {/* ラッパーはクリックを通す。中身 (scrim など) が pointerEvents: "auto" で受ける。中身が null を返しても下を塞がない。 */}
       {overlay && <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>{overlay}</div>}
     </div>

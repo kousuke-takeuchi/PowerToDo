@@ -1,5 +1,7 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useMotionTiming } from "../motion";
 import { Bell, Calendar, ChevronDown, ChevronRight, ChevronUp, Ellipsis, Flag, Folder, Repeat, Tag, X } from "lucide-react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { isImeKey } from "../app/keys";
@@ -189,15 +191,18 @@ export function TaskDetailPanel({
     setPopover((cur) => (cur === p ? null : p));
   };
   const popoverRef = useRef<HTMLDivElement>(null);
+  const { reduced, t } = useMotionTiming();
+  // 閉じるアニメーション中 (AppShell の AnimatePresence で退場中) は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
+  const present = useIsPresent();
 
   // Esc は Esc レイヤー (パネル本体の上にポップオーバー): ポップオーバーが開いていればそれだけ閉じ、無ければパネルを閉じる。
   // ポップオーバー内の行を押すと押した要素が消えてフォーカスが body に戻るので、パネルの onKeyDown では受けられない。
-  useEscLayer(true, () => {
+  useEscLayer(present, () => {
     // フォーカス中の入力の blur で編集中の値を確定してから閉じる (消えた要素には blur が来ない)
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     onClose?.();
   });
-  useEscLayer(popover !== null, () => setPopover(null));
+  useEscLayer(present && popover !== null, () => setPopover(null));
 
   // ポップオーバーの外のクリックで閉じる。
   useEffect(() => {
@@ -385,58 +390,69 @@ export function TaskDetailPanel({
         </div>
       )}
 
-      {popover && (
-        <div ref={popoverRef} style={{ position: "absolute", left: -1, top: editable && anchorTop !== null ? anchorTop : POPOVER_TOP[popover], zIndex: 10 }}>
-          {popover === "date" && (
-            <DatePicker
-              value={dueNow}
-              time={timeNow}
-              today={today}
-              recurrenceLabel={recurrenceLabel(rruleNow)}
-              onChange={(v) => {
-                if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null });
-                else {
-                  setDue(v.date);
-                  setTime(v.time);
-                }
-              }}
-              onOpenRecurrence={() => setPopover("recurrence")}
-            />
-          )}
-          {popover === "recurrence" && (
-            <RecurrencePicker
-              value={rruleNow}
-              onChange={(r) => {
-                if (onChange) onChange({ rrule: r ?? null });
-                else setRrule(r);
-                setPopover(null);
-              }}
-            />
-          )}
-          {popover === "reminder" && (
-            <ReminderPicker reminders={remindersNow} dueTime={timeNow} onChange={(r) => (onChange ? onChange({ reminders: r }) : setReminders(r))} />
-          )}
-          {popover === "priority" && (
-            <PopoverShell label="優先度" gap="var(--space-1)">
-              {PRIORITIES.map((p) => (
-                <PopRow
-                  key={p.value}
-                  icon={<Flag size={16} />}
-                  iconColor={`var(--color-priority-${p.value})`}
-                  selected={task.priority === p.value}
-                  ariaLabel={`P${p.value}`}
-                  onClick={() => {
-                    if (p.value !== task.priority) onChange?.({ priority: p.value });
-                    setPopover(null);
-                  }}
-                >
-                  <span style={{ flex: 1, fontSize: 13, lineHeight: "19px" }}>{p.label}</span>
-                </PopRow>
-              ))}
-            </PopoverShell>
-          )}
-        </div>
-      )}
+      {/* ポップオーバー: y 8 -> 0 + フェード (150ms)。最初から開いている描画 (Storybook) では動かさない。 */}
+      <AnimatePresence initial={false}>
+        {popover && (
+          <motion.div
+            key="popover"
+            ref={popoverRef}
+            initial={{ opacity: 0, y: reduced ? 0 : 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: reduced ? 0 : 8 }}
+            transition={t(0.15)}
+            style={{ position: "absolute", left: -1, top: editable && anchorTop !== null ? anchorTop : POPOVER_TOP[popover], zIndex: 10 }}
+          >
+            {popover === "date" && (
+              <DatePicker
+                value={dueNow}
+                time={timeNow}
+                today={today}
+                recurrenceLabel={recurrenceLabel(rruleNow)}
+                onChange={(v) => {
+                  if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null });
+                  else {
+                    setDue(v.date);
+                    setTime(v.time);
+                  }
+                }}
+                onOpenRecurrence={() => setPopover("recurrence")}
+              />
+            )}
+            {popover === "recurrence" && (
+              <RecurrencePicker
+                value={rruleNow}
+                onChange={(r) => {
+                  if (onChange) onChange({ rrule: r ?? null });
+                  else setRrule(r);
+                  setPopover(null);
+                }}
+              />
+            )}
+            {popover === "reminder" && (
+              <ReminderPicker reminders={remindersNow} dueTime={timeNow} onChange={(r) => (onChange ? onChange({ reminders: r }) : setReminders(r))} />
+            )}
+            {popover === "priority" && (
+              <PopoverShell label="優先度" gap="var(--space-1)">
+                {PRIORITIES.map((p) => (
+                  <PopRow
+                    key={p.value}
+                    icon={<Flag size={16} />}
+                    iconColor={`var(--color-priority-${p.value})`}
+                    selected={task.priority === p.value}
+                    ariaLabel={`P${p.value}`}
+                    onClick={() => {
+                      if (p.value !== task.priority) onChange?.({ priority: p.value });
+                      setPopover(null);
+                    }}
+                  >
+                    <span style={{ flex: 1, fontSize: 13, lineHeight: "19px" }}>{p.label}</span>
+                  </PopRow>
+                ))}
+              </PopoverShell>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

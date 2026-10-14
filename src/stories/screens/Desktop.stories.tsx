@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import type { Task } from "../../types/model";
 import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
 import { BoardView } from "../../views/BoardView";
@@ -63,6 +64,84 @@ export const D01c: Story = {
   render: () => <Screen initialExpanded={[1, 5]} initialFormParent={1} />,
 };
 
+// 操作確認用 (アニメーション): タスクの追加 (セクション末尾の「タスクを追加」) / 完了 (チェック) / 削除 (行の「その他」) / サブタスク追加が
+// この Story の中のローカル state で動く。完了にすると 400ms 後に行が畳まれて消える。サイドバーの「タスクを追加」でクイック追加も開く。
+function InteractiveScreen() {
+  const [list, setList] = useState<Task[]>(shopping);
+  const [qa, setQa] = useState(false);
+  const [text, setText] = useState("");
+  const nextNo = (cur: Task[]) => Math.max(0, ...cur.map((t) => t.no)) + 1;
+  const append = (title: string, section: string | null, parentNo?: number) =>
+    setList((cur) => {
+      const siblings = cur.filter((t) => t.parentNo === parentNo && (parentNo !== undefined || t.category === section));
+      const base = cur.find((t) => t.no === parentNo);
+      return [
+        ...cur,
+        {
+          no: nextNo(cur),
+          project: "買い物",
+          category: base ? base.category : section,
+          title,
+          assignee: "たろう",
+          priority: 4,
+          progress: 0,
+          parentNo,
+          labels: [],
+          reminders: [],
+          order: Math.max(-1, ...siblings.map((t) => t.order)) + 1,
+          createdAt: "2026-10-13T09:00",
+        },
+      ];
+    });
+  return (
+    <AppShell
+      sidebar={
+        <Sidebar
+          active={{ kind: "project", name: "買い物" }}
+          counts={counts}
+          projects={projects}
+          syncState="synced"
+          lastSyncedAt="09:41"
+          onAddTask={() => setQa(true)}
+        />
+      }
+      syncState="synced"
+      overlay={
+        <QuickAddDialog
+          open={qa}
+          tokens={text ? [{ text }] : []}
+          project="買い物"
+          projectColor={shoppingColor}
+          text={text}
+          onChangeText={setText}
+          onSubmit={(t) => {
+            append(t.trim(), "今週");
+            setText("");
+            setQa(false);
+          }}
+          onClose={() => setQa(false)}
+        />
+      }
+    >
+      <ProjectView
+        project="買い物"
+        tasks={list}
+        sections={sections}
+        initialExpanded={[1]}
+        onToggleDone={(t, done) => setList((cur) => cur.map((x) => (x.no === t.no ? { ...x, progress: done ? 100 : 0 } : x)))}
+        onAddTask={(section, title) => append(title, section)}
+        onAddSubtask={(parent, title) => append(title, parent.category, parent.no)}
+        onDeleteTask={(t) => setList((cur) => cur.filter((x) => x.no !== t.no && x.parentNo !== t.no))}
+      />
+    </AppShell>
+  );
+}
+
+export const D01Interactive: Story = {
+  name: "D-01 追加と完了 (操作)",
+  render: () => <InteractiveScreen />,
+};
+
 // D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
 const quickAddTokens = [
   { text: "牛乳と卵を買う " },
@@ -90,16 +169,14 @@ function QuickAddScreen() {
       }
       syncState="synced"
       overlay={
-        open ? (
-          <QuickAddDialog
-            open
-            tokens={quickAddTokens}
-            project="買い物"
-            projectColor={shoppingColor}
-            section="今週"
-            onClose={() => setOpen(false)}
-          />
-        ) : undefined
+        <QuickAddDialog
+          open={open}
+          tokens={quickAddTokens}
+          project="買い物"
+          projectColor={shoppingColor}
+          section="今週"
+          onClose={() => setOpen(false)}
+        />
       }
     >
       <ProjectView project="買い物" tasks={shopping} sections={sections} />
@@ -232,7 +309,7 @@ function SettingsScreen({ initialTarget, connected, syncState, lastSyncedAt }: {
         />
       }
       syncState={syncState}
-      overlay={open ? <SettingsDialog open initialTarget={initialTarget} connected={connected} onClose={() => setOpen(false)} /> : undefined}
+      overlay={<SettingsDialog open={open} initialTarget={initialTarget} connected={connected} onClose={() => setOpen(false)} />}
     >
       <ProjectView project="買い物" tasks={shopping} sections={sections} />
     </AppShell>

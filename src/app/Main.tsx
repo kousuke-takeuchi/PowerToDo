@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmAction, confirmDiscard } from "../api/dialogs";
 import type { Counts } from "../mock/data";
 import type { AppStateDto, ProjectSummary, QuickAddResult } from "../types/model";
+import { Collapse, useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
 import { EmptyState } from "../views/EmptyState";
 import { FixBanner } from "../views/FixBanner";
@@ -75,6 +77,7 @@ export function Main({ app }: { app: AppStateDto }) {
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
   const p = useProject(current, { onMutated: refreshSummaries });
   const view = p.view;
+  const { reduced, t } = useMotionTiming();
 
   const showError = useCallback((e: unknown) => setFlash({ text: errorMessage(e), tone: "error" }), []);
   const navigate = useCallback((target: Nav) => {
@@ -311,37 +314,66 @@ export function Main({ app }: { app: AppStateDto }) {
   }
 
   const invalidCount = !placeholder && !p.error && view ? view.invalidRows.length : 0;
+  // 帯は上から 8px 降りてくる + フェードで出て、消えるときはフェードしながら畳む (150ms)。最初の描画では動かさない。
   const banner = (
-    <>
+    <AnimatePresence initial={false}>
       {/* retry_save の失敗は save-status イベントでこの帯に出るので、catch は握りつぶすだけ (二重表示しない) */}
       {Object.entries(saveErrors).map(([project, message]) => (
-        <SaveBanner key={project} message={message} onRetry={() => void api.retrySave(project).catch(() => undefined)} />
+        <Collapse key={`save-${project}`} duration={0.15} enterY={-8}>
+          <SaveBanner message={message} onRetry={() => void api.retrySave(project).catch(() => undefined)} />
+        </Collapse>
       ))}
       {invalidCount > 0 && (
-        <FixBanner
-          message={`${invalidCount} 行に型の不整合があります。Excel で修正するまで、その行はアプリから編集できません。修正したら「再読み込み」を押してください。`}
-          onOpenExcel={reveal}
-          onReload={() => void reloadProject()}
-        />
+        <Collapse key="fix" duration={0.15} enterY={-8}>
+          <FixBanner
+            message={`${invalidCount} 行に型の不整合があります。Excel で修正するまで、その行はアプリから編集できません。修正したら「再読み込み」を押してください。`}
+            onOpenExcel={reveal}
+            onReload={() => void reloadProject()}
+          />
+        </Collapse>
       )}
-      {p.notice && <NoticeBanner message={p.notice} onDismiss={p.clearNotice} />}
-      {flash && <NoticeBanner message={flash.text} tone={flash.tone} onDismiss={() => setFlash(null)} />}
-    </>
+      {p.notice && (
+        <Collapse key="notice" duration={0.15} enterY={-8}>
+          <NoticeBanner message={p.notice} onDismiss={p.clearNotice} />
+        </Collapse>
+      )}
+      {flash && (
+        <Collapse key="flash" duration={0.15} enterY={-8}>
+          <NoticeBanner message={flash.text} tone={flash.tone} onDismiss={() => setFlash(null)} />
+        </Collapse>
+      )}
+    </AnimatePresence>
   );
 
   const overlay = (
     <>
-      {width === 960 && drawer && (
-        <div
-          role="presentation"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setDrawer(false);
-          }}
-          style={{ width: "100%", height: "100%", display: "flex", background: "var(--color-scrim)", pointerEvents: "auto" }}
-        >
-          <div style={{ flex: "0 0 280px", width: 280, height: "100%" }}>{sidebar}</div>
-        </div>
-      )}
+      {/* 狭い幅のドロワー: scrim は 150ms でフェード、サイドバーは左から 250ms でスライド */}
+      <AnimatePresence initial={false}>
+        {width === 960 && drawer && (
+          <motion.div
+            key="drawer"
+            role="presentation"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={t(0.15)}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setDrawer(false);
+            }}
+            style={{ width: "100%", height: "100%", display: "flex", background: "var(--color-scrim)", pointerEvents: "auto" }}
+          >
+            <motion.div
+              initial={{ x: reduced ? 0 : "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: reduced ? 0 : "-100%" }}
+              transition={t(0.25)}
+              style={{ flex: "0 0 280px", width: 280, height: "100%" }}
+            >
+              {sidebar}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <QuickAddDialog
         open={qa.open}
         tokens={tokens}
@@ -354,16 +386,15 @@ export function Main({ app }: { app: AppStateDto }) {
         error={qa.error}
         onClose={closeQuickAdd}
       />
-      {settingsOpen && (
-        <SettingsDialog
-          open
-          syncPlaceholder
-          initialPane="account"
-          onClose={() => setSettingsOpen(false)}
-          dataPane={settingsPanes.data}
-          accountPane={settingsPanes.account}
-        />
-      )}
+      {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
+      <SettingsDialog
+        open={settingsOpen}
+        syncPlaceholder
+        initialPane="account"
+        onClose={() => setSettingsOpen(false)}
+        dataPane={settingsPanes.data}
+        accountPane={settingsPanes.account}
+      />
     </>
   );
 

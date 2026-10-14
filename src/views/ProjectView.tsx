@@ -1,9 +1,11 @@
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
 import { TaskRow } from "../components/TaskRow";
 import { Button } from "../components/Button";
+import { Collapse, useMotionTiming } from "../motion";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
 import type { InvalidRow, Section, Task } from "../types/model";
 import { EmptyState } from "./EmptyState";
@@ -55,6 +57,10 @@ export type ProjectViewProps = {
 const INVALID_TASK_NO = 2; // D-11c で要修正にする行 (洗剤の詰め替え)
 const INVALID_SUFFIX = "    ⚠ 要修正: 「終了」列が日付ではありません (値: 来週)";
 const noop = () => {};
+/** 完了にしたチェックが付いたまま行を残す時間 (ms)。この後に行が退場する (完了タスクを隠している間だけ)。 */
+const LEAVE_DELAY_MS = 400;
+/** 追加された行のハイライトが消えるまで (ms)。 */
+const HIGHLIGHT_MS = 600;
 /** 型の不整合で Task にならなかった行の 1 行表示 (読み取り専用)。 */
 function invalidRowTitle(r: InvalidRow): string {
   const where = r.no !== undefined ? `行 ${r.row} (No. ${r.no})` : `行 ${r.row}`;
@@ -99,9 +105,74 @@ export function ProjectView({
   const [addingSection, setAddingSection] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [renamingProject, setRenamingProject] = useState(false);
+  // 完了にした直後の行 (no)。完了タスクを隠している間は、LEAVE_DELAY_MS だけ未完了の一覧に残してから退場させる。
+  const [leaving, setLeaving] = useState<Set<number>>(() => new Set());
+  const leaveTimers = useRef(new Map<number, number>());
+  // 直前の描画に無かった行 (追加された行)。ハイライトを HIGHLIGHT_MS だけ出す。
+  const [fresh, setFresh] = useState<Set<number>>(() => new Set());
+  const seenNos = useRef<Set<number> | null>(null);
+  const timers = useRef(new Set<number>());
+  const { reduced } = useMotionTiming();
 
   const mine = tasks.filter((t) => t.project === project);
-  const isDone = (t: Task) => (onToggleDone ? t.progress === 100 : (doneOverride.get(t.no) ?? t.progress === 100));
+  const nosKey = mine.map((t) => t.no).join(",");
+  useEffect(() => {
+    const now = new Set(nosKey ? nosKey.split(",").map(Number) : []);
+    const prev = seenNos.current;
+    seenNos.current = now;
+    if (!prev) return;
+    const added = [...now].filter((n) => !prev.has(n));
+    if (added.length === 0) return;
+    setFresh((f) => new Set([...f, ...added]));
+    const id = window.setTimeout(() => {
+      timers.current.delete(id);
+      setFresh((f) => new Set([...f].filter((n) => !added.includes(n))));
+    }, HIGHLIGHT_MS + 100);
+    timers.current.add(id);
+  }, [nosKey]);
+  useEffect(
+    () => () => {
+      timers.current.forEach((id) => window.clearTimeout(id));
+      leaveTimers.current.forEach((id) => window.clearTimeout(id));
+    },
+    [],
+  );
+
+  const isDone = (t: Task) => (onToggleDone ? t.progress === 100 || leaving.has(t.no) : (doneOverride.get(t.no) ?? t.progress === 100));
+  const toggleDone = (t: Task) => {
+    if (!onToggleDone) {
+      setDoneOverride((m) => new Map(m).set(t.no, !isDone(t)));
+      return;
+    }
+    const next = !isDone(t);
+    const timer = leaveTimers.current.get(t.no);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      leaveTimers.current.delete(t.no);
+    }
+    if (next && !showCompleted && t.parentNo === undefined) {
+      setLeaving((s) => new Set(s).add(t.no));
+      leaveTimers.current.set(
+        t.no,
+        window.setTimeout(() => {
+          leaveTimers.current.delete(t.no);
+          setLeaving((s) => {
+            const n = new Set(s);
+            n.delete(t.no);
+            return n;
+          });
+        }, LEAVE_DELAY_MS),
+      );
+    } else {
+      setLeaving((s) => {
+        if (!s.has(t.no)) return s;
+        const n = new Set(s);
+        n.delete(t.no);
+        return n;
+      });
+    }
+    onToggleDone(t, next);
+  };
   const childrenOf = (no: number) => mine.filter((t) => t.parentNo === no).sort((a, b) => a.order - b.order);
   const toggleSet = <T,>(set: Set<T>, v: T) => {
     const next = new Set(set);
@@ -126,14 +197,26 @@ export function ProjectView({
         showActions={showActions}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
         subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
-        onToggleDone={() => (onToggleDone ? onToggleDone(t, !isDone(t)) : setDoneOverride((m) => new Map(m).set(t.no, !isDone(t))))}
+        onToggleDone={() => toggleDone(t)}
         onMore={onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined}
         onToggleExpand={() => setExpanded((s) => toggleSet(s, t.no))}
       />
     );
     return (
-      <div key={t.no}>
-        {invalid ? <div style={{ background: "var(--color-accent-soft)" }}>{row}</div> : row}
+      <Collapse key={t.no} enterY={-8} exitX={-24}>
+        {/* 追加された行のハイライト: accent-soft から透明へ 600ms。行の背面 (DOM で行より前) に置く。 */}
+        <div style={{ position: "relative" }}>
+          {fresh.has(t.no) && (
+            <motion.div
+              aria-hidden
+              initial={{ opacity: 1 }}
+              animate={{ opacity: 0 }}
+              transition={{ duration: reduced ? 0 : HIGHLIGHT_MS / 1000, ease: "easeOut" }}
+              style={{ position: "absolute", top: 0, bottom: 0, right: 0, left: indent * 32, background: "var(--color-accent-soft)", pointerEvents: "none" }}
+            />
+          )}
+          {invalid ? <div style={{ background: "var(--color-accent-soft)" }}>{row}</div> : row}
+        </div>
         {onDeleteTask && deleteTarget === t.no && (
           <div
             role="alertdialog"
@@ -164,39 +247,46 @@ export function ProjectView({
             </Button>
           </div>
         )}
-        {open && kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}
-        {open && indent === 0 && kids.length > 0 && (
-          <div style={{ marginLeft: 32 }}>
-            {formParent === t.no ? (
-              <SubtaskForm
-                defaultTitle={formOpenedByClick || onAddSubtask ? "" : FORM_SAMPLE_TITLE}
-                autoFocus={formOpenedByClick}
-                compact={!!onAddSubtask}
-                onCancel={() => setFormParent(undefined)}
-                onSubmit={(title) => {
-                  setFormParent(undefined);
-                  onAddSubtask?.(t, title.trim());
-                }}
-              />
-            ) : (
-              <AddTaskRow
-                label="サブタスクを追加"
-                onClick={() => {
-                  setFormOpenedByClick(true);
-                  setFormParent(t.no);
-                }}
-              />
-            )}
-          </div>
-        )}
-      </div>
+        <AnimatePresence initial={false}>
+          {open && (
+            <Collapse key="subtasks">
+              <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}</AnimatePresence>
+              {indent === 0 && kids.length > 0 && (
+                <div style={{ marginLeft: 32 }}>
+                  {formParent === t.no ? (
+                    <SubtaskForm
+                      defaultTitle={formOpenedByClick || onAddSubtask ? "" : FORM_SAMPLE_TITLE}
+                      autoFocus={formOpenedByClick}
+                      compact={!!onAddSubtask}
+                      onCancel={() => setFormParent(undefined)}
+                      onSubmit={(title) => {
+                        setFormParent(undefined);
+                        onAddSubtask?.(t, title.trim());
+                      }}
+                    />
+                  ) : (
+                    <AddTaskRow
+                      label="サブタスクを追加"
+                      onClick={() => {
+                        setFormOpenedByClick(true);
+                        setFormParent(t.no);
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </Collapse>
+          )}
+        </AnimatePresence>
+      </Collapse>
     );
   };
 
   const topLevel = mine.filter((t) => t.parentNo === undefined).sort((a, b) => a.order - b.order);
   // 読み込み時点で未完了 / 完了済みの分類は固定し、チェックの見た目だけトグルする (行は動かない)
-  const open = topLevel.filter((t) => t.progress !== 100);
-  const completed = topLevel.filter((t) => t.progress === 100);
+  // 完了にした直後の行 (leaving) は、LEAVE_DELAY_MS だけ未完了の一覧に残す
+  const open = topLevel.filter((t) => t.progress !== 100 || leaving.has(t.no));
+  const completed = topLevel.filter((t) => t.progress === 100 && !leaving.has(t.no));
   const projectSections = sections.filter((s) => s.project === project).sort((a, b) => a.order - b.order);
   const sectionNames = new Set(projectSections.map((s) => s.name));
   const unsectioned = open.filter((t) => t.category === null || !sectionNames.has(t.category));
@@ -265,7 +355,7 @@ export function ProjectView({
             <TaskRow title={invalidRowTitle(r)} done={false} priority={4} hideActions />
           </div>
         ))}
-        {unsectioned.map((t) => renderRow(t, 0))}
+        <AnimatePresence initial={false}>{unsectioned.map((t) => renderRow(t, 0))}</AnimatePresence>
         {addSlot(null)}
         {projectSections.map((s) => {
           const rows = open.filter((t) => t.category === s.name);
@@ -296,17 +386,19 @@ export function ProjectView({
                   ) : undefined
                 }
               />
-              {!isCollapsed && (
-                <>
-                  {rows.map((t) => renderRow(t, 0))}
-                  {addSlot(s.name)}
-                </>
-              )}
+              <AnimatePresence initial={false}>
+                {!isCollapsed && (
+                  <Collapse key="body">
+                    <AnimatePresence initial={false}>{rows.map((t) => renderRow(t, 0))}</AnimatePresence>
+                    {addSlot(s.name)}
+                  </Collapse>
+                )}
+              </AnimatePresence>
             </section>
           );
         })}
         {addSectionSlot}
-        {showCompleted && completed.map((t) => renderRow(t, 0))}
+        <AnimatePresence initial={false}>{showCompleted && completed.map((t) => renderRow(t, 0))}</AnimatePresence>
         <button
           type="button"
           aria-pressed={showCompleted}
