@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import type { Task } from "../../types/model";
+import { addDays } from "../../app/dates";
+import type { DayGroup, Task } from "../../types/model";
 import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { AppShell } from "../../views/AppShell";
 import { BoardView } from "../../views/BoardView";
@@ -251,6 +252,47 @@ export const D04: Story = {
   render: () => navShell({ kind: "today" }, <TodayView tasks={withoutNo(15)} today={TODAY} />),
 };
 
+// 操作確認用 (横断ビュー): 実アプリと同じく、完了にしたタスクはビュー (Rust の today_view) からすぐ消える側として mock 一覧の progress を更新する。
+// 行は TodayView が 400ms だけ完了表示のまま残してから畳む。追加は受信トレイ・期限 = 今日、再スケジュールは期限切れ全件の期限を選んだ日にする。
+function TodayInteractive() {
+  const [list, setList] = useState<Task[]>(() => withoutNo(15));
+  return navShell(
+    { kind: "today" },
+    <TodayView
+      tasks={list}
+      today={TODAY}
+      hiddenProjects={["読書"]}
+      onToggleDone={(t, done) => setList((cur) => cur.map((x) => (x.no === t.no ? { ...x, progress: done ? 100 : 0 } : x)))}
+      onOpenTask={() => {}}
+      onAddTask={(title) =>
+        setList((cur) => [
+          ...cur,
+          {
+            no: Math.max(0, ...cur.map((x) => x.no)) + 1,
+            project: "受信トレイ",
+            category: null,
+            title,
+            assignee: "たろう",
+            priority: 4,
+            progress: 0,
+            due: TODAY,
+            labels: [],
+            reminders: [],
+            order: 0,
+            createdAt: `${TODAY}T09:00`,
+          },
+        ])
+      }
+      onReschedule={(due) => setList((cur) => cur.map((x) => (x.due !== undefined && x.due < TODAY ? { ...x, due } : x)))}
+    />,
+  );
+}
+
+export const D04Interactive: Story = {
+  name: "D-04 今日 (操作)",
+  render: () => <TodayInteractive />,
+};
+
 export const D04b: Story = {
   name: "D-04 今日 (期限切れなし)",
   render: () => navShell({ kind: "today" }, <TodayView tasks={withoutNo(15)} today={TODAY} hideOverdue />, 3),
@@ -259,6 +301,60 @@ export const D04b: Story = {
 export const D05: Story = {
   name: "D-05 近日",
   render: () => navShell({ kind: "upcoming" }, <UpcomingView tasks={withoutNo(12, 13, 15)} today={TODAY} />),
+};
+
+// 操作確認用 (近日): from から count 日分を mock から組み立てて days に渡す (Rust の upcoming_view の代わり)。
+// 「さらに 7 日」で count を増やし、月セレクトで from を変える (切り替えると 7 日に戻す)。完了・追加は mock 一覧に反映する。
+function UpcomingInteractive() {
+  const [list, setList] = useState<Task[]>(() => withoutNo(12, 13, 15));
+  const [from, setFrom] = useState(TODAY);
+  const [count, setCount] = useState(7);
+  const days: DayGroup[] = Array.from({ length: count }, (_, i) => {
+    const date = addDays(from, i);
+    return {
+      date,
+      tasks: list.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due === date).sort((a, b) => a.no - b.no),
+    };
+  });
+  return navShell(
+    { kind: "upcoming" },
+    <UpcomingView
+      tasks={list}
+      today={TODAY}
+      days={days}
+      onExtend={() => setCount((c) => Math.min(91, c + 7))}
+      onJumpTo={(f) => {
+        setFrom(f);
+        setCount(7);
+      }}
+      onToggleDone={(t, done) => setList((cur) => cur.map((x) => (x.no === t.no ? { ...x, progress: done ? 100 : 0 } : x)))}
+      onOpenTask={() => {}}
+      onAddTask={(date, title) =>
+        setList((cur) => [
+          ...cur,
+          {
+            no: Math.max(0, ...cur.map((x) => x.no)) + 1,
+            project: "受信トレイ",
+            category: null,
+            title,
+            assignee: "たろう",
+            priority: 4,
+            progress: 0,
+            due: date,
+            labels: [],
+            reminders: [],
+            order: 0,
+            createdAt: `${TODAY}T09:00`,
+          },
+        ])
+      }
+    />,
+  );
+}
+
+export const D05Interactive: Story = {
+  name: "D-05 近日 (操作)",
+  render: () => <UpcomingInteractive />,
 };
 
 export const D06: Story = {
