@@ -4,6 +4,7 @@
 
 pub mod saver;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -13,6 +14,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::domain::model::{INBOX, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
+use crate::domain::search;
+use crate::domain::search::Hit;
+use crate::domain::views::{self, DayGroup};
+use crate::domain::{Label, Task};
 use crate::error::{AppError, AppResult};
 use crate::platform;
 use crate::store::common_book::Settings;
@@ -116,9 +121,94 @@ pub struct SettingsDto {
     pub data_dir: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeReason {
+    Bulk,
+    External,
+    Move,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct ProjectChanged {
     name: String,
+    reason: ChangeReason,
+}
+
+fn emit_changed(app: &AppHandle, names: &[String], reason: ChangeReason) {
+    for name in names {
+        let _ = app.emit(
+            "project-changed",
+            ProjectChanged {
+                name: name.clone(),
+                reason,
+            },
+        );
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpcomingDto {
+    pub days: Vec<DayGroup>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelViewDto {
+    pub label: Label,
+    pub tasks: Vec<Task>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelsDto {
+    pub labels: Vec<Label>,
+    pub counts: BTreeMap<String, u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelRenamed {
+    pub label: Label,
+    pub changed_projects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedProjects {
+    pub changed_projects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchDto {
+    pub hits: Vec<Hit>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountsDto {
+    pub today: u32,
+    pub labels: BTreeMap<String, u32>,
+}
+
+fn parse_ymd(s: &str) -> AppResult<NaiveDate> {
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| AppError::Invalid {
+        message: format!("日付の形式が不正です: {s}"),
+    })
+}
+
+pub const MAX_UPCOMING_DAYS: u32 = 91;
+
+fn check_days(days: u32) -> AppResult<u32> {
+    if (1..=MAX_UPCOMING_DAYS).contains(&days) {
+        Ok(days)
+    } else {
+        Err(AppError::Invalid {
+            message: format!("days は 1〜{MAX_UPCOMING_DAYS} です"),
+        })
+    }
 }
 
 fn now() -> NaiveDateTime {
@@ -541,9 +631,7 @@ pub async fn move_task(
         s.move_task(&project, no, &to_project, to_section.as_deref())
     })?;
     if project != to_project {
-        for name in [project, to_project] {
-            let _ = app.emit("project-changed", ProjectChanged { name });
-        }
+        emit_changed(&app, &[project, to_project], ChangeReason::Move);
     }
     Ok(MoveOutcome { from, to })
 }
@@ -558,6 +646,159 @@ pub async fn reorder_tasks(
 ) -> AppResult<ProjectView> {
     mutate(&app, state.inner(), &[&project], false, |s| {
         s.reorder_tasks(&project, section.as_deref(), &order)
+    })
+}
+
+// ---- commands: cross-project views (仕様 §3, §4) ----
+
+#[tauri::command]
+pub async fn today_view(today: String, state: State<'_, AppState>) -> AppResult<views::TodayView> {
+    let today = parse_ymd(&today)?;
+    with_store(state.inner(), |s| {
+        Ok(views::today_view(&s.all_tasks(), today))
+    })
+}
+
+#[tauri::command]
+pub async fn upcoming_view(
+    from: String,
+    days: u32,
+    state: State<'_, AppState>,
+) -> AppResult<UpcomingDto> {
+    let from = parse_ymd(&from)?;
+    let days = check_days(days)?;
+    with_store(state.inner(), |s| {
+        Ok(UpcomingDto {
+            days: views::upcoming(&s.all_tasks(), from, days),
+        })
+    })
+}
+
+#[tauri::command]
+pub async fn label_view(label: String, state: State<'_, AppState>) -> AppResult<LabelViewDto> {
+    with_store(state.inner(), |s| {
+        Ok(LabelViewDto {
+            label: s.label_by_name(&label),
+            tasks: views::label_tasks(&s.all_tasks(), &label),
+        })
+    })
+}
+
+#[tauri::command]
+pub async fn labels(state: State<'_, AppState>) -> AppResult<LabelsDto> {
+    with_store(state.inner(), |s| {
+        Ok(LabelsDto {
+            labels: s.labels_union(),
+            counts: views::label_counts(&s.all_tasks()),
+        })
+    })
+}
+
+#[tauri::command]
+pub async fn add_label(
+    name: String,
+    color: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Label> {
+    mutate(&app, state.inner(), &[], true, |s| {
+        s.add_label(&name, &color)
+    })
+}
+
+#[tauri::command]
+pub async fn update_label(
+    name: String,
+    color: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Label> {
+    mutate(&app, state.inner(), &[], true, |s| {
+        s.update_label_color(&name, &color)
+    })
+}
+
+#[tauri::command]
+pub async fn rename_label(
+    name: String,
+    new_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<LabelRenamed> {
+    let (label, changed) = mutate(&app, state.inner(), &[], true, |s| {
+        s.rename_label(&name, &new_name)
+    })?;
+    for p in &changed {
+        state.saver.schedule(app.clone(), p.clone());
+    }
+    emit_changed(&app, &changed, ChangeReason::Bulk);
+    Ok(LabelRenamed {
+        label,
+        changed_projects: changed,
+    })
+}
+
+#[tauri::command]
+pub async fn delete_label(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ChangedProjects> {
+    let changed = mutate(&app, state.inner(), &[], true, |s| s.delete_label(&name))?;
+    for p in &changed {
+        state.saver.schedule(app.clone(), p.clone());
+    }
+    emit_changed(&app, &changed, ChangeReason::Bulk);
+    Ok(ChangedProjects {
+        changed_projects: changed,
+    })
+}
+
+#[tauri::command]
+pub async fn reschedule_overdue(
+    today: String,
+    due: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ChangedProjects> {
+    let today = parse_ymd(&today)?;
+    let due = parse_ymd(&due)?;
+    let changed = mutate(&app, state.inner(), &[], false, |s| {
+        s.reschedule_overdue(today, due)
+    })?;
+    for p in &changed {
+        state.saver.schedule(app.clone(), p.clone());
+    }
+    emit_changed(&app, &changed, ChangeReason::Bulk);
+    Ok(ChangedProjects {
+        changed_projects: changed,
+    })
+}
+
+#[tauri::command]
+pub async fn search(
+    query: String,
+    include_done: bool,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> AppResult<SearchDto> {
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    with_store(state.inner(), |s| {
+        Ok(SearchDto {
+            hits: search::search(&s.all_tasks(), &query, include_done, limit),
+        })
+    })
+}
+
+#[tauri::command]
+pub async fn counts(today: String, state: State<'_, AppState>) -> AppResult<CountsDto> {
+    let today = parse_ymd(&today)?;
+    with_store(state.inner(), |s| {
+        let tasks = s.all_tasks();
+        Ok(CountsDto {
+            today: views::today_count(&tasks, today),
+            labels: views::label_counts(&tasks),
+        })
     })
 }
 
@@ -815,5 +1056,21 @@ mod tests {
         let state = AppState::new(app_dir.path().to_path_buf());
         let err = with_store(&state, |s| Ok(s.summaries())).unwrap_err();
         assert!(matches!(err, AppError::Invalid { .. }));
+    }
+
+    #[test]
+    fn upcoming_view_rejects_out_of_range_days() {
+        assert!(matches!(check_days(0), Err(AppError::Invalid { .. })));
+        assert!(matches!(check_days(92), Err(AppError::Invalid { .. })));
+        assert_eq!(check_days(91).unwrap(), 91);
+    }
+
+    #[test]
+    fn parse_ymd_rejects_garbage() {
+        assert!(matches!(
+            parse_ymd("2026-13-01"),
+            Err(AppError::Invalid { .. })
+        ));
+        assert_eq!(parse_ymd("2026-10-13").unwrap(), d("2026-10-13"));
     }
 }

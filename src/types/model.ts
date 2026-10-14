@@ -53,3 +53,17 @@ export interface SaveStatus { project: string; state: SaveState; message?: strin
 
 export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; }
 export interface SettingsDto { displayName: string; weekStart: "mon" | "sun"; dataDir?: string; }
+
+// ---- Phase 2 ----
+export interface TodayViewDto { overdue: Task[]; today: Task[]; }
+export interface DayGroup { date: string; tasks: Task[]; }
+export interface UpcomingDto { days: DayGroup[]; }
+export interface LabelViewDto { label: Label; tasks: Task[]; }
+export interface LabelsDto { labels: Label[]; counts: Record<string, number>; }
+export interface LabelRenamed { label: Label; changedProjects: string[]; }
+export interface ChangedProjects { changedProjects: string[]; }
+export type Matched = "title" | "note" | "label";
+export interface SearchHit { task: Task; matched: Matched; }
+export interface SearchDto { hits: SearchHit[]; }
+export interface CountsDto { today: number; labels: Record<string, number>; }
+export type ChangeReason = "bulk" | "external" | "move";

@@ -43,6 +43,17 @@ pub fn run() {
             commands::parse_quick_add,
             commands::settings,
             commands::update_settings,
+            commands::today_view,
+            commands::upcoming_view,
+            commands::label_view,
+            commands::labels,
+            commands::add_label,
+            commands::update_label,
+            commands::rename_label,
+            commands::delete_label,
+            commands::reschedule_overdue,
+            commands::search,
+            commands::counts,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

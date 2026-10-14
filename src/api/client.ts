@@ -3,14 +3,23 @@ import type {
   AppError,
   AppErrorKind,
   AppStateDto,
+  ChangedProjects,
+  CountsDto,
+  Label,
+  LabelRenamed,
+  LabelViewDto,
+  LabelsDto,
   MoveOutcome,
   ProjectSummary,
   ProjectView,
   QuickAddOutcome,
   QuickAddResult,
+  SearchDto,
   SettingsDto,
   TaskInput,
   TaskPatch,
+  TodayViewDto,
+  UpcomingDto,
 } from "../types/model";
 
 /** Typed wrapper over Tauri `invoke`. Command names and argument keys follow src-tauri/src/commands/mod.rs (camelCase of the Rust params). */
@@ -50,6 +59,19 @@ export const api = {
 
   settings: () => invoke<SettingsDto>("settings"),
   updateSettings: (settings: SettingsDto) => invoke<SettingsDto>("update_settings", { settings }),
+
+  // ---- Phase 2: cross-project views, labels, search ----
+  todayView: (today: string) => invoke<TodayViewDto>("today_view", { today }),
+  upcomingView: (from: string, days: number) => invoke<UpcomingDto>("upcoming_view", { from, days }),
+  labelView: (label: string) => invoke<LabelViewDto>("label_view", { label }),
+  labels: () => invoke<LabelsDto>("labels"),
+  addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),
+  updateLabel: (name: string, color: string) => invoke<Label>("update_label", { name, color }),
+  renameLabel: (name: string, newName: string) => invoke<LabelRenamed>("rename_label", { name, newName }),
+  deleteLabel: (name: string) => invoke<ChangedProjects>("delete_label", { name }),
+  rescheduleOverdue: (today: string, due: string) => invoke<ChangedProjects>("reschedule_overdue", { today, due }),
+  search: (query: string, includeDone: boolean, limit = 50) => invoke<SearchDto>("search", { query, includeDone, limit }),
+  counts: (today: string) => invoke<CountsDto>("counts", { today }),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];
