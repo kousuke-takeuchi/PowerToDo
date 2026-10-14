@@ -8,6 +8,15 @@ export function isTypingTarget(e: KeyboardEvent): boolean {
   return !!t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 }
 
+const INTERACTIVE =
+  'button, a[href], summary, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [role="checkbox"], [role="switch"]';
+
+/** A focused control (not the page body) that uses Enter / Space / Delete / Backspace itself. */
+function isInteractiveTarget(e: KeyboardEvent): boolean {
+  const t = e.target instanceof HTMLElement ? e.target : null;
+  return !!t && t !== document.body && t.matches(INTERACTIVE);
+}
+
 export type RowHandlers = {
   /** True while a row has the keyboard focus. The keys that act on the focused row (and Enter / Backspace, which a focused button also uses) are left alone while it is false. */
   hasFocus: boolean;
@@ -58,6 +67,10 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
       // an element-level handler (a menu, a tab list) already took this key
       if (e.defaultPrevented || !h.enabled || isTypingTarget(e) || meta || e.altKey) return;
       const key = e.key;
+      // only Cmd/Ctrl+K carries a modifier; arrows may
+      if (e.shiftKey && !key.startsWith("Arrow")) return;
+      // a focused button / link / menu item keeps Enter, Space, Delete and Backspace for itself
+      if (isInteractiveTarget(e) && (key === "Enter" || key === " " || key === "Delete" || key === "Backspace")) return;
       const now = Date.now();
       if (now - gAt.current < G_TIMEOUT_MS) {
         gAt.current = 0;

@@ -195,7 +195,8 @@ export function Main({ app }: { app: AppStateDto }) {
     setDue: (t: Task, due: string) => (onProjectScreen(t) ? void p.updateTask(t.no, { due }) : void cross.setDue(t, due)),
   };
   const deleteAny = async (t: Task) => {
-    const hasSubtasks = onProjectScreen(t) && !!view?.tasks.some((x) => x.parentNo === t.no);
+    // プロジェクト画面は実際に子があるときだけ。横断ビューは子を一覧に出さないので、親タスクなら常に添える。
+    const hasSubtasks = onProjectScreen(t) ? !!view?.tasks.some((x) => x.parentNo === t.no) : t.parentNo === undefined;
     const ok = await confirmAction(`「${t.title}」を削除します。${hasSubtasks ? "サブタスクも削除されます。" : ""}`, {
       title: "タスクの削除",
       okLabel: "削除",

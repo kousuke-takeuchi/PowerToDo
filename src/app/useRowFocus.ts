@@ -16,7 +16,7 @@ export function useRowFocus(keys: string[]) {
       setFocusedKey(null);
       return;
     }
-    setFocusedKey(keys[Math.min(lastIndex.current, keys.length - 1)]);
+    setFocusedKey(keys[Math.max(0, Math.min(lastIndex.current, keys.length - 1))]);
   }, [keys, focusedKey]);
 
   const move = useCallback(

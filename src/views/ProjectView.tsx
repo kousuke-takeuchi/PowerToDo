@@ -57,8 +57,8 @@ export type ProjectViewProps = {
   focusedKey?: string;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
-  /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す。 */
-  onExpandApi?: (api: ExpandApi) => void;
+  /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
+  onExpandApi?: (api: ExpandApi | null) => void;
 };
 
 export type ExpandApi = { expand(no: number): void; collapse(no: number): void };
@@ -328,7 +328,10 @@ export function ProjectView({
         return n;
       }),
   });
-  useEffect(() => onExpandApi?.(expandApi.current), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onExpandApi?.(expandApi.current);
+    return () => onExpandApi?.(null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {
