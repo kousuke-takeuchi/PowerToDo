@@ -4,7 +4,7 @@
 
 pub mod saver;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -21,10 +21,12 @@ use crate::domain::{Label, Task};
 use crate::error::{AppError, AppResult};
 use crate::platform;
 use crate::store::common_book::Settings;
+use crate::store::external::{FileKind, Verdict, classify_path, fingerprint, verdict};
 use crate::store::paths::{AppSettings, Paths};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
+use crate::store::watcher::{self, Watcher};
 
-use saver::{COMMON_KEY, SaveSink, SaveStatus, Saver};
+use saver::{COMMON_KEY, SaveSink, SaveState, SaveStatus, Saver};
 
 // ---- state and DTOs ----
 
@@ -33,8 +35,18 @@ pub struct AppState {
     pub store: Mutex<Option<ProjectStore>>,
     pub app_settings: Mutex<AppSettings>,
     pub saver: Saver,
+    /// Watches the data folder; replaced whenever the folder changes.
+    pub watcher: Mutex<Option<Watcher>>,
+    /// Keys (project name or `COMMON_KEY`) whose write is in flight. Set before the store lock
+    /// is taken, so a watcher batch that gets the lock first still sees "a save is coming".
+    pub saving: Mutex<BTreeSet<String>>,
     app_data_dir: PathBuf,
 }
+
+// Lock order (never the reverse): `store`, then `saver.pending`. The watcher thread holds the
+// store lock while it asks the saver about / cancels a pending save; `TauriSink::save` runs in
+// a saver task that is not holding `pending` when it takes the store lock. `saving` and
+// `app_settings` are leaf locks (nothing is acquired while holding them).
 
 impl AppState {
     pub fn new(app_data_dir: PathBuf) -> Self {
@@ -46,6 +58,8 @@ impl AppState {
             store: Mutex::new(None),
             app_settings: Mutex::new(AppSettings::default()),
             saver,
+            watcher: Mutex::new(None),
+            saving: Mutex::new(BTreeSet::new()),
             app_data_dir,
         }
     }
@@ -58,7 +72,26 @@ impl AppState {
         self.app_settings.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Writes everything still dirty (used when the app quits). One failed write (say, a file
+    fn lock_saving(&self) -> MutexGuard<'_, BTreeSet<String>> {
+        self.saving.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A write for `key` is in flight (see [`AppState::saving`]).
+    pub fn is_saving(&self, key: &str) -> bool {
+        self.lock_saving().contains(key)
+    }
+
+    /// Projects (and `COMMON_KEY`) that changed on disk while they had unsaved edits and wait
+    /// for the user to choose. Empty when no data folder is open.
+    pub fn held_projects(&self) -> Vec<String> {
+        self.lock_store()
+            .as_ref()
+            .map(ProjectStore::held_projects)
+            .unwrap_or_default()
+    }
+
+    /// Writes everything still dirty (used when the app quits). Held projects are left alone:
+    /// writing them would overwrite the external change the user has not decided about. One failed write (say, a file
     /// locked by Excel) does not stop the others; each failure is logged and returned as
     /// `(project name or COMMON_KEY, error)`. Empty means everything was saved.
     pub fn flush_all(&self) -> Vec<(String, AppError)> {
@@ -76,11 +109,15 @@ impl AppState {
 fn flush(store: &mut ProjectStore) -> Vec<(String, AppError)> {
     let mut failures = Vec::new();
     if store.common_dirty()
+        && !store.is_held(COMMON_KEY)
         && let Err(e) = store.save_common()
     {
         failures.push((COMMON_KEY.to_string(), e));
     }
     for name in store.dirty_projects() {
+        if store.is_held(&name) {
+            continue;
+        }
         if let Err(e) = store.save(&name) {
             failures.push((name, e));
         }
@@ -240,14 +277,39 @@ struct TauriSink {
     app: AppHandle,
 }
 
+/// Marks `key` as being written for as long as it lives (also when the write fails).
+struct SavingGuard<'a> {
+    state: &'a AppState,
+    key: &'a str,
+}
+
+impl<'a> SavingGuard<'a> {
+    fn new(state: &'a AppState, key: &'a str) -> Self {
+        state.lock_saving().insert(key.to_string());
+        SavingGuard { state, key }
+    }
+}
+
+impl Drop for SavingGuard<'_> {
+    fn drop(&mut self) {
+        self.state.lock_saving().remove(self.key);
+    }
+}
+
 impl SaveSink for TauriSink {
     fn save(&self, key: &str) -> AppResult<()> {
         let state = self.app.state::<AppState>();
+        // Declared before the store lock is taken (and dropped after it is released).
+        let _saving = SavingGuard::new(&state, key);
         let mut guard = state.lock_store();
         // The store can be gone or already clean (a flush, a rename, a data folder switch).
         let Some(store) = guard.as_mut() else {
             return Ok(());
         };
+        // The file changed on disk while we had unsaved edits: wait for the user's choice.
+        if store.is_held(key) {
+            return Ok(());
+        }
         if key == COMMON_KEY {
             if store.common_dirty() {
                 store.save_common()?;
@@ -264,7 +326,17 @@ impl SaveSink for TauriSink {
 }
 
 impl Saver {
+    /// Schedules a debounced save. Nothing is scheduled for a held project (its file changed
+    /// on disk and the user has not chosen yet); `resolve_external_change` saves explicitly.
     pub fn schedule(&self, app: AppHandle, project: String) {
+        let held = app
+            .state::<AppState>()
+            .lock_store()
+            .as_ref()
+            .is_some_and(|s| s.is_held(&project));
+        if held {
+            return;
+        }
         self.schedule_with(Arc::new(TauriSink { app }), project);
     }
 
@@ -366,11 +438,17 @@ pub fn switch_data_dir(state: &AppState, path: &str) -> AppResult<AppStateDto> {
     }
     let dir = PathBuf::from(path);
     let mut store = state.lock_store();
-    // Never leave a folder with unsaved edits: any failed write aborts the switch.
-    if let Some(old) = store.as_mut()
-        && let Some((_, e)) = flush(old).into_iter().next()
-    {
-        return Err(e);
+    // Never leave a folder with unsaved edits: a project waiting for the user's choice about an
+    // external change (its edits cannot be flushed) or any failed write aborts the switch.
+    if let Some(old) = store.as_mut() {
+        if !old.held_projects().is_empty() {
+            return Err(AppError::Unsaved {
+                message: "他のアプリで変更されたファイルの扱いが決まっていません。先に「再読み込み」か「上書き」を選んでください。".into(),
+            });
+        }
+        if let Some((_, e)) = flush(old).into_iter().next() {
+            return Err(e);
+        }
     }
     let opened = ProjectStore::open(Paths::new(dir.clone()), now, true)?;
     let settings = AppSettings {
@@ -381,6 +459,168 @@ pub fn switch_data_dir(state: &AppState, path: &str) -> AppResult<AppStateDto> {
     state.saver.cancel_all();
     *store = Some(opened);
     Ok(state_dto(store.as_ref(), None))
+}
+
+// ---- external changes (仕様 §5) ----
+
+/// What one batch of watcher events did to the store; the caller publishes it.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct BatchOutcome {
+    /// Newly held: changed on disk while having unsaved or in-flight edits (`external-change`).
+    held: Vec<String>,
+    /// Projects re-read from their changed file (`project-changed`, reason `external`).
+    reloaded: Vec<String>,
+    /// The project list or the common workbook changed (`projects-changed`).
+    projects_changed: bool,
+    /// `(key, message)` for files that changed but could not be read (`save-status` error).
+    failures: Vec<(String, String)>,
+}
+
+impl BatchOutcome {
+    fn is_empty(&self) -> bool {
+        *self == BatchOutcome::default()
+    }
+}
+
+/// Decides, per changed file, what to do (仕様 §5.2). `busy(key)` says a save for the key is
+/// waiting or running; `cancel(key)` drops its timer. Our own writes are recognised by their
+/// recorded fingerprint and ignored.
+fn apply_fs_batch(
+    store: &mut ProjectStore,
+    busy: &dyn Fn(&str) -> bool,
+    cancel: &dyn Fn(&str),
+    paths: Vec<PathBuf>,
+) -> BatchOutcome {
+    let mut out = BatchOutcome::default();
+    for path in paths {
+        match classify_path(store.paths(), &path) {
+            FileKind::Ignore => {}
+            FileKind::Common => {
+                let changed =
+                    verdict(store.recorded(COMMON_KEY), fingerprint(&path)) == Verdict::Changed;
+                if !changed || store.is_held(COMMON_KEY) {
+                    continue;
+                }
+                if store.common_dirty() || busy(COMMON_KEY) {
+                    cancel(COMMON_KEY);
+                    store.hold(COMMON_KEY);
+                    out.held.push(COMMON_KEY.to_string());
+                } else {
+                    match store.reload_common() {
+                        Ok(()) => out.projects_changed = true,
+                        Err(e) => out.failures.push((COMMON_KEY.to_string(), e.to_string())),
+                    }
+                }
+            }
+            FileKind::Project(name) => {
+                let known = store.summaries().iter().any(|p| p.name == name);
+                match verdict(store.recorded(&name), fingerprint(&path)) {
+                    Verdict::OwnWrite => {}
+                    Verdict::Removed => {
+                        if known {
+                            store.mark_missing(&name);
+                            out.projects_changed = true;
+                        }
+                    }
+                    Verdict::Changed if !known => {
+                        if store.adopt_new_file(&name).is_ok() {
+                            out.projects_changed = true;
+                        }
+                    }
+                    Verdict::Changed => {
+                        if store.is_held(&name) {
+                            // Already waiting for the user's choice.
+                        } else if store.dirty_projects().contains(&name) || busy(&name) {
+                            cancel(&name);
+                            store.hold(&name);
+                            out.held.push(name);
+                        } else {
+                            match store.reload_discarding(&name) {
+                                Ok(_) => out.reloaded.push(name),
+                                Err(e) => {
+                                    // The project now shows as failed to load.
+                                    out.projects_changed = true;
+                                    out.failures.push((name, e.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalChange {
+    project: String,
+}
+
+/// One debounced batch of changed paths, delivered on the watcher thread. Lock order: the store
+/// lock is taken first, and the saver is only asked about / told to cancel while holding it.
+fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
+    let state = app.state::<AppState>();
+    let out = {
+        let mut guard = state.lock_store();
+        let Some(store) = guard.as_mut() else {
+            return;
+        };
+        apply_fs_batch(
+            store,
+            &|key| state.saver.is_pending(key) || state.is_saving(key),
+            &|key| state.saver.cancel(key),
+            paths,
+        )
+    };
+    if out.is_empty() {
+        return;
+    }
+    for project in out.held {
+        let _ = app.emit("external-change", ExternalChange { project });
+    }
+    emit_changed(app, &out.reloaded, ChangeReason::External);
+    for (project, message) in out.failures {
+        let _ = app.emit(
+            "save-status",
+            SaveStatus {
+                project,
+                state: SaveState::Error,
+                message: Some(format!("Excel の変更を読み込めません: {message}")),
+            },
+        );
+    }
+    if out.projects_changed {
+        let _ = app.emit("projects-changed", serde_json::json!({}));
+    }
+    // Re-read files can come back normalized (dirty), and a new file dirties the common
+    // workbook. `schedule` needs a tokio runtime; this is a plain thread.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        schedule_dirty(&handle, &handle.state::<AppState>());
+    });
+}
+
+/// Starts (or restarts) watching the open data folder, replacing the previous watcher. Without
+/// an open store, or when watching cannot start, no watcher is left running.
+fn start_watching(app: &AppHandle, state: &AppState) {
+    let dir = state
+        .lock_store()
+        .as_ref()
+        .map(|s| s.paths().data_dir.clone());
+    let watcher = dir.and_then(|dir| {
+        let handle = app.clone();
+        match watcher::start(&dir, move |paths| handle_fs_batch(&handle, paths)) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("watch failed: {e}");
+                let _ = app.emit("watch-failed", e.to_string());
+                None
+            }
+        }
+    });
+    *state.watcher.lock().unwrap_or_else(|e| e.into_inner()) = watcher;
 }
 
 // ---- quick add ----
@@ -422,6 +662,14 @@ pub fn quick_add_in(
 pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStateDto> {
     let dto = startup(state.inner())?;
     schedule_dirty(&app, state.inner());
+    let watching = state
+        .watcher
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some();
+    if !watching {
+        start_watching(&app, state.inner());
+    }
     Ok(dto)
 }
 
@@ -433,6 +681,7 @@ pub async fn set_data_dir(
 ) -> AppResult<AppStateDto> {
     let dto = switch_data_dir(state.inner(), &path)?;
     schedule_dirty(&app, state.inner());
+    start_watching(&app, state.inner());
     Ok(dto)
 }
 
@@ -445,6 +694,61 @@ pub async fn pick_folder(app: AppHandle) -> AppResult<Option<String>> {
 pub async fn reveal_data_dir(state: State<'_, AppState>) -> AppResult<()> {
     let dir = with_store(state.inner(), |s| Ok(s.paths().data_dir.clone()))?;
     platform::reveal_path(&dir)
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolveAction {
+    Reload,
+    Overwrite,
+}
+
+/// The banner's choice for a project (or `_common`) that changed on disk while it had unsaved
+/// edits (仕様 §5.3). `reload` drops ours and returns the project's new view (`None` for
+/// `_common`); `overwrite` writes ours now and returns the view.
+#[tauri::command]
+pub async fn resolve_external_change(
+    project: String,
+    action: ResolveAction,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Option<ProjectView>> {
+    let is_common = project == COMMON_KEY;
+    let view = with_store(state.inner(), |s| {
+        s.release(&project);
+        match (action, is_common) {
+            (ResolveAction::Reload, true) => s.reload_common().map(|()| None),
+            (ResolveAction::Reload, false) => s.reload_discarding(&project).map(Some),
+            (ResolveAction::Overwrite, true) => Ok(None),
+            (ResolveAction::Overwrite, false) => s.view(&project).map(Some),
+        }
+    })?;
+    match action {
+        ResolveAction::Overwrite => {
+            let sink = Arc::new(TauriSink { app: app.clone() });
+            state.saver.save_now(sink, &project).await?;
+        }
+        // Normalization on load (or re-listing in the common workbook) can leave it dirty.
+        ResolveAction::Reload => schedule_dirty(&app, state.inner()),
+    }
+    if is_common {
+        let _ = app.emit("projects-changed", serde_json::json!({}));
+    } else {
+        emit_changed(&app, &[project], ChangeReason::External);
+    }
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn held_projects(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    with_store(state.inner(), |s| Ok(s.held_projects()))
+}
+
+/// Exits for real, after the user resolved (or gave up on) the held projects that blocked the
+/// exit; `exit(0)` is not blocked again (see `lib.rs`).
+#[tauri::command]
+pub async fn quit(app: AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -1072,5 +1376,267 @@ mod tests {
             Err(AppError::Invalid { .. })
         ));
         assert_eq!(parse_ymd("2026-10-13").unwrap(), d("2026-10-13"));
+    }
+
+    // ---- external changes ----
+
+    /// Simulates Excel saving `file` in `dir`: a second store works on a copy of the folder,
+    /// `edit` changes it and it is written; then that one file is copied back over the
+    /// original (new modification time, different content).
+    fn excel_saves(dir: &Path, file: &str, edit: impl FnOnce(&mut ProjectStore)) {
+        let copy = tempfile::tempdir().unwrap();
+        for e in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+            if e.file_type().unwrap().is_file() {
+                std::fs::copy(e.path(), copy.path().join(e.file_name())).unwrap();
+            }
+        }
+        let mut other = open_store(copy.path());
+        edit(&mut other);
+        assert!(flush(&mut other).is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::copy(copy.path().join(file), dir.join(file)).unwrap();
+    }
+
+    /// Runs one batch with a saver that has nothing pending unless `busy`; returns the outcome
+    /// and the keys whose timers were cancelled.
+    fn run_batch(
+        store: &mut ProjectStore,
+        busy: bool,
+        paths: &[PathBuf],
+    ) -> (BatchOutcome, Vec<String>) {
+        let cancelled = std::cell::RefCell::new(Vec::new());
+        let out = apply_fs_batch(
+            store,
+            &|_| busy,
+            &|key| cancelled.borrow_mut().push(key.to_string()),
+            paths.to_vec(),
+        );
+        (out, cancelled.into_inner())
+    }
+
+    fn titles(store: &ProjectStore, project: &str) -> Vec<String> {
+        store
+            .view(project)
+            .unwrap()
+            .tasks
+            .into_iter()
+            .map(|t| t.title)
+            .collect()
+    }
+
+    #[test]
+    fn own_writes_and_noise_are_not_external_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "自分", INBOX, d("2026-10-14")).unwrap();
+        store.save(INBOX).unwrap();
+        store.update_settings(store.settings()).unwrap();
+        store.save_common().unwrap();
+        let (out, cancelled) = run_batch(
+            &mut store,
+            false,
+            &[
+                tmp.path().join("受信トレイ.xlsx"),
+                tmp.path().join("_PowerToDo.xlsx"),
+                tmp.path().join("~$受信トレイ.xlsx"),
+                tmp.path().join(".powertodo-x1.tmp"),
+                tmp.path().join("archive").join("x.xlsx"),
+            ],
+        );
+        assert!(out.is_empty(), "{out:?}");
+        assert!(cancelled.is_empty());
+    }
+
+    #[test]
+    fn clean_project_changed_in_excel_is_reloaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let (out, _) = run_batch(&mut store, false, &[tmp.path().join("受信トレイ.xlsx")]);
+        assert_eq!(out.reloaded, vec![INBOX.to_string()]);
+        assert!(out.held.is_empty() && out.failures.is_empty());
+        assert_eq!(titles(&store, INBOX), vec!["Excel で追加".to_string()]);
+        // The same event again (the file is now what we read): nothing to do.
+        let (again, _) = run_batch(&mut store, false, &[tmp.path().join("受信トレイ.xlsx")]);
+        assert!(again.is_empty());
+    }
+
+    #[test]
+    fn project_with_unsaved_edits_is_held_until_resolved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "未保存", INBOX, d("2026-10-14")).unwrap();
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let path = tmp.path().join("受信トレイ.xlsx");
+        let (out, cancelled) = run_batch(&mut store, false, std::slice::from_ref(&path));
+        assert_eq!(out.held, vec![INBOX.to_string()]);
+        assert_eq!(cancelled, vec![INBOX.to_string()]);
+        assert!(out.reloaded.is_empty());
+        assert_eq!(titles(&store, INBOX), vec!["未保存".to_string()]);
+        assert!(store.is_held(INBOX));
+        // Another event while waiting: no second banner, nothing cancelled again.
+        let (again, cancelled) = run_batch(&mut store, false, &[path]);
+        assert!(again.is_empty() && cancelled.is_empty());
+        // Quitting or switching folders must not write the held project.
+        assert!(flush(&mut store).is_empty());
+        assert_eq!(store.dirty_projects(), vec![INBOX.to_string()]);
+        // "Reload": ours is dropped, theirs is shown.
+        store.release(INBOX);
+        store.reload_discarding(INBOX).unwrap();
+        assert_eq!(titles(&store, INBOX), vec!["Excel で追加".to_string()]);
+        assert!(store.held_projects().is_empty());
+    }
+
+    #[test]
+    fn overwrite_after_hold_writes_ours_over_theirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "未保存", INBOX, d("2026-10-14")).unwrap();
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let path = tmp.path().join("受信トレイ.xlsx");
+        run_batch(&mut store, false, std::slice::from_ref(&path));
+        store.release(INBOX);
+        store.save(INBOX).unwrap();
+        let on_disk = crate::store::project_book::read_project_book(&path).unwrap();
+        assert_eq!(on_disk.tasks.len(), 1);
+        assert_eq!(on_disk.tasks[0].title, "未保存");
+        // Our write is not mistaken for another external change.
+        let (out, _) = run_batch(&mut store, false, &[path]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_save_in_flight_holds_the_project_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let (out, cancelled) = run_batch(&mut store, true, &[tmp.path().join("受信トレイ.xlsx")]);
+        assert_eq!(out.held, vec![INBOX.to_string()]);
+        assert_eq!(cancelled, vec![INBOX.to_string()]);
+    }
+
+    #[test]
+    fn removed_file_marks_project_missing_and_coming_back_reloads_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("aaa", "").unwrap();
+        let path = tmp.path().join("aaa.xlsx");
+        let keep = tmp.path().join("keep.xlsx");
+        std::fs::rename(&path, &keep).unwrap();
+        let (out, _) = run_batch(&mut store, false, std::slice::from_ref(&path));
+        assert!(out.projects_changed);
+        let aaa = store
+            .summaries()
+            .into_iter()
+            .find(|p| p.name == "aaa")
+            .unwrap();
+        assert!(aaa.load_error.is_some());
+
+        std::fs::rename(&keep, &path).unwrap();
+        let (out, _) = run_batch(&mut store, false, &[path]);
+        assert_eq!(out.reloaded, vec!["aaa".to_string()]);
+        let aaa = store
+            .summaries()
+            .into_iter()
+            .find(|p| p.name == "aaa")
+            .unwrap();
+        assert!(aaa.load_error.is_none());
+    }
+
+    #[test]
+    fn deleting_or_renaming_a_project_in_the_app_is_not_an_external_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("aaa", "").unwrap();
+        store.create_project("bbb", "").unwrap();
+        store.rename_project("aaa", "ccc").unwrap();
+        store.delete_project("bbb").unwrap();
+        store.save_common().unwrap();
+        let (out, _) = run_batch(
+            &mut store,
+            false,
+            &[
+                tmp.path().join("aaa.xlsx"),
+                tmp.path().join("ccc.xlsx"),
+                tmp.path().join("bbb.xlsx"),
+                tmp.path().join("_PowerToDo.xlsx"),
+            ],
+        );
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn new_workbook_in_the_folder_is_adopted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "新規.xlsx", |o| {
+            o.create_project("新規", "").unwrap();
+        });
+        let (out, _) = run_batch(&mut store, false, &[tmp.path().join("新規.xlsx")]);
+        assert!(out.projects_changed);
+        assert!(store.summaries().iter().any(|p| p.name == "新規"));
+        assert!(store.common_dirty(), "the common workbook must list it");
+    }
+
+    #[test]
+    fn common_workbook_changed_in_excel_is_reloaded_or_held() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "_PowerToDo.xlsx", |o| {
+            let mut settings = o.settings();
+            settings.display_name = "Excel".into();
+            o.update_settings(settings).unwrap();
+        });
+        let common = tmp.path().join("_PowerToDo.xlsx");
+        let (out, _) = run_batch(&mut store, false, std::slice::from_ref(&common));
+        assert!(out.projects_changed && out.held.is_empty());
+        assert_eq!(store.settings().display_name, "Excel");
+        assert!(!store.common_dirty());
+
+        // With unsaved edits to the common workbook it is held instead.
+        let mut settings = store.settings();
+        settings.display_name = "アプリ".into();
+        store.update_settings(settings).unwrap();
+        excel_saves(tmp.path(), "_PowerToDo.xlsx", |o| {
+            let mut settings = o.settings();
+            settings.display_name = "Excel 2".into();
+            o.update_settings(settings).unwrap();
+        });
+        let (out, cancelled) = run_batch(&mut store, false, &[common]);
+        assert_eq!(out.held, vec![COMMON_KEY.to_string()]);
+        assert_eq!(cancelled, vec![COMMON_KEY.to_string()]);
+        assert_eq!(store.settings().display_name, "アプリ");
+        assert!(flush(&mut store).is_empty());
+        assert!(
+            store.common_dirty(),
+            "a held common workbook is not written"
+        );
+        assert_eq!(store.held_projects(), vec![COMMON_KEY.to_string()]);
+    }
+
+    #[test]
+    fn switching_data_dir_is_refused_while_a_project_is_held() {
+        let app_dir = tempfile::tempdir().unwrap();
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let state = AppState::new(app_dir.path().to_path_buf());
+        switch_data_dir(&state, a.path().to_str().unwrap()).unwrap();
+        with_store(&state, |s| {
+            s.hold(INBOX);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(state.held_projects(), vec![INBOX.to_string()]);
+        let err = switch_data_dir(&state, b.path().to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, AppError::Unsaved { .. }));
+        assert_eq!(state.held_projects(), vec![INBOX.to_string()]);
     }
 }

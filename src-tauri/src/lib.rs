@@ -4,7 +4,7 @@ pub mod error;
 pub mod platform;
 pub mod store;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use commands::AppState;
 
@@ -54,16 +54,48 @@ pub fn run() {
             commands::reschedule_overdue,
             commands::search,
             commands::counts,
+            commands::resolve_external_change,
+            commands::held_projects,
+            commands::quit,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|handle, event| {
-        // Edits are written 1 s after the last change; do not lose the last second on quit.
-        if let tauri::RunEvent::Exit = event
-            && let Some(state) = handle.try_state::<AppState>()
-        {
-            state.flush_all();
+    app.run(|handle, event| match event {
+        // Quitting (Cmd+Q, or the last window closing) must not drop an external change the
+        // user has not decided about: keep running and let the UI ask. The `quit` command exits
+        // with a code, which is let through.
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
+            if code.is_none()
+                && let Some(state) = handle.try_state::<AppState>()
+            {
+                let held = state.held_projects();
+                if !held.is_empty() {
+                    api.prevent_exit();
+                    let _ = handle.emit("exit-blocked", held);
+                }
+            }
         }
+        // Closing the last window ends the app only after its window is gone, when there is no
+        // page left to ask. Keep the window while something is held; same event for the UI.
+        tauri::RunEvent::WindowEvent {
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } => {
+            if let Some(state) = handle.try_state::<AppState>() {
+                let held = state.held_projects();
+                if !held.is_empty() {
+                    api.prevent_close();
+                    let _ = handle.emit("exit-blocked", held);
+                }
+            }
+        }
+        // Edits are written 1 s after the last change; do not lose the last second on quit.
+        tauri::RunEvent::Exit => {
+            if let Some(state) = handle.try_state::<AppState>() {
+                state.flush_all();
+            }
+        }
+        _ => {}
     });
 }

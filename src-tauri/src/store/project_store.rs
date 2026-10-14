@@ -20,6 +20,7 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Serialize;
 
 use super::common_book::{CommonBook, Settings, read_common_book, write_common_book};
+use super::external::{Fingerprint, fingerprint};
 use super::paths::{Paths, validate_project_name};
 use super::project_book::{
     ProjectBook, created_at_sentinel, read_project_book, write_project_book,
@@ -69,8 +70,17 @@ pub struct ProjectStore {
     pub(super) dirty: BTreeSet<String>,
     pub(super) common_dirty: bool,
     high_water: BTreeMap<String, u32>,
+    /// What each workbook looked like on disk right after we last wrote or read it, keyed by
+    /// project name or `"_common"`. A watcher event whose file still matches is our own write.
+    last_written: BTreeMap<String, Fingerprint>,
+    /// Projects (or `"_common"`) whose file changed on disk while they had unsaved edits. Not
+    /// written until the user chooses to reload or overwrite.
+    held: BTreeSet<String>,
     clock: Box<dyn Fn() -> NaiveDateTime + Send>,
 }
+
+/// Key of the common workbook in `last_written` / `held` (same as the saver's key).
+const COMMON_KEY: &str = "_common";
 
 /// Values a mutation needs besides the book itself.
 struct Ctx {
@@ -186,7 +196,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// Files that are not project workbooks: Excel lock files (`~$`), our temp files (`.`), and
 /// the common workbook / other reserved names (`_`).
-fn adoptable_stem(path: &Path) -> Option<String> {
+pub(super) fn adoptable_stem(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     if !ext.eq_ignore_ascii_case("xlsx") {
         return None;
@@ -233,8 +243,13 @@ impl ProjectStore {
             dirty: BTreeSet::new(),
             common_dirty: is_new,
             high_water: BTreeMap::new(),
+            last_written: BTreeMap::new(),
+            held: BTreeSet::new(),
             clock: Box::new(clock),
         };
+        if !is_new {
+            store.record_written(COMMON_KEY, &common_path);
+        }
 
         if !store.common.projects.iter().any(|p| p.name == INBOX) {
             store.common.projects.insert(
@@ -341,6 +356,8 @@ impl ProjectStore {
             Ok(b) => b,
             Err(e) => return LoadedProject::Failed(e.to_string()),
         };
+        // What we just read is the state we know about.
+        self.record_written(name, &path);
 
         let now = self.now();
         let mut changed = book.project != name;
@@ -469,6 +486,7 @@ impl ProjectStore {
         }
         let book = self.empty_book(name);
         write_project_book(&path, &book, self.now().date(), &self.common.holidays)?;
+        self.record_written(name, &path);
 
         let project = Project {
             name: name.to_string(),
@@ -510,6 +528,12 @@ impl ProjectStore {
         }
         if old_path.exists() {
             std::fs::rename(&old_path, &new_path)?;
+        }
+        // The renamed file is the same file: carry over what we know about it.
+        self.last_written.remove(name);
+        self.record_written(new_name, &new_path);
+        if self.held.remove(name) {
+            self.held.insert(new_name.to_string());
         }
 
         self.common.projects[idx].name = new_name.to_string();
@@ -574,6 +598,8 @@ impl ProjectStore {
         self.books.remove(name);
         self.dirty.remove(name);
         self.high_water.remove(name);
+        self.last_written.remove(name);
+        self.held.remove(name);
         self.common_dirty = true;
         let _ = self.save_common();
         Ok(())
@@ -1076,6 +1102,7 @@ impl ProjectStore {
             Some(LoadedProject::Failed(m)) => return Err(load_failed(name, m)),
             None => return Err(not_found(format!("プロジェクト「{name}」がありません"))),
         }
+        self.record_written(name, &path);
         self.dirty.remove(name);
         // Invalid rows are written after the valid tasks, so their row numbers moved.
         if let Ok(fresh) = read_project_book(&path)
@@ -1089,8 +1116,129 @@ impl ProjectStore {
     }
 
     pub fn save_common(&mut self) -> AppResult<()> {
-        write_common_book(&self.paths.common(), &self.common)?;
+        let path = self.paths.common();
+        write_common_book(&path, &self.common)?;
+        self.record_written(COMMON_KEY, &path);
         self.common_dirty = false;
+        Ok(())
+    }
+
+    // ---- external changes (仕様 §5) ----
+
+    /// Remembers the file's current size and modification time as "our" state. Call right after
+    /// writing or reading a workbook (`key` is the project name or `"_common"`). A file that
+    /// cannot be inspected clears the record.
+    pub fn record_written(&mut self, key: &str, path: &Path) {
+        match fingerprint(path) {
+            Some(f) => {
+                self.last_written.insert(key.to_string(), f);
+            }
+            None => {
+                self.last_written.remove(key);
+            }
+        }
+    }
+
+    pub fn recorded(&self, key: &str) -> Option<&Fingerprint> {
+        self.last_written.get(key)
+    }
+
+    pub fn is_held(&self, name: &str) -> bool {
+        self.held.contains(name)
+    }
+
+    pub fn hold(&mut self, name: &str) {
+        self.held.insert(name.to_string());
+    }
+
+    pub fn release(&mut self, name: &str) {
+        self.held.remove(name);
+    }
+
+    pub fn held_projects(&self) -> Vec<String> {
+        self.held.iter().cloned().collect()
+    }
+
+    /// The file disappeared under us (deleted, or moved away by hand). Unsaved edits are
+    /// dropped with it; the project shows as failed to load until the file comes back.
+    pub fn mark_missing(&mut self, name: &str) {
+        if self.books.contains_key(name) {
+            self.dirty.remove(name);
+            self.held.remove(name);
+            self.last_written.remove(name);
+            self.books.insert(
+                name.to_string(),
+                LoadedProject::Failed("ファイルが見つかりません".into()),
+            );
+        }
+    }
+
+    /// A new `<name>.xlsx` appeared: list it in the common workbook (which becomes dirty) and
+    /// load it.
+    pub fn adopt_new_file(&mut self, name: &str) -> AppResult<ProjectSummary> {
+        if !self.common.projects.iter().any(|p| p.name == name) {
+            let order = self.next_project_order();
+            self.common.projects.push(Project {
+                name: name.into(),
+                color: DEFAULT_COLOR.into(),
+                order,
+                favorite: false,
+                inbox: false,
+            });
+            self.common_dirty = true;
+        }
+        let loaded = self.load_from_disk(name);
+        self.books.insert(name.to_string(), loaded);
+        let p = self
+            .common
+            .projects
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+            .expect("listed above");
+        Ok(self.summary(&p))
+    }
+
+    /// Re-reads the common workbook (labels, colors, holidays, settings), discarding unsaved
+    /// edits to it. Projects loaded here but no longer listed in the file are kept and
+    /// re-listed (so the common workbook comes back dirty); `.xlsx` files that are listed or
+    /// new but not loaded yet are loaded. The common workbook is clean afterwards unless that
+    /// re-listing happened.
+    pub fn reload_common(&mut self) -> AppResult<()> {
+        let path = self.paths.common();
+        let fresh = read_common_book(&path)?;
+        let unlisted: Vec<Project> = self
+            .common
+            .projects
+            .iter()
+            .filter(|p| !fresh.projects.iter().any(|f| f.name == p.name))
+            .cloned()
+            .collect();
+        self.common = fresh;
+        self.common_dirty = false;
+        self.record_written(COMMON_KEY, &path);
+        if !unlisted.is_empty() {
+            self.common.projects.extend(unlisted);
+            self.common_dirty = true;
+        }
+        self.adopt_unlisted();
+        let to_load: Vec<String> = self
+            .common
+            .projects
+            .iter()
+            .map(|p| p.name.clone())
+            .filter(|n| !self.books.contains_key(n))
+            .collect();
+        for name in to_load {
+            let loaded = self.load_from_disk(&name);
+            self.books.insert(name, loaded);
+        }
+        let holidays = self.common.holidays.clone();
+        for b in self.books.values_mut() {
+            if let LoadedProject::Ok(book) = b {
+                recompute_days(book, &holidays);
+            }
+        }
         Ok(())
     }
 }
