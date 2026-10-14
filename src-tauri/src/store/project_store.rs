@@ -569,13 +569,26 @@ impl ProjectStore {
     /// Moves `<name>.xlsx` to `archive/<name> (YYYYMMDD-HHMM).xlsx` (never deletes it) and
     /// removes the project from the common workbook. Unsaved changes are written first so the
     /// archive holds the latest state; if that write fails, its error is returned and the
-    /// project is left as it was (still listed, still dirty, file not moved).
+    /// project is left as it was (still listed, still dirty, file not moved). A project that
+    /// is held, or has unsaved edits while its file changed on disk since we read it, is refused
+    /// (`Unsaved`) without writing: saving first would overwrite the external change, and
+    /// archiving the file would take the external change away before the user chose.
     pub fn delete_project(&mut self, name: &str) -> AppResult<()> {
         if name == INBOX {
             return Err(invalid("受信トレイは削除できません"));
         }
         if !self.common.projects.iter().any(|p| p.name == name) {
             return Err(not_found(format!("プロジェクト「{name}」がありません")));
+        }
+        // A clean project has nothing of ours to overwrite, and archiving moves the file as it
+        // is (a file that failed to load has no recorded fingerprint, so it always reads as
+        // "changed": it must stay deletable). Only unsaved edits make the disk state matter.
+        if self.is_held(name) || (self.dirty.contains(name) && self.changed_on_disk(name)) {
+            return Err(AppError::Unsaved {
+                message: format!(
+                    "「{name}」は Excel で変更されています。帯の操作で解決してから削除してください"
+                ),
+            });
         }
         if self.dirty.contains(name) {
             self.save(name)?;
@@ -1164,7 +1177,17 @@ impl ProjectStore {
     /// common workbook; `-2`, `-3`, … when the name is taken) and returns its path. Used on quit
     /// for edits that cannot go to their own file without overwriting an external change: the
     /// file is left as it is and the edits are kept next to it. Nothing in the store changes.
-    pub fn write_recovery_copy(&self, key: &str, now: NaiveDateTime) -> AppResult<PathBuf> {
+    ///
+    /// When `archive/` cannot be written (the folder cannot be created, the drive is gone or
+    /// read-only), the copy goes to `fallback_dir` under the same file name instead; the
+    /// returned path tells which one was used. The error of the `archive/` attempt is returned
+    /// only when the fallback fails too.
+    pub fn write_recovery_copy(
+        &self,
+        key: &str,
+        now: NaiveDateTime,
+        fallback_dir: &Path,
+    ) -> AppResult<PathBuf> {
         let stem = if key == COMMON_KEY {
             COMMON_FILE.trim_end_matches(".xlsx").to_string()
         } else {
@@ -1176,8 +1199,29 @@ impl ProjectStore {
             }
             key.to_string()
         };
-        let dir = self.paths.archive_dir();
-        std::fs::create_dir_all(&dir)?;
+        match self.write_recovery_copy_in(key, &stem, now, &self.paths.archive_dir()) {
+            Ok(path) => Ok(path),
+            Err(first) => self
+                .write_recovery_copy_in(key, &stem, now, fallback_dir)
+                .map_err(|second| {
+                    eprintln!(
+                        "recovery copy of {key}: fallback {} failed too: {second}",
+                        fallback_dir.display()
+                    );
+                    first
+                }),
+        }
+    }
+
+    /// One attempt of `write_recovery_copy`: creates `dir` if needed and writes the copy there.
+    fn write_recovery_copy_in(
+        &self,
+        key: &str,
+        stem: &str,
+        now: NaiveDateTime,
+        dir: &Path,
+    ) -> AppResult<PathBuf> {
+        std::fs::create_dir_all(dir)?;
         let stamp = now.format("%Y%m%d-%H%M").to_string();
         let mut dest = dir.join(format!("{stem} (未保存 {stamp}).xlsx"));
         let mut n = 2;
@@ -1185,7 +1229,7 @@ impl ProjectStore {
             dest = dir.join(format!("{stem} (未保存 {stamp}-{n}).xlsx"));
             n += 1;
         }
-        // Both writers go through a temp file in `archive/` and rename it into place.
+        // Both writers go through a temp file next to the copy and rename it into place.
         if key == COMMON_KEY {
             write_common_book(&dest, &self.common)?;
         } else if let Some(LoadedProject::Ok(book)) = self.books.get(key) {
@@ -1629,7 +1673,8 @@ mod tests {
         assert_eq!(e.store.unsavable_keys(), vec!["仕事".to_string()]);
 
         let now = dt("2026-10-14T18:05");
-        let path = e.store.write_recovery_copy("仕事", now).unwrap();
+        let fb = e.dir.path().join("app").join("recovery");
+        let path = e.store.write_recovery_copy("仕事", now, &fb).unwrap();
         assert_eq!(
             path,
             e.data()
@@ -1650,7 +1695,7 @@ mod tests {
         assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
 
         // Same minute again: a second copy, not an overwrite.
-        let again = e.store.write_recovery_copy("仕事", now).unwrap();
+        let again = e.store.write_recovery_copy("仕事", now, &fb).unwrap();
         assert_eq!(
             again,
             e.data()
@@ -1662,7 +1707,7 @@ mod tests {
         let mut settings = e.store.settings();
         settings.display_name = "回復".into();
         e.store.update_settings(settings).unwrap();
-        let common = e.store.write_recovery_copy("_common", now).unwrap();
+        let common = e.store.write_recovery_copy("_common", now, &fb).unwrap();
         assert_eq!(
             common,
             e.data()
@@ -1674,7 +1719,7 @@ mod tests {
             "回復"
         );
         assert!(matches!(
-            e.store.write_recovery_copy("無い", now),
+            e.store.write_recovery_copy("無い", now, &fb),
             Err(AppError::NotFound { .. })
         ));
     }
@@ -2216,6 +2261,8 @@ mod tests {
         let path = e.data().join("仕事.xlsx");
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
+        // The directory is what we "know" now: this is a failed write, not an external change.
+        e.store.accept_disk_state("仕事");
 
         let err = e.store.delete_project("仕事").unwrap_err();
         // Unix reports the rename over a directory as a plain I/O error; Windows returns
@@ -2229,6 +2276,110 @@ mod tests {
         assert_eq!(nos(&e.store.view("仕事").unwrap()), vec![1]);
         assert!(path.is_dir(), "nothing was moved");
         assert!(!e.data().join("archive").exists());
+    }
+
+    #[test]
+    fn delete_project_refuses_a_held_or_externally_changed_project() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.save("仕事").unwrap();
+        e.store.add_task("仕事", input("未保存")).unwrap();
+        e.store.hold("仕事");
+        let message = |err: AppError| match err {
+            AppError::Unsaved { message } => message,
+            other => panic!("expected Unsaved, got {other:?}"),
+        };
+        let held = message(e.store.delete_project("仕事").unwrap_err());
+        assert_eq!(
+            held,
+            "「仕事」は Excel で変更されています。帯の操作で解決してから削除してください"
+        );
+        // Nothing was written or moved: the file is as it was, the edit is still ours.
+        assert!(
+            read_project_book(&e.data().join("仕事.xlsx"))
+                .unwrap()
+                .tasks
+                .is_empty()
+        );
+        assert!(!e.data().join("archive").exists());
+        assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
+        assert!(e.store.summaries().iter().any(|s| s.name == "仕事"));
+
+        // Not held yet, but Excel saved the file and the watcher has not reported it.
+        e.store.release("仕事");
+        let mut other = e.reopen();
+        other.add_task("仕事", input("Excel の作業")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        other.save("仕事").unwrap();
+        assert!(e.store.changed_on_disk("仕事"));
+        let changed = message(e.store.delete_project("仕事").unwrap_err());
+        assert_eq!(changed, held);
+        assert_eq!(
+            read_project_book(&e.data().join("仕事.xlsx"))
+                .unwrap()
+                .tasks[0]
+                .title,
+            "Excel の作業"
+        );
+        assert!(!e.data().join("archive").exists());
+        assert!(e.store.summaries().iter().any(|s| s.name == "仕事"));
+    }
+
+    #[test]
+    fn delete_project_archives_a_file_that_failed_to_load() {
+        let mut e = env();
+        e.store.create_project("壊れた", "c").unwrap();
+        e.store.save("壊れた").unwrap();
+        let path = e.data().join("壊れた.xlsx");
+        std::fs::write(&path, b"not a workbook").unwrap();
+        assert!(e.store.reload_discarding("壊れた").is_err());
+        assert!(e.store.dirty_projects().is_empty());
+
+        e.store.delete_project("壊れた").unwrap();
+        assert!(!path.exists());
+        let n = std::fs::read_dir(e.data().join("archive")).unwrap().count();
+        assert_eq!(n, 1, "the broken file was moved to archive/");
+        assert!(e.store.summaries().iter().all(|s| s.name != "壊れた"));
+    }
+
+    #[test]
+    fn recovery_copy_falls_back_when_archive_cannot_be_written() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.save("仕事").unwrap();
+        e.store.add_task("仕事", input("未保存の作業")).unwrap();
+        // A file named `archive` keeps the folder from being created.
+        std::fs::write(e.data().join("archive"), b"not a folder").unwrap();
+        let fallback = e.dir.path().join("app").join("recovery");
+
+        let now = dt("2026-10-14T18:05");
+        let path = e.store.write_recovery_copy("仕事", now, &fallback).unwrap();
+        assert_eq!(path, fallback.join("仕事 (未保存 20261014-1805).xlsx"));
+        assert_eq!(
+            read_project_book(&path).unwrap().tasks[0].title,
+            "未保存の作業"
+        );
+        // A second copy in the same minute does not overwrite the first.
+        let again = e.store.write_recovery_copy("仕事", now, &fallback).unwrap();
+        assert_eq!(again, fallback.join("仕事 (未保存 20261014-1805-2).xlsx"));
+
+        // When the fallback cannot be written either, the archive error is returned.
+        std::fs::write(e.dir.path().join("blocked"), b"x").unwrap();
+        let err = e
+            .store
+            .write_recovery_copy("仕事", now, &e.dir.path().join("blocked").join("recovery"))
+            .unwrap_err();
+        assert!(matches!(err, AppError::Io { .. }), "{err:?}");
+
+        // A writable archive/ is preferred and the fallback stays unused.
+        std::fs::remove_file(e.data().join("archive")).unwrap();
+        let other_fallback = e.dir.path().join("unused");
+        let normal = e
+            .store
+            .write_recovery_copy("仕事", now, &other_fallback)
+            .unwrap();
+        assert!(normal.starts_with(e.data().join("archive")));
+        assert!(!other_fallback.exists());
     }
 
     #[test]
