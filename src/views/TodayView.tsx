@@ -25,6 +25,8 @@ export type TodayViewProps = {
   hiddenProjects?: string[];
   /** 行フォーカス (Task 8)。 */
   focusedKey?: string;
+  /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
+  onVisibleKeys?: (keys: string[]) => void;
 };
 
 const rescheduleButton = {
@@ -84,7 +86,7 @@ function RescheduleButton({ today, onReschedule }: { today: string; onReschedule
 }
 
 /** 期限切れグループ (再スケジュール付き) + 今日。期限切れを出さないときは見出しなしで今日の行だけ並べる。 */
-export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects }: TodayViewProps) {
+export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects, focusedKey, onVisibleKeys }: TodayViewProps) {
   const [overdueCollapsed, setOverdueCollapsed] = useState(false);
   const open = tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due !== undefined);
   // Rust (today_view) already orders the groups (due, priority, No.); only the mock data needs sorting here.
@@ -96,7 +98,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
   }
   const showOverdue = !hideOverdue && overdue.length > 0;
   const total = (showOverdue ? overdue.length : 0) + todays.length;
-  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today) });
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today), focusedKey, onVisibleKeys });
 
   return (
     <>

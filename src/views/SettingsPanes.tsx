@@ -118,3 +118,67 @@ export function AccountPane({ displayName = SAMPLE_NAME, onSaveDisplayName, busy
 export function LaterPane() {
   return <Desc>Phase 2 以降</Desc>;
 }
+
+/** ショートカット一覧 (仕様 §6)。keys の各要素は同じ動作に割り当てた別々のキー / 組み合わせ。 */
+const SHORTCUTS: { keys: string[][]; action: string; note?: string }[] = [
+  { keys: [["q"]], action: "クイック追加" },
+  { keys: [["Cmd/Ctrl", "K"], ["/"]], action: "検索を開く" },
+  { keys: [["g", "t / u / i / l"]], action: "今日 / 近日 / 受信トレイ / フィルターとラベル", note: "g のあと 1 秒以内に押す" },
+  { keys: [["↑"], ["↓"]], action: "フォーカス行を上下", note: "折りたたまれた行は飛ばす" },
+  { keys: [["Enter"]], action: "フォーカス行の詳細を開く" },
+  { keys: [["e"]], action: "フォーカス行を完了 / 取り消し" },
+  { keys: [["Delete"], ["Backspace"]], action: "フォーカス行を削除", note: "確認あり" },
+  { keys: [["1 - 4"]], action: "優先度" },
+  { keys: [["t"], ["m"]], action: "期限を今日 / 明日", note: "時刻は保つ" },
+  { keys: [["→"], ["←"]], action: "サブタスクの展開 / 折りたたみ", note: "プロジェクト画面" },
+  { keys: [["Esc"]], action: "最上位のレイヤーを閉じる", note: "レイヤーが無ければ行フォーカスを外す" },
+];
+
+const kbdStyle: React.CSSProperties = {
+  display: "inline-block",
+  border: "1px solid var(--color-border)",
+  borderRadius: 4,
+  padding: "0 6px",
+  fontFamily: "var(--font-mono, monospace)",
+  fontSize: 12,
+  lineHeight: "20px",
+  color: "var(--color-text-primary)",
+  background: "var(--color-bg)",
+};
+
+/** 「キーボード」ペイン: ショートカットの一覧。読むだけで操作は無い。入力中 (入力欄・IME 変換中) はどれも効かない。 */
+export function KeyboardPane() {
+  return (
+    // 設定ダイアログは高さが固定なので、一覧が収まらないときはこの中でスクロールする
+    <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+      <Section label="ショートカット">
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px" }}>
+          <tbody>
+            {SHORTCUTS.map((row) => (
+              <tr key={row.action} style={{ boxShadow: "inset 0 -1px 0 var(--color-border)" }}>
+                <td style={{ padding: "6px 12px 6px 0", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                  {row.keys.map((combo, i) => (
+                    <span key={i}>
+                      {i > 0 && <span style={{ margin: "0 6px", color: "var(--color-text-muted)" }}>/</span>}
+                      {combo.map((k, j) => (
+                        <span key={k}>
+                          {j > 0 && <span style={{ margin: "0 4px", color: "var(--color-text-muted)" }}>+</span>}
+                          <kbd style={kbdStyle}>{k}</kbd>
+                        </span>
+                      ))}
+                    </span>
+                  ))}
+                </td>
+                <td style={{ padding: "6px 0", color: "var(--color-text-primary)" }}>
+                  {row.action}
+                  {row.note && <div style={{ ...hintStyle, marginTop: 2 }}>{row.note}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Desc>入力欄にカーソルがあるとき、日本語の変換中は、どのキーも効きません。</Desc>
+      </Section>
+    </div>
+  );
+}

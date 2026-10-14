@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree } from "lucide-react";
 import { Checkbox } from "./Checkbox";
@@ -23,6 +24,8 @@ export type TaskRowProps = {
   showActions?: boolean;
   /** 右端の 4 アイコンを出さない (D-03 のサブタスク行)。 */
   hideActions?: boolean;
+  /** キーボードのフォーカス行: 左に 2px の accent 枠 + ホバーと同じ背景 + 右端のアイコンを出す。 */
+  focused?: boolean;
   onToggleDone?: () => void;
   onToggleExpand?: () => void;
   onClick?: () => void;
@@ -44,6 +47,12 @@ export function TaskRow(p: TaskRowProps) {
   const mobile = p.variant === "mobile";
   const indentPx = (p.indent ?? 0) * (mobile ? 24 : 32);
   const { reduced, t } = useMotionTiming();
+  const ref = useRef<HTMLDivElement>(null);
+  // フォーカス行が画面の外に出たら見える位置までスクロールする (↑↓ で動かしたとき)。
+  useEffect(() => {
+    if (p.focused) ref.current?.scrollIntoView?.({ block: "nearest" });
+  }, [p.focused]);
+  const showActions = p.showActions || p.focused;
   // 開閉はアイコンの差し替えではなく、右向きのシェブロンを 90° 回して表す。最初の描画では回すアニメーションをしない。
   const chevron = (size: number) => (
     <motion.span
@@ -58,14 +67,19 @@ export function TaskRow(p: TaskRowProps) {
   );
   return (
     <div
-      className="group"
+      ref={ref}
+      className={p.focused ? "group bg-[var(--color-bg-hover)]" : "group"}
+      aria-current={p.focused ? "true" : undefined}
       style={{
         position: "relative",
         display: "flex",
         gap: "var(--space-3)",
         alignItems: "flex-start",
         padding: "10px 0",
-        boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側 (高さに加算しない)
+        // pen の stroke は内側 (高さに加算しない)。フォーカス行は左に 2px の accent 枠を足す。
+        boxShadow: p.focused
+          ? "inset 2px 0 0 var(--color-accent), inset 0 -1px 0 var(--color-border)"
+          : "inset 0 -1px 0 var(--color-border)",
         marginLeft: indentPx,
         fontFamily: "var(--font-body)",
       }}
@@ -154,11 +168,11 @@ export function TaskRow(p: TaskRowProps) {
             display: "flex",
             gap: "var(--space-1)",
             alignItems: "center",
-            opacity: p.showActions ? 1 : undefined,
+            opacity: showActions ? 1 : undefined,
             transition: reduced ? undefined : `opacity 120ms ${EASE_CSS}`,
           }}
           onClick={(e) => e.stopPropagation()}
-          className={p.showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}
+          className={showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}
         >
           <Button variant="icon" icon={Pencil} ariaLabel="編集" />
           <Button variant="icon" icon={Calendar} ariaLabel="日付" />

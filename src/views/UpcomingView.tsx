@@ -25,7 +25,10 @@ export type UpcomingViewProps = {
   /** 各日の「タスクを追加」。受信トレイにその日を期限として追加する。 */
   onAddTask?: (date: string, title: string) => void;
   hiddenProjects?: string[];
+  /** 行フォーカス (Task 8)。 */
   focusedKey?: string;
+  /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
+  onVisibleKeys?: (keys: string[]) => void;
 };
 
 /** upcoming_view が返せる最大日数 (Rust 側の上限)。 */
@@ -53,7 +56,7 @@ function dayTitle(ymd: string, today: string): string {
 }
 
 /** MonthSelect + WeekStrip (今日から 7 日) + 日付グループ。タスクのない日も見出し + AddTaskRow を出す。 */
-export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects }: UpcomingViewProps) {
+export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys }: UpcomingViewProps) {
   const { reduced } = useMotionTiming();
   const [monthOpen, setMonthOpen] = useState(false);
   const monthRef = useRef<HTMLDivElement>(null);
@@ -68,7 +71,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
     days ? (days.find((d) => d.date === ymd)?.tasks ?? []) : open.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no);
 
   const allTasks = days ? days.flatMap((d) => d.tasks) : tasks;
-  const rows = useCrossRows({ tasks: allTasks, onToggleDone, onOpenTask });
+  const rows = useCrossRows({ tasks: allTasks, onToggleDone, onOpenTask, focusedKey, onVisibleKeys });
 
   const monthButton = (
     <button

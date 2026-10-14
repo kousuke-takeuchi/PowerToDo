@@ -15,15 +15,18 @@ export type LabelDetailViewProps = {
   /** 受信トレイにこのラベルを付けて追加する。 */
   onAddTask?: (title: string) => void;
   hiddenProjects?: string[];
+  /** 行フォーカス (Task 8)。 */
   focusedKey?: string;
+  /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
+  onVisibleKeys?: (keys: string[]) => void;
 };
 
 /** ラベルが付いたタスクを全プロジェクト横断で並べる。 */
-export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask, onAddTask, hiddenProjects }: LabelDetailViewProps) {
+export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys }: LabelDetailViewProps) {
   const list = onToggleDone
     ? tasks
     : tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.labels.includes(label)).sort((a, b) => a.no - b.no);
-  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today ?? TODAY) });
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today ?? TODAY), focusedKey, onVisibleKeys });
 
   return (
     <>

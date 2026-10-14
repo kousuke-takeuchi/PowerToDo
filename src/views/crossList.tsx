@@ -6,6 +6,7 @@ import { TaskRow } from "../components/TaskRow";
 import type { TaskRowProps } from "../components/TaskRow";
 import { Collapse } from "../motion";
 import type { Task } from "../types/model";
+import { useReportKeys } from "../app/useRowFocus";
 import { SubtaskForm } from "./SubtaskForm";
 import { useDone } from "./useDone";
 
@@ -110,15 +111,22 @@ export type CrossRowsOptions = {
   onOpenTask?: (t: Task) => void;
   /** 行の期限ラベル。無ければ出さない。 */
   date?: (t: Task) => TaskRowProps["date"];
+  /** キーボードのフォーカス行 (taskKey)。その行の TaskRow に `focused` を渡す。 */
+  focusedKey?: string;
+  /** 描画した行のキーを表示順に親へ知らせる (変わったときだけ呼ぶ。ビューが消えるときは [])。 */
+  onVisibleKeys?: (keys: string[]) => void;
 };
 
 /**
  * 今日 / 近日 / ラベル詳細の行 (チェック・退場・開く) を作る。戻り値の `rows(group, list)` が、グループ `group` の
  * `list` を描画する要素にする。`onToggleDone` が無いときは従来どおりの素の TaskRow の並び (ラッパーなし)。
  */
-export function useCrossRows({ tasks, onToggleDone, onOpenTask, date }: CrossRowsOptions) {
+export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey, onVisibleKeys }: CrossRowsOptions) {
   const { isDone: fakeDone, toggle: fakeToggle } = useDone();
   const leave = useLeaving(tasks);
+  // `rows()` を呼んだ順 (= 表示順) に積む。描画ごとに作り直し、コミット後に useReportKeys が読む。
+  const shown: string[] = [];
+  useReportKeys(() => shown, onVisibleKeys);
 
   const isDone = (t: Task) => (onToggleDone ? t.progress === 100 || leave.isLeaving(t) : fakeDone(t));
   const toggle = (t: Task, group: string, index: number) => {
@@ -132,6 +140,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date }: CrossRow
     onToggleDone(t, next);
   };
   const row = (group: string) => (t: Task, index: number) => {
+    shown.push(taskKey(t));
     const el = (
       <TaskRow
         key={onToggleDone ? taskKey(t) : t.no}
@@ -140,6 +149,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date }: CrossRow
         priority={t.priority}
         date={date?.(t)}
         project={t.project}
+        focused={focusedKey === taskKey(t)}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
         onToggleDone={() => toggle(t, group, index)}
       />

@@ -6,7 +6,7 @@ import { useMotionTiming } from "../motion";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
-import { AccountPane, DataPane, Desc, LaterPane, Row, Section } from "./SettingsPanes";
+import { AccountPane, DataPane, Desc, KeyboardPane, LaterPane, Row, Section } from "./SettingsPanes";
 import type { AccountPaneProps, DataPaneProps } from "./SettingsPanes";
 import { NasFields, syncTargetOptions } from "./SyncFields";
 
@@ -288,7 +288,8 @@ export function SettingsDialog({
               )}
               {pane === "account" && <AccountPane {...accountPane} />}
               {pane === "data" && <DataPane {...dataPane} />}
-              {(pane === "notifications" || pane === "appearance" || pane === "datetime" || pane === "keyboard") && <LaterPane />}
+              {pane === "keyboard" && <KeyboardPane />}
+              {(pane === "notifications" || pane === "appearance" || pane === "datetime") && <LaterPane />}
             </div>
           </motion.div>
         </motion.div>

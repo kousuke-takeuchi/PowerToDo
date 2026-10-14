@@ -8,6 +8,7 @@ import { Button } from "../components/Button";
 import { Collapse, useMotionTiming } from "../motion";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
 import type { InvalidRow, Section, Task } from "../types/model";
+import { useReportKeys } from "../app/useRowFocus";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { PageHeader, titleStyle } from "./HeaderActions";
@@ -52,7 +53,15 @@ export type ProjectViewProps = {
   onDeleteProject?: () => void;
   /** 期限ラベルの基準日 YYYY-MM-DD。既定は Storybook の固定日 (TODAY)。 */
   today?: string;
+  /** キーボードのフォーカス行 (`project/no`)。 */
+  focusedKey?: string;
+  /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
+  onVisibleKeys?: (keys: string[]) => void;
+  /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す。 */
+  onExpandApi?: (api: ExpandApi) => void;
 };
+
+export type ExpandApi = { expand(no: number): void; collapse(no: number): void };
 
 const INVALID_TASK_NO = 2; // D-11c で要修正にする行 (洗剤の詰め替え)
 const INVALID_SUFFIX = "    ⚠ 要修正: 「終了」列が日付ではありません (値: 来週)";
@@ -91,6 +100,9 @@ export function ProjectView({
   onRenameProject,
   onDeleteProject,
   today = TODAY,
+  focusedKey,
+  onVisibleKeys,
+  onExpandApi,
 }: ProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [formParent, setFormParent] = useState<number | undefined>(initialFormParent);
@@ -189,6 +201,7 @@ export function ProjectView({
       <TaskRow
         title={invalid ? t.title + INVALID_SUFFIX : t.title}
         description={t.note}
+        focused={focusedKey === `${t.project}/${t.no}`}
         done={isDone(t)}
         priority={t.priority}
         date={dateLabel(t.due, today)}
@@ -290,6 +303,32 @@ export function ProjectView({
   const projectSections = sections.filter((s) => s.project === project).sort((a, b) => a.order - b.order);
   const sectionNames = new Set(projectSections.map((s) => s.name));
   const unsectioned = open.filter((t) => t.category === null || !sectionNames.has(t.category));
+
+  // キーボードのフォーカス対象 = 画面に出ている行を表示順に (renderRow と同じ並び)。
+  const rowKeys = (t: Task): string[] => [
+    `${t.project}/${t.no}`,
+    ...(expanded.has(t.no) ? childrenOf(t.no).flatMap(rowKeys) : []),
+  ];
+  const visibleKeys = (): string[] => {
+    if (state === "empty" || state === "error") return [];
+    return [
+      ...unsectioned.flatMap(rowKeys),
+      ...projectSections.flatMap((s) => (collapsed.has(s.name) ? [] : open.filter((t) => t.category === s.name).flatMap(rowKeys))),
+      ...(showCompleted ? completed.flatMap(rowKeys) : []),
+    ];
+  };
+  useReportKeys(visibleKeys, onVisibleKeys);
+  const expandApi = useRef<ExpandApi>({
+    expand: (no) => setExpanded((s) => (s.has(no) ? s : new Set(s).add(no))),
+    collapse: (no) =>
+      setExpanded((s) => {
+        if (!s.has(no)) return s;
+        const n = new Set(s);
+        n.delete(no);
+        return n;
+      }),
+  });
+  useEffect(() => onExpandApi?.(expandApi.current), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {

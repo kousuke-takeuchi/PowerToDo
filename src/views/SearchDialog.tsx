@@ -193,14 +193,10 @@ export function SearchDialog({
                     key={`${h.task.project}/${h.task.no}`}
                     role="option"
                     aria-selected={i === selected}
-                    style={{
-                      boxShadow: i === selected ? "inset 2px 0 0 var(--color-accent)" : undefined,
-                      background: i === selected ? "var(--color-bg-hover)" : undefined,
-                      paddingLeft: "var(--space-2)",
-                      paddingRight: "var(--space-2)",
-                    }}
+                    style={{ paddingLeft: "var(--space-2)", paddingRight: "var(--space-2)" }}
                   >
                     <TaskRow
+                      focused={i === selected}
                       title={h.task.title}
                       description={h.matched === "note" ? h.task.note : undefined}
                       done={h.task.progress === 100}
