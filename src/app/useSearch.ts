@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { SearchHit } from "../types/model";
 
-/** Search state for the dialog: debounced (150 ms) `search` calls; stale responses are dropped; reset on close. */
+/** Search state for the dialog: debounced (150 ms) `search` calls; stale responses are dropped; reset on open. */
 export function useSearch(open: boolean) {
   const [query, setQuery] = useState("");
   const [includeDone, setIncludeDone] = useState(false);
@@ -11,13 +11,16 @@ export function useSearch(open: boolean) {
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
 
+  // Reset on open (not on close) so the card keeps its content during the exit animation; closing only drops
+  // responses still in flight.
   useEffect(() => {
-    if (!open) {
-      seq.current++; // drop any response still in flight
+    if (open) {
       setQuery("");
       setIncludeDone(false);
       setHits([]);
       setBusy(false);
+    } else {
+      seq.current++;
     }
   }, [open]);
 

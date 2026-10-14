@@ -153,7 +153,8 @@ export function SearchDialog({
                   color: "var(--color-text-primary)",
                 }}
               />
-              <div style={{ flex: "0 0 auto", width: 200 }}>
+              {/* mousedown を止めて、トグルを押しても入力欄のフォーカスを外さない (↑↓ / Enter を効かせ続ける) */}
+              <div style={{ flex: "0 0 auto", width: 200 }} onMouseDown={(e) => e.preventDefault()}>
                 <Segmented
                   options={modeOptions}
                   value={includeDone ? "all" : "open"}
@@ -177,7 +178,16 @@ export function SearchDialog({
                 {empty}
               </div>
             ) : (
-              <div ref={listRef} role="listbox" aria-label="検索結果" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+              <div
+                ref={listRef}
+                role="listbox"
+                aria-label="検索結果"
+                // チェックボックスや行を押しても入力欄のフォーカスを外さない (スクロールバー自体の操作は除く)
+                onMouseDown={(e) => {
+                  if (e.target !== e.currentTarget) e.preventDefault();
+                }}
+                style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}
+              >
                 {hits.map((h, i) => (
                   <div
                     key={`${h.task.project}/${h.task.no}`}

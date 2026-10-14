@@ -60,7 +60,11 @@ export function Main({ app }: { app: AppStateDto }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const search = useSearch(searchOpen);
   const [searchSel, setSearchSel] = useState(0);
-  useEffect(() => setSearchSel(0), [search.hits]);
+  // 選択位置: 開くとき / 検索条件が変わったときは先頭、結果が入れ替わっただけ (チェック後の再取得) なら範囲内に収める。
+  useEffect(() => {
+    if (searchOpen) setSearchSel(0);
+  }, [searchOpen]);
+  useEffect(() => setSearchSel((s) => Math.min(s, Math.max(search.hits.length - 1, 0))), [search.hits]);
 
   // サイドバーの「今日」の件数 (期限が今日以前の未完了。project-changed / 保存完了でも更新される)。
   const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
@@ -151,7 +155,7 @@ export function Main({ app }: { app: AppStateDto }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // isImeKey: see keys.ts (WebKit's committing keydown arrives with isComposing false but keyCode 229)
-      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || isImeKey(e) || settingsOpen) return;
+      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || isImeKey(e) || settingsOpen || searchOpen) return;
       const t = e.target instanceof HTMLElement ? e.target : null;
       if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
       e.preventDefault();
@@ -159,7 +163,7 @@ export function Main({ app }: { app: AppStateDto }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openQuickAdd, settingsOpen]);
+  }, [openQuickAdd, settingsOpen, searchOpen]);
 
   // Cmd/Ctrl+K: 検索 (暫定。Task 8 のショートカット管理に移す)。IME 変換中と設定ダイアログ・クイック追加の表示中は除く。
   useEffect(() => {
@@ -557,9 +561,15 @@ export function Main({ app }: { app: AppStateDto }) {
       <SearchDialog
         open={searchOpen}
         query={search.query}
-        onChangeQuery={search.setQuery}
+        onChangeQuery={(q) => {
+          search.setQuery(q);
+          setSearchSel(0);
+        }}
         includeDone={search.includeDone}
-        onToggleIncludeDone={search.toggleIncludeDone}
+        onToggleIncludeDone={() => {
+          search.toggleIncludeDone();
+          setSearchSel(0);
+        }}
         hits={search.hits}
         selected={searchSel}
         onSelect={setSearchSel}
