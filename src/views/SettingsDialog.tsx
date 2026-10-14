@@ -289,7 +289,7 @@ export function SettingsDialog({
               {pane === "account" && <AccountPane {...accountPane} />}
               {pane === "data" && <DataPane {...dataPane} />}
               {pane === "keyboard" && <KeyboardPane />}
-              {(pane === "notifications" || pane === "appearance" || pane === "datetime") && <LaterPane />}
+              {(pane === "notifications" || pane === "appearance" || pane === "datetime") && <LaterPane pane={pane} />}
             </div>
           </motion.div>
         </motion.div>

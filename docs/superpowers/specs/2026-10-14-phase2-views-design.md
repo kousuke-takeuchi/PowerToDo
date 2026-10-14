@@ -2,7 +2,7 @@
 
 作成日: 2026-10-14
 前提: `2026-10-13-powertodo-overall-design.md` (§5 ビュー、§9 段階分け)、`2026-10-14-phase1-core-design.md` (command API、`ProjectStore`、保存)、PR #16 のコード (Phase 1)、PR #17 (アニメーション)
-状態: 会話で範囲合意済み。本ファイルのレビュー待ち。
+状態: 実装済み (PR 参照)
 
 ## 1. 目的と範囲
 
@@ -250,8 +250,13 @@ src/
 | 2026-10-14 | 最後のウィンドウの `CloseRequested` も止めて `exit-blocked` を出す | `ExitRequested` だけだと Webview が先に破棄され、確認を出せない |
 | 2026-10-14 | 保留中のプロジェクトがあるあいだ `switch_data_dir` は `Unsaved` を返して切り替えない | 保留中の編集は flush で書かれない。切り替えると黙って捨てることになる。先に帯を解決してもらう |
 | 2026-10-14 | データフォルダ自体が消えたら、監視を止めて全プロジェクトを「見つかりません」にし `projects-changed` を出す。オンボーディングへ戻すのは Phase 4 (Drive のアンマウント) で扱う | 消えた原因が Drive のアンマウントなら、戻し方はそこで決める。当面はアプリの再起動 |
-| 2026-10-14 | 終了時の `flush_all` は、前回の書き込みの記録から外部で変わっていたプロジェクトを書かない (ログのみ。約 1 秒分の編集は失われうる) | 終了時は帯を出す画面が無い。ユーザーが選んでいないので Excel 側を潰さない |
+| 2026-10-14 | 終了時の `flush_all` は、前回の書き込みの記録から外部で変わっていたプロジェクトを書かない (ログに残し、アプリの内容は下の行の回復コピーに書く) | 終了時は帯を出す画面が無い。ユーザーが選んでいないので Excel 側を潰さない |
 | 2026-10-14 | 保存の直前にも `changed_on_disk` で現在の `(len, mtime)` を記録と比べ (`TauriSink::save`)、違えば書かずに保留して帯を出す。終了時の `flush` も同じ確認をする | 外部の保存が監視のイベントより先に着くことがある。監視だけに頼ると、デバウンスの隙間で Excel 側の変更を上書きする |
 | 2026-10-14 | `reload_external` で読み直しに失敗したときは、メモリ上の元のブックを残す (`Failed` にしない) | Excel が保存の途中で壊れた状態を見せることがある。次のイベントで再試行すれば足りる。画面からタスクを消さない |
 | 2026-10-14 | CI の Node は 26 (ローカルの v26.5.0 とロックファイルの作成環境に合わせる)。setup-node が解決できなければ 22 に下げる | ロックファイルの再現性を優先。未確認のため PR の CI 結果で確かめる |
 | 2026-10-14 | D-05 `(操作)` の Story は、読み込めないプロジェクトの注記 (`hiddenProjects`) を出さない | モックに「読書」のタスクがあり、注記と矛盾するため。見た目だけの違い |
+| 2026-10-14 | macOS ではアプリメニューの「終了」を自前の項目 (「PowerToDo を終了」、`CmdOrCtrl+Q`) に差し替え、`on_menu_event` で保留が無ければ `exit(0)`、あれば `exit-blocked` を出す。他のメニュー (編集のコピー / ペーストなど) は Tauri の既定のまま。それでも確認を出せない終了 (Dock の「終了」、ログアウト) に備え、`RunEvent::Exit` で保留中のキーと「dirty かつディスク側が変わった」キーのメモリ上のブックを `archive/<名前> (未保存 YYYYMMDD-HHMM).xlsx` (共通は `archive/_PowerToDo (未保存 …).xlsx`) に書き出す (`ProjectStore::write_recovery_copy`)。Windows / Linux は既定のメニューが無く、ウィンドウを閉じる操作は `CloseRequested` で止まるので変えない | 既定の「終了」は `terminate:` を送り、tao は `applicationWillTerminate` しか実装していないので `ExitRequested` が来ず `RunEvent::Exit` だけになる。そのままでは保留中の編集が黙って消える。Dock の「終了」は自前のメニューでは拾えないので、ファイルは Excel 側のまま残し、編集は別ファイルに逃がす |
+| 2026-10-14 | 外部変更の読み直しの失敗は `save-status: error` ではなく `external-read-failed { project, message }` で送る。UI は閉じるボタンだけの帯「「<名前>」の Excel の変更を読み込めません: <message>」を出し、同じ名前の `project-changed` (`external`) か、共通は `projects-changed` で消す (§5.2 の表の動作は同じ) | 保存の失敗の帯だと「保存できません」と「再試行」が出るが、再試行しても読み直しにはならず、帯も消えない。読み直しは次の変更イベントで行う |
+| 2026-10-14 | 監視を始められなかった理由は `AppState` に持ち、`app_state` / `set_data_dir` の `AppStateDto.watchError` と `watch_status` で返す。メイン画面は表示時に `watchError` でフラッシュを出し、設定からのフォルダ変更のあとは `watch_status` で聞き直す。`watch-failed` イベントも残す | 監視の開始は `app_state` の中 (メイン画面がイベントを聞く前) なので、イベントだけだと §7 のフラッシュが出ない |
+| 2026-10-14 | プロジェクトの作成 / 改名 / 削除のときの共通ファイルの即時書き込みも、書く直前に `changed_on_disk` を見る。変わっていれば書かずに `_common` を保留し、command が `external-change { project: "_common" }` を出す | 自動保存 (`TauriSink::save`) と同じ確認。監視のイベントより先に作成などが来ると、Excel で直した共通ファイルを上書きしてしまう |
+| 2026-10-14 | 監視の統合テスト (`store::watcher` の `batches_are_delivered_after_quiet_period`、実ファイル + `notify`) は macOS だけで動かし、Ubuntu / Windows では `ignore` にする (`#[cfg_attr(not(target_os = "macos"), ignore)]`)。判定の単体テスト (`store::external` の分類と `(len, mtime)` の比較) と `apply_fs_batch` のシナリオは 3 OS で動く | イベントの届き方と時期が OS の監視機構 (FSEvents / inotify / ReadDirectoryChangesW) で違い、5 秒のタイムアウトが CI の共有ランナーで安定する保証が無い (確認できているのは macOS で 4 回中 4 回の通過)。§9 の「不安定なら macOS だけに絞る」を先に当てた。アプリ本体の確認も macOS だけ |

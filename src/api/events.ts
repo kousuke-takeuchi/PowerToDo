@@ -40,6 +40,14 @@ export function onExternalChange(cb: (project: string) => void): () => void {
   return subscribe<{ project: string }>("external-change", (p) => cb(p.project));
 }
 
+/**
+ * `external-read-failed`: `project` ("_common" included) changed on disk but could not be read (Excel mid-save, a broken file).
+ * The in-memory book is kept; the next change event reads it again.
+ */
+export function onExternalReadFailed(cb: (project: string, message: string) => void): () => void {
+  return subscribe<{ project: string; message: string }>("external-read-failed", (p) => cb(p.project, p.message));
+}
+
 /** `exit-blocked`: the app was asked to quit while these projects ("_common" included) are held. */
 export function onExitBlocked(cb: (projects: string[]) => void): () => void {
   return subscribe<string[]>("exit-blocked", cb);

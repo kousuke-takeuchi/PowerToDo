@@ -30,7 +30,7 @@ import { NoticeBanner, SaveBanner } from "./SaveBanner";
 import type { RowHandlers } from "./shortcuts";
 import { useShortcuts } from "./shortcuts";
 import { useCrossActions, useCrossView } from "./useCrossView";
-import { heldFileName, useExternalChanges } from "./useExternalChanges";
+import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useProject } from "./useProject";
 import { useRowFocus } from "./useRowFocus";
 import { useSearch } from "./useSearch";
@@ -42,7 +42,7 @@ type Flash = { text: string; tone: "error" | "info" };
 type QuickAddState = { open: boolean; text: string; busy: boolean; error?: string; parsed?: { text: string; result: QuickAddResult } };
 
 const QA_CLOSED: QuickAddState = { open: false, text: "", busy: false };
-/** 新しいプロジェクトの色は順番に割り当てる (色の選択 UI は Phase 1 では出さない)。 */
+/** 新しいプロジェクトの色は順番に割り当てる。ラベルの「色」メニューの候補も同じ (新しいラベルは既定色、仕様 §3.3)。 */
 const PALETTE = [
   "var(--color-priority-3)",
   "var(--color-success)",
@@ -108,8 +108,8 @@ export function Main({ app }: { app: AppStateDto }) {
     loadDisplayName();
   }, [refreshSummaries, loadDisplayName]);
 
-  // 受信トレイ / プロジェクトの画面だけがタスク詳細・要修正の帯を持つ。今日 / 近日 / ラベル詳細は横断ビュー
-  // (useProject は受信トレイを読み続ける)。「フィルターとラベル」は Phase 2 の Task 6 まで仮置き。
+  // 受信トレイ / プロジェクトの画面だけがタスク詳細・要修正の帯を持つ。今日 / 近日 / ラベル詳細 / フィルターとラベルは
+  // 横断ビュー (useProject は受信トレイを読み続ける)。
   const projectScreen = nav.kind === "inbox" || nav.kind === "project";
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
   const p = useProject(current, { onMutated: refreshSummaries });
@@ -118,6 +118,7 @@ export function Main({ app }: { app: AppStateDto }) {
 
   const showError = useCallback((e: unknown) => setFlash({ text: errorMessage(e), tone: "error" }), []);
   const ext = useExternalChanges(showError);
+  const readFailures = useExternalReadFailures();
 
   // Excel など外での変更の取り込み / ファイル構成の変化 / 監視の失敗 (バックエンドのイベント)。
   useEffect(
@@ -135,13 +136,16 @@ export function Main({ app }: { app: AppStateDto }) {
       }),
     [refreshSummaries, loadDisplayName],
   );
-  useEffect(
-    () =>
-      onWatchFailed((m) =>
-        setFlash({ text: `ファイルの変更監視を開始できません (${m})。Excel で直した内容は再読み込みで取り込めます`, tone: "error" }),
-      ),
+  // 監視の失敗は app_state / set_data_dir の中で起きる (この画面がイベントを聞く前) ので、起動時は DTO の watchError で出す。
+  // あとからの失敗 (データフォルダの変更) はイベントで受ける。
+  const watchFailed = useCallback(
+    (m: string) => setFlash({ text: `ファイルの変更監視を開始できません (${m})。Excel で直した内容は再読み込みで取り込めます`, tone: "error" }),
     [],
   );
+  useEffect(() => {
+    if (app.watchError) watchFailed(app.watchError);
+  }, [app.watchError, watchFailed]);
+  useEffect(() => onWatchFailed(watchFailed), [watchFailed]);
   const navigate = useCallback(
     (target: Nav) => {
       setNav(target);
@@ -331,6 +335,9 @@ export function Main({ app }: { app: AppStateDto }) {
       navigate({ kind: "project", name: renamed.name });
     } catch (e) {
       showError(e);
+    } finally {
+      // 保留中のプロジェクトは新しい名前で保留され直す (共通設定が保留になることもある)
+      void ext.refresh();
     }
   };
 
@@ -367,7 +374,13 @@ export function Main({ app }: { app: AppStateDto }) {
   // 古いフォルダの保存失敗 / 通知の帯はもう当てはまらないので消す。
   const dataDirChanged = () => {
     clearSaveErrors();
+    readFailures.clear();
     setFlash(null);
+    // set_data_dir の中で出た watch-failed のフラッシュは上で消えるので、状態を聞き直して出す
+    void api
+      .watchStatus()
+      .then((m) => m && watchFailed(m))
+      .catch(() => undefined);
     p.clearNotice();
     navigate({ kind: "inbox" });
     if (current === app.inbox) void p.reload().catch(() => undefined); // 名前が変わらないと useProject は読み直さない
@@ -383,10 +396,15 @@ export function Main({ app }: { app: AppStateDto }) {
   });
 
   // 読み込みに失敗したプロジェクトは未保存の変更を持たないので、確認なしで再試行する。
-  const retryLoad = () => void p.reload().catch(() => undefined);
+  const retryLoad = () =>
+    void p
+      .reload()
+      .catch(() => undefined)
+      .finally(() => void ext.refresh());
 
   // 「再読み込み」(FixBanner): 未保存の変更があると reload_project は `unsaved` で断る。確認できたら破棄して読み直す。
   // window.confirm は dialog プラグインが非同期版に置き換えるので使わない (src/api/dialogs.ts)。
+  // reload_project は保留も解くので、終わったら保留の一覧を取り直す。
   const reloadProject = async () => {
     try {
       await p.reload();
@@ -394,6 +412,8 @@ export function Main({ app }: { app: AppStateDto }) {
       if (!isAppError(e) || e.kind !== "unsaved") return;
       const ok = await confirmDiscard("未保存の変更を破棄して読み直しますか？", "再読み込み").catch(() => false);
       if (ok) await p.reload(true).catch(() => undefined);
+    } finally {
+      void ext.refresh();
     }
   };
 
@@ -480,7 +500,7 @@ export function Main({ app }: { app: AppStateDto }) {
         onOpenLabel={(name) => navigate({ kind: "label", name })}
         onAddLabel={(name) =>
           void api
-            .addLabel(name, PALETTE[d.labels.length % PALETTE.length])
+            .addLabel(name, "var(--color-text-muted)")
             .then(labelsData.refresh)
             .catch(showError)
         }
@@ -603,6 +623,14 @@ export function Main({ app }: { app: AppStateDto }) {
       {Object.entries(saveErrors).map(([project, message]) => (
         <Collapse key={`save-${project}`} duration={0.15} enterY={-8}>
           <SaveBanner message={message} onRetry={() => void api.retrySave(project).catch(() => undefined)} />
+        </Collapse>
+      ))}
+      {Object.entries(readFailures.failures).map(([project, message]) => (
+        <Collapse key={`read-${project}`} duration={0.15} enterY={-8}>
+          <NoticeBanner
+            message={`「${project === "_common" ? "共通設定" : project}」の Excel の変更を読み込めません: ${message}`}
+            onDismiss={() => readFailures.dismiss(project)}
+          />
         </Collapse>
       ))}
       {ext.held.map((project) => (

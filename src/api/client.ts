@@ -26,6 +26,8 @@ import type {
 export const api = {
   appState: () => invoke<AppStateDto>("app_state"),
   setDataDir: (path: string) => invoke<AppStateDto>("set_data_dir", { path }),
+  /** Why watching the data folder could not start, or null while it runs. */
+  watchStatus: () => invoke<string | null>("watch_status"),
   pickFolder: () => invoke<string | null>("pick_folder"),
   revealDataDir: () => invoke<null>("reveal_data_dir"),
   /** `project` is a project name, or "_common" for the common workbook. */

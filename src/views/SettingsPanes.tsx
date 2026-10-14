@@ -114,9 +114,15 @@ export function AccountPane({ displayName = SAMPLE_NAME, onSaveDisplayName, busy
   );
 }
 
-/** まだ中身のないペイン (通知 / 外観 / 日付と時刻 / キーボード)。 */
-export function LaterPane() {
-  return <Desc>Phase 2 以降</Desc>;
+/** まだ中身のないペイン (通知 / 外観 / 日付と時刻)。予定の Phase は全体設計書 §9 の段階分けに合わせる。 */
+const LATER: Record<"notifications" | "appearance" | "datetime", string> = {
+  notifications: "通知はリマインダーと一緒に Phase 3 で実装予定",
+  appearance: "外観 (ダークテーマ) は Phase 5 で実装予定",
+  datetime: "日付と時刻の設定は後の Phase で実装予定",
+};
+
+export function LaterPane({ pane }: { pane: keyof typeof LATER }) {
+  return <Desc>{LATER[pane]}</Desc>;
 }
 
 /** ショートカット一覧 (仕様 §6)。keys の各要素は同じ動作に割り当てた別々のキー / 組み合わせ。 */

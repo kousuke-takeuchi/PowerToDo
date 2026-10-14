@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Serialize;
 
-use super::common_book::{CommonBook, Settings, read_common_book, write_common_book};
+use super::common_book::{COMMON_FILE, CommonBook, Settings, read_common_book, write_common_book};
 use super::external::{Fingerprint, Verdict, fingerprint, verdict};
 use super::paths::{Paths, validate_project_name};
 use super::project_book::{
@@ -1128,11 +1128,70 @@ impl ProjectStore {
 
     /// The immediate write of the common workbook after create / rename / delete. While the
     /// common workbook is held (Excel changed it and the user has not chosen) it is not
-    /// written: the dirty flag stays and the banner's choice decides.
+    /// written: the dirty flag stays and the banner's choice decides. When the file changed on
+    /// disk since we last wrote or read it (an external save the watcher has not reported yet),
+    /// it is not written either but held, like `TauriSink::save` does; the caller sees the new
+    /// hold through `is_held("_common")` and tells the UI.
     fn save_common_unless_held(&mut self) {
-        if !self.is_held(COMMON_KEY) {
-            let _ = self.save_common();
+        if self.is_held(COMMON_KEY) {
+            return;
         }
+        if self.changed_on_disk(COMMON_KEY) {
+            self.hold(COMMON_KEY);
+            return;
+        }
+        let _ = self.save_common();
+    }
+
+    /// Keys (project names and `"_common"`) whose in-memory edits cannot be written to their own
+    /// file on quit: held ones, and dirty ones whose file changed on disk since our last write
+    /// or read. `write_recovery_copy` keeps them.
+    pub fn unsavable_keys(&self) -> Vec<String> {
+        let mut keys: BTreeSet<String> = self.held.clone();
+        if self.common_dirty && self.changed_on_disk(COMMON_KEY) {
+            keys.insert(COMMON_KEY.to_string());
+        }
+        for name in &self.dirty {
+            if self.changed_on_disk(name) {
+                keys.insert(name.clone());
+            }
+        }
+        keys.into_iter().collect()
+    }
+
+    /// Writes the in-memory workbook of `key` (a project name or `"_common"`) to
+    /// `archive/<name> (未保存 YYYYMMDD-HHMM).xlsx` (`archive/_PowerToDo (未保存 …).xlsx` for the
+    /// common workbook; `-2`, `-3`, … when the name is taken) and returns its path. Used on quit
+    /// for edits that cannot go to their own file without overwriting an external change: the
+    /// file is left as it is and the edits are kept next to it. Nothing in the store changes.
+    pub fn write_recovery_copy(&self, key: &str, now: NaiveDateTime) -> AppResult<PathBuf> {
+        let stem = if key == COMMON_KEY {
+            COMMON_FILE.trim_end_matches(".xlsx").to_string()
+        } else {
+            validate_project_name(key)?;
+            match self.books.get(key) {
+                Some(LoadedProject::Ok(_)) => {}
+                Some(LoadedProject::Failed(m)) => return Err(load_failed(key, m)),
+                None => return Err(not_found(format!("プロジェクト「{key}」がありません"))),
+            }
+            key.to_string()
+        };
+        let dir = self.paths.archive_dir();
+        std::fs::create_dir_all(&dir)?;
+        let stamp = now.format("%Y%m%d-%H%M").to_string();
+        let mut dest = dir.join(format!("{stem} (未保存 {stamp}).xlsx"));
+        let mut n = 2;
+        while dest.exists() {
+            dest = dir.join(format!("{stem} (未保存 {stamp}-{n}).xlsx"));
+            n += 1;
+        }
+        // Both writers go through a temp file in `archive/` and rename it into place.
+        if key == COMMON_KEY {
+            write_common_book(&dest, &self.common)?;
+        } else if let Some(LoadedProject::Ok(book)) = self.books.get(key) {
+            write_project_book(&dest, book, now.date(), &self.common.holidays)?;
+        }
+        Ok(dest)
     }
 
     /// The file for `key` (a project name or `"_common"`) differs from what we last wrote or
@@ -1551,6 +1610,68 @@ mod tests {
         e.store.delete_project("仕事").unwrap();
         let n = std::fs::read_dir(e.data().join("archive")).unwrap().count();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn held_edits_are_kept_in_a_recovery_copy() {
+        use crate::store::common_book::read_common_book;
+
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.save("仕事").unwrap();
+        e.store.add_task("仕事", input("未保存の作業")).unwrap();
+        e.store.hold("仕事");
+        assert_eq!(e.store.unsavable_keys(), vec!["仕事".to_string()]);
+
+        let now = dt("2026-10-14T18:05");
+        let path = e.store.write_recovery_copy("仕事", now).unwrap();
+        assert_eq!(
+            path,
+            e.data()
+                .join("archive")
+                .join("仕事 (未保存 20261014-1805).xlsx")
+        );
+        let copy = read_project_book(&path).unwrap();
+        assert_eq!(copy.tasks.len(), 1);
+        assert_eq!(copy.tasks[0].title, "未保存の作業");
+        // The project's own file is untouched and the store still holds the edits.
+        assert!(
+            read_project_book(&e.data().join("仕事.xlsx"))
+                .unwrap()
+                .tasks
+                .is_empty()
+        );
+        assert!(e.store.is_held("仕事"));
+        assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
+
+        // Same minute again: a second copy, not an overwrite.
+        let again = e.store.write_recovery_copy("仕事", now).unwrap();
+        assert_eq!(
+            again,
+            e.data()
+                .join("archive")
+                .join("仕事 (未保存 20261014-1805-2).xlsx")
+        );
+
+        // The common workbook is copied under the common file's name.
+        let mut settings = e.store.settings();
+        settings.display_name = "回復".into();
+        e.store.update_settings(settings).unwrap();
+        let common = e.store.write_recovery_copy("_common", now).unwrap();
+        assert_eq!(
+            common,
+            e.data()
+                .join("archive")
+                .join("_PowerToDo (未保存 20261014-1805).xlsx")
+        );
+        assert_eq!(
+            read_common_book(&common).unwrap().settings.display_name,
+            "回復"
+        );
+        assert!(matches!(
+            e.store.write_recovery_copy("無い", now),
+            Err(AppError::NotFound { .. })
+        ));
     }
 
     #[test]

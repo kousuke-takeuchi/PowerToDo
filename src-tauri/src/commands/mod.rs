@@ -26,7 +26,7 @@ use crate::store::paths::{AppSettings, Paths};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
 use crate::store::watcher::{self, Watcher};
 
-use saver::{COMMON_KEY, SaveSink, SaveState, SaveStatus, Saver};
+use saver::{COMMON_KEY, SaveSink, SaveStatus, Saver};
 
 // ---- state and DTOs ----
 
@@ -40,6 +40,10 @@ pub struct AppState {
     /// Keys (project name or `COMMON_KEY`) whose write is in flight. Set before the store lock
     /// is taken, so a watcher batch that gets the lock first still sees "a save is coming".
     pub saving: Mutex<BTreeSet<String>>,
+    /// Why watching the data folder could not start (仕様 §7), `None` while it runs. Kept here
+    /// because the failure happens in `app_state` / `set_data_dir`, before the main screen
+    /// listens for `watch-failed`; the screen reads it from `AppStateDto::watch_error`.
+    pub watch_error: Mutex<Option<String>>,
     app_data_dir: PathBuf,
 }
 
@@ -60,6 +64,7 @@ impl AppState {
             saver,
             watcher: Mutex::new(None),
             saving: Mutex::new(BTreeSet::new()),
+            watch_error: Mutex::new(None),
             app_data_dir,
         }
     }
@@ -90,13 +95,36 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// Writes everything still dirty (used when the app quits). Held projects are left alone:
-    /// writing them would overwrite the external change the user has not decided about. One failed write (say, a file
-    /// locked by Excel) does not stop the others; each failure is logged and returned as
-    /// `(project name or COMMON_KEY, error)`. Empty means everything was saved.
+    /// The last failure to start watching the data folder (see [`AppState::watch_error`]).
+    pub fn watch_error(&self) -> Option<String> {
+        self.watch_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Writes everything still dirty (used when the app quits). Held projects, and dirty ones
+    /// whose file changed on disk, are not written to their own file: that would overwrite the
+    /// external change the user has not decided about. Their in-memory workbook goes to a
+    /// recovery copy in `archive/` instead (`ProjectStore::write_recovery_copy`), so quitting
+    /// without the banner's choice (the Dock's Quit on macOS, a logout) loses no edits. One
+    /// failed write (say, a file locked by Excel) does not stop the others; each failure is
+    /// logged and returned as `(project name or COMMON_KEY, error)`. Empty means everything
+    /// was saved.
     pub fn flush_all(&self) -> Vec<(String, AppError)> {
         self.saver.cancel_all();
-        let failures = self.lock_store().as_mut().map(flush).unwrap_or_default();
+        let mut guard = self.lock_store();
+        let Some(store) = guard.as_mut() else {
+            return Vec::new();
+        };
+        let at = now();
+        for key in store.unsavable_keys() {
+            match store.write_recovery_copy(&key, at) {
+                Ok(path) => eprintln!("unsaved edits of {key} kept in {}", path.display()),
+                Err(e) => eprintln!("recovery copy failed for {key}: {e}"),
+            }
+        }
+        let failures = flush(store);
         for (name, e) in &failures {
             eprintln!("flush on exit failed for {name}: {e}");
         }
@@ -147,6 +175,9 @@ pub struct AppStateDto {
     pub inbox: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Watching the data folder could not start (仕様 §7); the main screen shows it once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watch_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -282,6 +313,7 @@ fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateD
         projects: store.map(ProjectStore::summaries).unwrap_or_default(),
         inbox: INBOX.to_string(),
         warning,
+        watch_error: None,
     }
 }
 
@@ -432,6 +464,35 @@ fn mutate<T>(
     Ok(out)
 }
 
+/// `mutate` for create / rename / delete of a project, which write the common workbook at once.
+/// When that file changed on disk since we last wrote or read it, the store holds `_common`
+/// instead of writing (`save_common_unless_held`); tell the UI like a watcher batch would, so
+/// the banner asks. Checked under the same lock as the mutation, so a hold made by the watcher
+/// in between is not reported twice.
+fn mutate_structure<T>(
+    app: &AppHandle,
+    state: &AppState,
+    projects: &[&str],
+    f: impl FnOnce(&mut ProjectStore) -> AppResult<T>,
+) -> AppResult<T> {
+    let mut newly_held = false;
+    let out = mutate(app, state, projects, true, |s| {
+        let before = s.is_held(COMMON_KEY);
+        let out = f(s);
+        newly_held = !before && s.is_held(COMMON_KEY);
+        out
+    });
+    if newly_held {
+        let _ = app.emit(
+            "external-change",
+            ExternalChange {
+                project: COMMON_KEY.to_string(),
+            },
+        );
+    }
+    out
+}
+
 // ---- start-up and data folder ----
 
 /// Reads `settings.json` and opens the data folder it names, if the store is not open yet.
@@ -510,7 +571,7 @@ struct BatchOutcome {
     reloaded: Vec<String>,
     /// The project list or the common workbook changed (`projects-changed`).
     projects_changed: bool,
-    /// `(key, message)` for files that changed but could not be read (`save-status` error).
+    /// `(key, message)` for files that changed but could not be read (`external-read-failed`).
     failures: Vec<(String, String)>,
     /// The data folder itself is gone: every project was marked missing and the watcher should
     /// be dropped.
@@ -609,6 +670,15 @@ struct ExternalChange {
     project: String,
 }
 
+/// `external-read-failed`: `project` (or `_common`) changed on disk but could not be read. Not a
+/// save failure: there is nothing to retry from here, the next change event reads it again.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalReadFailed {
+    project: String,
+    message: String,
+}
+
 /// One debounced batch of changed paths, delivered on the watcher thread. Lock order: the store
 /// lock is taken first, and the saver is only asked about / told to cancel while holding it.
 fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
@@ -639,12 +709,8 @@ fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
     let gone = out.data_dir_missing;
     for (project, message) in out.failures {
         let _ = app.emit(
-            "save-status",
-            SaveStatus {
-                project,
-                state: SaveState::Error,
-                message: Some(format!("Excel の変更を読み込めません: {message}")),
-            },
+            "external-read-failed",
+            ExternalReadFailed { project, message },
         );
     }
     if out.projects_changed {
@@ -668,18 +734,22 @@ fn start_watching(app: &AppHandle, state: &AppState) {
         .lock_store()
         .as_ref()
         .map(|s| s.paths().data_dir.clone());
+    let mut error = None;
     let watcher = dir.and_then(|dir| {
         let handle = app.clone();
         match watcher::start(&dir, move |paths| handle_fs_batch(&handle, paths)) {
             Ok(w) => Some(w),
             Err(e) => {
                 eprintln!("watch failed: {e}");
+                // Usually nobody listens yet (start-up): the DTO carries it too.
                 let _ = app.emit("watch-failed", e.to_string());
+                error = Some(e.to_string());
                 None
             }
         }
     });
     *state.watcher.lock().unwrap_or_else(|e| e.into_inner()) = watcher;
+    *state.watch_error.lock().unwrap_or_else(|e| e.into_inner()) = error;
 }
 
 // ---- quick add ----
@@ -729,7 +799,10 @@ pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     if !watching {
         start_watching(&app, state.inner());
     }
-    Ok(dto)
+    Ok(AppStateDto {
+        watch_error: state.watch_error(),
+        ..dto
+    })
 }
 
 #[tauri::command]
@@ -741,7 +814,16 @@ pub async fn set_data_dir(
     let dto = switch_data_dir(state.inner(), &path)?;
     schedule_dirty(&app, state.inner());
     start_watching(&app, state.inner());
-    Ok(dto)
+    Ok(AppStateDto {
+        watch_error: state.watch_error(),
+        ..dto
+    })
+}
+
+/// Why watching the data folder could not start, or `None` while it runs (仕様 §7).
+#[tauri::command]
+pub async fn watch_status(state: State<'_, AppState>) -> AppResult<Option<String>> {
+    Ok(state.watch_error())
 }
 
 #[tauri::command]
@@ -885,7 +967,7 @@ pub async fn create_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectSummary> {
-    mutate(&app, state.inner(), &[], true, |s| {
+    mutate_structure(&app, state.inner(), &[], |s| {
         s.create_project(&name, &color)
     })
 }
@@ -897,7 +979,7 @@ pub async fn rename_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectSummary> {
-    mutate(&app, state.inner(), &[&new_name], true, |s| {
+    mutate_structure(&app, state.inner(), &[&new_name], |s| {
         s.rename_project(&name, &new_name)
     })
 }
@@ -908,7 +990,7 @@ pub async fn delete_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    mutate(&app, state.inner(), &[], true, |s| s.delete_project(&name))
+    mutate_structure(&app, state.inner(), &[], |s| s.delete_project(&name))
 }
 
 // ---- commands: sections ----
@@ -1280,6 +1362,15 @@ mod tests {
         assert_eq!(json["projects"][0]["name"], "受信トレイ");
         assert_eq!(json["projects"][0]["taskCount"], 0);
         assert!(json.get("warning").is_none());
+        assert!(json.get("watchError").is_none());
+        let failed = AppStateDto {
+            watch_error: Some("inotify".into()),
+            ..state_dto(Some(&store), None)
+        };
+        assert_eq!(
+            serde_json::to_value(failed).unwrap()["watchError"],
+            "inotify"
+        );
 
         let first_run = serde_json::to_value(state_dto(None, Some("w".into()))).unwrap();
         assert!(first_run["dataDir"].is_null());
@@ -1836,6 +1927,84 @@ mod tests {
         let after = listed(tmp.path());
         assert!(after.contains(&"ccc".to_string()) && after.contains(&"aaa2".to_string()));
         assert!(!after.contains(&"bbb".to_string()));
+    }
+
+    #[test]
+    fn create_project_does_not_overwrite_a_common_workbook_changed_in_excel() {
+        use crate::store::common_book::read_common_book;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        // Excel saves the common workbook; the watcher has not reported it yet.
+        excel_saves(tmp.path(), "_PowerToDo.xlsx", |o| {
+            let mut settings = o.settings();
+            settings.display_name = "Excel 側".into();
+            o.update_settings(settings).unwrap();
+        });
+        assert!(!store.is_held(COMMON_KEY));
+        store.create_project("新規", "").unwrap();
+
+        let on_disk = read_common_book(&tmp.path().join("_PowerToDo.xlsx")).unwrap();
+        assert_eq!(on_disk.settings.display_name, "Excel 側", "not overwritten");
+        assert!(!on_disk.projects.iter().any(|p| p.name == "新規"));
+        assert!(store.is_held(COMMON_KEY));
+        assert!(store.common_dirty());
+        // The project itself exists in memory and on disk; the common workbook waits for the
+        // banner's choice.
+        assert!(tmp.path().join("新規.xlsx").exists());
+        assert!(store.summaries().iter().any(|p| p.name == "新規"));
+    }
+
+    #[test]
+    fn flush_all_keeps_held_and_externally_changed_edits_in_recovery_copies() {
+        use crate::store::project_book::read_project_book;
+
+        let app_dir = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = AppState::new(app_dir.path().to_path_buf());
+        switch_data_dir(&state, data.path().to_str().unwrap()).unwrap();
+        with_store(&state, |s| {
+            s.create_project("aaa", "")?;
+            s.create_project("bbb", "")?;
+            quick_add_in(s, "A の作業", "aaa", d("2026-10-14"))?;
+            quick_add_in(s, "B の作業", "bbb", d("2026-10-14"))?;
+            s.hold("aaa");
+            Ok(())
+        })
+        .unwrap();
+        // "bbb" changed in Excel while dirty; the watcher has not reported it.
+        excel_saves(data.path(), "bbb.xlsx", |o| {
+            quick_add_in(o, "Excel の作業", "bbb", d("2026-10-14")).unwrap();
+        });
+
+        state.flush_all();
+
+        let copies: Vec<PathBuf> = std::fs::read_dir(data.path().join("archive"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(copies.len(), 2, "{copies:?}");
+        for (project, title) in [("aaa", "A の作業"), ("bbb", "B の作業")] {
+            let copy = copies
+                .iter()
+                .find(|p| {
+                    let name = p.file_name().unwrap().to_string_lossy();
+                    name.starts_with(&format!("{project} (未保存 ")) && name.ends_with(").xlsx")
+                })
+                .unwrap_or_else(|| panic!("no copy for {project}: {copies:?}"));
+            assert_eq!(read_project_book(copy).unwrap().tasks[0].title, title);
+        }
+        // The files themselves keep what is on disk.
+        assert!(
+            read_project_book(&data.path().join("aaa.xlsx"))
+                .unwrap()
+                .tasks
+                .is_empty()
+        );
+        let bbb = read_project_book(&data.path().join("bbb.xlsx")).unwrap();
+        assert_eq!(bbb.tasks.len(), 1);
+        assert_eq!(bbb.tasks[0].title, "Excel の作業");
     }
 
     #[test]
