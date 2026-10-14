@@ -118,16 +118,13 @@ export function Main({ app }: { app: AppStateDto }) {
   else if (upcomingData.data) lastUpcoming.current = upcomingData.data;
   const labelName = nav.kind === "label" ? nav.name : undefined;
   const labelData = useCrossView<LabelViewDto | null>(labelName ? () => api.labelView(labelName) : inactive, [labelName]);
-  const cross = useCrossActions(
-    () => {
-      todayData.refresh();
-      upcomingData.refresh();
-      labelData.refresh();
-      void refreshSummaries();
-    },
-    showError,
-    app.inbox,
-  );
+  const refreshAll = () => {
+    todayData.refresh();
+    upcomingData.refresh();
+    labelData.refresh();
+    void refreshSummaries(); // 件数 (今日 / プロジェクト) も更新する
+  };
+  const cross = useCrossActions(refreshAll, showError, app.inbox);
   /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
   const openCross = (t: Task) => {
     navigate(t.project === app.inbox ? { kind: "inbox" } : { kind: "project", name: t.project });
@@ -343,7 +340,7 @@ export function Main({ app }: { app: AppStateDto }) {
         onToggleDone={cross.toggleDone}
         onOpenTask={openCross}
         onAddTask={(title) => void cross.addToInbox({ title, due: today })}
-        onReschedule={(due) => void api.rescheduleOverdue(today, due).then(() => todayData.refresh()).catch(showError)}
+        onReschedule={(due) => void api.rescheduleOverdue(today, due).catch(showError).finally(refreshAll)}
         hiddenProjects={failed}
       />
     );

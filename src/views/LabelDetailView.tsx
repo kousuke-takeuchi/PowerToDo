@@ -1,11 +1,7 @@
-import { AnimatePresence } from "motion/react";
-import { TaskRow } from "../components/TaskRow";
 import { TODAY, dateLabel } from "../mock/data";
-import { Collapse } from "../motion";
 import type { Task } from "../types/model";
-import { AddSlot, HiddenNote, taskKey, useLeaving } from "./crossList";
+import { AddSlot, HiddenNote, useCrossRows } from "./crossList";
 import { PageHeader, TitleGroup } from "./HeaderActions";
-import { useDone } from "./useDone";
 
 export type LabelDetailViewProps = {
   label: string;
@@ -24,45 +20,10 @@ export type LabelDetailViewProps = {
 
 /** ラベルが付いたタスクを全プロジェクト横断で並べる。 */
 export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask, onAddTask, hiddenProjects }: LabelDetailViewProps) {
-  const { isDone: fakeDone, toggle: fakeToggle } = useDone();
-  const leave = useLeaving();
   const list = onToggleDone
     ? tasks
     : tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.labels.includes(label)).sort((a, b) => a.no - b.no);
-  const rows = onToggleDone ? leave.merge("label", list) : list;
-
-  const isDone = (t: Task) => (onToggleDone ? t.progress === 100 || leave.isLeaving(t) : fakeDone(t));
-  const toggle = (t: Task, index: number) => {
-    if (!onToggleDone) {
-      fakeToggle(t);
-      return;
-    }
-    const next = !isDone(t);
-    if (next) leave.begin(t, "label", index);
-    else leave.cancel(t);
-    onToggleDone(t, next);
-  };
-  const items = rows.map((t, index) => {
-    const el = (
-      <TaskRow
-        key={onToggleDone ? taskKey(t) : t.no}
-        title={t.title}
-        done={isDone(t)}
-        priority={t.priority}
-        date={dateLabel(t.due, today ?? TODAY)}
-        project={t.project}
-        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-        onToggleDone={() => toggle(t, index)}
-      />
-    );
-    return onToggleDone ? (
-      <Collapse key={taskKey(t)} enterY={-8} exitX={-24}>
-        {el}
-      </Collapse>
-    ) : (
-      el
-    );
-  });
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today ?? TODAY) });
 
   return (
     <>
@@ -71,7 +32,7 @@ export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask,
       </PageHeader>
       <HiddenNote names={hiddenProjects} />
       <div>
-        {onToggleDone ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items}
+        {rows("label", list)}
         <AddSlot label="タスクを追加" onAdd={onAddTask} />
       </div>
     </>

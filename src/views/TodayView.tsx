@@ -1,15 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEscLayer } from "../app/layers";
 import { SectionHeader } from "../components/SectionHeader";
-import { TaskRow } from "../components/TaskRow";
 import { dateLabel, monthDay, weekdayLong } from "../mock/data";
-import { Collapse, useMotionTiming } from "../motion";
+import { useMotionTiming } from "../motion";
 import type { Task } from "../types/model";
-import { AddSlot, HiddenNote, taskKey, useLeaving } from "./crossList";
+import { AddSlot, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
 import { DatePicker } from "./DatePicker";
 import { PageHeader, TitleGroup } from "./HeaderActions";
-import { useDone } from "./useDone";
 
 export type TodayViewProps = {
   tasks: Task[];
@@ -41,24 +39,53 @@ const rescheduleButton = {
   cursor: "pointer",
 } as const;
 
+/** 「再スケジュール」ボタン + 日付ピッカーのポップオーバー。期限切れグループと一緒にマウントされ、消えると閉じた状態に戻る。 */
+function RescheduleButton({ today, onReschedule }: { today: string; onReschedule?: (due: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const { reduced, t } = useMotionTiming();
+  const close = () => setOpen(false);
+  useEscLayer(open, close);
+  useOutsideClose(ref, open, close);
+  const button = (
+    <button type="button" style={rescheduleButton} onClick={onReschedule ? () => setOpen((v) => !v) : undefined}>
+      再スケジュール
+    </button>
+  );
+  if (!onReschedule) return button;
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      {button}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: reduced ? 0 : 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={t(0.15)}
+            style={{ position: "absolute", right: 0, top: "100%", zIndex: 10 }}
+          >
+            <DatePicker
+              dateOnly
+              today={today}
+              value={today}
+              onChange={(v) => {
+                if (v.date) {
+                  onReschedule(v.date);
+                  close();
+                }
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /** 期限切れグループ (再スケジュール付き) + 今日。期限切れを出さないときは見出しなしで今日の行だけ並べる。 */
 export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects }: TodayViewProps) {
   const [overdueCollapsed, setOverdueCollapsed] = useState(false);
-  const { isDone: fakeDone, toggle: fakeToggle } = useDone();
-  const leave = useLeaving();
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const { reduced, t: timing } = useMotionTiming();
-  useEscLayer(pickerOpen, () => setPickerOpen(false));
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (e.target instanceof Node && !pickerRef.current?.contains(e.target)) setPickerOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [pickerOpen]);
-
   const open = tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due !== undefined);
   // Rust (today_view) already orders the groups (due, priority, No.); only the mock data needs sorting here.
   const overdue = open.filter((t) => t.due! < today);
@@ -69,50 +96,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
   }
   const showOverdue = !hideOverdue && overdue.length > 0;
   const total = (showOverdue ? overdue.length : 0) + todays.length;
-
-  const isDone = (t: Task) => (onToggleDone ? t.progress === 100 || leave.isLeaving(t) : fakeDone(t));
-  const toggle = (t: Task, group: string, index: number) => {
-    if (!onToggleDone) {
-      fakeToggle(t);
-      return;
-    }
-    const next = !isDone(t);
-    if (next) leave.begin(t, group, index);
-    else leave.cancel(t);
-    onToggleDone(t, next);
-  };
-
-  const row = (group: string) => (t: Task, index: number) => {
-    const el = (
-      <TaskRow
-        key={onToggleDone ? taskKey(t) : t.no}
-        title={t.title}
-        done={isDone(t)}
-        priority={t.priority}
-        date={dateLabel(t.due, today)}
-        project={t.project}
-        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-        onToggleDone={() => toggle(t, group, index)}
-      />
-    );
-    return onToggleDone ? (
-      <Collapse key={taskKey(t)} enterY={-8} exitX={-24}>
-        {el}
-      </Collapse>
-    ) : (
-      el
-    );
-  };
-  const rows = (group: string, list: Task[]) => {
-    const items = (onToggleDone ? leave.merge(group, list) : list).map(row(group));
-    return onToggleDone ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
-  };
-
-  const reschedule = (
-    <button type="button" style={rescheduleButton} onClick={onReschedule ? () => setPickerOpen((v) => !v) : undefined}>
-      再スケジュール
-    </button>
-  );
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today) });
 
   return (
     <>
@@ -132,35 +116,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
             {!overdueCollapsed && (
               <>
                 <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 0" }}>
-                  {onReschedule ? (
-                    <div ref={pickerRef} style={{ position: "relative" }}>
-                      {reschedule}
-                      <AnimatePresence>
-                        {pickerOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, y: reduced ? 0 : 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            transition={timing(0.15)}
-                            style={{ position: "absolute", right: 0, top: "100%", zIndex: 10 }}
-                          >
-                            <DatePicker
-                              today={today}
-                              value={today}
-                              onChange={(v) => {
-                                if (v.date) {
-                                  onReschedule(v.date);
-                                  setPickerOpen(false);
-                                }
-                              }}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  ) : (
-                    reschedule
-                  )}
+                  <RescheduleButton today={today} onReschedule={onReschedule} />
                 </div>
                 {rows("overdue", overdue)}
               </>

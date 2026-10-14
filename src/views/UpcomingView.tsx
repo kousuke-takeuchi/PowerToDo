@@ -1,16 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { AnimatePresence } from "motion/react";
+import { useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { addDays, daysBetween, monthDay, monthStart, weekdayLong } from "../app/dates";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { SectionHeader } from "../components/SectionHeader";
-import { TaskRow } from "../components/TaskRow";
-import { Collapse, useMotionTiming } from "../motion";
+import { useMotionTiming } from "../motion";
 import type { DayGroup, Task } from "../types/model";
-import { AddSlot, HiddenNote, taskKey, useLeaving } from "./crossList";
+import { AddSlot, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
 import { PageHeader, titleStyle } from "./HeaderActions";
-import { useDone } from "./useDone";
 import { WeekStrip } from "./WeekStrip";
 
 export type UpcomingViewProps = {
@@ -57,20 +54,11 @@ function dayTitle(ymd: string, today: string): string {
 
 /** MonthSelect + WeekStrip (今日から 7 日) + 日付グループ。タスクのない日も見出し + AddTaskRow を出す。 */
 export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects }: UpcomingViewProps) {
-  const { isDone: fakeDone, toggle: fakeToggle } = useDone();
-  const leave = useLeaving();
   const { reduced } = useMotionTiming();
   const [monthOpen, setMonthOpen] = useState(false);
   const monthRef = useRef<HTMLDivElement>(null);
   useEscLayer(monthOpen, () => setMonthOpen(false));
-  useEffect(() => {
-    if (!monthOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (e.target instanceof Node && !monthRef.current?.contains(e.target)) setMonthOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [monthOpen]);
+  useOutsideClose(monthRef, monthOpen, () => setMonthOpen(false));
 
   const [y, m] = (days?.[0]?.date ?? today).split("-");
   const open = tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due !== undefined);
@@ -79,41 +67,8 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
   const rowsOf = (ymd: string): Task[] =>
     days ? (days.find((d) => d.date === ymd)?.tasks ?? []) : open.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no);
 
-  const isDone = (t: Task) => (onToggleDone ? t.progress === 100 || leave.isLeaving(t) : fakeDone(t));
-  const toggle = (t: Task, group: string, index: number) => {
-    if (!onToggleDone) {
-      fakeToggle(t);
-      return;
-    }
-    const next = !isDone(t);
-    if (next) leave.begin(t, group, index);
-    else leave.cancel(t);
-    onToggleDone(t, next);
-  };
-  const row = (group: string) => (t: Task, index: number) => {
-    const el = (
-      <TaskRow
-        key={onToggleDone ? taskKey(t) : t.no}
-        title={t.title}
-        done={isDone(t)}
-        priority={t.priority}
-        project={t.project}
-        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-        onToggleDone={() => toggle(t, group, index)}
-      />
-    );
-    return onToggleDone ? (
-      <Collapse key={taskKey(t)} enterY={-8} exitX={-24}>
-        {el}
-      </Collapse>
-    ) : (
-      el
-    );
-  };
-  const rows = (group: string, list: Task[]) => {
-    const items = (onToggleDone ? leave.merge(group, list) : list).map(row(group));
-    return onToggleDone ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
-  };
+  const allTasks = days ? days.flatMap((d) => d.tasks) : tasks;
+  const rows = useCrossRows({ tasks: allTasks, onToggleDone, onOpenTask });
 
   const monthButton = (
     <button

@@ -14,6 +14,8 @@ export type DatePickerProps = {
   recurrenceLabel?: string;
   /** 「今日」の基準日 YYYY-MM-DD。既定は Storybook の固定日 (TODAY)。 */
   today?: string;
+  /** 日付だけを選ばせる (時刻と繰り返しの行を出さない)。タスクに紐づかない場面 (期限切れの再スケジュール) 用。 */
+  dateOnly?: boolean;
 };
 
 const WEEKDAY_HEAD = ["月", "火", "水", "木", "金", "土", "日"] as const;
@@ -42,7 +44,7 @@ const shiftMonth = (ymd: string, delta: number) => {
 };
 
 /** D-07: 日付ポップオーバーの中身。選択状態は内部で持ち、onChange で通知する。 */
-export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY }: DatePickerProps) {
+export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY, dateOnly }: DatePickerProps) {
   const [date, setDate] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
   const [month, setMonth] = useState(monthStart(value ?? today));
@@ -145,17 +147,21 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
           </div>
         ))}
       </div>
-      <PopRow icon={<Clock3 size={16} />} borderTop>
-        <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>時刻</span>
-        <span style={small(time ? "var(--color-text-primary)" : "var(--color-text-muted)")}>{time ?? "なし"}</span>
-      </PopRow>
-      <PopRow icon={<Repeat size={16} />} onClick={onOpenRecurrence}>
-        <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>繰り返し</span>
-        <span style={small("var(--color-text-primary)")}>{recurrenceLabel}</span>
-        <span style={{ display: "inline-flex", color: "var(--color-text-muted)" }}>
-          <ChevronRight size={14} />
-        </span>
-      </PopRow>
+      {!dateOnly && (
+        <>
+          <PopRow icon={<Clock3 size={16} />} borderTop>
+            <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>時刻</span>
+            <span style={small(time ? "var(--color-text-primary)" : "var(--color-text-muted)")}>{time ?? "なし"}</span>
+          </PopRow>
+          <PopRow icon={<Repeat size={16} />} onClick={onOpenRecurrence}>
+            <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>繰り返し</span>
+            <span style={small("var(--color-text-primary)")}>{recurrenceLabel}</span>
+            <span style={{ display: "inline-flex", color: "var(--color-text-muted)" }}>
+              <ChevronRight size={14} />
+            </span>
+          </PopRow>
+        </>
+      )}
     </PopoverShell>
   );
 }
