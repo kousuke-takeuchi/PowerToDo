@@ -9,6 +9,7 @@ import { AppShell } from "../views/AppShell";
 import { FixBanner } from "../views/FixBanner";
 import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
+import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
 import { LabelDetailView } from "../views/LabelDetailView";
 import { LabelsView } from "../views/LabelsView";
@@ -24,6 +25,7 @@ import { spansToTokens } from "./quickAddTokens";
 import { NoticeBanner, SaveBanner } from "./SaveBanner";
 import { useCrossActions, useCrossView } from "./useCrossView";
 import { useProject } from "./useProject";
+import { useSearch } from "./useSearch";
 import { useSaveErrors } from "./useSaveStatus";
 import { useSettingsPanes } from "./useSettingsPanes";
 
@@ -55,6 +57,10 @@ export function Main({ app }: { app: AppStateDto }) {
   const [flash, setFlash] = useState<Flash | null>(null);
   const [qa, setQa] = useState<QuickAddState>(QA_CLOSED);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const search = useSearch(searchOpen);
+  const [searchSel, setSearchSel] = useState(0);
+  useEffect(() => setSearchSel(0), [search.hits]);
 
   // サイドバーの「今日」の件数 (期限が今日以前の未完了。project-changed / 保存完了でも更新される)。
   const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
@@ -154,6 +160,17 @@ export function Main({ app }: { app: AppStateDto }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [openQuickAdd, settingsOpen]);
+
+  // Cmd/Ctrl+K: 検索 (暫定。Task 8 のショートカット管理に移す)。IME 変換中と設定ダイアログ・クイック追加の表示中は除く。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey || isImeKey(e) || settingsOpen || qa.open) return;
+      e.preventDefault();
+      setSearchOpen(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settingsOpen, qa.open]);
 
   // 狭い幅のドロワー: Esc で閉じる (Esc レイヤー。上に開いたものがあればそちらが先に閉じる)。幅が戻ったら閉じる。
   useEffect(() => {
@@ -292,6 +309,10 @@ export function Main({ app }: { app: AppStateDto }) {
       onAddTask={() => {
         setDrawer(false);
         openQuickAdd();
+      }}
+      onSearch={() => {
+        setDrawer(false);
+        setSearchOpen(true);
       }}
       onCreateProject={(name) => void createProject(name)}
       onOpenSettings={() => {
@@ -533,6 +554,32 @@ export function Main({ app }: { app: AppStateDto }) {
         error={qa.error}
         onClose={closeQuickAdd}
       />
+      <SearchDialog
+        open={searchOpen}
+        query={search.query}
+        onChangeQuery={search.setQuery}
+        includeDone={search.includeDone}
+        onToggleIncludeDone={search.toggleIncludeDone}
+        hits={search.hits}
+        selected={searchSel}
+        onSelect={setSearchSel}
+        onOpen={(h) => {
+          setSearchOpen(false);
+          openCross(h.task);
+        }}
+        onToggleDone={(h, done) =>
+          void api
+            .completeTask(h.task.project, h.task.no, done)
+            .then(() => {
+              search.refresh();
+              refreshAll();
+            })
+            .catch(showError)
+        }
+        onClose={() => setSearchOpen(false)}
+        today={today}
+        busy={search.busy}
+      />
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
         open={settingsOpen}
@@ -555,7 +602,8 @@ export function Main({ app }: { app: AppStateDto }) {
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,
         onNavigate: (t) => {
-          if (t !== "search") navigate({ kind: t });
+          if (t === "search") setSearchOpen(true);
+          else navigate({ kind: t });
         },
       }}
       banner={banner}
