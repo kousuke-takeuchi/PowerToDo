@@ -34,3 +34,18 @@ export function onProjectChanged(cb: (name: string, reason: ChangeReason) => voi
 export function onProjectsChanged(cb: () => void): () => void {
   return subscribe<Record<string, never>>("projects-changed", () => cb());
 }
+
+/** `external-change`: a file changed on disk while the project had unsaved edits (it is now held). `project` may be "_common". */
+export function onExternalChange(cb: (project: string) => void): () => void {
+  return subscribe<{ project: string }>("external-change", (p) => cb(p.project));
+}
+
+/** `exit-blocked`: the app was asked to quit while these projects ("_common" included) are held. */
+export function onExitBlocked(cb: (projects: string[]) => void): () => void {
+  return subscribe<string[]>("exit-blocked", cb);
+}
+
+/** `watch-failed`: the data-folder watcher could not start (the payload is the reason). */
+export function onWatchFailed(cb: (message: string) => void): () => void {
+  return subscribe<string>("watch-failed", cb);
+}

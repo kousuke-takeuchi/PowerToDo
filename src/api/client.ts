@@ -30,6 +30,16 @@ export const api = {
   revealDataDir: () => invoke<null>("reveal_data_dir"),
   /** `project` is a project name, or "_common" for the common workbook. */
   retrySave: (project: string) => invoke<null>("retry_save", { project }),
+  /**
+   * The user's choice for a project (or "_common") that changed on disk while it had unsaved edits.
+   * `reload` drops ours (returns the new view; null for "_common"), `overwrite` saves ours now.
+   */
+  resolveExternalChange: (project: string, action: "reload" | "overwrite") =>
+    invoke<ProjectView | null>("resolve_external_change", { project, action }),
+  /** Projects (or "_common") currently held back from saving because of an external change. */
+  heldProjects: () => invoke<string[]>("held_projects"),
+  /** Exits for real, after the held projects that blocked the exit were resolved. */
+  quit: () => invoke<void>("quit"),
 
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   getProject: (name: string) => invoke<ProjectView>("get_project", { name }),

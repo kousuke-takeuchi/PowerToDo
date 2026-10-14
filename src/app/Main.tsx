@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmAction, confirmDiscard } from "../api/dialogs";
+import { onProjectChanged, onProjectsChanged, onWatchFailed } from "../api/events";
 import type { Counts } from "../mock/data";
 import type { AppStateDto, CountsDto, LabelsDto, LabelViewDto, ProjectSummary, QuickAddResult, Task, TodayViewDto, UpcomingDto } from "../types/model";
 import { Collapse, useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
+import { ExternalChangeBanner } from "../views/ExternalChangeBanner";
 import { FixBanner } from "../views/FixBanner";
 import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
@@ -28,6 +30,7 @@ import { NoticeBanner, SaveBanner } from "./SaveBanner";
 import type { RowHandlers } from "./shortcuts";
 import { useShortcuts } from "./shortcuts";
 import { useCrossActions, useCrossView } from "./useCrossView";
+import { heldFileName, useExternalChanges } from "./useExternalChanges";
 import { useProject } from "./useProject";
 import { useRowFocus } from "./useRowFocus";
 import { useSearch } from "./useSearch";
@@ -114,6 +117,31 @@ export function Main({ app }: { app: AppStateDto }) {
   const { reduced, t } = useMotionTiming();
 
   const showError = useCallback((e: unknown) => setFlash({ text: errorMessage(e), tone: "error" }), []);
+  const ext = useExternalChanges(showError);
+
+  // Excel など外での変更の取り込み / ファイル構成の変化 / 監視の失敗 (バックエンドのイベント)。
+  useEffect(
+    () =>
+      onProjectChanged((name, reason) => {
+        if (reason === "external") setFlash({ text: `「${name}」の Excel での変更を取り込みました`, tone: "info" });
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      onProjectsChanged(() => {
+        void refreshSummaries();
+        loadDisplayName();
+      }),
+    [refreshSummaries, loadDisplayName],
+  );
+  useEffect(
+    () =>
+      onWatchFailed((m) =>
+        setFlash({ text: `ファイルの変更監視を開始できません (${m})。Excel で直した内容は再読み込みで取り込めます`, tone: "error" }),
+      ),
+    [],
+  );
   const navigate = useCallback(
     (target: Nav) => {
       setNav(target);
@@ -575,6 +603,15 @@ export function Main({ app }: { app: AppStateDto }) {
       {Object.entries(saveErrors).map(([project, message]) => (
         <Collapse key={`save-${project}`} duration={0.15} enterY={-8}>
           <SaveBanner message={message} onRetry={() => void api.retrySave(project).catch(() => undefined)} />
+        </Collapse>
+      ))}
+      {ext.held.map((project) => (
+        <Collapse key={`ext-${project}`} duration={0.15} enterY={-8}>
+          <ExternalChangeBanner
+            fileName={heldFileName(project)}
+            onReload={() => void ext.resolve(project, "reload")}
+            onOverwrite={() => void ext.resolve(project, "overwrite")}
+          />
         </Collapse>
       ))}
       {invalidCount > 0 && (

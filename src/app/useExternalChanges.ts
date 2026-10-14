@@ -1,0 +1,84 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../api/client";
+import { confirmAction } from "../api/dialogs";
+import { onExitBlocked, onExternalChange, onProjectsChanged } from "../api/events";
+
+/** 利用者に見せるファイル名。"_common" は共通設定のブック。 */
+export function heldFileName(project: string): string {
+  return project === "_common" ? "共通設定 (_PowerToDo.xlsx)" : `${project}.xlsx`;
+}
+
+/**
+ * Excel など外でファイルが変わり、アプリにも未保存の変更があるプロジェクト (保存を止めて利用者の選択を待っている)。
+ * `held` の正はバックエンドの held_projects: 起動時・フォルダ内の構成が変わったとき・解決のあとに取り直す。
+ * `external-change` は取り直しを待たずに追加する。
+ */
+export function useExternalChanges(onError: (e: unknown) => void) {
+  const [held, setHeld] = useState<string[]>([]);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  const refresh = useCallback(() => api.heldProjects().then(setHeld).catch(() => undefined), []);
+
+  useEffect(() => {
+    void refresh();
+    // データフォルダの変更やファイルの削除でバックエンドが保持を解くので、一覧も取り直す
+    return onProjectsChanged(() => void refresh());
+  }, [refresh]);
+  useEffect(() => onExternalChange((p) => setHeld((h) => (h.includes(p) ? h : [...h, p]))), []);
+
+  const resolve = useCallback(
+    async (project: string, action: "reload" | "overwrite") => {
+      const ok = await confirmAction(
+        action === "reload"
+          ? "このアプリでの変更は失われます。ファイルの内容を読み込みますか？"
+          : "ファイル側の変更は失われます。このアプリの内容で上書きしますか？",
+        { title: "外部での変更", okLabel: action === "reload" ? "ファイルを読み込む" : "上書きする" },
+      ).catch(() => false);
+      if (!ok) return;
+      try {
+        await api.resolveExternalChange(project, action);
+      } catch (e) {
+        onErrorRef.current(e);
+      } finally {
+        await refresh();
+      }
+    },
+    [refresh],
+  );
+
+  // 終了しようとしたとき保持中のものがあった: 確認は 1 回。上書きがひとつでも失敗したら終了しない (未保存の内容を失わせない)。
+  const exiting = useRef(false);
+  useEffect(
+    () =>
+      onExitBlocked(async (projects) => {
+        if (exiting.current) return;
+        exiting.current = true;
+        try {
+          const ok = await confirmAction(
+            `${projects.map((p) => `「${heldFileName(p)}」`).join("")}に、Excel での変更とこのアプリでの未保存の変更の両方があります。このアプリの内容で上書きして終了しますか？ (「終了しない」を選ぶと、アプリはそのまま開いています)`,
+            { title: "終了", okLabel: "上書きして終了", cancelLabel: "終了しない" },
+          ).catch(() => false);
+          if (!ok) return;
+          let failed = false;
+          for (const p of projects) {
+            try {
+              await api.resolveExternalChange(p, "overwrite");
+            } catch (e) {
+              failed = true;
+              onErrorRef.current(e);
+            }
+          }
+          if (failed) {
+            await refresh();
+            return;
+          }
+          await api.quit();
+        } finally {
+          exiting.current = false;
+        }
+      }),
+    [refresh],
+  );
+  return { held, resolve };
+}
