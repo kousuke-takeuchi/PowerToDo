@@ -809,7 +809,9 @@ pub async fn resolve_external_change(
     }
     if is_common {
         let _ = app.emit("projects-changed", serde_json::json!({}));
-    } else {
+    } else if matches!(action, ResolveAction::Reload) {
+        // Only a reload changed the in-memory view; after an overwrite it is unchanged (the UI
+        // re-reads on `save-status` saved), and an "imported" notice would contradict the action.
         emit_changed(&app, &[project], ChangeReason::External);
     }
     Ok(view)

@@ -27,21 +27,29 @@ export function useExternalChanges(onError: (e: unknown) => void) {
   }, [refresh]);
   useEffect(() => onExternalChange((p) => setHeld((h) => (h.includes(p) ? h : [...h, p]))), []);
 
+  // 同じキーの確認を二重に開かない (ボタンの連打)
+  const resolving = useRef(new Set<string>());
   const resolve = useCallback(
     async (project: string, action: "reload" | "overwrite") => {
-      const ok = await confirmAction(
-        action === "reload"
-          ? "このアプリでの変更は失われます。ファイルの内容を読み込みますか？"
-          : "ファイル側の変更は失われます。このアプリの内容で上書きしますか？",
-        { title: "外部での変更", okLabel: action === "reload" ? "ファイルを読み込む" : "上書きする" },
-      ).catch(() => false);
-      if (!ok) return;
+      if (resolving.current.has(project)) return;
+      resolving.current.add(project);
       try {
-        await api.resolveExternalChange(project, action);
-      } catch (e) {
-        onErrorRef.current(e);
+        const ok = await confirmAction(
+          action === "reload"
+            ? "このアプリでの変更は失われます。ファイルの内容を読み込みますか？"
+            : "ファイル側の変更は失われます。このアプリの内容で上書きしますか？",
+          { title: "外部での変更", okLabel: action === "reload" ? "ファイルを読み込む" : "上書きする" },
+        ).catch(() => false);
+        if (!ok) return;
+        try {
+          await api.resolveExternalChange(project, action);
+        } catch (e) {
+          onErrorRef.current(e);
+        } finally {
+          await refresh();
+        }
       } finally {
-        await refresh();
+        resolving.current.delete(project);
       }
     },
     [refresh],
@@ -60,8 +68,11 @@ export function useExternalChanges(onError: (e: unknown) => void) {
             { title: "終了", okLabel: "上書きして終了", cancelLabel: "終了しない" },
           ).catch(() => false);
           if (!ok) return;
+          // 確認を出している間に新しく保持されたキーも上書きする (終了時の flush は保持中のものを書かない)
+          const fresh = await api.heldProjects().catch(() => [] as string[]);
+          const targets = [...new Set([...projects, ...fresh])];
           let failed = false;
-          for (const p of projects) {
+          for (const p of targets) {
             try {
               await api.resolveExternalChange(p, "overwrite");
             } catch (e) {
@@ -73,7 +84,11 @@ export function useExternalChanges(onError: (e: unknown) => void) {
             await refresh();
             return;
           }
-          await api.quit();
+          try {
+            await api.quit();
+          } catch (e) {
+            onErrorRef.current(e);
+          }
         } finally {
           exiting.current = false;
         }
