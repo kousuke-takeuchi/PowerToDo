@@ -118,13 +118,26 @@ impl AppState {
             return Vec::new();
         };
         let at = now();
+        let fallback = self.app_data_dir.join(RECOVERY_DIR);
+        let mut recovered = BTreeSet::new();
         for key in store.unsavable_keys() {
-            match store.write_recovery_copy(&key, at) {
-                Ok(path) => eprintln!("unsaved edits of {key} kept in {}", path.display()),
+            match store.write_recovery_copy(&key, at, &fallback) {
+                Ok(path) => {
+                    let place = if path.starts_with(&fallback) {
+                        "the app data folder (archive/ was not writable)"
+                    } else {
+                        "archive/"
+                    };
+                    eprintln!(
+                        "unsaved edits of {key} kept in {} ({place})",
+                        path.display()
+                    );
+                    recovered.insert(key);
+                }
                 Err(e) => eprintln!("recovery copy failed for {key}: {e}"),
             }
         }
-        let failures = flush(store);
+        let failures = flush(store, &recovered);
         for (name, e) in &failures {
             eprintln!("flush on exit failed for {name}: {e}");
         }
@@ -138,13 +151,21 @@ fn changed_on_disk_error(key: &str) -> AppError {
     }
 }
 
+/// Where `flush_all` writes a recovery copy when `archive/` cannot be written:
+/// `<app_data_dir>/recovery/`.
+const RECOVERY_DIR: &str = "recovery";
+
 /// Tries to save the common workbook and every dirty project, continuing past failures.
-/// Returns the failures as `(project name or COMMON_KEY, error)`.
-fn flush(store: &mut ProjectStore) -> Vec<(String, AppError)> {
+/// Returns the failures as `(project name or COMMON_KEY, error)`. Keys in `recovered` already
+/// have their edits in a recovery copy, so a changed-on-disk file among them is not reported
+/// again.
+fn flush(store: &mut ProjectStore, recovered: &BTreeSet<String>) -> Vec<(String, AppError)> {
     let mut failures = Vec::new();
     if store.common_dirty() && !store.is_held(COMMON_KEY) {
         if store.changed_on_disk(COMMON_KEY) {
-            failures.push((COMMON_KEY.to_string(), changed_on_disk_error(COMMON_KEY)));
+            if !recovered.contains(COMMON_KEY) {
+                failures.push((COMMON_KEY.to_string(), changed_on_disk_error(COMMON_KEY)));
+            }
         } else if let Err(e) = store.save_common() {
             failures.push((COMMON_KEY.to_string(), e));
         }
@@ -157,7 +178,9 @@ fn flush(store: &mut ProjectStore) -> Vec<(String, AppError)> {
         // writing now would overwrite their work. It stays dirty; the next watcher batch
         // holds it and the user chooses.
         if store.changed_on_disk(&name) {
-            failures.push((name.clone(), changed_on_disk_error(&name)));
+            if !recovered.contains(&name) {
+                failures.push((name.clone(), changed_on_disk_error(&name)));
+            }
             continue;
         }
         if let Err(e) = store.save(&name) {
@@ -215,6 +238,15 @@ pub enum ChangeReason {
 struct ProjectChanged {
     name: String,
     reason: ChangeReason,
+}
+
+/// `projects-changed`. `common_reloaded` says the common workbook was re-read from its file,
+/// which is what clears an earlier `external-read-failed` for `_common` in the UI.
+fn emit_projects_changed(app: &AppHandle, common_reloaded: bool) {
+    let _ = app.emit(
+        "projects-changed",
+        serde_json::json!({ "commonReloaded": common_reloaded }),
+    );
 }
 
 fn emit_changed(app: &AppHandle, names: &[String], reason: ChangeReason) {
@@ -545,7 +577,7 @@ pub fn switch_data_dir(state: &AppState, path: &str) -> AppResult<AppStateDto> {
                 message: "他のアプリで変更されたファイルの扱いが決まっていません。先に「再読み込み」か「上書き」を選んでください。".into(),
             });
         }
-        if let Some((_, e)) = flush(old).into_iter().next() {
+        if let Some((_, e)) = flush(old, &BTreeSet::new()).into_iter().next() {
             return Err(e);
         }
     }
@@ -571,6 +603,10 @@ struct BatchOutcome {
     reloaded: Vec<String>,
     /// The project list or the common workbook changed (`projects-changed`).
     projects_changed: bool,
+    /// The common workbook was re-read in this batch (`projects-changed` `commonReloaded`). A
+    /// batch can also change the project list without reading it (a new file adopted), so
+    /// `projects_changed` alone does not mean an earlier `_common` read failure is resolved.
+    common_reloaded: bool,
     /// `(key, message)` for files that changed but could not be read (`external-read-failed`).
     failures: Vec<(String, String)>,
     /// The data folder itself is gone: every project was marked missing and the watcher should
@@ -618,7 +654,10 @@ fn apply_fs_batch(
                     out.held.push(COMMON_KEY.to_string());
                 } else {
                     match store.reload_common() {
-                        Ok(()) => out.projects_changed = true,
+                        Ok(()) => {
+                            out.projects_changed = true;
+                            out.common_reloaded = true;
+                        }
                         Err(e) => out.failures.push((COMMON_KEY.to_string(), e.to_string())),
                     }
                 }
@@ -714,7 +753,7 @@ fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
         );
     }
     if out.projects_changed {
-        let _ = app.emit("projects-changed", serde_json::json!({}));
+        emit_projects_changed(app, out.common_reloaded);
     }
     if gone {
         return;
@@ -890,7 +929,7 @@ pub async fn resolve_external_change(
         ResolveAction::Reload => schedule_dirty(&app, state.inner()),
     }
     if is_common {
-        let _ = app.emit("projects-changed", serde_json::json!({}));
+        emit_projects_changed(&app, matches!(action, ResolveAction::Reload));
     } else if matches!(action, ResolveAction::Reload) {
         // Only a reload changed the in-memory view; after an overwrite it is unchanged (the UI
         // re-reads on `save-status` saved), and an "imported" notice would contradict the action.
@@ -1509,6 +1548,13 @@ mod tests {
         let aaa = data.path().join("aaa.xlsx");
         std::fs::remove_file(&aaa).unwrap();
         std::fs::create_dir(&aaa).unwrap();
+        // The directory is what we "know" now, so this is a failed write, not an external change
+        // (those go to a recovery copy instead).
+        with_store(&state, |s| {
+            s.accept_disk_state("aaa");
+            Ok(())
+        })
+        .unwrap();
 
         let failures = state.flush_all();
         assert_eq!(failures.len(), 1);
@@ -1563,7 +1609,7 @@ mod tests {
         }
         let mut other = open_store(copy.path());
         edit(&mut other);
-        assert!(flush(&mut other).is_empty());
+        assert!(flush(&mut other, &BTreeSet::new()).is_empty());
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::copy(copy.path().join(file), dir.join(file)).unwrap();
     }
@@ -1653,7 +1699,7 @@ mod tests {
         let (again, cancelled) = run_batch(&mut store, false, &[path]);
         assert!(again.is_empty() && cancelled.is_empty());
         // Quitting or switching folders must not write the held project.
-        assert!(flush(&mut store).is_empty());
+        assert!(flush(&mut store, &BTreeSet::new()).is_empty());
         assert_eq!(store.dirty_projects(), vec![INBOX.to_string()]);
         // "Reload": ours is dropped, theirs is shown.
         store.release(INBOX);
@@ -1753,6 +1799,7 @@ mod tests {
         });
         let (out, _) = run_batch(&mut store, false, &[tmp.path().join("新規.xlsx")]);
         assert!(out.projects_changed);
+        assert!(!out.common_reloaded, "the common workbook was not read");
         assert!(store.summaries().iter().any(|p| p.name == "新規"));
         assert!(store.common_dirty(), "the common workbook must list it");
     }
@@ -1768,7 +1815,7 @@ mod tests {
         });
         let common = tmp.path().join("_PowerToDo.xlsx");
         let (out, _) = run_batch(&mut store, false, std::slice::from_ref(&common));
-        assert!(out.projects_changed && out.held.is_empty());
+        assert!(out.projects_changed && out.common_reloaded && out.held.is_empty());
         assert_eq!(store.settings().display_name, "Excel");
         assert!(!store.common_dirty());
 
@@ -1785,7 +1832,7 @@ mod tests {
         assert_eq!(out.held, vec![COMMON_KEY.to_string()]);
         assert_eq!(cancelled, vec![COMMON_KEY.to_string()]);
         assert_eq!(store.settings().display_name, "アプリ");
-        assert!(flush(&mut store).is_empty());
+        assert!(flush(&mut store, &BTreeSet::new()).is_empty());
         assert!(
             store.common_dirty(),
             "a held common workbook is not written"
@@ -1833,6 +1880,25 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_common_workbook_is_not_reported_as_reloaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "新規.xlsx", |o| {
+            o.create_project("新規", "").unwrap();
+        });
+        // Excel is mid-save on the common workbook: the file is not a workbook yet.
+        let common = tmp.path().join("_PowerToDo.xlsx");
+        std::fs::write(&common, b"not a workbook").unwrap();
+        let (out, _) = run_batch(&mut store, false, &[common, tmp.path().join("新規.xlsx")]);
+        // The new file is adopted (the list changed) but `_common` was not re-read, so the UI
+        // must keep its read-failure banner.
+        assert!(out.projects_changed);
+        assert!(!out.common_reloaded);
+        assert_eq!(out.failures.len(), 1);
+        assert_eq!(out.failures[0].0, COMMON_KEY);
+    }
+
+    #[test]
     fn a_genuinely_new_file_is_still_adopted_next_to_listed_ones() {
         let tmp = tempfile::tempdir().unwrap();
         let mut store = open_store(tmp.path());
@@ -1869,7 +1935,7 @@ mod tests {
         assert!(store.changed_on_disk(INBOX) && store.changed_on_disk(COMMON_KEY));
 
         // The exit flush refuses to write over them, reports it and leaves them dirty.
-        let failures = flush(&mut store);
+        let failures = flush(&mut store, &BTreeSet::new());
         let mut keys: Vec<&str> = failures.iter().map(|(k, _)| k.as_str()).collect();
         keys.sort();
         assert_eq!(keys, vec![COMMON_KEY, INBOX]);
@@ -1878,6 +1944,11 @@ mod tests {
                 .iter()
                 .all(|(_, e)| matches!(e, AppError::Unsaved { .. }))
         );
+        assert_eq!(store.dirty_projects(), vec![INBOX.to_string()]);
+        assert!(store.common_dirty());
+        // Keys that already have a recovery copy are not reported again, and stay dirty.
+        let recovered: BTreeSet<String> = [COMMON_KEY.to_string(), INBOX.to_string()].into();
+        assert!(flush(&mut store, &recovered).is_empty());
         assert_eq!(store.dirty_projects(), vec![INBOX.to_string()]);
         assert!(store.common_dirty());
         let inbox = read_project_book(&tmp.path().join("受信トレイ.xlsx")).unwrap();
@@ -1889,7 +1960,7 @@ mod tests {
         store.accept_disk_state(INBOX);
         store.accept_disk_state(COMMON_KEY);
         assert!(!store.changed_on_disk(INBOX) && !store.changed_on_disk(COMMON_KEY));
-        assert!(flush(&mut store).is_empty());
+        assert!(flush(&mut store, &BTreeSet::new()).is_empty());
         let inbox = read_project_book(&tmp.path().join("受信トレイ.xlsx")).unwrap();
         assert_eq!(inbox.tasks[0].title, "アプリの作業");
     }
@@ -1977,7 +2048,8 @@ mod tests {
             quick_add_in(o, "Excel の作業", "bbb", d("2026-10-14")).unwrap();
         });
 
-        state.flush_all();
+        // Both are in recovery copies, so nothing is reported as a failed write.
+        assert!(state.flush_all().is_empty());
 
         let copies: Vec<PathBuf> = std::fs::read_dir(data.path().join("archive"))
             .unwrap()

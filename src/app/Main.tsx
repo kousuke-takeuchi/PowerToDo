@@ -42,7 +42,9 @@ type Flash = { text: string; tone: "error" | "info" };
 type QuickAddState = { open: boolean; text: string; busy: boolean; error?: string; parsed?: { text: string; result: QuickAddResult } };
 
 const QA_CLOSED: QuickAddState = { open: false, text: "", busy: false };
-/** 新しいプロジェクトの色は順番に割り当てる。ラベルの「色」メニューの候補も同じ (新しいラベルは既定色、仕様 §3.3)。 */
+/** 新しいラベルの色 (既定、仕様 §3.3)。ラベルの「色」メニューの先頭にも出し、既定に戻せるようにする。 */
+const DEFAULT_LABEL_COLOR = "var(--color-text-muted)";
+/** 新しいプロジェクトの色は順番に割り当てる。ラベルの「色」メニューの候補はこれに既定色を足したもの。 */
 const PALETTE = [
   "var(--color-priority-3)",
   "var(--color-success)",
@@ -50,6 +52,7 @@ const PALETTE = [
   "var(--color-priority-4)",
   "var(--color-priority-1)",
 ];
+const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 
 /** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
 export function Main({ app }: { app: AppStateDto }) {
@@ -351,6 +354,7 @@ export function Main({ app }: { app: AppStateDto }) {
       await api.deleteProject(current);
       await refreshSummaries();
       navigate({ kind: "inbox" });
+      void ext.refresh();
     } catch (e) {
       showError(e);
     }
@@ -496,11 +500,11 @@ export function Main({ app }: { app: AppStateDto }) {
         labels={d.labels}
         filters={[]}
         counts={d.counts}
-        palette={PALETTE}
+        palette={LABEL_PALETTE}
         onOpenLabel={(name) => navigate({ kind: "label", name })}
         onAddLabel={(name) =>
           void api
-            .addLabel(name, "var(--color-text-muted)")
+            .addLabel(name, DEFAULT_LABEL_COLOR)
             .then(labelsData.refresh)
             .catch(showError)
         }

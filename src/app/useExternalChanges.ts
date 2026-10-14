@@ -103,7 +103,8 @@ export function useExternalChanges(onError: (e: unknown) => void) {
 /**
  * Excel など外で変わったファイルを読み込めなかったもの、{ project ("_common" を含む) -> message }。
  * 保存の失敗ではないので再試行は無い (次の変更イベントで読み直す)。帯は閉じるか、同じファイルの取り込みが
- * 成功したとき (project-changed の external、"_common" は projects-changed) に消える。
+ * 成功したとき (project-changed の external、"_common" は commonReloaded が true の projects-changed) に消える。
+ * ファイルの追加だけで共通を読み直していない projects-changed では消さない。
  * `clear()` はデータフォルダが変わったとき用。
  */
 export function useExternalReadFailures() {
@@ -125,7 +126,13 @@ export function useExternalReadFailures() {
       }),
     [drop],
   );
-  useEffect(() => onProjectsChanged(() => drop("_common")), [drop]);
+  useEffect(
+    () =>
+      onProjectsChanged(({ commonReloaded }) => {
+        if (commonReloaded) drop("_common");
+      }),
+    [drop],
+  );
   const clear = useCallback(() => setFailures({}), []);
   return { failures, dismiss: drop, clear };
 }

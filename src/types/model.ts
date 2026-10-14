@@ -68,3 +68,8 @@ export interface SearchHit { task: Task; matched: Matched; }
 export interface SearchDto { hits: SearchHit[]; }
 export interface CountsDto { today: number; labels: Record<string, number>; }
 export type ChangeReason = "bulk" | "external" | "move";
+
+/** `projects-changed` payload. `commonReloaded`: the common workbook was re-read from its file in this batch. */
+export interface ProjectsChanged {
+  commonReloaded: boolean;
+}

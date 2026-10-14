@@ -133,7 +133,7 @@ src/
 | イベント | payload | いつ |
 | --- | --- | --- |
 | `project-changed` | `{ name, reason: "bulk" \| "external" \| "move" }` | 複数プロジェクト更新、外部変更の自動再読込、move_task |
-| `projects-changed` | `{}` | 外部でファイルが増えた / 消えた、共通ファイルが変わった (サイドバーの一覧とラベルを取り直す) |
+| `projects-changed` | `{ commonReloaded: bool }` | 外部でファイルが増えた / 消えた、共通ファイルが変わった (サイドバーの一覧とラベルを取り直す)。`commonReloaded` はそのバッチで共通ファイルを読み直せたときだけ true |
 | `external-change` | `{ project }` | 外部で変わったが未保存の編集があり自動再読込しなかった (帯を出す) |
 
 `useCrossView(kind, params)`: command を呼んで state に持つ。再取得のきっかけは (a) params の変化、(b) どのプロジェクトの `project-changed` でも、(c) `projects-changed`、(d) 自分が呼んだ変更 command の完了。連続する再取得は 1 つにまとめる (直前の呼び出しが終わってから最新の 1 回だけ)。応答は古いものを捨てる (`useProject` の世代番号と同じ)
@@ -217,7 +217,7 @@ src/
 ## 9. テスト
 
 - Rust 単体 (`cargo test`): `domain::views` (期限切れ / 今日の分け方と並び、近日のグループ化、タスクの無い日、ラベル詳細の並び)、`domain::search` (正規化: NFKC・カタカナ→ひらがな・小文字、AND、一致箇所の優先)、`store` (ラベルの改名 / 削除が全プロジェクトに及ぶ、`reschedule_overdue` が時刻を保つ、和集合のラベル一覧)、`watcher` (自分の書き込みの判定、無視するファイル名、デバウンスのまとめ。`notify` は使わず判定関数に `(path, len, mtime)` を渡す)
-- 統合 (`cargo test`、`tempfile`): 実ファイルを別経路で書き換え、`notify` のイベントで `reload` が走ることを 1 本 (タイムアウト 5 秒。CI の 3 OS で動くことを確認する。不安定なら macOS だけに絞る)
+- 統合 (`cargo test`、`tempfile`): 実ファイルを別経路で書き換え、`notify` のイベントで `reload` が走ることを 1 本 (タイムアウト 5 秒。macOS だけで動かし、Ubuntu / Windows では `ignore` にする。理由は §10 の「監視の統合テスト」の行)
 - UI: 手動 (Phase 1 と同じチェックリスト形式で PR に書く)。Storybook に `Screens/Desktop/D-04 今日 (操作)` を足し、再スケジュールと完了を触れるようにする。既存 40 画面の初回描画は変えない
 - UI の自動テスト: Tauri 2 の公式案内は WebdriverIO + `@wdio/tauri-service` (埋め込み WebDriver サーバーで Windows / Linux / macOS に対応。`tauri-driver` 単体は Windows / Linux のみ)。Phase 2 では入れない (CI に 3 OS のビルドを足すのが先。アプリの画面は手動確認で足りる量)。Phase 5 で `@wdio/tauri-service` の browser mode (Vite dev server + `invoke` のモック) から試す
 
@@ -256,7 +256,11 @@ src/
 | 2026-10-14 | CI の Node は 26 (ローカルの v26.5.0 とロックファイルの作成環境に合わせる)。setup-node が解決できなければ 22 に下げる | ロックファイルの再現性を優先。未確認のため PR の CI 結果で確かめる |
 | 2026-10-14 | D-05 `(操作)` の Story は、読み込めないプロジェクトの注記 (`hiddenProjects`) を出さない | モックに「読書」のタスクがあり、注記と矛盾するため。見た目だけの違い |
 | 2026-10-14 | macOS ではアプリメニューの「終了」を自前の項目 (「PowerToDo を終了」、`CmdOrCtrl+Q`) に差し替え、`on_menu_event` で保留が無ければ `exit(0)`、あれば `exit-blocked` を出す。他のメニュー (編集のコピー / ペーストなど) は Tauri の既定のまま。それでも確認を出せない終了 (Dock の「終了」、ログアウト) に備え、`RunEvent::Exit` で保留中のキーと「dirty かつディスク側が変わった」キーのメモリ上のブックを `archive/<名前> (未保存 YYYYMMDD-HHMM).xlsx` (共通は `archive/_PowerToDo (未保存 …).xlsx`) に書き出す (`ProjectStore::write_recovery_copy`)。Windows / Linux は既定のメニューが無く、ウィンドウを閉じる操作は `CloseRequested` で止まるので変えない | 既定の「終了」は `terminate:` を送り、tao は `applicationWillTerminate` しか実装していないので `ExitRequested` が来ず `RunEvent::Exit` だけになる。そのままでは保留中の編集が黙って消える。Dock の「終了」は自前のメニューでは拾えないので、ファイルは Excel 側のまま残し、編集は別ファイルに逃がす |
-| 2026-10-14 | 外部変更の読み直しの失敗は `save-status: error` ではなく `external-read-failed { project, message }` で送る。UI は閉じるボタンだけの帯「「<名前>」の Excel の変更を読み込めません: <message>」を出し、同じ名前の `project-changed` (`external`) か、共通は `projects-changed` で消す (§5.2 の表の動作は同じ) | 保存の失敗の帯だと「保存できません」と「再試行」が出るが、再試行しても読み直しにはならず、帯も消えない。読み直しは次の変更イベントで行う |
+| 2026-10-14 | 外部変更の読み直しの失敗は `save-status: error` ではなく `external-read-failed { project, message }` で送る。UI は閉じるボタンだけの帯「「<名前>」の Excel の変更を読み込めません: <message>」を出し、同じ名前の `project-changed` (`external`) か、共通は `commonReloaded` が true の `projects-changed` で消す (§5.2 の表の動作は同じ) | 保存の失敗の帯だと「保存できません」と「再試行」が出るが、再試行しても読み直しにはならず、帯も消えない。読み直しは次の変更イベントで行う |
 | 2026-10-14 | 監視を始められなかった理由は `AppState` に持ち、`app_state` / `set_data_dir` の `AppStateDto.watchError` と `watch_status` で返す。メイン画面は表示時に `watchError` でフラッシュを出し、設定からのフォルダ変更のあとは `watch_status` で聞き直す。`watch-failed` イベントも残す | 監視の開始は `app_state` の中 (メイン画面がイベントを聞く前) なので、イベントだけだと §7 のフラッシュが出ない |
 | 2026-10-14 | プロジェクトの作成 / 改名 / 削除のときの共通ファイルの即時書き込みも、書く直前に `changed_on_disk` を見る。変わっていれば書かずに `_common` を保留し、command が `external-change { project: "_common" }` を出す | 自動保存 (`TauriSink::save`) と同じ確認。監視のイベントより先に作成などが来ると、Excel で直した共通ファイルを上書きしてしまう |
-| 2026-10-14 | 監視の統合テスト (`store::watcher` の `batches_are_delivered_after_quiet_period`、実ファイル + `notify`) は macOS だけで動かし、Ubuntu / Windows では `ignore` にする (`#[cfg_attr(not(target_os = "macos"), ignore)]`)。判定の単体テスト (`store::external` の分類と `(len, mtime)` の比較) と `apply_fs_batch` のシナリオは 3 OS で動く | イベントの届き方と時期が OS の監視機構 (FSEvents / inotify / ReadDirectoryChangesW) で違い、5 秒のタイムアウトが CI の共有ランナーで安定する保証が無い (確認できているのは macOS で 4 回中 4 回の通過)。§9 の「不安定なら macOS だけに絞る」を先に当てた。アプリ本体の確認も macOS だけ |
+| 2026-10-14 | 監視の統合テスト (`store::watcher` の `batches_are_delivered_after_quiet_period`、実ファイル + `notify`) は macOS だけで動かし、Ubuntu / Windows では `ignore` にする (`#[cfg_attr(not(target_os = "macos"), ignore = "timing depends on the OS watcher")]`)。判定の単体テスト (`store::external` の分類と `(len, mtime)` の比較) と `apply_fs_batch` のシナリオは 3 OS で動く | イベントの届き方と時期が OS の監視機構 (FSEvents / inotify / ReadDirectoryChangesW) で違い、5 秒のタイムアウトが CI の共有ランナーで安定する保証が無い (確認できているのは macOS で 4 回中 4 回の通過)。§9 の「不安定なら macOS だけに絞る」を先に当てた。アプリ本体の確認も macOS だけ |
+| 2026-10-15 | `projects-changed` の payload に `commonReloaded` を足し、そのバッチで共通ファイルを読み直せたとき (`reload_common` の成功、`resolve_external_change` の「ファイルを読み込む」) だけ true にする。UI は `_common` の読み込み失敗の帯を `commonReloaded` が true のときだけ消す | 同じバッチで新しいファイルを取り込むと共通を読めていなくても `projects-changed` が出て、共通の読み込み失敗の帯が消えていた |
+| 2026-10-15 | 終了時の回復コピーは、`archive/` に書けない (フォルダを作れない、ドライブが外れている) ときは `<アプリのデータフォルダ>/recovery/` に同じファイル名で書く (`write_recovery_copy` の `fallback_dir`)。どちらに書いたかはログに出す。回復コピーを書けたキーは、`flush` の「他のアプリで変更されているため書き込みませんでした」の失敗としては重ねて報告しない | Drive のアンマウントなどで `archive/` が使えないと編集が消える。同じ編集についてログが 2 つ出る重複も避ける |
+| 2026-10-15 | `delete_project` は、保留中、またはディスク側が変わっている (`changed_on_disk`) プロジェクトを、保存もアーカイブもせずに `Unsaved`「「<名前>」は Excel で変更されています。帯の操作で解決してから削除してください」で断る。成功後は画面が保留の一覧を取り直す | 削除の前の保存は Excel 側の変更を上書きし、アーカイブはその変更をユーザーが選ぶ前に持ち去る。帯の選択が先 |
+| 2026-10-15 | ラベルの「色」メニューの先頭に既定色 (`var(--color-text-muted)`) を足す (新しいプロジェクトの `PALETTE` は変えない) | 一度色を付けたラベルを既定に戻せなかった |
