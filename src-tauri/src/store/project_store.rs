@@ -1565,7 +1565,12 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
 
         let err = e.store.save("仕事").unwrap_err();
-        assert!(matches!(err, AppError::Io { .. }), "{err:?}");
+        // Unix reports the rename over a directory as a plain I/O error; Windows returns
+        // ERROR_ACCESS_DENIED (os error 5), which maps to `Locked`. Either way the save fails.
+        assert!(
+            matches!(err, AppError::Io { .. } | AppError::Locked { .. }),
+            "{err:?}"
+        );
         assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
         assert_eq!(nos(&e.store.view("仕事").unwrap()), vec![1]);
 
@@ -2213,7 +2218,12 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
 
         let err = e.store.delete_project("仕事").unwrap_err();
-        assert!(matches!(err, AppError::Io { .. }), "{err:?}");
+        // Unix reports the rename over a directory as a plain I/O error; Windows returns
+        // ERROR_ACCESS_DENIED (os error 5), which maps to `Locked`. Either way the save fails.
+        assert!(
+            matches!(err, AppError::Io { .. } | AppError::Locked { .. }),
+            "{err:?}"
+        );
         assert!(e.store.summaries().iter().any(|s| s.name == "仕事"));
         assert_eq!(e.store.dirty_projects(), vec!["仕事".to_string()]);
         assert_eq!(nos(&e.store.view("仕事").unwrap()), vec![1]);
