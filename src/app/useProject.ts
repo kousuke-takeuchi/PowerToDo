@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage, isAppError } from "../api/client";
-import { onProjectChanged } from "../api/events";
+import { onProjectChanged, onSaveStatus } from "../api/events";
 import type { ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
 
 export type UseProjectOptions = {
@@ -75,6 +75,12 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   // `project-changed` (a change that did not come through this hook): re-read the in-memory state.
   useEffect(() => onProjectChanged((n) => n === name && void load(() => api.getProject(name), true)), [name, load]);
 
+  // A save finished: the file's row numbers (invalid rows) may have changed with it, so re-read the in-memory view.
+  useEffect(
+    () => onSaveStatus((s) => s.project === name && s.state === "saved" && void load(() => api.getProject(name), true)),
+    [name, load],
+  );
+
   /** Run a command that returns the new ProjectView. Resolves true on success; failure becomes `notice`. */
   const mutate = useCallback(
     (call: () => Promise<ProjectView>): Promise<boolean> => {
@@ -111,6 +117,8 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   const updateTask = useCallback((no: number, patch: TaskPatch) => mutate(() => api.updateTask(name, no, patch)), [mutate, name]);
   const completeTask = useCallback((no: number, done: boolean) => mutate(() => api.completeTask(name, no, done)), [mutate, name]);
   const deleteTask = useCallback((no: number) => mutate(() => api.deleteTask(name, no)), [mutate, name]);
+  const addSection = useCallback((section: string) => mutate(() => api.addSection(name, section)), [mutate, name]);
+  const renameSection = useCallback((from: string, to: string) => mutate(() => api.renameSection(name, from, to)), [mutate, name]);
   const addSubtask = useCallback((parentNo: number, title: string) => addTask({ title, parentNo }), [addTask]);
 
   /**
@@ -136,5 +144,5 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   const parseQuickAdd = useCallback((text: string): Promise<QuickAddResult> => api.parseQuickAdd(text), []);
   const clearNotice = useCallback(() => setNotice(null), []);
 
-  return { view, loading, error, notice, clearNotice, reload, addTask, updateTask, completeTask, deleteTask, addSubtask, quickAdd, parseQuickAdd };
+  return { view, loading, error, notice, clearNotice, reload, addTask, updateTask, completeTask, deleteTask, addSubtask, addSection, renameSection, quickAdd, parseQuickAdd };
 }

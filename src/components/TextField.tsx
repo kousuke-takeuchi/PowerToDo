@@ -4,15 +4,19 @@ export type TextFieldProps = {
   onChange?: (v: string) => void;
   type?: "text" | "password" | "url";
   readOnly?: boolean;
+  ariaLabel?: string;
+  autoFocus?: boolean;
 };
 
-export function TextField({ value, placeholder, onChange, type = "text", readOnly }: TextFieldProps) {
+export function TextField({ value, placeholder, onChange, type = "text", readOnly, ariaLabel, autoFocus }: TextFieldProps) {
   return (
     <input
       type={type}
       value={value ?? ""}
       placeholder={placeholder}
       readOnly={readOnly}
+      aria-label={ariaLabel}
+      autoFocus={autoFocus}
       onChange={(e) => onChange?.(e.target.value)}
       className="outline-none border-[color:var(--color-border)] focus-visible:border-[color:var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
       style={{

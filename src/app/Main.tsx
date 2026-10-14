@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage, isAppError } from "../api/client";
-import { confirm } from "../api/dialogs";
+import { confirmAction, confirmDiscard } from "../api/dialogs";
 import type { Counts } from "../mock/data";
 import type { AppStateDto, ProjectSummary, QuickAddResult } from "../types/model";
 import { AppShell } from "../views/AppShell";
@@ -8,6 +8,7 @@ import { EmptyState } from "../views/EmptyState";
 import { FixBanner } from "../views/FixBanner";
 import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
+import { SettingsDialog } from "../views/SettingsDialog";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
@@ -47,6 +48,7 @@ export function Main({ app }: { app: AppStateDto }) {
   const [drawer, setDrawer] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [qa, setQa] = useState<QuickAddState>(QA_CLOSED);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refreshSummaries = useCallback(async () => {
     try {
@@ -56,13 +58,17 @@ export function Main({ app }: { app: AppStateDto }) {
     }
   }, []);
 
-  useEffect(() => {
-    void refreshSummaries();
+  const loadDisplayName = useCallback(() => {
     api
       .settings()
       .then((s) => setDisplayName(s.displayName || undefined))
       .catch(() => undefined);
-  }, [refreshSummaries]);
+  }, []);
+
+  useEffect(() => {
+    void refreshSummaries();
+    loadDisplayName();
+  }, [refreshSummaries, loadDisplayName]);
 
   const placeholder = nav.kind === "today" || nav.kind === "upcoming" || nav.kind === "labels";
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
@@ -89,7 +95,7 @@ export function Main({ app }: { app: AppStateDto }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // isImeKey: see keys.ts (WebKit's committing keydown arrives with isComposing false but keyCode 229)
-      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || isImeKey(e)) return;
+      if (e.key.toLowerCase() !== "q" || e.metaKey || e.ctrlKey || e.altKey || isImeKey(e) || settingsOpen) return;
       const t = e.target instanceof HTMLElement ? e.target : null;
       if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
       e.preventDefault();
@@ -97,7 +103,7 @@ export function Main({ app }: { app: AppStateDto }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openQuickAdd]);
+  }, [openQuickAdd, settingsOpen]);
 
   // 狭い幅のドロワー: Esc で閉じる (Esc レイヤー。上に開いたものがあればそちらが先に閉じる)。幅が戻ったら閉じる。
   useEffect(() => {
@@ -145,6 +151,40 @@ export function Main({ app }: { app: AppStateDto }) {
     }
   };
 
+  // ---- プロジェクトの改名 / 削除 (受信トレイは不可) ----
+  const renameProject = async (newName: string) => {
+    try {
+      const renamed = await api.renameProject(current, newName);
+      await refreshSummaries();
+      navigate({ kind: "project", name: renamed.name });
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const deleteProject = async () => {
+    const ok = await confirmAction(`プロジェクト「${current}」を削除します (archive フォルダに移動)。`, {
+      title: "プロジェクトの削除",
+      okLabel: "削除",
+    }).catch(() => false);
+    if (!ok) return;
+    try {
+      await api.deleteProject(current);
+      await refreshSummaries();
+      navigate({ kind: "inbox" });
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  // データフォルダが変わった: 開いていたプロジェクトは新しいフォルダに無いかもしれないので、受信トレイに戻して読み直す。
+  const dataDirChanged = () => {
+    navigate({ kind: "inbox" });
+    if (current === app.inbox) void p.reload().catch(() => undefined); // 名前が変わらないと useProject は読み直さない
+    void refreshSummaries();
+    loadDisplayName();
+  };
+
   const reveal = () => void api.revealDataDir().catch(showError);
 
   // 読み込みに失敗したプロジェクトは未保存の変更を持たないので、確認なしで再試行する。
@@ -157,7 +197,7 @@ export function Main({ app }: { app: AppStateDto }) {
       await p.reload();
     } catch (e) {
       if (!isAppError(e) || e.kind !== "unsaved") return;
-      const ok = await confirm("未保存の変更を破棄して読み直しますか？", "再読み込み").catch(() => false);
+      const ok = await confirmDiscard("未保存の変更を破棄して読み直しますか？", "再読み込み").catch(() => false);
       if (ok) await p.reload(true).catch(() => undefined);
     }
   };
@@ -181,6 +221,10 @@ export function Main({ app }: { app: AppStateDto }) {
         openQuickAdd();
       }}
       onCreateProject={(name) => void createProject(name)}
+      onOpenSettings={() => {
+        setDrawer(false);
+        setSettingsOpen(true);
+      }}
     />
   );
 
@@ -248,6 +292,10 @@ export function Main({ app }: { app: AppStateDto }) {
           if (openNo === t.no) setOpenNo(null);
           void p.deleteTask(t.no);
         }}
+        onAddSection={(name) => void p.addSection(name)}
+        onRenameSection={(from, to) => void p.renameSection(from, to)}
+        onRenameProject={current === app.inbox ? undefined : (name) => void renameProject(name)}
+        onDeleteProject={current === app.inbox ? undefined : () => void deleteProject()}
       />
     );
   }
@@ -296,6 +344,17 @@ export function Main({ app }: { app: AppStateDto }) {
         error={qa.error}
         onClose={closeQuickAdd}
       />
+      {settingsOpen && (
+        <SettingsDialog
+          open
+          live
+          syncPlaceholder
+          initialPane="account"
+          onClose={() => setSettingsOpen(false)}
+          onDataDirChanged={dataDirChanged}
+          onDisplayNameChanged={(name) => setDisplayName(name || undefined)}
+        />
+      )}
     </>
   );
 

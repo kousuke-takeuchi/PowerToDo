@@ -4,6 +4,7 @@ import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
 import { TaskRow } from "../components/TaskRow";
 import { Button } from "../components/Button";
+import { InlineEdit } from "../components/InlineEdit";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
 import type { InvalidRow, Section, Task } from "../types/model";
 import { EmptyState } from "./EmptyState";
@@ -39,6 +40,14 @@ export type ProjectViewProps = {
   onRevealFile?: () => void;
   /** state="error" のとき ErrorState に添えるエラーメッセージ。 */
   errorDetail?: string;
+  /** 渡すと最後のセクションの下に「セクションを追加」を出し、名前の入力 (Enter / Esc) で確定するとこれを呼ぶ。 */
+  onAddSection?: (name: string) => void;
+  /** 渡すとセクション名をダブルクリックでその場で編集でき、確定でこれ (旧名, 新名) を呼ぶ。 */
+  onRenameSection?: (oldName: string, newName: string) => void;
+  /** 渡すとヘッダー右の「その他」にメニュー (名前を変更) が出る。確定でこれを呼ぶ。受信トレイには渡さない。 */
+  onRenameProject?: (newName: string) => void;
+  /** 渡すとヘッダー右の「その他」メニューに「削除」が出る (確認は呼び出し側)。受信トレイには渡さない。 */
+  onDeleteProject?: () => void;
   /** 期限ラベルの基準日 YYYY-MM-DD。既定は Storybook の固定日 (TODAY)。 */
   today?: string;
 };
@@ -71,6 +80,10 @@ export function ProjectView({
   onRetryLoad,
   onRevealFile,
   errorDetail,
+  onAddSection,
+  onRenameSection,
+  onRenameProject,
+  onDeleteProject,
   today = TODAY,
 }: ProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
@@ -83,6 +96,8 @@ export function ProjectView({
   const [showCompleted, setShowCompleted] = useState(false);
   const [addTo, setAddTo] = useState<{ section: string | null } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [addingSection, setAddingSection] = useState(false);
+  const [renamingProject, setRenamingProject] = useState(false);
 
   const mine = tasks.filter((t) => t.project === project);
   const isDone = (t: Task) => (onToggleDone ? t.progress === 100 : (doneOverride.get(t.no) ?? t.progress === 100));
@@ -234,6 +249,15 @@ export function ProjectView({
                 count={rows.filter((t) => !isDone(t)).length}
                 collapsed={isCollapsed}
                 onToggle={() => setCollapsed((c) => toggleSet(c, s.name))}
+                onRename={
+                  onRenameSection
+                    ? (newName) => {
+                        // 折りたたみ状態は名前で持っているので新しい名前に引き継ぐ
+                        setCollapsed((c) => (c.has(s.name) ? new Set([...c].filter((n) => n !== s.name).concat(newName)) : c));
+                        onRenameSection(s.name, newName);
+                      }
+                    : undefined
+                }
               />
               {!isCollapsed && (
                 <>
@@ -244,6 +268,22 @@ export function ProjectView({
             </section>
           );
         })}
+        {onAddSection &&
+          (addingSection ? (
+            <div style={{ padding: "8px 0" }}>
+              <InlineEdit
+                ariaLabel="セクション名"
+                placeholder="セクション名"
+                onCommit={(name) => {
+                  setAddingSection(false);
+                  onAddSection(name);
+                }}
+                onCancel={() => setAddingSection(false)}
+              />
+            </div>
+          ) : (
+            <AddTaskRow label="セクションを追加" onClick={() => setAddingSection(true)} />
+          ))}
         {showCompleted && completed.map((t) => renderRow(t, 0))}
         <button
           type="button"
@@ -267,10 +307,26 @@ export function ProjectView({
     );
   };
 
+  const menu = onRenameProject || onDeleteProject ? { rename: onRenameProject ? () => setRenamingProject(true) : undefined, delete: onDeleteProject } : undefined;
   return (
     <>
-      <PageHeader>
-        <h1 style={titleStyle}>{project}</h1>
+      <PageHeader onMenu={menu}>
+        {renamingProject && onRenameProject ? (
+          <div style={{ flex: 1, minWidth: 0, maxWidth: 480, marginRight: "var(--space-4)" }}>
+            <InlineEdit
+              value={project}
+              ariaLabel="プロジェクト名"
+              style={{ fontSize: 24, lineHeight: "35px", fontWeight: 700, padding: "0 7px" }}
+              onCommit={(name) => {
+                setRenamingProject(false);
+                if (name !== project) onRenameProject(name);
+              }}
+              onCancel={() => setRenamingProject(false)}
+            />
+          </div>
+        ) : (
+          <h1 style={titleStyle}>{project}</h1>
+        )}
       </PageHeader>
       {body()}
     </>
