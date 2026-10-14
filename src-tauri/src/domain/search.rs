@@ -44,24 +44,37 @@ fn where_matched(t: &Task, words: &[String]) -> Option<Matched> {
     let title = normalize(&t.title);
     let note = t.note.as_deref().map(normalize).unwrap_or_default();
     let labels: Vec<String> = t.labels.iter().map(|l| normalize(l)).collect();
-    let in_title = words.iter().all(|w| title.contains(w.as_str()));
-    let in_note = !note.is_empty() && words.iter().all(|w| note.contains(w.as_str()));
-    let in_labels = words
+    let hit_title = |w: &String| title.contains(w.as_str());
+    let hit_note = |w: &String| note.contains(w.as_str());
+    let hit_label = |w: &String| labels.iter().any(|l| l.contains(w.as_str()));
+    // AND across fields: every word must hit the title, the note or some label.
+    if !words
         .iter()
-        .all(|w| labels.iter().any(|l| l.contains(w.as_str())));
-    if in_title {
+        .all(|w| hit_title(w) || hit_note(w) || hit_label(w))
+    {
+        return None;
+    }
+    // Report the field that holds the whole query if there is one, else the first field
+    // (title > note > label) that holds at least one word.
+    if words.iter().all(hit_title) {
         Some(Matched::Title)
-    } else if in_note {
+    } else if words.iter().all(hit_note) {
         Some(Matched::Note)
-    } else if in_labels {
+    } else if words.iter().all(hit_label) {
         Some(Matched::Label)
+    } else if words.iter().any(hit_title) {
+        Some(Matched::Title)
+    } else if words.iter().any(hit_note) {
+        Some(Matched::Note)
     } else {
-        None
+        Some(Matched::Label)
     }
 }
 
-/// Every word must appear in one field (title, note or a label). Ordered: title hits, then
-/// note, then label; inside a group by due date (none last), then No. At most `limit` hits.
+/// Every word must appear somewhere in the task (title, note or a label; different words may be
+/// in different fields). `matched` is the field holding all words, else the first of title,
+/// note, label holding at least one. Ordered: title hits, then note, then label; inside a group
+/// by due date (none last), then No. At most `limit` hits.
 pub fn search(tasks: &[Task], query: &str, include_done: bool, limit: usize) -> Vec<Hit> {
     let words = words(query);
     if words.is_empty() {
@@ -91,7 +104,14 @@ mod tests {
     use crate::domain::Priority;
     use chrono::{NaiveDate, NaiveDateTime};
 
-    fn task(no: u32, title: &str, note: Option<&str>, labels: &[&str], due: Option<&str>, progress: u8) -> Task {
+    fn task(
+        no: u32,
+        title: &str,
+        note: Option<&str>,
+        labels: &[&str],
+        due: Option<&str>,
+        progress: u8,
+    ) -> Task {
         Task {
             no,
             project: "p".into(),
@@ -134,12 +154,18 @@ mod tests {
             task(5, "パン", None, &[], None, 0),
         ];
         let hits = search(&tasks, "ギュウニュウ", false, 50);
-        assert_eq!(hits.iter().map(|h| h.task.no).collect::<Vec<_>>(), vec![2, 1, 3]);
-        assert!(matches!(hits[0].matched, Matched::Title));
-        assert!(matches!(hits[1].matched, Matched::Note));
-        assert!(matches!(hits[2].matched, Matched::Label));
+        assert_eq!(
+            hits.iter().map(|h| h.task.no).collect::<Vec<_>>(),
+            vec![2, 1, 3]
+        );
+        assert_eq!(hits[0].matched, Matched::Title);
+        assert_eq!(hits[1].matched, Matched::Note);
+        assert_eq!(hits[2].matched, Matched::Label);
         let with_done = search(&tasks, "ぎゅうにゅう", true, 50);
-        assert_eq!(with_done.iter().map(|h| h.task.no).collect::<Vec<_>>(), vec![2, 4, 1, 3]);
+        assert_eq!(
+            with_done.iter().map(|h| h.task.no).collect::<Vec<_>>(),
+            vec![2, 4, 1, 3]
+        );
     }
 
     #[test]
@@ -154,9 +180,26 @@ mod tests {
 
     #[test]
     fn search_ignores_blank_query_and_respects_limit() {
-        let tasks: Vec<Task> = (1..=5).map(|i| task(i, "同じ名前", None, &[], None, 0)).collect();
+        let tasks: Vec<Task> = (1..=5)
+            .map(|i| task(i, "同じ名前", None, &[], None, 0))
+            .collect();
         assert!(search(&tasks, "   ", false, 50).is_empty());
         assert!(search(&tasks, "", false, 50).is_empty());
         assert_eq!(search(&tasks, "同じ", false, 3).len(), 3);
+    }
+
+    #[test]
+    fn search_and_spans_fields() {
+        let tasks = vec![
+            task(1, "牛乳を買う", None, &["急ぎ"], None, 0),
+            task(2, "牛乳", Some("卵"), &[], None, 0),
+            task(3, "パン", Some("卵"), &[], None, 0),
+        ];
+        let hits = search(&tasks, "牛乳 急ぎ", false, 50);
+        assert_eq!(hits.iter().map(|h| h.task.no).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(hits[0].matched, Matched::Title);
+        let hits = search(&tasks, "牛乳 卵", false, 50);
+        assert_eq!(hits.iter().map(|h| h.task.no).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(hits[0].matched, Matched::Title);
     }
 }
