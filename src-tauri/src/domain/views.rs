@@ -112,7 +112,14 @@ mod tests {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
 
-    fn task(no: u32, project: &str, due: Option<&str>, priority: u8, progress: u8, parent: Option<u32>) -> Task {
+    fn task(
+        no: u32,
+        project: &str,
+        due: Option<&str>,
+        priority: u8,
+        progress: u8,
+        parent: Option<u32>,
+    ) -> Task {
         Task {
             no,
             project: project.into(),
@@ -140,18 +147,21 @@ mod tests {
     #[test]
     fn today_splits_overdue_and_today_and_sorts() {
         let tasks = vec![
-            task(1, "a", Some("2026-10-13"), 4, 0, None),   // today, p4
-            task(2, "a", Some("2026-10-13"), 1, 0, None),   // today, p1 -> first in today
-            task(3, "b", Some("2026-10-10"), 3, 0, None),   // overdue
-            task(4, "b", Some("2026-10-01"), 4, 0, None),   // overdue, oldest -> first
-            task(5, "b", Some("2026-10-10"), 1, 0, None),   // overdue same day, p1 before p3
+            task(1, "a", Some("2026-10-13"), 4, 0, None), // today, p4
+            task(2, "a", Some("2026-10-13"), 1, 0, None), // today, p1 -> first in today
+            task(3, "b", Some("2026-10-10"), 3, 0, None), // overdue
+            task(4, "b", Some("2026-10-01"), 4, 0, None), // overdue, oldest -> first
+            task(5, "b", Some("2026-10-10"), 1, 0, None), // overdue same day, p1 before p3
             task(6, "a", Some("2026-10-13"), 1, 100, None), // done: hidden
             task(7, "a", Some("2026-10-13"), 1, 0, Some(1)), // subtask: hidden
-            task(8, "a", Some("2026-10-14"), 1, 0, None),   // tomorrow: hidden
-            task(9, "a", None, 1, 0, None),                 // no due: hidden
+            task(8, "a", Some("2026-10-14"), 1, 0, None), // tomorrow: hidden
+            task(9, "a", None, 1, 0, None),               // no due: hidden
         ];
         let v = today_view(&tasks, d("2026-10-13"));
-        assert_eq!(v.overdue.iter().map(|t| t.no).collect::<Vec<_>>(), vec![4, 5, 3]);
+        assert_eq!(
+            v.overdue.iter().map(|t| t.no).collect::<Vec<_>>(),
+            vec![4, 5, 3]
+        );
         assert_eq!(v.today.iter().map(|t| t.no).collect::<Vec<_>>(), vec![2, 1]);
         assert_eq!(today_count(&tasks, d("2026-10-13")), 5);
     }
@@ -170,9 +180,15 @@ mod tests {
         assert_eq!(g[0].date, d("2026-10-13"));
         assert_eq!(g[0].tasks.iter().map(|t| t.no).collect::<Vec<_>>(), vec![1]);
         assert!(g[1].tasks.is_empty());
-        assert_eq!(g[2].tasks.iter().map(|t| t.no).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(
+            g[2].tasks.iter().map(|t| t.no).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
         assert_eq!(g[6].date, d("2026-10-19"));
-        assert!(g.iter().all(|day| day.tasks.iter().all(|t| t.no != 4 && t.no != 5)));
+        assert!(
+            g.iter()
+                .all(|day| day.tasks.iter().all(|t| t.no != 4 && t.no != 5))
+        );
     }
 
     #[test]
