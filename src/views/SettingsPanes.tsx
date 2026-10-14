@@ -1,11 +1,8 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
-import { api, errorMessage } from "../api/client";
-import { confirmAction } from "../api/dialogs";
+import { useEffect, useState } from "react";
 import { isImeKey } from "../app/keys";
 import { Button } from "../components/Button";
 import { TextField } from "../components/TextField";
-import type { SettingsDto } from "../types/model";
 import { hintStyle, labelStyle } from "./SyncFields";
 
 /** 設定ダイアログの右側に並べる部品 (ラベル + 内容)。 */
@@ -26,77 +23,32 @@ const ErrorText = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
-/** Storybook (live でない) で出す見た目用のパス。 */
+/** Storybook (ハンドラ無し) で出す見た目用の値。 */
 const SAMPLE_DATA_DIR = "~/Documents/PowerToDo/";
 const SAMPLE_NAME = "たろう";
 
-/** 画面が閉じた後に state を更新しないためのフラグ。 */
-function useAlive() {
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  return alive;
-}
+export type DataPaneProps = {
+  /** 表示するデータフォルダ。無ければ見た目用のサンプル。 */
+  dataDir?: string;
+  /** 「フォルダを開く」。 */
+  onReveal?: () => void;
+  /** 「変更」(フォルダ選択 -> 確認 -> 変更は呼び出し側)。 */
+  onChangeFolder?: () => void;
+  busy?: boolean;
+  error?: string | null;
+};
 
-/**
- * 「データ」ペイン: データフォルダの表示 / フォルダを開く / 変更。
- * `live` でないとき (Storybook) は見た目だけで何も呼ばない。変更は pick_folder -> 確認 -> set_data_dir の順で、
- * 既存のファイルは移動しない。成功したら `onDataDirChanged` を呼ぶ (プロジェクト一覧を読み直すのは呼び出し側)。
- */
-export function DataPane({ live, onDataDirChanged }: { live: boolean; onDataDirChanged?: () => void }) {
-  const alive = useAlive();
-  const [path, setPath] = useState(live ? "" : SAMPLE_DATA_DIR);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!live) return;
-    api
-      .settings()
-      .then((s) => alive.current && setPath(s.dataDir ?? ""))
-      .catch((e) => alive.current && setError(errorMessage(e)));
-  }, [live, alive]);
-
-  const reveal = () => {
-    if (live) void api.revealDataDir().catch((e) => alive.current && setError(errorMessage(e)));
-  };
-
-  const change = async () => {
-    if (!live || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const dir = await api.pickFolder();
-      if (!dir || dir === path) return; // キャンセル / 同じ場所
-      const ok = await confirmAction(`データフォルダを変更します。既存のファイルは移動しません。\n\n新しい場所: ${dir}`, {
-        title: "データフォルダの変更",
-        okLabel: "変更する",
-      });
-      if (!ok) return;
-      await api.setDataDir(dir);
-      const s = await api.settings().catch(() => null);
-      if (alive.current) setPath(s?.dataDir ?? dir);
-      onDataDirChanged?.();
-    } catch (e) {
-      if (alive.current) setError(errorMessage(e));
-    } finally {
-      if (alive.current) setBusy(false);
-    }
-  };
-
+/** 「データ」ペイン: データフォルダの表示 / フォルダを開く / 変更。ハンドラが無いとき (Storybook) は見た目だけ。 */
+export function DataPane({ dataDir = SAMPLE_DATA_DIR, onReveal, onChangeFolder, busy = false, error }: DataPaneProps) {
   return (
     <Section label="データフォルダ">
-      <TextField value={path} readOnly ariaLabel="データフォルダ" />
+      <TextField value={dataDir} readOnly ariaLabel="データフォルダ" />
       <Desc>プロジェクトごとの xlsx ファイルはこのフォルダに保存されます。変更しても既存のファイルは移動しません。</Desc>
       <Row>
-        <Button variant="secondary" onClick={reveal}>
+        <Button variant="secondary" onClick={onReveal}>
           フォルダを開く
         </Button>
-        <Button variant="secondary" onClick={() => void change()} disabled={busy}>
+        <Button variant="secondary" onClick={onChangeFolder} disabled={busy}>
           変更
         </Button>
       </Row>
@@ -105,46 +57,28 @@ export function DataPane({ live, onDataDirChanged }: { live: boolean; onDataDirC
   );
 }
 
-/** 「アカウント」ペイン: 表示名 (update_settings)。`live` でないときは見た目だけ。 */
-export function AccountPane({ live, onDisplayNameChanged }: { live: boolean; onDisplayNameChanged?: (name: string) => void }) {
-  const alive = useAlive();
-  const [settings, setSettings] = useState<SettingsDto | null>(null);
-  const [name, setName] = useState(live ? "" : SAMPLE_NAME);
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export type AccountPaneProps = {
+  /** 保存済みの表示名 (入力欄の初期値。変わったら入力欄もこれに戻す)。無ければ見た目用のサンプル。 */
+  displayName?: string;
+  /** 保存 (前後の空白は除いて渡す)。成功したら true。無いあいだ (Storybook / 読み込み前) は保存できない。 */
+  onSaveDisplayName?: (name: string) => Promise<boolean>;
+  busy?: boolean;
+  error?: string | null;
+};
 
-  useEffect(() => {
-    if (!live) return;
-    api
-      .settings()
-      .then((s) => {
-        if (!alive.current) return;
-        setSettings(s);
-        setName(s.displayName);
-      })
-      .catch((e) => alive.current && setError(errorMessage(e)));
-  }, [live, alive]);
+/** 「アカウント」ペイン: 表示名。入力中の文字列だけここで持ち、保存は呼び出し側。 */
+export function AccountPane({ displayName = SAMPLE_NAME, onSaveDisplayName, busy = false, error }: AccountPaneProps) {
+  const [name, setName] = useState(displayName);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => setName(displayName), [displayName]);
 
   const trimmed = name.trim();
-  const dirty = settings !== null && trimmed !== settings.displayName;
+  const dirty = !!onSaveDisplayName && trimmed !== displayName;
 
   const save = async () => {
-    if (!live || !settings || !dirty || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await api.updateSettings({ ...settings, displayName: trimmed });
-      if (!alive.current) return;
-      setSettings(next);
-      setName(next.displayName);
-      setSaved(true);
-      onDisplayNameChanged?.(next.displayName);
-    } catch (e) {
-      if (alive.current) setError(errorMessage(e));
-    } finally {
-      if (alive.current) setBusy(false);
-    }
+    if (!onSaveDisplayName || !dirty || busy) return;
+    if (await onSaveDisplayName(trimmed)) setSaved(true);
   };
 
   return (

@@ -5,6 +5,7 @@ import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import { AccountPane, DataPane, Desc, LaterPane, Row, Section } from "./SettingsPanes";
+import type { AccountPaneProps, DataPaneProps } from "./SettingsPanes";
 import { NasFields, syncTargetOptions } from "./SyncFields";
 
 export type SyncTarget = "google" | "nas" | "none";
@@ -17,14 +18,12 @@ export type SettingsDialogProps = {
   // ---- 実アプリ用 (全部 optional。無ければ Storybook と同じ見た目だけの挙動) ----
   /** 最初に開くペイン。既定は「同期」。 */
   initialPane?: SettingsPane;
-  /** true にすると「データ」「アカウント」ペインが設定 / フォルダの command を呼ぶ。無ければ見た目だけ。 */
-  live?: boolean;
   /** 「同期」ペインの先頭に「実装前で表示のみ」の注記を出す。 */
   syncPlaceholder?: boolean;
-  /** データフォルダを変更し終えたとき (プロジェクト一覧などを読み直す)。 */
-  onDataDirChanged?: () => void;
-  /** 表示名を保存したとき。 */
-  onDisplayNameChanged?: (name: string) => void;
+  /** 「データ」ペインに渡す値とハンドラ (src/app/useSettingsPanes.ts)。無ければ見た目だけ。 */
+  dataPane?: DataPaneProps;
+  /** 「アカウント」ペインに渡す値とハンドラ。無ければ見た目だけ。 */
+  accountPane?: AccountPaneProps;
 };
 
 type Icon = React.ComponentType<{ size?: number }>;
@@ -66,10 +65,9 @@ export function SettingsDialog({
   connected = false,
   onClose,
   initialPane = "sync",
-  live = false,
   syncPlaceholder,
-  onDataDirChanged,
-  onDisplayNameChanged,
+  dataPane,
+  accountPane,
 }: SettingsDialogProps) {
   const [pane, setPane] = useState<SettingsPane>(initialPane);
   const [target, setTarget] = useState<SyncTarget>(initialTarget);
@@ -267,8 +265,8 @@ export function SettingsDialog({
               {localCache}
             </>
           )}
-          {pane === "account" && <AccountPane live={live} onDisplayNameChanged={onDisplayNameChanged} />}
-          {pane === "data" && <DataPane live={live} onDataDirChanged={onDataDirChanged} />}
+          {pane === "account" && <AccountPane {...accountPane} />}
+          {pane === "data" && <DataPane {...dataPane} />}
           {(pane === "notifications" || pane === "appearance" || pane === "datetime" || pane === "keyboard") && <LaterPane />}
         </div>
       </div>

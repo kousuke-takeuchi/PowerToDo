@@ -4,12 +4,12 @@ import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
 import { TaskRow } from "../components/TaskRow";
 import { Button } from "../components/Button";
-import { InlineEdit } from "../components/InlineEdit";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
 import type { InvalidRow, Section, Task } from "../types/model";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { PageHeader, titleStyle } from "./HeaderActions";
+import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
 
 export type ProjectViewProps = {
@@ -97,6 +97,7 @@ export function ProjectView({
   const [addTo, setAddTo] = useState<{ section: string | null } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [addingSection, setAddingSection] = useState(false);
+  const [editingSection, setEditingSection] = useState<string | null>(null);
   const [renamingProject, setRenamingProject] = useState(false);
 
   const mine = tasks.filter((t) => t.project === project);
@@ -221,9 +222,36 @@ export function ProjectView({
     return <AddTaskRow onClick={() => setAddTo({ section })} />;
   };
 
+  /** 「セクションを追加」(onAddSection があるときだけ)。クリックで名前の入力 (Enter / Esc) に変わる。 */
+  const addSectionSlot: React.ReactNode =
+    onAddSection &&
+    (addingSection ? (
+      <div style={{ padding: "8px 0" }}>
+        <InlineEdit
+          ariaLabel="セクション名"
+          placeholder="セクション名"
+          onCommit={(name) => {
+            setAddingSection(false);
+            onAddSection(name);
+          }}
+          onCancel={() => setAddingSection(false)}
+        />
+      </div>
+    ) : (
+      <AddTaskRow label="セクションを追加" onClick={() => setAddingSection(true)} />
+    ));
+
   const body = (): React.ReactNode => {
+    if (state === "empty") return <EmptyState onAdd={onAddTask ? () => setAddTo({ section: null }) : undefined} />;
     const liveEmpty = state !== "error" && !!onAddTask && mine.length === 0 && projectSections.length === 0 && !invalidRows?.length && !addTo;
-    if (state === "empty" || liveEmpty) return <EmptyState onAdd={onAddTask ? () => setAddTo({ section: null }) : undefined} />;
+    if (liveEmpty) {
+      return (
+        <>
+          <EmptyState onAdd={() => setAddTo({ section: null })} />
+          {addSectionSlot}
+        </>
+      );
+    }
     if (state === "error") {
       return <ErrorState fileName={`${project}.xlsx`} detail={errorDetail} onRetry={onRetryLoad} onReveal={onRevealFile ?? (onRetryLoad ? undefined : noop)} />;
     }
@@ -249,14 +277,23 @@ export function ProjectView({
                 count={rows.filter((t) => !isDone(t)).length}
                 collapsed={isCollapsed}
                 onToggle={() => setCollapsed((c) => toggleSet(c, s.name))}
-                onRename={
-                  onRenameSection
-                    ? (newName) => {
+                onStartEdit={onRenameSection ? () => setEditingSection(s.name) : undefined}
+                editor={
+                  onRenameSection && editingSection === s.name ? (
+                    <InlineEdit
+                      value={s.name}
+                      ariaLabel="セクション名"
+                      style={{ fontWeight: 700 }}
+                      onCommit={(newName) => {
+                        setEditingSection(null);
+                        if (newName === s.name) return;
                         // 折りたたみ状態は名前で持っているので新しい名前に引き継ぐ
                         setCollapsed((c) => (c.has(s.name) ? new Set([...c].filter((n) => n !== s.name).concat(newName)) : c));
                         onRenameSection(s.name, newName);
-                      }
-                    : undefined
+                      }}
+                      onCancel={() => setEditingSection(null)}
+                    />
+                  ) : undefined
                 }
               />
               {!isCollapsed && (
@@ -268,22 +305,7 @@ export function ProjectView({
             </section>
           );
         })}
-        {onAddSection &&
-          (addingSection ? (
-            <div style={{ padding: "8px 0" }}>
-              <InlineEdit
-                ariaLabel="セクション名"
-                placeholder="セクション名"
-                onCommit={(name) => {
-                  setAddingSection(false);
-                  onAddSection(name);
-                }}
-                onCancel={() => setAddingSection(false)}
-              />
-            </div>
-          ) : (
-            <AddTaskRow label="セクションを追加" onClick={() => setAddingSection(true)} />
-          ))}
+        {addSectionSlot}
         {showCompleted && completed.map((t) => renderRow(t, 0))}
         <button
           type="button"

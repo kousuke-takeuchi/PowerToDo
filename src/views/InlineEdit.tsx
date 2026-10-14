@@ -17,7 +17,8 @@ export type InlineEditProps = {
 /**
  * A one-line text field for renaming / naming in place. Focused and selected on mount. Enter commits and Esc cancels,
  * except while an IME composition is being confirmed (keys.ts). Esc stops propagating so only this field closes
- * (the window-level Esc layers do not see it). Commits at most once.
+ * (the window-level Esc layers do not see it). Commits at most once. Leaving the field commits too, except when the
+ * whole window lost focus (switching apps): the field keeps focus and gets it back when the window does.
  */
 export function InlineEdit({ value = "", placeholder, ariaLabel, onCommit, onCancel, style }: InlineEditProps) {
   const [text, setText] = useState(value);
@@ -54,7 +55,9 @@ export function InlineEdit({ value = "", placeholder, ariaLabel, onCommit, onCan
           finish(false);
         }
       }}
-      onBlur={() => finish(true)}
+      onBlur={() => {
+        if (document.hasFocus()) finish(true);
+      }}
       className="outline-none border-[color:var(--color-border)] focus-visible:border-[color:var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
       style={{
         boxSizing: "border-box",

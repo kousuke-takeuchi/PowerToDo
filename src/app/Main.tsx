@@ -19,6 +19,7 @@ import { spansToTokens } from "./quickAddTokens";
 import { NoticeBanner, SaveBanner } from "./SaveBanner";
 import { useProject } from "./useProject";
 import { useSaveErrors } from "./useSaveStatus";
+import { useSettingsPanes } from "./useSettingsPanes";
 
 type Nav = SidebarProps["active"];
 type Flash = { text: string; tone: "error" | "info" };
@@ -39,7 +40,7 @@ const PHASE2_TITLE: Record<string, string> = { today: "今日", upcoming: "近�
 export function Main({ app }: { app: AppStateDto }) {
   const today = useToday();
   const width = useShellWidth();
-  const saveErrors = useSaveErrors();
+  const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
 
   const [nav, setNav] = useState<Nav>({ kind: "inbox" });
   const [summaries, setSummaries] = useState<ProjectSummary[]>(app.projects);
@@ -178,7 +179,11 @@ export function Main({ app }: { app: AppStateDto }) {
   };
 
   // データフォルダが変わった: 開いていたプロジェクトは新しいフォルダに無いかもしれないので、受信トレイに戻して読み直す。
+  // 古いフォルダの保存失敗 / 通知の帯はもう当てはまらないので消す。
   const dataDirChanged = () => {
+    clearSaveErrors();
+    setFlash(null);
+    p.clearNotice();
     navigate({ kind: "inbox" });
     if (current === app.inbox) void p.reload().catch(() => undefined); // 名前が変わらないと useProject は読み直さない
     void refreshSummaries();
@@ -186,6 +191,11 @@ export function Main({ app }: { app: AppStateDto }) {
   };
 
   const reveal = () => void api.revealDataDir().catch(showError);
+
+  const settingsPanes = useSettingsPanes(settingsOpen, {
+    onDataDirChanged: dataDirChanged,
+    onDisplayNameChanged: (name) => setDisplayName(name || undefined),
+  });
 
   // 読み込みに失敗したプロジェクトは未保存の変更を持たないので、確認なしで再試行する。
   const retryLoad = () => void p.reload().catch(() => undefined);
@@ -347,12 +357,11 @@ export function Main({ app }: { app: AppStateDto }) {
       {settingsOpen && (
         <SettingsDialog
           open
-          live
           syncPlaceholder
           initialPane="account"
           onClose={() => setSettingsOpen(false)}
-          onDataDirChanged={dataDirChanged}
-          onDisplayNameChanged={(name) => setDisplayName(name || undefined)}
+          dataPane={settingsPanes.data}
+          accountPane={settingsPanes.account}
         />
       )}
     </>

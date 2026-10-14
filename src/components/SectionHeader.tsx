@@ -1,7 +1,5 @@
 import type React from "react";
-import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { InlineEdit } from "./InlineEdit";
 
 export type SectionHeaderProps = {
   title: string;
@@ -10,78 +8,91 @@ export type SectionHeaderProps = {
   onToggle?: () => void;
   showChevron?: boolean;
   trailing?: React.ReactNode;
-  /** 渡すとタイトルのダブルクリックでその場で名前を編集でき、確定でこれを呼ぶ (変更が無ければ呼ばない)。 */
-  onRename?: (newName: string) => void;
+  /**
+   * 渡すとタイトルのダブルクリックでこれを呼ぶ (名前の編集を始める)。このときタイトルは折りたたみボタンの外に出し、
+   * 折りたたみはシェブロンのボタンで行う (ダブルクリックで折りたたみが切り替わらないように)。
+   */
+  onStartEdit?: () => void;
+  /** 渡すとタイトルの代わりにこれ (名前の入力欄) を出す。編集中かどうかは呼び出し側が持つ。 */
+  editor?: React.ReactNode;
 };
 
-export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onRename }: SectionHeaderProps) {
-  const [editing, setEditing] = useState(false);
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-2)",
+  padding: "12px 0 8px 0",
+  boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側 (高さに加算しない)
+  fontFamily: "var(--font-body)",
+};
+const buttonReset: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-2)",
+  padding: 0,
+  border: 0,
+  background: "none",
+  fontFamily: "var(--font-body)",
+  textAlign: "left",
+};
+const chevronStyle: React.CSSProperties = { display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" };
+const titleTextStyle: React.CSSProperties = { fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" };
+const countStyle: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
+
+export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor }: SectionHeaderProps) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-2)",
-        padding: "12px 0 8px 0",
-        boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側 (高さに加算しない)
-        fontFamily: "var(--font-body)",
-      }}
-    >
-      {editing && onRename ? (
-        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          {showChevron && (
-            <span style={{ display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" }}>
-              <Chevron size={16} />
-            </span>
-          )}
-          <InlineEdit
-            value={title}
-            ariaLabel="セクション名"
-            style={{ fontWeight: 700 }}
-            onCommit={(v) => {
-              setEditing(false);
-              if (v !== title) onRename(v);
-            }}
-            onCancel={() => setEditing(false)}
-          />
-        </div>
-      ) : (
+  const chevron = showChevron && (
+    <span style={chevronStyle}>
+      <Chevron size={16} />
+    </span>
+  );
+  const countEl = count !== undefined && <span style={countStyle}>{count}</span>;
+
+  let main: React.ReactNode;
+  if (editor) {
+    main = (
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+        {chevron}
+        {editor}
+      </div>
+    );
+  } else if (onStartEdit) {
+    main = (
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+        {showChevron && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={!collapsed}
+            aria-label={title}
+            style={{ ...buttonReset, cursor: onToggle ? "pointer" : "default" }}
+          >
+            {chevron}
+          </button>
+        )}
+        <span onDoubleClick={onStartEdit} title="ダブルクリックで名前を変更" style={titleTextStyle}>
+          {title}
+        </span>
+        {countEl}
+      </div>
+    );
+  } else {
+    main = (
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={showChevron ? !collapsed : undefined}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--space-2)",
-          padding: 0,
-          border: 0,
-          background: "none",
-          fontFamily: "var(--font-body)",
-          textAlign: "left",
-          cursor: onToggle ? "pointer" : "default",
-        }}
+        style={{ flex: 1, minWidth: 0, ...buttonReset, cursor: onToggle ? "pointer" : "default" }}
       >
-        {showChevron && (
-          <span style={{ display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" }}>
-            <Chevron size={16} />
-          </span>
-        )}
-        <span
-          onDoubleClick={onRename ? () => setEditing(true) : undefined}
-          title={onRename ? "ダブルクリックで名前を変更" : undefined}
-          style={{ fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}
-        >
-          {title}
-        </span>
-        {count !== undefined && (
-          <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{count}</span>
-        )}
+        {chevron}
+        <span style={titleTextStyle}>{title}</span>
+        {countEl}
       </button>
-      )}
+    );
+  }
+  return (
+    <div style={rowStyle}>
+      {main}
       {trailing}
     </div>
   );
