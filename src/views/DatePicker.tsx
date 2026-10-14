@@ -12,6 +12,8 @@ export type DatePickerProps = {
   onOpenRecurrence?: () => void;
   /** 繰り返し行に出す現在値 (既定 "毎週土曜")。 */
   recurrenceLabel?: string;
+  /** 「今日」の基準日 YYYY-MM-DD。既定は Storybook の固定日 (TODAY)。 */
+  today?: string;
 };
 
 const WEEKDAY_HEAD = ["月", "火", "水", "木", "金", "土", "日"] as const;
@@ -40,10 +42,10 @@ const shiftMonth = (ymd: string, delta: number) => {
 };
 
 /** D-07: 日付ポップオーバーの中身。選択状態は内部で持ち、onChange で通知する。 */
-export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜" }: DatePickerProps) {
+export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY }: DatePickerProps) {
   const [date, setDate] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
-  const [month, setMonth] = useState(monthStart(value ?? TODAY));
+  const [month, setMonth] = useState(monthStart(value ?? today));
 
   const select = (d: string | undefined) => {
     setDate(d);
@@ -53,12 +55,12 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
     onChange?.(time ? { date: d, time } : { date: d });
   };
 
-  const derived = date ? `${dateLabel(date)?.label ?? date}${time ? ` ${time}` : ""}` : "";
-  const nextSaturday = addDays(TODAY, (6 - weekdayIndex(TODAY) + 7) % 7 || 7);
-  const nextMonday = addDays(TODAY, ((1 - weekdayIndex(TODAY) + 7) % 7) || 7);
+  const derived = date ? `${dateLabel(date, today)?.label ?? date}${time ? ` ${time}` : ""}` : "";
+  const nextSaturday = addDays(today, (6 - weekdayIndex(today) + 7) % 7 || 7);
+  const nextMonday = addDays(today, ((1 - weekdayIndex(today) + 7) % 7) || 7);
   const picks: { key: string; icon: React.ReactNode; color: string; label: string; value: string; date?: string }[] = [
-    { key: "today", icon: <Calendar size={16} />, color: "var(--color-success)", label: "今日", value: weekdayShort(TODAY), date: TODAY },
-    { key: "tomorrow", icon: <Sun size={16} />, color: "var(--color-priority-2)", label: "明日", value: weekdayShort(addDays(TODAY, 1)), date: addDays(TODAY, 1) },
+    { key: "today", icon: <Calendar size={16} />, color: "var(--color-success)", label: "今日", value: weekdayShort(today), date: today },
+    { key: "tomorrow", icon: <Sun size={16} />, color: "var(--color-priority-2)", label: "明日", value: weekdayShort(addDays(today, 1)), date: addDays(today, 1) },
     { key: "weekend", icon: <Sofa size={16} />, color: "var(--color-priority-3)", label: "今週末", value: weekdayShort(nextSaturday), date: nextSaturday },
     {
       key: "nextweek",
@@ -92,7 +94,7 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
             <button type="button" aria-label="前の月" style={navBtn} onClick={() => setMonth(shiftMonth(month, -1))}>
               <ChevronLeft size={14} />
             </button>
-            <button type="button" aria-label="今月" style={navBtn} onClick={() => setMonth(monthStart(TODAY))}>
+            <button type="button" aria-label="今月" style={navBtn} onClick={() => setMonth(monthStart(today))}>
               <Circle size={14} />
             </button>
             <button type="button" aria-label="次の月" style={navBtn} onClick={() => setMonth(shiftMonth(month, 1))}>
@@ -112,7 +114,7 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
             {week.map((d) => {
               const inMonth = d.slice(0, 7) === month.slice(0, 7);
               const selected = d === date;
-              const today = d === TODAY;
+              const isToday = d === today;
               return (
                 <button
                   key={d}
@@ -131,8 +133,8 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
                     fontFamily: "var(--font-body)",
                     fontSize: 13,
                     lineHeight: "19px",
-                    fontWeight: today && !selected ? 700 : 400,
-                    color: selected ? "#FFFFFF" : today ? "var(--color-accent)" : inMonth ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                    fontWeight: isToday && !selected ? 700 : 400,
+                    color: selected ? "#FFFFFF" : isToday ? "var(--color-accent)" : inMonth ? "var(--color-text-primary)" : "var(--color-text-muted)",
                     cursor: "pointer",
                   }}
                 >

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    powertodo_scaffold_lib::run()
+    powertodo_lib::run()
 }

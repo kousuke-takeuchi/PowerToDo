@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "powertodo-scaffold",
-        "width": 800,
-        "height": 600
+        "title": "PowerToDo",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {

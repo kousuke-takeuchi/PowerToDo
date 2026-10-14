@@ -85,6 +85,8 @@ JSON の型は `src/types/model.ts` の `Task` / `Project` / `Section` / `Label`
 | `create_project` | `{ name, color }` | `ProjectSummary` | ファイル作成 |
 | `rename_project` | `{ name, newName }` | `ProjectSummary` | ファイル名も変更 |
 | `delete_project` | `{ name }` | なし | ファイルを `archive/` に移動 (物理削除しない)。受信トレイは不可 |
+| `reload_project` | `{ name, discard }` | `ProjectView` | ファイルを読み直す (Excel で直した行を取り込む)。メモリに未保存の変更があり `discard` が false のときは `unsaved` エラーで拒否し、true なら変更を捨てて読み直す |
+| `retry_save` | `{ project }` | なし | 保存失敗後の再試行 (§8) |
 | `add_section` / `rename_section` / `reorder_sections` | 各 | `ProjectView` | 設定シートのカテゴリ一覧を更新 |
 | `add_task` | `{ project, input: TaskInput }` | `ProjectView` | `TaskInput` = title, section?, priority?, due?, dueTime?, note?, labels?, parentNo? |
 | `update_task` | `{ project, no, patch: TaskPatch }` | `ProjectView` | 部分更新 |
@@ -98,7 +100,7 @@ JSON の型は `src/types/model.ts` の `Task` / `Project` / `Section` / `Label`
 
 イベント: `project-changed { name }` (別経路で変わったとき。Phase 1 では move_task の from/to 以外ほぼ使わない)、`save-status { project, state: "saving" | "saved" | "error", message? }`。
 
-エラー: command は `Result<T, AppError>`。`AppError` は `{ kind: "not_found" | "invalid" | "io" | "locked" | "corrupt", message }` を JSON で返す。UI は kind でバナー文言を変える。
+エラー: command は `Result<T, AppError>`。`AppError` は `{ kind: "not_found" | "invalid" | "io" | "locked" | "corrupt" | "unsaved", message }` を JSON で返す。UI は kind でバナー文言を変える。`unsaved` は未保存の変更を捨てる操作 (`reload_project` を `discard: false` で呼んだ場合) を拒否したときの種別で、UI は OS ネイティブの確認ダイアログ (dialog プラグインの `ask`) を出し、了承されたら `discard: true` で再実行する (`window.confirm` は dialog プラグイン下で非同期になり常に真を返すため使わない)。
 
 ## 5. クイック追加の構文
 
@@ -123,7 +125,7 @@ JSON の型は `src/types/model.ts` の `Task` / `Project` / `Section` / `Label`
 - 書き: `rust_xlsxwriter` でブック全体を生成。見出し行 (太字、背景色)、日付列は `yyyy-mm-dd` / `yyyy-mm-dd hh:mm` 書式、列幅、ウィンドウ枠固定 (見出し行)、オートフィルター、条件付き書式 (進捗 100 → 灰色 + 取り消し線、終了 < 今日 かつ 進捗 < 100 → 赤文字)、「設定」シート (見出し行 / 開始行 / 開始列 / 終了列、カテゴリ一覧、担当一覧、優先度)、入力規則 (カテゴリ・担当・優先度のプルダウン)
 - 書き込みは一時ファイルに書いてから `rename` (途中で落ちても元ファイルを壊さない)
 - 共通ファイル `_PowerToDo.xlsx` も同様 (プロジェクト / ラベル / フィルター (空) / 祝日 (空) / 設定)
-- 往復テスト: domain → xlsx → domain で同値。Qiita 形式の手作りファイル (`src-tauri/tests/fixtures/qiita.xlsx`、Excel で作って保存したもの) を読めること
+- 往復テスト: domain → xlsx → domain で同値。Qiita 形式の配置を `rust_xlsxwriter` で生成して読めること (Excel で保存した実ファイルの fixture は手動確認で追加。§10)
 
 ## 7. 初回起動と設定
 
@@ -136,7 +138,7 @@ JSON の型は `src/types/model.ts` の `Task` / `Project` / `Section` / `Label`
 - 読み込み失敗: `ProjectSummary.loadError` にメッセージ。UI は D-11b。再試行ボタンで `get_project` を再実行
 - 型不整合: `ProjectView.invalidRows`。UI は D-11c (バナー + 行の強調)。その行は編集不可
 - 保存失敗: `save-status: error`。バナー「保存できません (理由)」。再試行は次の変更時または「再試行」ボタン (`retry_save { project }` command を追加)
-- 受信トレイの削除、空のタスク名、存在しない No. などは `invalid` で返し、UI はトースト表示 (簡易)
+- 受信トレイの削除、空のタスク名などは `invalid` で返し、UI はトースト表示 (簡易)。存在しない No. は `not_found` で返す (実装時に変更: 「存在しない」と「入力が不正」を UI が区別できるようにするため)
 
 ## 9. テスト
 
@@ -154,3 +156,15 @@ JSON の型は `src/types/model.ts` の `Task` / `Project` / `Section` / `Label`
 | 2026-10-14 | 削除は `archive/` への移動 | ユーザーの誤操作で xlsx を失わない |
 | 2026-10-14 | 初回起動は Phase 1 ではステップ 1 のみ | 同期は Phase 4、受信トレイ名は固定で十分 |
 | 2026-10-14 | command の戻り値は常に最新の `ProjectView` 全体 | UI 側で差分適用のロジックを持たない (全体設計 §4) |
+| 2026-10-14 | Qiita 形式の本物の fixture (Excel で保存したもの) は手動確認で追加する | 自動テストでは `rust_xlsxwriter` で Qiita の配置を生成して読む。Excel で保存した実ファイルは手動確認で得て、あとから fixture に足す |
+| 2026-10-14 | `resolve()` は存在しない月日 (2/30 など) に対して `None` を返し、その語はタスク名に残す | 非うるう年の 2/29 を今日の日付などに丸めると、意図しない期限が付くため。解決できない語は本文として扱う (§5 の「対応が無ければ名前に残す」と同じ方針) |
+| 2026-10-14 | 期限時刻 00:00 は読み戻すと `None` になる | calamine はセルの表示書式を取得できず、時刻なしの日付と 00:00 の時刻付きを区別できない。00:00 は「時刻なし」として扱う |
+| 2026-10-14 | 型不整合の行は、正常な行のあとに並べて書き戻す (行番号が変わる) | 書き戻しは正常な行を詰めて書いたあと、不正な行を元の値のまま出力する。行番号が変わるので、アプリは保存完了のたびに `ProjectView` を取得し直す |
+| 2026-10-14 | 存在しない No. の指定は `invalid` ではなく `not_found` | UI が「対象が消えた」(別経路での削除など) と「入力が不正」を区別できる。§8 の文言を更新した |
+| 2026-10-14 | No. の再利用を、アプリの再起動をまたぐ場合は許容する | 最大 No. の記録 (ハイウォーターマーク) はセッション単位で、起動時はファイル内の最大値から採番し直す。末尾のタスクを消して再起動すると、その No. が再び使われうる。Phase 1 では外部参照が無いため問題にしない |
+| 2026-10-14 | `reload_project { name, discard }` と `unsaved` エラー種別を追加し、確認はネイティブダイアログで行う | 再読み込みで未保存の編集が静かに消えるのを防ぐ。確認は dialog プラグインの `ask` を使う (`window.confirm` は dialog プラグイン下で非同期になり常に真になるため) |
+| 2026-10-14 | 共通ファイルの書き戻しでは、解釈できなかった祝日の行・未知の設定キー・未知の列は保持するが、未知のシートは保持しない | Excel で手書きされた内容を可能な範囲で壊さないため。未知のシートまで往復で保持するのは Phase 1 では過剰と判断 |
+| 2026-10-14 | `ProjectStore::open(…, create)` は初回起動のときだけデータフォルダを作成する | 設定されたフォルダが消えている (Drive の未マウントなど) ときに空のフォルダを作り直して、データが消えたように見えるのを防ぐ。それ以外の起動では `not_found` を返し、オンボーディングに戻す |
+| 2026-10-14 | 終了時は、変更のあるファイルをすべて保存し、失敗はログに残す | デバウンス待ちの変更を落とさないため。1 ファイルの失敗で他のファイルの保存を止めない |
+| 2026-10-14 | IME 変換中の Enter / Esc を無視するガードに `keyCode === 229` を加える | WKWebView (macOS) では変換確定の Enter で `isComposing` が false になるため |
+| 2026-10-14 | データフォルダを変更したとき、前のフォルダに紐づく保存エラーのバナーなどを消す | 別フォルダの古い状態が新しいフォルダの画面に残るのを防ぐ |

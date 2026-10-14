@@ -1,6 +1,8 @@
 import { Bell, Calendar, ChevronDown, Ellipsis, Flag, Tag } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef } from "react";
+import { isImeKey } from "../app/keys";
+import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 
 export type QuickAddToken = { text: string; kind?: "date" | "priority" | "project" | "label" };
@@ -13,6 +15,16 @@ export type QuickAddDialogProps = {
   /** プロジェクトのドット色。未指定は muted。 */
   projectColor?: string;
   onClose?: () => void;
+  // ---- 実アプリ用 (onSubmit を渡すと有効。無ければ絵コンテと同じ静的な見た目) ----
+  /** 入力中の文字列。タスク名の行が本物の <input> になる。tokens は親が parse_quick_add の spans から渡す。 */
+  text?: string;
+  onChangeText?: (text: string) => void;
+  /** Enter または「タスクを追加」ボタンで呼ぶ。空 / busy の間は呼ばない。 */
+  onSubmit?: (text: string) => void;
+  /** 追加中。ボタンを無効にする。 */
+  busy?: boolean;
+  /** 追加に失敗したときのメッセージ (ダイアログは開いたまま)。 */
+  error?: string;
 };
 
 const tokenStyle = {
@@ -58,7 +70,23 @@ function ToolbarChip({ icon: Icon, label, color = "var(--color-text-secondary)" 
  * 開いたら「説明」入力にフォーカスし、閉じたら開く前にフォーカスしていた要素へ戻す。
  * scrim は pointerEvents: "auto" (AppShell の overlay ラッパーは "none")。
  */
-export function QuickAddDialog({ open, tokens, project, section, projectColor = "var(--color-text-muted)", onClose }: QuickAddDialogProps) {
+export function QuickAddDialog({
+  open,
+  tokens,
+  project,
+  section,
+  projectColor = "var(--color-text-muted)",
+  onClose,
+  text = "",
+  onChangeText,
+  onSubmit,
+  busy,
+  error,
+}: QuickAddDialogProps) {
+  const live = onSubmit !== undefined;
+  const submit = () => {
+    if (live && !busy && text.trim()) onSubmit(text);
+  };
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -75,14 +103,7 @@ export function QuickAddDialog({ open, tokens, project, section, projectColor = 
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscLayer(open, () => onClose?.());
 
   if (!open) return null;
 
@@ -128,38 +149,83 @@ export function QuickAddDialog({ open, tokens, project, section, projectColor = 
           color: "var(--color-text-primary)",
         }}
       >
-        <div role="group" aria-label="タスク名" style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: 16, lineHeight: "23px" }}>
-          {tokens.map((t, i) =>
-            t.kind ? (
-              <span key={i} style={{ padding: "1px 4px", borderRadius: 4, whiteSpace: "pre", ...tokenStyle[t.kind] }}>
-                {t.text}
-              </span>
-            ) : (
-              <span key={i} style={{ whiteSpace: "pre", color: "var(--color-text-primary)" }}>
-                {t.text}
-              </span>
-            ),
-          )}
-          <span aria-hidden style={{ width: 2, height: 20, background: "var(--color-text-primary)", flex: "0 0 auto" }} />
-        </div>
-        <input
-          ref={inputRef}
-          aria-label="説明"
-          placeholder="説明"
-          className="placeholder:text-[var(--color-text-muted)]"
-          style={{
-            boxSizing: "border-box",
-            width: "100%",
-            padding: 0,
-            border: 0,
-            outline: "none",
-            background: "transparent",
-            fontFamily: "var(--font-body)",
-            fontSize: 14,
-            lineHeight: "20px",
-            color: "var(--color-text-primary)",
-          }}
-        />
+        {live ? (
+          <>
+            <input
+              ref={inputRef}
+              aria-label="タスク名"
+              value={text}
+              placeholder="タスク名 (例: 牛乳を買う 明日 p1 #買い物 @急ぎ)"
+              onChange={(e) => onChangeText?.(e.target.value)}
+              onKeyDown={(e) => {
+                // isImeKey: the Enter that commits a Japanese conversion must not submit (see keys.ts)
+                if (e.key === "Enter" && !isImeKey(e)) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              className="placeholder:text-[var(--color-text-muted)]"
+              style={{
+                boxSizing: "border-box",
+                width: "100%",
+                padding: 0,
+                border: 0,
+                outline: "none",
+                background: "transparent",
+                fontFamily: "var(--font-body)",
+                fontSize: 16,
+                lineHeight: "23px",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            {tokens.some((t) => t.kind) && (
+              <div role="group" aria-label="認識した項目" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px" }}>
+                {tokens
+                  .filter((t) => t.kind)
+                  .map((t, i) => (
+                    <span key={i} style={{ padding: "1px 4px", borderRadius: 4, whiteSpace: "pre", ...tokenStyle[t.kind!] }}>
+                      {t.text}
+                    </span>
+                  ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div role="group" aria-label="タスク名" style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: 16, lineHeight: "23px" }}>
+              {tokens.map((t, i) =>
+                t.kind ? (
+                  <span key={i} style={{ padding: "1px 4px", borderRadius: 4, whiteSpace: "pre", ...tokenStyle[t.kind] }}>
+                    {t.text}
+                  </span>
+                ) : (
+                  <span key={i} style={{ whiteSpace: "pre", color: "var(--color-text-primary)" }}>
+                    {t.text}
+                  </span>
+                ),
+              )}
+              <span aria-hidden style={{ width: 2, height: 20, background: "var(--color-text-primary)", flex: "0 0 auto" }} />
+            </div>
+            <input
+              ref={inputRef}
+              aria-label="説明"
+              placeholder="説明"
+              className="placeholder:text-[var(--color-text-muted)]"
+              style={{
+                boxSizing: "border-box",
+                width: "100%",
+                padding: 0,
+                border: 0,
+                outline: "none",
+                background: "transparent",
+                fontFamily: "var(--font-body)",
+                fontSize: 14,
+                lineHeight: "20px",
+                color: "var(--color-text-primary)",
+              }}
+            />
+          </>
+        )}
         <div style={{ display: "flex", gap: "var(--space-2)" }}>
           <ToolbarChip icon={Calendar} label={dateText ?? "期限"} color={dateText ? "var(--color-success)" : undefined} />
           <ToolbarChip
@@ -171,6 +237,11 @@ export function QuickAddDialog({ open, tokens, project, section, projectColor = 
           <ToolbarChip icon={Tag} label={labelText ?? "ラベル"} />
           <ToolbarChip icon={Ellipsis} />
         </div>
+        {error && (
+          <div role="alert" style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-danger)" }}>
+            {error}
+          </div>
+        )}
         <div style={{ height: 1, background: "var(--color-border)" }} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <button
@@ -199,7 +270,9 @@ export function QuickAddDialog({ open, tokens, project, section, projectColor = 
             <Button variant="secondary" onClick={onClose}>
               キャンセル
             </Button>
-            <Button>タスクを追加</Button>
+            <Button onClick={live ? submit : undefined} disabled={live && (busy || !text.trim())}>
+              タスクを追加
+            </Button>
           </div>
         </div>
       </div>

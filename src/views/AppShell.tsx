@@ -1,6 +1,7 @@
 import type React from "react";
 import type { SyncState } from "../components/SyncStatus";
 import { SidebarRail } from "./SidebarRail";
+import type { SidebarRailProps } from "./SidebarRail";
 
 export type AppShellProps = {
   width?: 1440 | 960 | 390;
@@ -12,6 +13,10 @@ export type AppShellProps = {
   /** 中央カラムを 800 に絞らず Main いっぱいに広げる (D-10 ボード: padding 40/32)。 */
   fullWidth?: boolean;
   syncState?: SyncState;
+  /** 実アプリ用: ウィンドウいっぱいに広げる (width は 1440 / 960 のレイアウトの選択だけに使い、中央カラムはスクロールする)。 */
+  fill?: boolean;
+  /** 960 のとき SidebarRail に渡すハンドラ (Storybook は渡さない)。 */
+  rail?: Pick<SidebarRailProps, "onExpand" | "onAddTask" | "onNavigate">;
 };
 
 const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
@@ -22,7 +27,7 @@ const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
  * 960: SidebarRail 56 + Main (Column は全幅、padding 24/32)。390 は Main のみ (モバイルは MobileShell を使う)。
  * overflow: hidden はルートだけ。Main / Column はクリップしない (左余白のシェブロンが見えるように)。
  */
-export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, syncState = "synced" }: AppShellProps) {
+export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, syncState = "synced", fill, rail: railProps }: AppShellProps) {
   const wide = width === 1440;
   const rail = width === 960;
   return (
@@ -30,8 +35,8 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
       style={{
         position: "relative",
         display: "flex",
-        width,
-        height: HEIGHT[width],
+        width: fill ? "100%" : width,
+        height: fill ? "100vh" : HEIGHT[width],
         overflow: "hidden",
         background: "var(--color-bg)",
         color: "var(--color-text-primary)",
@@ -41,7 +46,7 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
       {wide && (
         <aside style={{ flex: "0 0 280px", width: 280, height: "100%", background: "var(--color-bg-sidebar)" }}>{sidebar}</aside>
       )}
-      {rail && <SidebarRail syncState={syncState} />}
+      {rail && <SidebarRail syncState={syncState} {...railProps} />}
       <main
         style={{
           flex: 1,
@@ -49,6 +54,7 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
           display: "flex",
           flexDirection: "column",
           alignItems: wide ? "center" : "stretch",
+          overflowY: fill ? "auto" : undefined,
         }}
       >
         {banner && <div style={{ alignSelf: "stretch" }}>{banner}</div>}

@@ -1,39 +1,45 @@
 import { Bell, Calendar, Cloud, Folder, Keyboard, Palette, User } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
-import { NasFields, hintStyle, labelStyle, syncTargetOptions } from "./SyncFields";
+import { AccountPane, DataPane, Desc, LaterPane, Row, Section } from "./SettingsPanes";
+import type { AccountPaneProps, DataPaneProps } from "./SettingsPanes";
+import { NasFields, syncTargetOptions } from "./SyncFields";
 
 export type SyncTarget = "google" | "nas" | "none";
-export type SettingsDialogProps = { open: boolean; initialTarget?: SyncTarget; connected?: boolean; onClose?: () => void };
+export type SettingsPane = "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard";
+export type SettingsDialogProps = {
+  open: boolean;
+  initialTarget?: SyncTarget;
+  connected?: boolean;
+  onClose?: () => void;
+  // ---- 実アプリ用 (全部 optional。無ければ Storybook と同じ見た目だけの挙動) ----
+  /** 最初に開くペイン。既定は「同期」。 */
+  initialPane?: SettingsPane;
+  /** 「同期」ペインの先頭に「実装前で表示のみ」の注記を出す。 */
+  syncPlaceholder?: boolean;
+  /** 「データ」ペインに渡す値とハンドラ (src/app/useSettingsPanes.ts)。無ければ見た目だけ。 */
+  dataPane?: DataPaneProps;
+  /** 「アカウント」ペインに渡す値とハンドラ。無ければ見た目だけ。 */
+  accountPane?: AccountPaneProps;
+};
 
 type Icon = React.ComponentType<{ size?: number }>;
 
-const navItems: { label: string; icon: Icon; active?: boolean }[] = [
-  { label: "アカウント", icon: User },
-  { label: "同期", icon: Cloud, active: true },
-  { label: "データ", icon: Folder },
-  { label: "通知", icon: Bell },
-  { label: "外観", icon: Palette },
-  { label: "日付と時刻", icon: Calendar },
-  { label: "キーボード", icon: Keyboard },
+const navItems: { pane: SettingsPane; label: string; icon: Icon }[] = [
+  { pane: "account", label: "アカウント", icon: User },
+  { pane: "sync", label: "同期", icon: Cloud },
+  { pane: "data", label: "データ", icon: Folder },
+  { pane: "notifications", label: "通知", icon: Bell },
+  { pane: "appearance", label: "外観", icon: Palette },
+  { pane: "datetime", label: "日付と時刻", icon: Calendar },
+  { pane: "keyboard", label: "キーボード", icon: Keyboard },
 ];
 
 const titles: Record<SyncTarget, string> = { google: "Google Drive", nas: "Synology NAS (WebDAV)", none: "同期" };
 const CACHE_PATH = "~/Library/Application Support/PowerToDo/data/";
-
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-      <div style={labelStyle}>{label}</div>
-      {children}
-    </section>
-  );
-}
-
-const Desc = ({ children }: { children: React.ReactNode }) => <div style={hintStyle}>{children}</div>;
-const Row = ({ children }: { children: React.ReactNode }) => <div style={{ display: "flex", gap: "var(--space-2)" }}>{children}</div>;
 
 function StatusRow({ text, action, onAction }: { text: string; action: string; onAction: () => void }) {
   return (
@@ -53,7 +59,17 @@ function StatusRow({ text, action, onAction }: { text: string; action: string; o
  * 接続状態は同期先ごとに内部で持つ (Google でログイン / 接続 → 接続済み、ログアウト / 切断 → 未接続。絵コンテの操作確認用で実際には通信しない)。
  * scrim クリック / Esc で onClose。scrim は pointerEvents: "auto" (AppShell の overlay ラッパーは "none")。
  */
-export function SettingsDialog({ open, initialTarget = "google", connected = false, onClose }: SettingsDialogProps) {
+export function SettingsDialog({
+  open,
+  initialTarget = "google",
+  connected = false,
+  onClose,
+  initialPane = "sync",
+  syncPlaceholder,
+  dataPane,
+  accountPane,
+}: SettingsDialogProps) {
+  const [pane, setPane] = useState<SettingsPane>(initialPane);
   const [target, setTarget] = useState<SyncTarget>(initialTarget);
   const [conn, setConn] = useState<Record<SyncTarget, boolean>>({ google: false, nas: false, none: false, [initialTarget]: connected });
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -71,20 +87,13 @@ export function SettingsDialog({ open, initialTarget = "google", connected = fal
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscLayer(open, () => onClose?.());
 
   if (!open) return null;
 
   const set = (t: SyncTarget, v: boolean) => setConn((c) => ({ ...c, [t]: v }));
   const isConnected = conn[target];
-  const nasForm = target === "nas" && !isConnected;
+  const nasForm = pane === "sync" && target === "nas" && !isConnected;
 
   const localCache = (
     <Section label="ローカルキャッシュ">
@@ -209,10 +218,13 @@ export function SettingsDialog({ open, initialTarget = "google", connected = fal
           }}
         >
           <div style={{ fontSize: 16, lineHeight: "23px", fontWeight: 700, color: "var(--color-text-primary)" }}>設定</div>
-          {navItems.map(({ label, icon: I, active }) => (
+          {navItems.map(({ pane: p, label, icon: I }) => {
+            const active = p === pane;
+            return (
             <button
               key={label}
               type="button"
+              onClick={() => setPane(p)}
               aria-current={active ? "page" : undefined}
               className={active ? undefined : "bg-transparent hover:bg-[var(--color-bg-hover)]"}
               style={{
@@ -236,15 +248,26 @@ export function SettingsDialog({ open, initialTarget = "google", connected = fal
               </span>
               {label}
             </button>
-          ))}
+            );
+          })}
         </nav>
         <div style={{ boxSizing: "border-box", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "20px 24px" }}>
-          <h2 style={{ margin: 0, fontSize: 18, lineHeight: "26px", fontWeight: 700, color: "var(--color-text-primary)" }}>{titles[target]}</h2>
-          <Section label="同期先">
-            <Segmented options={[...syncTargetOptions]} value={target} onChange={setTarget} />
-          </Section>
-          {middle}
-          {localCache}
+          <h2 style={{ margin: 0, fontSize: 18, lineHeight: "26px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+            {pane === "sync" ? titles[target] : navItems.find((n) => n.pane === pane)?.label}
+          </h2>
+          {pane === "sync" && (
+            <>
+              {syncPlaceholder && <Desc>同期は Phase 4 で実装予定。この画面は表示のみ</Desc>}
+              <Section label="同期先">
+                <Segmented options={[...syncTargetOptions]} value={target} onChange={setTarget} />
+              </Section>
+              {middle}
+              {localCache}
+            </>
+          )}
+          {pane === "account" && <AccountPane {...accountPane} />}
+          {pane === "data" && <DataPane {...dataPane} />}
+          {(pane === "notifications" || pane === "appearance" || pane === "datetime" || pane === "keyboard") && <LaterPane />}
         </div>
       </div>
     </div>
