@@ -124,7 +124,10 @@ export function ProjectView({
     const added = [...now].filter((n) => !prev.has(n));
     if (added.length === 0) return;
     setFresh((f) => new Set([...f, ...added]));
-    const id = window.setTimeout(() => setFresh((f) => new Set([...f].filter((n) => !added.includes(n)))), HIGHLIGHT_MS + 100);
+    const id = window.setTimeout(() => {
+      timers.current.delete(id);
+      setFresh((f) => new Set([...f].filter((n) => !added.includes(n))));
+    }, HIGHLIGHT_MS + 100);
     timers.current.add(id);
   }, [nosKey]);
   useEffect(

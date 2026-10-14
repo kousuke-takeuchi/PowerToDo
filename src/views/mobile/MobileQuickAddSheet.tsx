@@ -1,5 +1,5 @@
 import type React from "react";
-import { motion } from "motion/react";
+import { motion, useIsPresent } from "motion/react";
 import { ArrowUp, Bell, Calendar, Flag, Folder, Tag } from "lucide-react";
 import { useEscLayer } from "../../app/layers";
 import { useMotionTiming } from "../../motion";
@@ -32,7 +32,8 @@ function ToolbarIcon({ icon: Icon, label, color = "var(--color-text-secondary)" 
  * scrim は pointerEvents: "auto" (MobileShell の overlay ラッパーは "none")。
  */
 export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProps) {
-  useEscLayer(true, () => onClose?.());
+  // 閉じるアニメーション中は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
+  useEscLayer(useIsPresent(), () => onClose?.());
   // シートとキーボード領域は下からせり上がる (250ms)。scrim は 150ms でフェード。reduced motion では動かさない。
   const { reduced, t } = useMotionTiming();
   const slide = { initial: { y: reduced ? 0 : "100%" }, animate: { y: 0 }, exit: { y: reduced ? 0 : "100%" }, transition: t(0.25) };

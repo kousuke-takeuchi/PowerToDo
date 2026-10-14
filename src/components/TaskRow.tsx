@@ -6,7 +6,7 @@ import { DateChip } from "./DateChip";
 import { LabelChip } from "./LabelChip";
 import { MoreChip } from "./MoreChip";
 import { Button } from "./Button";
-import { useMotionTiming } from "../motion";
+import { EASE_CSS, useMotionTiming } from "../motion";
 
 export type TaskRowProps = {
   title: string;
@@ -43,7 +43,7 @@ const subCountStyle: React.CSSProperties = {
 export function TaskRow(p: TaskRowProps) {
   const mobile = p.variant === "mobile";
   const indentPx = (p.indent ?? 0) * (mobile ? 24 : 32);
-  const { t } = useMotionTiming();
+  const { reduced, t } = useMotionTiming();
   // 開閉はアイコンの差し替えではなく、右向きのシェブロンを 90° 回して表す。最初の描画では回すアニメーションをしない。
   const chevron = (size: number) => (
     <motion.span
@@ -155,7 +155,7 @@ export function TaskRow(p: TaskRowProps) {
             gap: "var(--space-1)",
             alignItems: "center",
             opacity: p.showActions ? 1 : undefined,
-            transition: "opacity 120ms cubic-bezier(0.2, 0, 0, 1)",
+            transition: reduced ? undefined : `opacity 120ms ${EASE_CSS}`,
           }}
           onClick={(e) => e.stopPropagation()}
           className={p.showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}

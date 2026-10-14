@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { motion, useAnimate } from "motion/react";
-import { EASE, useMotionTiming } from "../motion";
+import { EASE_CSS, useMotionTiming } from "../motion";
 
 export type CheckboxProps = {
   checked: boolean;
@@ -29,7 +29,7 @@ export function Checkbox({ checked, priority = 4, onChange, size = 20, ariaLabel
     if (prev.current === checked) return;
     prev.current = checked;
     if (checked && !reduced && scope.current) {
-      animate(scope.current, { scale: [1, 1.25, 1] }, { duration: 0.2, ease: EASE });
+      animate(scope.current, { scale: [1, 1.25, 1] }, t(0.2));
     }
   }, [checked, reduced, animate, scope]);
 
@@ -57,7 +57,7 @@ export function Checkbox({ checked, priority = 4, onChange, size = 20, ariaLabel
         cursor: "pointer",
         flex: "0 0 auto",
         boxSizing: "border-box",
-        transition: reduced ? undefined : `border-color ${checked ? 150 : 120}ms cubic-bezier(0.2, 0, 0, 1)`,
+        transition: reduced ? undefined : `border-color ${checked ? 150 : 120}ms ${EASE_CSS}`,
       }}
     >
       <motion.span

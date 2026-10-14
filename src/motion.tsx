@@ -3,6 +3,8 @@ import { motion, useReducedMotion } from "motion/react";
 
 /** 全アニメ共通のイージング (Todoist 風の素早い減速)。 */
 export const EASE = [0.2, 0, 0, 1] as const;
+/** EASE と同じ曲線の CSS 表記 (CSS transition 用)。 */
+export const EASE_CSS = `cubic-bezier(${EASE.join(", ")})`;
 
 /**
  * 秒数を返すフック。prefers-reduced-motion のときは 0 (即時) にする。

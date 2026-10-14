@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useMotionTiming } from "../motion";
 import { Bell, Calendar, ChevronDown, ChevronRight, ChevronUp, Ellipsis, Flag, Folder, Repeat, Tag, X } from "lucide-react";
 import { AddTaskRow } from "../components/AddTaskRow";
@@ -192,15 +192,17 @@ export function TaskDetailPanel({
   };
   const popoverRef = useRef<HTMLDivElement>(null);
   const { reduced, t } = useMotionTiming();
+  // 閉じるアニメーション中 (AppShell の AnimatePresence で退場中) は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
+  const present = useIsPresent();
 
   // Esc は Esc レイヤー (パネル本体の上にポップオーバー): ポップオーバーが開いていればそれだけ閉じ、無ければパネルを閉じる。
   // ポップオーバー内の行を押すと押した要素が消えてフォーカスが body に戻るので、パネルの onKeyDown では受けられない。
-  useEscLayer(true, () => {
+  useEscLayer(present, () => {
     // フォーカス中の入力の blur で編集中の値を確定してから閉じる (消えた要素には blur が来ない)
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     onClose?.();
   });
-  useEscLayer(popover !== null, () => setPopover(null));
+  useEscLayer(present && popover !== null, () => setPopover(null));
 
   // ポップオーバーの外のクリックで閉じる。
   useEffect(() => {
