@@ -1,5 +1,7 @@
 import type React from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { motion } from "motion/react";
+import { ChevronRight } from "lucide-react";
+import { useMotionTiming } from "../motion";
 
 export type SectionHeaderProps = {
   title: string;
@@ -40,11 +42,12 @@ const titleTextStyle: React.CSSProperties = { fontSize: 14, lineHeight: "20px", 
 const countStyle: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
 
 export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor }: SectionHeaderProps) {
-  const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const { t } = useMotionTiming();
+  // 右向きのシェブロンを回して開閉を表す (折りたたみ = 0°, 展開 = 90°)。最初の描画では回すアニメーションをしない。
   const chevron = showChevron && (
-    <span style={chevronStyle}>
-      <Chevron size={16} />
-    </span>
+    <motion.span aria-hidden initial={false} animate={{ rotate: collapsed ? 0 : 90 }} transition={t(0.2)} style={chevronStyle}>
+      <ChevronRight size={16} />
+    </motion.span>
   );
   const countEl = count !== undefined && <span style={countStyle}>{count}</span>;
 

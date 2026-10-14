@@ -1,6 +1,8 @@
 import { Bell, Calendar, Cloud, Folder, Keyboard, Palette, User } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useMotionTiming } from "../motion";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
@@ -88,8 +90,15 @@ export function SettingsDialog({
   }, [open]);
 
   useEscLayer(open, () => onClose?.());
+  const { reduced, t } = useMotionTiming();
 
-  if (!open) return null;
+  // 閉じたら開き直したときのために初期状態へ戻す (閉じるアニメーション中の表示は固まった要素なので影響しない)。
+  useEffect(() => {
+    if (open) return;
+    setPane(initialPane);
+    setTarget(initialTarget);
+    setConn({ google: false, nas: false, none: false, [initialTarget]: connected });
+  }, [open, initialPane, initialTarget, connected]);
 
   const set = (t: SyncTarget, v: boolean) => setConn((c) => ({ ...c, [t]: v }));
   const isConnected = conn[target];
@@ -167,109 +176,123 @@ export function SettingsDialog({
     );
   }
 
+  // 開閉: scrim は 150ms でフェード、ダイアログは 180ms で scale 0.96 / y -8 から。最初から開いている描画 (Storybook) では動かさない。
   return (
-    <div
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
-      }}
-      style={{
-        boxSizing: "border-box",
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--color-scrim)",
-        pointerEvents: "auto",
-        fontFamily: "var(--font-body)",
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="設定"
-        tabIndex={-1}
-        style={{
-          boxSizing: "border-box",
-          width: 760,
-          height: nasForm ? 640 : 560,
-          display: "flex",
-          overflow: "hidden",
-          background: "var(--color-bg)",
-          borderRadius: 12,
-          boxShadow: "var(--shadow-dialog)",
-          color: "var(--color-text-primary)",
-          outline: "none",
-        }}
-      >
-        <nav
-          aria-label="設定の項目"
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div
+          key="settings"
+          role="presentation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={t(0.15)}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose?.();
+          }}
           style={{
             boxSizing: "border-box",
-            flex: "0 0 180px",
-            width: 180,
+            width: "100%",
+            height: "100%",
             display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            padding: "16px 8px",
-            background: "var(--color-bg-sidebar)",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--color-scrim)",
+            pointerEvents: "auto",
+            fontFamily: "var(--font-body)",
           }}
         >
-          <div style={{ fontSize: 16, lineHeight: "23px", fontWeight: 700, color: "var(--color-text-primary)" }}>設定</div>
-          {navItems.map(({ pane: p, label, icon: I }) => {
-            const active = p === pane;
-            return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => setPane(p)}
-              aria-current={active ? "page" : undefined}
-              className={active ? undefined : "bg-transparent hover:bg-[var(--color-bg-hover)]"}
+          <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="設定"
+            tabIndex={-1}
+            initial={{ opacity: 0, scale: reduced ? 1 : 0.96, y: reduced ? 0 : -8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: reduced ? 1 : 0.96, y: reduced ? 0 : -8 }}
+            transition={t(0.18)}
+            style={{
+              boxSizing: "border-box",
+              width: 760,
+              height: nasForm ? 640 : 560,
+              display: "flex",
+              overflow: "hidden",
+              background: "var(--color-bg)",
+              borderRadius: 12,
+              boxShadow: "var(--shadow-dialog)",
+              color: "var(--color-text-primary)",
+              outline: "none",
+            }}
+          >
+            <nav
+              aria-label="設定の項目"
               style={{
+                boxSizing: "border-box",
+                flex: "0 0 180px",
+                width: 180,
                 display: "flex",
-                alignItems: "center",
-                gap: "var(--space-2)",
-                padding: "6px 8px",
-                border: 0,
-                borderRadius: 6,
-                background: active ? "var(--color-bg-hover)" : undefined,
-                fontFamily: "var(--font-body)",
-                fontSize: 13,
-                lineHeight: "19px",
-                color: "var(--color-text-primary)",
-                textAlign: "left",
-                cursor: "pointer",
+                flexDirection: "column",
+                gap: 2,
+                padding: "16px 8px",
+                background: "var(--color-bg-sidebar)",
               }}
             >
-              <span style={{ display: "inline-flex", color: active ? "var(--color-text-primary)" : "var(--color-text-secondary)" }}>
-                <I size={16} />
-              </span>
-              {label}
-            </button>
-            );
-          })}
-        </nav>
-        <div style={{ boxSizing: "border-box", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "20px 24px" }}>
-          <h2 style={{ margin: 0, fontSize: 18, lineHeight: "26px", fontWeight: 700, color: "var(--color-text-primary)" }}>
-            {pane === "sync" ? titles[target] : navItems.find((n) => n.pane === pane)?.label}
-          </h2>
-          {pane === "sync" && (
-            <>
-              {syncPlaceholder && <Desc>同期は Phase 4 で実装予定。この画面は表示のみ</Desc>}
-              <Section label="同期先">
-                <Segmented options={[...syncTargetOptions]} value={target} onChange={setTarget} />
-              </Section>
-              {middle}
-              {localCache}
-            </>
-          )}
-          {pane === "account" && <AccountPane {...accountPane} />}
-          {pane === "data" && <DataPane {...dataPane} />}
-          {(pane === "notifications" || pane === "appearance" || pane === "datetime" || pane === "keyboard") && <LaterPane />}
-        </div>
-      </div>
-    </div>
+              <div style={{ fontSize: 16, lineHeight: "23px", fontWeight: 700, color: "var(--color-text-primary)" }}>設定</div>
+              {navItems.map(({ pane: p, label, icon: I }) => {
+                const active = p === pane;
+                return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setPane(p)}
+                  aria-current={active ? "page" : undefined}
+                  className={active ? undefined : "bg-transparent hover:bg-[var(--color-bg-hover)]"}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--space-2)",
+                    padding: "6px 8px",
+                    border: 0,
+                    borderRadius: 6,
+                    background: active ? "var(--color-bg-hover)" : undefined,
+                    fontFamily: "var(--font-body)",
+                    fontSize: 13,
+                    lineHeight: "19px",
+                    color: "var(--color-text-primary)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", color: active ? "var(--color-text-primary)" : "var(--color-text-secondary)" }}>
+                    <I size={16} />
+                  </span>
+                  {label}
+                </button>
+                );
+              })}
+            </nav>
+            <div style={{ boxSizing: "border-box", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "20px 24px" }}>
+              <h2 style={{ margin: 0, fontSize: 18, lineHeight: "26px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+                {pane === "sync" ? titles[target] : navItems.find((n) => n.pane === pane)?.label}
+              </h2>
+              {pane === "sync" && (
+                <>
+                  {syncPlaceholder && <Desc>同期は Phase 4 で実装予定。この画面は表示のみ</Desc>}
+                  <Section label="同期先">
+                    <Segmented options={[...syncTargetOptions]} value={target} onChange={setTarget} />
+                  </Section>
+                  {middle}
+                  {localCache}
+                </>
+              )}
+              {pane === "account" && <AccountPane {...accountPane} />}
+              {pane === "data" && <DataPane {...dataPane} />}
+              {(pane === "notifications" || pane === "appearance" || pane === "datetime" || pane === "keyboard") && <LaterPane />}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

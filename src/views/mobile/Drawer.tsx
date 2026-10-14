@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { motion } from "motion/react";
 import { CalendarCheck, CalendarDays, Inbox, LayoutGrid, Settings } from "lucide-react";
 import { Button } from "../../components/Button";
 import { ProjectItem } from "../../components/ProjectItem";
 import { SidebarItem } from "../../components/SidebarItem";
 import { SyncStatus } from "../../components/SyncStatus";
 import type { SyncState } from "../../components/SyncStatus";
+import { useMotionTiming } from "../../motion";
 import type { Counts } from "../../mock/data";
 import type { Project } from "../../types/model";
 
@@ -25,16 +27,26 @@ export function Drawer({ counts, projects, syncState = "syncing", lastSyncedAt, 
   // 選択行のハイライトだけ内部で持つ (pen の M-06 は何も選択していない)。画面遷移は Story を切り替える。
   const [selected, setSelected] = useState<string | null>(null);
   const nav = (label: string) => ({ active: selected === label, onClick: () => setSelected(label) });
+  // scrim は 150ms でフェード、ドロワーは左から 250ms でスライド。reduced motion では動かさない。
+  const { reduced, t } = useMotionTiming();
   return (
-    <div
+    <motion.div
       role="presentation"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={t(0.15)}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose?.();
       }}
       style={{ width: "100%", height: "100%", background: "var(--color-scrim)", pointerEvents: "auto", fontFamily: "var(--font-body)" }}
     >
-      <aside
+      <motion.aside
         aria-label="ドロワー"
+        initial={{ x: reduced ? 0 : "-100%" }}
+        animate={{ x: 0 }}
+        exit={{ x: reduced ? 0 : "-100%" }}
+        transition={t(0.25)}
         style={{
           boxSizing: "border-box",
           width: 300,
@@ -68,7 +80,7 @@ export function Drawer({ counts, projects, syncState = "syncing", lastSyncedAt, 
         </div>
         <div style={{ flex: 1 }} />
         <SyncStatus state={syncState} lastSyncedAt={lastSyncedAt} />
-      </aside>
-    </div>
+      </motion.aside>
+    </motion.div>
   );
 }

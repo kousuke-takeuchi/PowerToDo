@@ -1,6 +1,8 @@
 import type React from "react";
+import { motion } from "motion/react";
 import { ArrowUp, Bell, Calendar, Flag, Folder, Tag } from "lucide-react";
 import { useEscLayer } from "../../app/layers";
+import { useMotionTiming } from "../../motion";
 import type { QuickAddToken } from "../QuickAddDialog";
 
 export type MobileQuickAddSheetProps = {
@@ -31,11 +33,18 @@ function ToolbarIcon({ icon: Icon, label, color = "var(--color-text-secondary)" 
  */
 export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProps) {
   useEscLayer(true, () => onClose?.());
+  // シートとキーボード領域は下からせり上がる (250ms)。scrim は 150ms でフェード。reduced motion では動かさない。
+  const { reduced, t } = useMotionTiming();
+  const slide = { initial: { y: reduced ? 0 : "100%" }, animate: { y: 0 }, exit: { y: reduced ? 0 : "100%" }, transition: t(0.25) };
 
   const of = (kind: NonNullable<QuickAddToken["kind"]>) => tokens.some((t) => t.kind === kind);
   return (
-    <div
+    <motion.div
       role="presentation"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={t(0.15)}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose?.();
       }}
@@ -50,10 +59,11 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
         fontFamily: "var(--font-body)",
       }}
     >
-      <div
+      <motion.div
         role="dialog"
         aria-modal="true"
         aria-label="クイック追加"
+        {...slide}
         style={{
           boxSizing: "border-box",
           display: "flex",
@@ -124,10 +134,11 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
             <ArrowUp size={18} />
           </button>
         </div>
-      </div>
+      </motion.div>
       {/* OS のキーボードの代わり。pen の Keyboard (291pt)。色はこのモックだけの固定値 (トークンにしない)。 */}
-      <div
+      <motion.div
         aria-hidden
+        {...slide}
         style={{
           height: 291,
           flex: "0 0 291px",
@@ -140,7 +151,7 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
         }}
       >
         キーボード領域 (291pt)
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

@@ -1,4 +1,6 @@
 import type React from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useMotionTiming } from "../motion";
 import type { SyncState } from "../components/SyncStatus";
 import { SidebarRail } from "./SidebarRail";
 import type { SidebarRailProps } from "./SidebarRail";
@@ -30,6 +32,7 @@ const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;
 export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, syncState = "synced", fill, rail: railProps }: AppShellProps) {
   const wide = width === 1440;
   const rail = width === 960;
+  const { reduced, t } = useMotionTiming();
   return (
     <div
       style={{
@@ -72,19 +75,27 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
           {children}
         </div>
       </main>
-      {panel && (
-        <aside
-          style={{
-            flex: "0 0 400px",
-            width: 400,
-            height: "100%",
-            borderLeft: "1px solid var(--color-border)",
-            background: "var(--color-bg)",
-          }}
-        >
-          {panel}
-        </aside>
-      )}
+      {/* 詳細パネル: 右から x 24 -> 0 + フェード (200ms)。閉じるときも同じ動きで退場。最初から開いている描画 (Storybook) では動かさない。 */}
+      <AnimatePresence initial={false}>
+        {panel && (
+          <motion.aside
+            key="panel"
+            initial={{ opacity: 0, x: reduced ? 0 : 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: reduced ? 0 : 24 }}
+            transition={t(0.2)}
+            style={{
+              flex: "0 0 400px",
+              width: 400,
+              height: "100%",
+              borderLeft: "1px solid var(--color-border)",
+              background: "var(--color-bg)",
+            }}
+          >
+            {panel}
+          </motion.aside>
+        )}
+      </AnimatePresence>
       {/* ラッパーはクリックを通す。中身 (scrim など) が pointerEvents: "auto" で受ける。中身が null を返しても下を塞がない。 */}
       {overlay && <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>{overlay}</div>}
     </div>
