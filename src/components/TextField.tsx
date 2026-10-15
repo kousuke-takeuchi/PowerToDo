@@ -1,3 +1,5 @@
+import type React from "react";
+
 export type TextFieldProps = {
   value?: string;
   placeholder?: string;
@@ -6,9 +8,12 @@ export type TextFieldProps = {
   readOnly?: boolean;
   ariaLabel?: string;
   autoFocus?: boolean;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onCompositionStart?: () => void;
+  onCompositionEnd?: () => void;
 };
 
-export function TextField({ value, placeholder, onChange, type = "text", readOnly, ariaLabel, autoFocus }: TextFieldProps) {
+export function TextField({ value, placeholder, onChange, type = "text", readOnly, ariaLabel, autoFocus, onKeyDown, onCompositionStart, onCompositionEnd }: TextFieldProps) {
   return (
     <input
       type={type}
@@ -18,6 +23,9 @@ export function TextField({ value, placeholder, onChange, type = "text", readOnl
       aria-label={ariaLabel}
       autoFocus={autoFocus}
       onChange={(e) => onChange?.(e.target.value)}
+      onKeyDown={onKeyDown}
+      onCompositionStart={onCompositionStart}
+      onCompositionEnd={onCompositionEnd}
       className="outline-none border-[color:var(--color-border)] focus-visible:border-[color:var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
       style={{
         boxSizing: "border-box",

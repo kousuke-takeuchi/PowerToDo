@@ -76,9 +76,16 @@ export function useLeaving(tasks: Task[]) {
   const isLeaving = (t: Task) => entries.has(taskKey(t));
 
   // 時間が過ぎた行は、まだ未完了としてビューに残っている間だけ保持する。消えたら (または完了で届いたら) 手放す。
-  const openKeys = new Set(tasks.filter((t) => t.progress < 100).map(taskKey));
+  // 繰り返しのタスクは完了すると未完了のまま次の期限へ進んで戻ってくる。期限が変わっていたら、それも手放す。
+  const openByKey = new Map(tasks.filter((t) => t.progress < 100).map((t) => [taskKey(t), t]));
   useEffect(() => {
-    const done = [...entries].filter(([k, e]) => e.elapsed && !openKeys.has(k)).map(([k]) => k);
+    const done = [...entries]
+      .filter(([k, e]) => {
+        if (!e.elapsed) return false;
+        const now = openByKey.get(k);
+        return !now || now.due !== e.task.due || now.dueTime !== e.task.dueTime;
+      })
+      .map(([k]) => k);
     if (done.length === 0) return;
     done.forEach(clearTimers);
     setEntries((m) => {
@@ -148,6 +155,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
         done={isDone(t)}
         priority={t.priority}
         date={date?.(t)}
+        recurring={onToggleDone && t.rrule ? true : undefined}
         project={t.project}
         focused={focusedKey === taskKey(t)}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}

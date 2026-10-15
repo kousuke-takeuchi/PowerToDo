@@ -84,7 +84,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack }: M
           <Prop icon={Flag} name="優先度" value={`P${task.priority}`} valueColor={`var(--color-priority-${task.priority})`} />
           <Prop icon={Tag} name="ラベル" value={task.labels.map((l) => `@${l}`).join(" ") || "なし"} />
           <Prop icon={Bell} name="リマインダー" value={task.reminders.map(reminderLabel).join(", ") || "なし"} />
-          <Prop icon={Repeat} name="繰り返し" value={recurrenceLabel(task.rrule)} />
+          <Prop icon={Repeat} name="繰り返し" value={task.rruleLabel ?? recurrenceLabel(task.rrule)} />
         </div>
         <div>
           <div style={{ fontSize: 13, lineHeight: "19px", fontWeight: 700, color: "var(--color-text-primary)" }}>

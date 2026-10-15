@@ -1,7 +1,8 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isImeKey } from "../app/keys";
 import { Button } from "../components/Button";
+import { Segmented } from "../components/Segmented";
 import { TextField } from "../components/TextField";
 import { hintStyle, labelStyle } from "./SyncFields";
 
@@ -111,6 +112,220 @@ export function AccountPane({ displayName = SAMPLE_NAME, onSaveDisplayName, busy
         {error && <ErrorText>{error}</ErrorText>}
       </Section>
     </form>
+  );
+}
+
+const ON_OFF = [
+  { value: "on", label: "オン" },
+  { value: "off", label: "オフ" },
+] as const;
+
+/** Linux ではウィンドウを閉じるとアプリが終了する (Rust 側がトレイ常駐を使わない)。 */
+function isLinux(): boolean {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  return ua.includes("Linux") && !ua.includes("Android");
+}
+
+export type NotificationsPaneProps = {
+  enabled: boolean;
+  onToggle?: (v: boolean) => void;
+  keepInTray: boolean;
+  onToggleKeepInTray?: (v: boolean) => void;
+  /** トレイを作れなかった理由 (あれば「トレイに残す」は使えない)。 */
+  trayError?: string;
+  /** 設定を読み込むまで操作できない。 */
+  loading?: boolean;
+  busy?: boolean;
+  error?: string | null;
+};
+
+/**
+ * 「通知」ペイン: 通知のオン / オフ、閉じたときトレイに残す。変更は呼び出し側がすぐ保存する。
+ * OS の権限は出さない: デスクトップの通知プラグインは常に「許可済み」と答え、実際に出るかは OS の通知設定で決まる。
+ */
+export function NotificationsPane({
+  enabled,
+  onToggle,
+  keepInTray,
+  onToggleKeepInTray,
+  trayError,
+  loading = false,
+  busy = false,
+  error,
+}: NotificationsPaneProps) {
+  const linux = isLinux();
+  const trayDisabled = !!trayError || linux;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+      {loading && !error && <Desc>読み込み中…</Desc>}
+      <Section label="通知">
+        <Segmented
+          options={[...ON_OFF]}
+          value={enabled ? "on" : "off"}
+          onChange={(v) => !busy && onToggle?.(v === "on")}
+          ariaLabel="通知"
+          disabled={loading}
+        />
+        <Desc>リマインダーの時刻になると OS の通知を出します。オフでもアプリ内の帯は出ます。</Desc>
+        <Desc>{"通知の表示は OS の通知設定で決まります (macOS: システム設定 > 通知 > PowerToDo)"}</Desc>
+      </Section>
+      <Section label="閉じたときトレイに残す">
+        <Segmented
+          options={[...ON_OFF]}
+          value={keepInTray && !trayDisabled ? "on" : "off"}
+          onChange={(v) => !busy && onToggleKeepInTray?.(v === "on")}
+          ariaLabel="閉じたときトレイに残す"
+          disabled={loading || trayDisabled}
+        />
+        <Desc>オンにすると、ウィンドウを閉じてもトレイに残り、通知が届きます。トレイの「終了」で終了します。</Desc>
+        {trayError && <Desc>{trayError}</Desc>}
+        {linux && <Desc>Linux ではウィンドウを閉じるとアプリが終了します (トレイに残す設定は使われません)。</Desc>}
+      </Section>
+      {error && <ErrorText>{error}</ErrorText>}
+    </div>
+  );
+}
+
+const REMINDER_OPTIONS = [
+  { value: "none", label: "なし", code: null },
+  { value: "-0m", label: "同時刻", code: "-0m" },
+  { value: "-10m", label: "10 分前", code: "-10m" },
+  { value: "-30m", label: "30 分前", code: "-30m" },
+  { value: "-60m", label: "1 時間前", code: "-60m" },
+  { value: "-1d", label: "前日", code: "-1d" },
+] as const;
+
+const WEEK_START_OPTIONS = [
+  { value: "mon", label: "月曜" },
+  { value: "sun", label: "日曜" },
+] as const;
+
+export type DateTimePaneProps = {
+  /** リマインダーコード (例 "-10m")。null = なし。 */
+  defaultReminder: string | null;
+  onChangeDefaultReminder?: (v: string | null) => void;
+  /** 時刻なしのタスクを通知する時刻 "HH:MM"。 */
+  notifyTime: string;
+  /** 保存の結果を返せるなら成功したかどうか (false なら入力欄を保存済みの値に戻す)。 */
+  onChangeNotifyTime?: (v: string) => Promise<boolean> | void;
+  weekStart: "mon" | "sun";
+  onChangeWeekStart?: (v: "mon" | "sun") => void;
+  /** 設定を読み込むまで操作できない。 */
+  loading?: boolean;
+  busy?: boolean;
+  error?: string | null;
+};
+
+/** 「日付と時刻」ペイン: 既定リマインダー / 時刻なしの通知時刻 / 週の開始。変更は呼び出し側がすぐ保存する (時刻だけは入力欄を離れるか Enter で)。 */
+export function DateTimePane({
+  defaultReminder,
+  onChangeDefaultReminder,
+  notifyTime,
+  onChangeNotifyTime,
+  weekStart,
+  onChangeWeekStart,
+  loading = false,
+  busy = false,
+  error,
+}: DateTimePaneProps) {
+  // 時刻入力は打っている途中の値 (draft) を持ち、入力欄を離れたとき / Enter で確定する。
+  const [draft, setDraft] = useState(notifyTime);
+  const focused = useRef(false);
+  /** 最後に保存へ送った値 (結果待ちを含む)。保存済みの props より新しいことがある。 */
+  const sent = useRef(notifyTime);
+  const saved = useRef(notifyTime);
+  saved.current = notifyTime;
+  useEffect(() => {
+    sent.current = notifyTime;
+    if (!focused.current) setDraft(notifyTime);
+  }, [notifyTime]);
+
+  const commit = async () => {
+    const v = draft;
+    if (!/^\d{2}:\d{2}$/.test(v)) {
+      setDraft(saved.current); // 空 / 途中の値は捨てて保存済みに戻す
+      return;
+    }
+    if (v === sent.current) return;
+    sent.current = v;
+    const ok = await onChangeNotifyTime?.(v);
+    if (ok === false) {
+      sent.current = saved.current;
+      setDraft(saved.current);
+    }
+  };
+
+  const known = REMINDER_OPTIONS.find((o) => o.code === defaultReminder);
+  const reminderValue = known?.value ?? "other";
+  const reminderOptions: { value: string; label: string }[] = REMINDER_OPTIONS.map(({ value, label }) => ({ value, label }));
+  // 一覧に無いコード (別の版や手編集で入った値) は 7 つ目に出す。押しても何も変えない。
+  if (!known) reminderOptions.push({ value: "other", label: `その他 (${defaultReminder})` });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+      {loading && !error && <Desc>読み込み中…</Desc>}
+      <Section label="既定リマインダー">
+        <Segmented
+          options={reminderOptions}
+          value={reminderValue}
+          onChange={(v) => {
+            const o = REMINDER_OPTIONS.find((x) => x.value === v);
+            if (!busy && o) onChangeDefaultReminder?.(o.code);
+          }}
+          ariaLabel="既定リマインダー"
+          disabled={loading}
+        />
+        <Desc>時刻付きの期限を入れたタスクに自動で付けます。タスクごとに変えられます。</Desc>
+      </Section>
+      <Section label="時刻なしの通知時刻">
+        <input
+          type="time"
+          value={draft}
+          disabled={loading}
+          aria-label="時刻なしの通知時刻"
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => {
+            focused.current = true;
+          }}
+          onBlur={() => {
+            focused.current = false;
+            void commit();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !isImeKey(e)) {
+              e.preventDefault();
+              void commit();
+            }
+          }}
+          className="outline-none border-[color:var(--color-border)] focus-visible:border-[color:var(--color-accent)]"
+          style={{
+            boxSizing: "border-box",
+            width: 140,
+            padding: "7px 11px",
+            borderRadius: "var(--radius)",
+            borderWidth: 1,
+            borderStyle: "solid",
+            background: "transparent",
+            color: "var(--color-text-primary)",
+            fontFamily: "var(--font-body)",
+            fontSize: 14,
+            lineHeight: "20px",
+            opacity: loading ? 0.5 : 1,
+          }}
+        />
+        <Desc>期限に時刻が無いタスクは、この時刻に通知します。</Desc>
+      </Section>
+      <Section label="週の開始">
+        <Segmented
+          options={[...WEEK_START_OPTIONS]}
+          value={weekStart}
+          onChange={(v) => !busy && onChangeWeekStart?.(v)}
+          ariaLabel="週の開始"
+          disabled={loading}
+        />
+      </Section>
+      {error && <ErrorText>{error}</ErrorText>}
+    </div>
   );
 }
 

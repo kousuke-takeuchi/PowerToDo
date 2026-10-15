@@ -205,6 +205,7 @@ export function ProjectView({
         done={isDone(t)}
         priority={t.priority}
         date={dateLabel(t.due, today)}
+        recurring={onToggleDone && t.rrule ? true : undefined}
         labels={t.labels}
         indent={indent}
         showActions={showActions}

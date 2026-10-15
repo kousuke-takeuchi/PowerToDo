@@ -136,6 +136,7 @@ mod tests {
             parent_no: parent,
             labels: vec![],
             rrule: None,
+            rrule_label: None,
             reminders: vec![],
             order: 0,
             created_at: NaiveDateTime::default(),

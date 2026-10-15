@@ -1,17 +1,22 @@
 import { listen } from "@tauri-apps/api/event";
-import type { ChangeReason, ProjectsChanged, SaveStatus } from "../types/model";
+import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus } from "../types/model";
 
 /**
  * `listen` is async; the returned function unsubscribes even if it is called before the
  * subscription finished (the late UnlistenFn is invoked as soon as it arrives).
+ * `onReady` runs once the subscription is in place (not after an early unsubscribe): an event
+ * sent before that is lost, so a caller that must not miss one re-reads its state there.
  */
-function subscribe<T>(event: string, cb: (payload: T) => void): () => void {
+function subscribe<T>(event: string, cb: (payload: T) => void, onReady?: () => void): () => void {
   let cancelled = false;
   let unlisten: (() => void) | undefined;
   listen<T>(event, (e) => cb(e.payload))
     .then((fn) => {
       if (cancelled) fn();
-      else unlisten = fn;
+      else {
+        unlisten = fn;
+        onReady?.();
+      }
     })
     .catch((err) => console.error(`listen(${event}) failed`, err));
   return () => {
@@ -59,4 +64,32 @@ export function onExitBlocked(cb: (projects: string[]) => void): () => void {
 /** `watch-failed`: the data-folder watcher could not start (the payload is the reason). */
 export function onWatchFailed(cb: (message: string) => void): () => void {
   return subscribe<string>("watch-failed", cb);
+}
+
+/**
+ * `reminder-fired`: reminders that fired now (and, at start-up, the ones missed while the app was not running). Sent even when notifications are off.
+ * `onReady`: the subscription is in place (see `subscribe`).
+ */
+export function onReminderFired(cb: (items: ReminderItem[]) => void, onReady?: () => void): () => void {
+  return subscribe<{ items: ReminderItem[] }>("reminder-fired", (p) => cb(p.items), onReady);
+}
+
+/** `notification-error`: a notification's button could not do its work (e.g. 完了 on a held project); the window was shown to say so. */
+export function onNotificationError(cb: (message: string) => void): () => void {
+  return subscribe<{ message: string }>("notification-error", (p) => cb(p.message));
+}
+
+/** `open-task`: a reminder notification was clicked; open that task's details. */
+export function onOpenTask(cb: (project: string, no: number) => void): () => void {
+  return subscribe<{ project: string; no: number }>("open-task", (p) => cb(p.project, p.no));
+}
+
+/** `window-shown`: the hidden window came back (notification, tray, Dock); refresh what may have changed. */
+export function onWindowShown(cb: () => void): () => void {
+  return subscribe<Record<string, never>>("window-shown", () => cb());
+}
+
+/** `open-quick-add`: the tray's 「タスクを追加…」; open the quick-add bar. */
+export function onOpenQuickAdd(cb: () => void): () => void {
+  return subscribe<Record<string, never>>("open-quick-add", () => cb());
 }

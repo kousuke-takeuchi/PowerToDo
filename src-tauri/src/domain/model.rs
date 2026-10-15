@@ -165,6 +165,10 @@ pub struct Task {
     pub labels: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rrule: Option<String>,
+    /// Display text for `rrule` (summary, or the raw string when unreadable). Filled when a
+    /// view is built; never stored in the workbook.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rrule_label: Option<String>,
     pub reminders: Vec<String>,
     pub order: u32,
     #[serde(with = "serde_datetime")]
@@ -236,6 +240,10 @@ pub struct TaskInput {
     pub labels: Vec<String>,
     #[serde(default)]
     pub parent_no: Option<u32>,
+    #[serde(default)]
+    pub rrule: Option<String>,
+    #[serde(default)]
+    pub reminders: Vec<String>,
 }
 
 /// Partial update. Every field is optional: outer `None` = unchanged. The fields that can be
@@ -323,6 +331,7 @@ mod tests {
             parent_no: None,
             labels: vec!["急ぎ".into()],
             rrule: None,
+            rrule_label: None,
             reminders: vec![],
             order: 1,
             created_at: NaiveDateTime::parse_from_str("2026-10-10T09:00", "%Y-%m-%dT%H:%M")

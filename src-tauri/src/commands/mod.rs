@@ -5,15 +5,19 @@
 pub mod saver;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use chrono::{Local, NaiveDate, NaiveDateTime};
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::domain::model::{INBOX, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
+use crate::domain::recurrence;
+use crate::domain::recurrence_words;
+use crate::domain::reminders;
 use crate::domain::search;
 use crate::domain::search::Hit;
 use crate::domain::views::{self, DayGroup};
@@ -22,6 +26,7 @@ use crate::error::{AppError, AppResult};
 use crate::platform;
 use crate::store::common_book::Settings;
 use crate::store::external::{FileKind, Verdict, classify_path, fingerprint, verdict};
+use crate::store::fired::{Fired, ReminderItem, ReminderKey};
 use crate::store::paths::{AppSettings, Paths};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
 use crate::store::watcher::{self, Watcher};
@@ -44,6 +49,12 @@ pub struct AppState {
     /// because the failure happens in `app_state` / `set_data_dir`, before the main screen
     /// listens for `watch-failed`; the screen reads it from `AppStateDto::watch_error`.
     pub watch_error: Mutex<Option<String>>,
+    /// Why the tray icon could not be created (set once at start), `None` while it exists. The
+    /// settings pane notes it; with no tray, closing the window must not hide it.
+    pub tray_error: Mutex<Option<String>>,
+    /// `fired.json` (仕様 §4.3): reminders already fired, snoozes, and the ones the UI has not
+    /// taken yet. Loaded once at start; written by the scheduler and the reminder commands.
+    pub fired: Mutex<Fired>,
     app_data_dir: PathBuf,
 }
 
@@ -51,6 +62,11 @@ pub struct AppState {
 // store lock while it asks the saver about / cancels a pending save; `TauriSink::save` runs in
 // a saver task that is not holding `pending` when it takes the store lock. `saving` and
 // `app_settings` are leaf locks (nothing is acquired while holding them).
+//
+// `fired` is a leaf lock too, and is never held together with `store`: the scheduler copies
+// the tasks and settings under the store lock, releases it, then takes `fired`; the task
+// commands take `fired` only after their mutation released the store. Notifications are sent
+// and events emitted with neither lock held.
 
 impl AppState {
     pub fn new(app_data_dir: PathBuf) -> Self {
@@ -65,8 +81,83 @@ impl AppState {
             watcher: Mutex::new(None),
             saving: Mutex::new(BTreeSet::new()),
             watch_error: Mutex::new(None),
+            tray_error: Mutex::new(None),
+            fired: Mutex::new(Fired::load(&app_data_dir)),
             app_data_dir,
         }
+    }
+
+    pub(crate) fn lock_fired(&self) -> MutexGuard<'_, Fired> {
+        self.fired.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Where `settings.json` and `fired.json` live.
+    pub(crate) fn app_data_dir(&self) -> &Path {
+        &self.app_data_dir
+    }
+
+    /// What the scheduler needs, copied under the store lock (released on return): the tasks,
+    /// the settings and the data folder. `None` while no data folder is open.
+    pub(crate) fn reminder_inputs(&self) -> Option<(Vec<Task>, Settings, PathBuf)> {
+        self.lock_store()
+            .as_ref()
+            .map(|s| (s.all_tasks(), s.settings(), s.paths().data_dir.clone()))
+    }
+
+    /// The open data folder (store lock taken and released).
+    pub(crate) fn current_data_dir(&self) -> Option<PathBuf> {
+        self.lock_store()
+            .as_ref()
+            .map(|s| s.paths().data_dir.clone())
+    }
+
+    /// Ties `fired.json` to the open data folder, dropping another folder's records (see
+    /// `Fired::bind`). Called after the store lock is released.
+    fn bind_fired_to_store(&self) {
+        if let Some(dir) = self.current_data_dir() {
+            let mut fired = self.lock_fired();
+            if fired.bind(&dir)
+                && let Err(e) = fired.save(&self.app_data_dir)
+            {
+                eprintln!("could not write {}: {e}", Fired::FILE);
+            }
+        }
+    }
+
+    /// Changes `fired.json` and writes it. A failed write is logged: the in-memory record
+    /// still holds for this run.
+    fn update_fired(&self, f: impl FnOnce(&mut Fired)) {
+        let mut fired = self.lock_fired();
+        f(&mut fired);
+        if let Err(e) = fired.save(&self.app_data_dir) {
+            eprintln!("could not write {}: {e}", Fired::FILE);
+        }
+    }
+
+    /// Lets the reminders of a task fire again (it changed, was completed or deleted).
+    pub(crate) fn forget_fired(&self, project: &str, no: u32) {
+        self.update_fired(|f| f.forget_task(project, no));
+    }
+
+    /// Fires `key` again at `until` (the notification's 「後で」 and `snooze_reminder`). The
+    /// snooze is tied to the reminder's current fire time (store lock taken and released
+    /// first), so it lapses when the due date moves (see `Fired::snooze_until`).
+    pub(crate) fn snooze_fired(&self, key: &ReminderKey, until: NaiveDateTime) {
+        let fire_at = self.lock_store().as_ref().and_then(|s| {
+            let task = s
+                .all_tasks()
+                .into_iter()
+                .find(|t| t.project == key.project && t.no == key.no)?;
+            reminders::fire_time(&key.code, task.due, task.due_time, s.settings().notify_time)
+        });
+        self.update_fired(|f| f.snooze(key, fire_at, until));
+    }
+
+    /// The fired reminders the UI has not taken yet; they are removed.
+    pub(crate) fn take_pending_reminders(&self) -> Vec<ReminderItem> {
+        let mut items = Vec::new();
+        self.update_fired(|f| items = f.take_pending());
+        items
     }
 
     fn lock_store(&self) -> MutexGuard<'_, Option<ProjectStore>> {
@@ -101,6 +192,29 @@ impl AppState {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Why the tray icon could not be created (see [`AppState::tray_error`]).
+    pub fn tray_error(&self) -> Option<String> {
+        self.tray_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Whether closing the window hides it (the 「トレイに常駐」 setting). `true` while no data
+    /// folder is open (the default setting). Always `false` when there is no tray to bring the
+    /// window back from (`tray_error`), and on Linux regardless of the setting: stock GNOME has
+    /// no tray host, so a hidden window could not be reached again (the settings pane says so).
+    pub fn keep_in_tray(&self) -> bool {
+        if cfg!(target_os = "linux") {
+            return false;
+        }
+        let setting = self
+            .lock_store()
+            .as_ref()
+            .map(|store| store.settings().keep_in_tray);
+        resolve_keep_in_tray(self.tray_error().is_some(), setting)
     }
 
     /// Writes everything still dirty (used when the app quits). Held projects, and dirty ones
@@ -201,6 +315,9 @@ pub struct AppStateDto {
     /// Watching the data folder could not start (仕様 §7); the main screen shows it once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watch_error: Option<String>,
+    /// The tray icon could not be created; the settings pane notes that closing quits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tray_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,6 +339,12 @@ pub struct MoveOutcome {
 pub struct SettingsDto {
     pub display_name: String,
     pub week_start: String,
+    /// Reminder code for tasks that get a time; `null` = none.
+    pub default_reminder: Option<String>,
+    /// `HH:MM`: when tasks without a time notify.
+    pub notify_time: String,
+    pub keep_in_tray: bool,
+    pub notifications: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
 }
@@ -307,6 +430,24 @@ pub struct CountsDto {
     pub labels: BTreeMap<String, u32>,
 }
 
+/// `parse_recurrence`: the RRULE for a recurrence phrase (`null` when the text is not one) and
+/// its short label (the RRULE itself when no short form exists).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceDto {
+    pub rrule: Option<String>,
+    pub label: Option<String>,
+}
+
+/// `summarize_recurrence`: the label for a stored RRULE, and whether the rule computes without
+/// error (a finished COUNT / UNTIL rule is valid; only an unreadable one is not).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceLabelDto {
+    pub label: String,
+    pub valid: bool,
+}
+
 fn parse_ymd(s: &str) -> AppResult<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| AppError::Invalid {
         message: format!("日付の形式が不正です: {s}"),
@@ -339,6 +480,12 @@ fn dir_string(store: &ProjectStore) -> String {
     store.paths().data_dir.to_string_lossy().into_owned()
 }
 
+/// The cfg-independent part of [`AppState::keep_in_tray`]: no tray beats the setting; no data
+/// folder (`None`) means the default, which is on.
+fn resolve_keep_in_tray(tray_failed: bool, setting: Option<bool>) -> bool {
+    !tray_failed && setting.unwrap_or(true)
+}
+
 fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateDto {
     AppStateDto {
         data_dir: store.map(dir_string),
@@ -346,6 +493,7 @@ fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateD
         inbox: INBOX.to_string(),
         warning,
         watch_error: None,
+        tray_error: None,
     }
 }
 
@@ -796,7 +944,17 @@ fn start_watching(app: &AppHandle, state: &AppState) {
 pub fn parse_quick_add_in(store: &ProjectStore, text: &str, today: NaiveDate) -> QuickAddResult {
     let projects: Vec<String> = store.summaries().into_iter().map(|p| p.name).collect();
     let labels: Vec<String> = store.labels().into_iter().map(|l| l.name).collect();
-    parse(text, today, &projects, &labels)
+    let mut parsed = parse(text, today, &projects, &labels);
+    // A recurrence without a date starts on its first occurrence on or after today. An
+    // unreadable rule (or one that has no occurrence) leaves the date empty.
+    if parsed.due.is_none()
+        && let Some(rrule) = &parsed.rrule
+    {
+        parsed.due = recurrence::first_on_or_after(rrule, today, parsed.due_time)
+            .ok()
+            .flatten();
+    }
+    parsed
 }
 
 pub fn quick_add_in(
@@ -819,6 +977,8 @@ pub fn quick_add_in(
         note: None,
         labels: parsed.labels.clone(),
         parent_no: None,
+        rrule: parsed.rrule.clone(),
+        reminders: Vec::new(),
     };
     let view = store.add_task(&project, input)?;
     Ok(QuickAddOutcome { parsed, view })
@@ -829,6 +989,7 @@ pub fn quick_add_in(
 #[tauri::command]
 pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStateDto> {
     let dto = startup(state.inner())?;
+    state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
     let watching = state
         .watcher
@@ -840,6 +1001,7 @@ pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     }
     Ok(AppStateDto {
         watch_error: state.watch_error(),
+        tray_error: state.tray_error(),
         ..dto
     })
 }
@@ -851,10 +1013,12 @@ pub async fn set_data_dir(
     state: State<'_, AppState>,
 ) -> AppResult<AppStateDto> {
     let dto = switch_data_dir(state.inner(), &path)?;
+    state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
     start_watching(&app, state.inner());
     Ok(AppStateDto {
         watch_error: state.watch_error(),
+        tray_error: state.tray_error(),
         ..dto
     })
 }
@@ -1018,9 +1182,12 @@ pub async fn rename_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectSummary> {
-    mutate_structure(&app, state.inner(), &[&new_name], |s| {
+    let summary = mutate_structure(&app, state.inner(), &[&new_name], |s| {
         s.rename_project(&name, &new_name)
-    })
+    })?;
+    // The records follow the project (task numbers stay), so nothing fires twice.
+    state.update_fired(|f| f.rename_project(&name, &new_name));
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -1029,7 +1196,9 @@ pub async fn delete_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    mutate_structure(&app, state.inner(), &[], |s| s.delete_project(&name))
+    mutate_structure(&app, state.inner(), &[], |s| s.delete_project(&name))?;
+    state.update_fired(|f| f.forget_project(&name));
+    Ok(())
 }
 
 // ---- commands: sections ----
@@ -1093,9 +1262,63 @@ pub async fn update_task(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    mutate(&app, state.inner(), &[&project], false, |s| {
+    let touches_reminders = patch_touches_reminders(&patch);
+    let view = mutate(&app, state.inner(), &[&project], false, |s| {
         s.update_task(&project, no, patch)
-    })
+    })?;
+    if touches_reminders {
+        state.forget_fired(&project, no);
+    }
+    Ok(view)
+}
+
+/// A change to the due date, its time or the reminders moves the fire times: the task's
+/// records in `fired.json` are dropped so the new times can fire (仕様 §4.3).
+pub fn patch_touches_reminders(patch: &TaskPatch) -> bool {
+    patch.due.is_some() || patch.due_time.is_some() || patch.reminders.is_some()
+}
+
+/// `complete_task`, shared with the notification's 「完了」 button: completes (a recurring task
+/// moves to its next due date), schedules the save, and forgets the task's fired reminders so
+/// the next occurrence fires again.
+fn complete_task_in(
+    app: &AppHandle,
+    state: &AppState,
+    project: &str,
+    no: u32,
+    done: bool,
+) -> AppResult<ProjectView> {
+    let view = mutate(app, state, &[project], false, |s| {
+        s.complete_task(project, no, done)
+    })?;
+    state.forget_fired(project, no);
+    Ok(view)
+}
+
+/// The notification's 「完了」 button (`on_action` `done`). Open views refresh on
+/// `project-changed` (reason `bulk`). A failure (a held project, a missing task) brings the
+/// window back and tells the UI (`notification-error { message }`), which shows it.
+pub(crate) fn complete_from_notification(app: &AppHandle, project: &str, no: u32) {
+    let state = app.state::<AppState>();
+    match complete_task_in(app, &state, project, no, true) {
+        Ok(_) => emit_changed(app, &[project.to_string()], ChangeReason::Bulk),
+        Err(e) => {
+            eprintln!("could not complete {project}#{no} from a notification: {e}");
+            crate::window::show_main_window(app);
+            let _ = app.emit(
+                "notification-error",
+                NotificationErrorEvent {
+                    message: format!("通知から完了にできませんでした: {e}"),
+                },
+            );
+        }
+    }
+}
+
+/// Payload of `notification-error`.
+#[derive(Debug, Clone, Serialize)]
+struct NotificationErrorEvent {
+    message: String,
 }
 
 #[tauri::command]
@@ -1106,9 +1329,7 @@ pub async fn complete_task(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    mutate(&app, state.inner(), &[&project], false, |s| {
-        s.complete_task(&project, no, done)
-    })
+    complete_task_in(&app, state.inner(), &project, no, done)
 }
 
 #[tauri::command]
@@ -1118,9 +1339,11 @@ pub async fn delete_task(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    mutate(&app, state.inner(), &[&project], false, |s| {
+    let view = mutate(&app, state.inner(), &[&project], false, |s| {
         s.delete_task(&project, no)
-    })
+    })?;
+    state.forget_fired(&project, no);
+    Ok(view)
 }
 
 #[tauri::command]
@@ -1136,6 +1359,8 @@ pub async fn move_task(
         s.move_task(&project, no, &to_project, to_section.as_deref())
     })?;
     if project != to_project {
+        // The task has a new key in the other project; the old records would never match.
+        state.forget_fired(&project, no);
         emit_changed(&app, &[project, to_project], ChangeReason::Move);
     }
     Ok(MoveOutcome { from, to })
@@ -1259,6 +1484,19 @@ pub async fn delete_label(
     })
 }
 
+/// The tasks whose due date differs between two copies of the store's tasks (`(project, no)`).
+fn moved_due(before: &[Task], after: &[Task]) -> Vec<(String, u32)> {
+    after
+        .iter()
+        .filter(|t| {
+            before
+                .iter()
+                .any(|b| b.project == t.project && b.no == t.no && b.due != t.due)
+        })
+        .map(|t| (t.project.clone(), t.no))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn reschedule_overdue(
     today: String,
@@ -1268,11 +1506,21 @@ pub async fn reschedule_overdue(
 ) -> AppResult<ChangedProjects> {
     let today = parse_ymd(&today)?;
     let due = parse_ymd(&due)?;
-    let changed = mutate(&app, state.inner(), &[], false, |s| {
-        s.reschedule_overdue(today, due)
+    let (changed, moved) = mutate(&app, state.inner(), &[], false, |s| {
+        let before = s.all_tasks();
+        let changed = s.reschedule_overdue(today, due)?;
+        Ok((changed, moved_due(&before, &s.all_tasks())))
     })?;
     for p in &changed {
         state.saver.schedule(app.clone(), p.clone());
+    }
+    // The due dates moved: their reminders can fire again on the new date (仕様 §4.3).
+    if !moved.is_empty() {
+        state.update_fired(|f| {
+            for (project, no) in &moved {
+                f.forget_task(project, *no);
+            }
+        });
     }
     emit_changed(&app, &changed, ChangeReason::Bulk);
     Ok(ChangedProjects {
@@ -1346,8 +1594,42 @@ fn settings_dto(store: &ProjectStore) -> SettingsDto {
     SettingsDto {
         display_name: s.display_name,
         week_start: s.week_start,
+        default_reminder: s.default_reminder,
+        notify_time: s.notify_time.format("%H:%M").to_string(),
+        keep_in_tray: s.keep_in_tray,
+        notifications: s.notifications,
         data_dir: Some(dir_string(store)),
     }
+}
+
+// ---- recurrence ----
+
+pub fn parse_recurrence_in(text: &str) -> RecurrenceDto {
+    let rrule = recurrence_words::parse_recurrence_text(text);
+    let label = rrule
+        .as_deref()
+        .map(|r| recurrence::summarize(r).unwrap_or_else(|| r.to_string()));
+    RecurrenceDto { rrule, label }
+}
+
+/// `valid` is true when the rule computes without error (`next_due` is `Ok`). A finished rule
+/// (COUNT / UNTIL used up, `Ok(None)`) is still well-formed, so it is valid; only an unreadable
+/// rule (`Err`) is not.
+pub fn summarize_recurrence_in(rrule: &str, today: NaiveDate) -> RecurrenceLabelDto {
+    RecurrenceLabelDto {
+        label: recurrence::summarize(rrule).unwrap_or_else(|| rrule.to_string()),
+        valid: recurrence::next_due(rrule, None, None, today).is_ok(),
+    }
+}
+
+#[tauri::command]
+pub async fn parse_recurrence(text: String) -> RecurrenceDto {
+    parse_recurrence_in(&text)
+}
+
+#[tauri::command]
+pub async fn summarize_recurrence(rrule: String) -> RecurrenceLabelDto {
+    summarize_recurrence_in(&rrule, now().date())
 }
 
 #[tauri::command]
@@ -1365,13 +1647,103 @@ pub async fn update_settings(
         // The time zone is not editable yet; keep what the workbook has. `data_dir` is
         // changed with `set_data_dir`, not here.
         let timezone = s.settings().timezone;
+        let notify_time =
+            NaiveTime::parse_from_str(&settings.notify_time, "%H:%M").map_err(|_| {
+                AppError::Invalid {
+                    message: "時刻なしの通知時刻は HH:MM で指定してください".into(),
+                }
+            })?;
         s.update_settings(Settings {
             display_name: settings.display_name,
             week_start: settings.week_start,
             timezone,
+            default_reminder: settings.default_reminder,
+            notify_time,
+            keep_in_tray: settings.keep_in_tray,
+            notifications: settings.notifications,
         })?;
         Ok(settings_dto(s))
     })
+}
+
+// ---- commands: reminders and the window (仕様 §4.4, §6) ----
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PendingRemindersDto {
+    pub items: Vec<ReminderItem>,
+}
+
+/// Local `YYYY-MM-DDTHH:MM` (seconds accepted).
+fn parse_local_datetime(s: &str) -> AppResult<NaiveDateTime> {
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+        .map_err(|_| AppError::Invalid {
+            message: format!("日時を読めません: {s}"),
+        })
+}
+
+/// `"granted" | "denied" | "prompt"` for the settings pane.
+pub fn permission_str(state: PermissionState) -> &'static str {
+    match state {
+        PermissionState::Granted => "granted",
+        PermissionState::Denied => "denied",
+        PermissionState::Prompt | PermissionState::PromptWithRationale => "prompt",
+    }
+}
+
+fn notification_error(e: tauri_plugin_notification::Error) -> AppError {
+    AppError::Io {
+        message: e.to_string(),
+    }
+}
+
+/// The banner's 「後で」: fire the reminder again at `until` (the task's reminder codes do not
+/// change).
+#[tauri::command]
+pub async fn snooze_reminder(
+    project: String,
+    no: u32,
+    code: String,
+    until: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let until = parse_local_datetime(&until)?;
+    state.snooze_fired(&ReminderKey { project, no, code }, until);
+    Ok(())
+}
+
+/// Reminders fired (or summarized at start-up) that the UI has not shown yet. Drains the list
+/// (returns and clears it, and writes `fired.json`). The UI calls this on mount and on every
+/// `reminder-fired` event and shows what it returns (see `ReminderItem`).
+#[tauri::command]
+pub async fn pending_reminders(state: State<'_, AppState>) -> AppResult<PendingRemindersDto> {
+    Ok(PendingRemindersDto {
+        items: state.take_pending_reminders(),
+    })
+}
+
+#[tauri::command]
+pub async fn notification_permission(app: AppHandle) -> AppResult<String> {
+    let s = app
+        .notification()
+        .permission_state()
+        .map_err(notification_error)?;
+    Ok(permission_str(s).to_string())
+}
+
+/// Desktop never prompts: the plugin answers `granted` (the OS settings decide).
+#[tauri::command]
+pub async fn request_notification_permission(app: AppHandle) -> AppResult<String> {
+    let s = app
+        .notification()
+        .request_permission()
+        .map_err(notification_error)?;
+    Ok(permission_str(s).to_string())
+}
+
+#[tauri::command]
+pub async fn show_main_window(app: AppHandle) {
+    crate::window::show_main_window(&app);
 }
 
 #[cfg(test)]
@@ -1392,6 +1764,15 @@ mod tests {
     }
 
     #[test]
+    fn keep_in_tray_resolution() {
+        assert!(resolve_keep_in_tray(false, Some(true)));
+        assert!(!resolve_keep_in_tray(false, Some(false)));
+        assert!(resolve_keep_in_tray(false, None));
+        assert!(!resolve_keep_in_tray(true, Some(true)));
+        assert!(!resolve_keep_in_tray(true, None));
+    }
+
+    #[test]
     fn app_state_dto_serializes_camel_case() {
         let tmp = tempfile::tempdir().unwrap();
         let store = open_store(tmp.path());
@@ -1402,6 +1783,7 @@ mod tests {
         assert_eq!(json["projects"][0]["taskCount"], 0);
         assert!(json.get("warning").is_none());
         assert!(json.get("watchError").is_none());
+        assert!(json.get("trayError").is_none());
         let failed = AppStateDto {
             watch_error: Some("inotify".into()),
             ..state_dto(Some(&store), None)
@@ -1410,11 +1792,254 @@ mod tests {
             serde_json::to_value(failed).unwrap()["watchError"],
             "inotify"
         );
+        let no_tray = AppStateDto {
+            tray_error: Some("no tray".into()),
+            ..state_dto(Some(&store), None)
+        };
+        assert_eq!(
+            serde_json::to_value(no_tray).unwrap()["trayError"],
+            "no tray"
+        );
 
         let first_run = serde_json::to_value(state_dto(None, Some("w".into()))).unwrap();
         assert!(first_run["dataDir"].is_null());
         assert_eq!(first_run["projects"], serde_json::json!([]));
         assert_eq!(first_run["warning"], "w");
+    }
+
+    #[test]
+    fn only_date_time_and_reminder_patches_forget_fired() {
+        let patch =
+            |json: serde_json::Value| -> TaskPatch { serde_json::from_value(json).unwrap() };
+        assert!(!patch_touches_reminders(&patch(
+            serde_json::json!({ "title": "x" })
+        )));
+        assert!(!patch_touches_reminders(&patch(
+            serde_json::json!({ "progress": 50 })
+        )));
+        assert!(patch_touches_reminders(&patch(
+            serde_json::json!({ "due": null })
+        )));
+        assert!(patch_touches_reminders(&patch(
+            serde_json::json!({ "dueTime": "15:00" })
+        )));
+        assert!(patch_touches_reminders(&patch(
+            serde_json::json!({ "reminders": [] })
+        )));
+    }
+
+    #[test]
+    fn fired_lives_next_to_settings_json_and_survives_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let at = d("2026-10-13").and_hms_opt(9, 0, 0).unwrap();
+        let key = ReminderKey {
+            project: "p".into(),
+            no: 1,
+            code: "-0m".into(),
+        };
+        let state = AppState::new(tmp.path().to_path_buf());
+        state.lock_fired().mark(&key, at);
+        state.snooze_fired(&key, at + chrono::Duration::minutes(10));
+        assert!(tmp.path().join(Fired::FILE).exists());
+        let again = AppState::new(tmp.path().to_path_buf());
+        assert_eq!(
+            again.lock_fired().snooze_until(&key, at),
+            Some(at + chrono::Duration::minutes(10))
+        );
+        again.forget_fired("p", 1);
+        assert!(
+            AppState::new(tmp.path().to_path_buf())
+                .lock_fired()
+                .entries
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn opening_another_folder_resets_and_persists_fired() {
+        let app_dir = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let key = ReminderKey {
+            project: INBOX.into(),
+            no: 1,
+            code: "-0m".into(),
+        };
+        let state = AppState::new(app_dir.path().to_path_buf());
+        {
+            let mut fired = state.lock_fired();
+            fired.bind(Path::new("/some/other/folder"));
+            fired.mark(&key, d("2026-10-13").and_hms_opt(9, 0, 0).unwrap());
+        }
+        *state.store.lock().unwrap() = Some(open_store(data.path()));
+        state.bind_fired_to_store();
+        let reloaded = AppState::new(app_dir.path().to_path_buf());
+        let fired = reloaded.lock_fired();
+        assert!(fired.entries.is_empty());
+        assert_eq!(fired.data_dir.as_deref(), Some(data.path()));
+    }
+
+    #[test]
+    fn rescheduling_reports_moved_tasks_and_snoozes_bind_to_the_current_fire_time() {
+        let data = tempfile::tempdir().unwrap();
+        let app_dir = tempfile::tempdir().unwrap();
+        let mut store = open_store(data.path());
+        let input: TaskInput = serde_json::from_value(serde_json::json!({
+            "title": "t",
+            "due": "2026-10-13",
+            "dueTime": "15:00",
+            "reminders": ["-0m"],
+        }))
+        .unwrap();
+        let no = store
+            .add_task(INBOX, input)
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|t| t.title == "t")
+            .unwrap()
+            .no;
+        let key = ReminderKey {
+            project: INBOX.into(),
+            no,
+            code: "-0m".into(),
+        };
+        let state = AppState::new(app_dir.path().to_path_buf());
+        *state.store.lock().unwrap() = Some(store);
+        let at = |s: &str| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M").unwrap();
+
+        // The banner's 後で for a reminder with no record ties the snooze to 10/13 15:00.
+        state.snooze_fired(&key, at("2026-10-13T15:10"));
+        assert_eq!(
+            state
+                .lock_fired()
+                .snooze_until(&key, at("2026-10-13T15:00")),
+            Some(at("2026-10-13T15:10"))
+        );
+
+        let moved = {
+            let mut guard = state.store.lock().unwrap();
+            let s = guard.as_mut().unwrap();
+            let before = s.all_tasks();
+            s.reschedule_overdue(d("2026-10-14"), d("2026-10-14"))
+                .unwrap();
+            moved_due(&before, &s.all_tasks())
+        };
+        assert_eq!(moved, vec![(INBOX.to_string(), no)]);
+        // Unchanged tasks are not reported.
+        let tasks = state.store.lock().unwrap().as_ref().unwrap().all_tasks();
+        assert!(moved_due(&tasks, &tasks).is_empty());
+    }
+
+    #[test]
+    fn pending_reminders_are_taken_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(tmp.path().to_path_buf());
+        let item = ReminderItem {
+            project: "p".into(),
+            no: 1,
+            title: "t".into(),
+            code: "-0m".into(),
+            at: d("2026-10-13").and_hms_opt(9, 0, 0).unwrap(),
+            due: Some(d("2026-10-13")),
+            due_time: None,
+        };
+        state.lock_fired().push_pending([item.clone()]);
+        let json = serde_json::to_value(PendingRemindersDto {
+            items: state.take_pending_reminders(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "items": [{
+                "project": "p", "no": 1, "title": "t", "code": "-0m",
+                "at": "2026-10-13T09:00", "due": "2026-10-13", "dueTime": null
+            }] })
+        );
+        assert!(state.take_pending_reminders().is_empty());
+        assert!(
+            AppState::new(tmp.path().to_path_buf())
+                .lock_fired()
+                .pending
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn snooze_until_parses_minutes_and_seconds() {
+        assert_eq!(
+            parse_local_datetime("2026-10-13T09:10").unwrap(),
+            d("2026-10-13").and_hms_opt(9, 10, 0).unwrap()
+        );
+        assert_eq!(
+            parse_local_datetime("2026-10-13T09:10:30").unwrap(),
+            d("2026-10-13").and_hms_opt(9, 10, 30).unwrap()
+        );
+        assert!(parse_local_datetime("10分後").is_err());
+        assert_eq!(permission_str(PermissionState::Granted), "granted");
+        assert_eq!(permission_str(PermissionState::Denied), "denied");
+        assert_eq!(
+            permission_str(PermissionState::PromptWithRationale),
+            "prompt"
+        );
+    }
+
+    #[test]
+    fn parse_recurrence_dto() {
+        let r = parse_recurrence_in("毎週月曜");
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO"));
+        assert_eq!(r.label.as_deref(), Some("毎週月曜"));
+        let r = parse_recurrence_in("あした");
+        assert_eq!(r.rrule, None);
+        assert_eq!(r.label, None);
+        let s = summarize_recurrence_in("FREQ=WEEKLY;BYDAY=MO", d("2026-10-15"));
+        assert!(s.valid);
+        assert_eq!(s.label, "毎週月曜");
+        let s = summarize_recurrence_in("FREQ=SOMETIMES", d("2026-10-15"));
+        assert!(!s.valid);
+        assert_eq!(s.label, "FREQ=SOMETIMES");
+        // A finished rule (COUNT used up) is still well-formed.
+        let s = summarize_recurrence_in("FREQ=DAILY;COUNT=1", d("2026-10-15"));
+        assert!(s.valid);
+    }
+
+    #[test]
+    fn quick_add_with_a_recurrence_starts_on_the_first_occurrence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        // 2026-10-14 is a Wednesday: the next Tuesday is 10-20.
+        let out =
+            quick_add_in(&mut store, "ゴミ出し 毎週火曜 8:00", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-20")));
+        let t = &out.view.tasks[0];
+        assert_eq!(t.title, "ゴミ出し");
+        assert_eq!(t.due, Some(d("2026-10-20")));
+        assert_eq!(t.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+        assert_eq!(t.rrule_label.as_deref(), Some("毎週火曜"));
+        // When today matches, the first occurrence is today.
+        let out = quick_add_in(&mut store, "朝会 毎週火曜", INBOX, d("2026-10-13")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-13")));
+        // Rules without a weekday / day anchor start today.
+        let out = quick_add_in(&mut store, "週報 毎週", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-14")));
+        let out = quick_add_in(&mut store, "家賃 毎月", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-14")));
+        // An explicit date wins over the first occurrence.
+        let out = quick_add_in(&mut store, "x 毎週火曜 明日", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-15")));
+        assert_eq!(out.parsed.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+    }
+
+    #[test]
+    fn settings_dto_carries_the_phase3_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = open_store(tmp.path());
+        let dto = settings_dto(&store);
+        assert_eq!(dto.default_reminder.as_deref(), Some("-0m"));
+        assert_eq!(dto.notify_time, "09:00");
+        assert!(dto.keep_in_tray && dto.notifications);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["notifyTime"], "09:00");
+        assert_eq!(json["defaultReminder"], "-0m");
     }
 
     #[test]

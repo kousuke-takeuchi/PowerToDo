@@ -3,6 +3,7 @@ use serde::Serialize;
 
 use super::dates::{parse_date_word, parse_time_word, resolve};
 use super::model::{Priority, serde_time};
+use super::recurrence_words::parse_recurrence;
 
 /// A recognised token. Offsets are `char` indices into the original text (not bytes).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -18,6 +19,7 @@ pub struct Span {
 pub enum TokenKind {
     Date,
     Time,
+    Recurrence,
     Priority,
     Project,
     Label,
@@ -30,6 +32,9 @@ pub struct QuickAddResult {
     pub due: Option<NaiveDate>,
     #[serde(with = "serde_time::option")]
     pub due_time: Option<NaiveTime>,
+    /// Recurrence from words like 毎週火曜 / every 2 weeks. Does not set `due`; the caller
+    /// decides the first due date.
+    pub rrule: Option<String>,
     pub priority: Option<Priority>,
     pub project: Option<String>,
     pub labels: Vec<String>,
@@ -108,6 +113,12 @@ fn date_at(tokens: &[Token], i: usize, today: NaiveDate) -> Option<(NaiveDate, u
     resolve(rel, today).map(|date| (date, 1))
 }
 
+/// A recurrence phrase starting at `tokens[i]`: its RRULE and how many tokens it used.
+fn recurrence_at(tokens: &[Token], i: usize) -> Option<(String, usize)> {
+    let words: Vec<&str> = tokens[i..].iter().map(|t| t.text.as_str()).collect();
+    parse_recurrence(&words)
+}
+
 pub fn parse(
     text: &str,
     today: NaiveDate,
@@ -119,13 +130,15 @@ pub fn parse(
         title: String::new(),
         due: None,
         due_time: None,
+        rrule: None,
         priority: None,
         project: None,
         labels: Vec::new(),
         spans: Vec::new(),
     };
     let mut title_words: Vec<&str> = Vec::new();
-    // True when the previous token was an accepted date, so a time word may follow.
+    // True when the previous token was an accepted date or recurrence, so a time word may
+    // follow.
     let mut after_date = false;
     let mut i = 0;
     while i < tokens.len() {
@@ -154,6 +167,14 @@ pub fn parse(
                 result.labels.push(name.to_string());
             }
             result.spans.push(span(tok.end, TokenKind::Label));
+        } else if let Some((rrule, used)) = recurrence_at(&tokens, i) {
+            let last = &tokens[i + used - 1];
+            result.rrule = Some(rrule);
+            result.spans.push(span(last.end, TokenKind::Recurrence));
+            // A time may follow (ゴミ出し 毎週火曜 8:00).
+            after_date = true;
+            i += used;
+            continue;
         } else if let Some(p) = parse_priority(&tok.text) {
             result.priority = Some(p);
             result.spans.push(span(tok.end, TokenKind::Priority));
@@ -485,5 +506,28 @@ mod tests {
         assert_eq!(v["spans"][0]["kind"], "date");
         let none = serde_json::to_value(run("x")).unwrap();
         assert!(none["dueTime"].is_null());
+    }
+
+    #[test]
+    fn recurrence_words_are_parsed_and_removed_from_the_title() {
+        let r = run("ゴミ出し 毎週火曜 8:00");
+        assert_eq!(r.title, "ゴミ出し");
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+        // Parsing leaves `due` empty; the caller fills in the first occurrence.
+        assert_eq!(r.due, None);
+        // A time word right after the recurrence is read as the due time.
+        assert_eq!(r.due_time, Some(t(8, 0)));
+        assert!(r.spans.iter().any(|s| s.kind == TokenKind::Recurrence));
+        let r = run("report every 2 weeks p1");
+        assert_eq!(r.title, "report");
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;INTERVAL=2"));
+        assert_eq!(r.priority, Some(Priority(1)));
+    }
+
+    #[test]
+    fn project_and_label_tokens_are_never_recurrence() {
+        let r = run("#every @every x");
+        assert_eq!(r.rrule, None);
+        assert_eq!(r.labels, strs(&["every"]));
     }
 }

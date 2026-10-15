@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
 import type { SettingsDto } from "../types/model";
-import type { AccountPaneProps, DataPaneProps } from "../views/SettingsPanes";
+import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "../views/SettingsPanes";
+
+/** `trayError` は呼び出し側 (AppStateDto) が足す。 */
+export type SettingsPanes = {
+  data: DataPaneProps;
+  account: AccountPaneProps;
+  notifications: Omit<NotificationsPaneProps, "trayError">;
+  datetime: DateTimePaneProps;
+};
 
 type Options = {
   /** データフォルダを変更し終えたとき (プロジェクト一覧などを読み直すのは呼び出し側)。 */
@@ -12,34 +20,55 @@ type Options = {
 };
 
 /**
- * 設定ダイアログの「データ」「アカウント」ペインに渡す値とハンドラ。`open` になるたびに `settings` を読み直し、
+ * 設定ダイアログの「データ」「アカウント」「通知」「日付と時刻」ペインに渡す値とハンドラ。`open` になるたびに `settings` を読み直し、
  * エラー / busy を消す。閉じた後に返ってきた結果では state を更新しない (変更が済んだことの通知は呼び出し側に届ける)。
  * データフォルダの変更は pick_folder -> 確認 -> set_data_dir の順で、既存のファイルは移動しない。
  */
-export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNameChanged }: Options): { data: DataPaneProps; account: AccountPaneProps } {
+export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNameChanged }: Options): SettingsPanes {
   const [settings, setSettings] = useState<SettingsDto | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [notifBusy, setNotifBusy] = useState(false);
+  const [notifError, setNotifError] = useState<string | null>(null);
+  const [dateBusy, setDateBusy] = useState(false);
+  const [dateError, setDateError] = useState<string | null>(null);
   /** 開くたび / 閉じるたびに進める。古い世代の結果は捨てる。 */
   const gen = useRef(0);
+  /** 最新の settings と、保存を一つずつ流す列 (続けて変えても前の保存の結果に上書きされない)。 */
+  const latest = useRef<SettingsDto | null>(null);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  /** ペインごとの保存中の数 (キーは busy の setState)。全部終わったときだけ busy を下ろす。 */
+  const inflight = useRef(new Map<(v: boolean) => void, number>());
 
   useEffect(() => {
     if (!open) return;
     const g = ++gen.current;
     setSettings(null);
+    latest.current = null;
+    inflight.current.clear();
+    setNotifBusy(false);
+    setNotifError(null);
+    setDateBusy(false);
+    setDateError(null);
     setDataBusy(false);
     setDataError(null);
     setAccountBusy(false);
     setAccountError(null);
     api
       .settings()
-      .then((s) => g === gen.current && setSettings(s))
+      .then((s) => {
+        if (g !== gen.current) return;
+        latest.current = s;
+        setSettings(s);
+      })
       .catch((e) => {
         if (g !== gen.current) return;
         setDataError(errorMessage(e));
         setAccountError(errorMessage(e));
+        setNotifError(errorMessage(e));
+        setDateError(errorMessage(e));
       });
     return () => {
       gen.current++;
@@ -76,24 +105,52 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
     }
   };
 
-  const onSaveDisplayName = async (name: string): Promise<boolean> => {
-    if (!settings || accountBusy) return false;
+  /** 変更した項目だけを、その時点の最新の settings に重ねて保存する。結果は世代が同じときだけ反映する。 */
+  const save = (
+    patch: Partial<SettingsDto>,
+    setBusy: (v: boolean) => void,
+    setError: (v: string | null) => void,
+  ): Promise<SettingsDto | null> => {
     const g = gen.current;
     const alive = () => g === gen.current;
-    setAccountBusy(true);
-    setAccountError(null);
-    try {
-      const next = await api.updateSettings({ ...settings, displayName: name });
-      if (alive()) setSettings(next);
-      onDisplayNameChanged(next.displayName);
-      return true;
-    } catch (e) {
-      if (alive()) setAccountError(errorMessage(e));
-      return false;
-    } finally {
-      if (alive()) setAccountBusy(false);
-    }
+    const count = (d: number) => {
+      const n = (inflight.current.get(setBusy) ?? 0) + d;
+      inflight.current.set(setBusy, n);
+      setBusy(n > 0);
+    };
+    count(1);
+    setError(null);
+    const run = async (): Promise<SettingsDto | null> => {
+      const cur = latest.current;
+      if (!alive() || !cur) return null;
+      try {
+        const next = await api.updateSettings({ ...cur, ...patch });
+        if (alive()) {
+          latest.current = next;
+          setSettings(next);
+        }
+        return next;
+      } catch (e) {
+        if (alive()) setError(errorMessage(e));
+        return null;
+      }
+    };
+    const result = queue.current.then(run);
+    queue.current = result.then(() => undefined);
+    return result.finally(() => {
+      if (alive()) count(-1);
+    });
   };
+
+  const onSaveDisplayName = async (name: string): Promise<boolean> => {
+    if (!settings || accountBusy) return false;
+    const next = await save({ displayName: name }, setAccountBusy, setAccountError);
+    if (next) onDisplayNameChanged(next.displayName);
+    return !!next;
+  };
+
+  const saveNotif = (patch: Partial<SettingsDto>) => void save(patch, setNotifBusy, setNotifError);
+  const saveDate = (patch: Partial<SettingsDto>) => save(patch, setDateBusy, setDateError);
 
   return {
     data: {
@@ -109,6 +166,26 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
       onSaveDisplayName: settings ? onSaveDisplayName : undefined,
       busy: accountBusy,
       error: accountError,
+    },
+    notifications: {
+      enabled: settings?.notifications ?? true,
+      onToggle: (v) => saveNotif({ notifications: v }),
+      keepInTray: settings?.keepInTray ?? true,
+      onToggleKeepInTray: (v) => saveNotif({ keepInTray: v }),
+      loading: !settings,
+      busy: notifBusy,
+      error: notifError,
+    },
+    datetime: {
+      defaultReminder: settings?.defaultReminder ?? null,
+      onChangeDefaultReminder: (v) => void saveDate({ defaultReminder: v }),
+      notifyTime: settings?.notifyTime ?? "09:00",
+      onChangeNotifyTime: async (v) => !!(await saveDate({ notifyTime: v })),
+      weekStart: settings?.weekStart ?? "mon",
+      onChangeWeekStart: (v) => void saveDate({ weekStart: v }),
+      loading: !settings,
+      busy: dateBusy,
+      error: dateError,
     },
   };
 }

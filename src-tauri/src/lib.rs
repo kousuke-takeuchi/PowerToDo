@@ -2,7 +2,10 @@ pub mod commands;
 pub mod domain;
 pub mod error;
 pub mod platform;
+pub mod scheduler;
 pub mod store;
+pub mod tray;
+pub mod window;
 
 use tauri::{Emitter, Manager};
 
@@ -61,36 +64,35 @@ fn app_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri:
     Ok(menu)
 }
 
-/// Our Quit item: quit at once unless something is held; then the UI asks (same event as a
-/// blocked `ExitRequested`) and calls `quit` itself.
-#[cfg(target_os = "macos")]
-fn on_quit_menu(handle: &tauri::AppHandle) {
-    let held = handle
-        .try_state::<AppState>()
-        .map(|state| state.held_projects())
-        .unwrap_or_default();
-    if held.is_empty() {
-        handle.exit(0);
-    } else {
-        let _ = handle.emit("exit-blocked", held);
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
+    // One app per user (仕様 §9): with close-to-tray, launching the app again while it runs
+    // hidden would start a second scheduler and a second saver on the same xlsx files. The
+    // second launch exits and the running one shows its window instead. Must be the first
+    // plugin (the plugin's README: plugins run in the order they are added).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        window::show_main_window(app);
+    }));
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {
-            on_quit_menu(handle);
+            window::request_quit(handle);
         }
     });
     let app = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let dir = platform::app_data_dir(app.handle())?;
             app.manage(AppState::new(dir));
+            // Buttons and the action handler first: notifications shown before a handler
+            // exists report no clicks.
+            scheduler::register(app.handle());
+            scheduler::start(app.handle().clone());
+            tray::setup(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -117,6 +119,8 @@ pub fn run() {
             commands::reorder_tasks,
             commands::quick_add,
             commands::parse_quick_add,
+            commands::parse_recurrence,
+            commands::summarize_recurrence,
             commands::settings,
             commands::update_settings,
             commands::today_view,
@@ -133,6 +137,11 @@ pub fn run() {
             commands::resolve_external_change,
             commands::held_projects,
             commands::quit,
+            commands::snooze_reminder,
+            commands::pending_reminders,
+            commands::notification_permission,
+            commands::request_notification_permission,
+            commands::show_main_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -152,20 +161,20 @@ pub fn run() {
                 }
             }
         }
-        // Closing the last window ends the app only after its window is gone, when there is no
-        // page left to ask. Keep the window while something is held; same event for the UI.
+        // Closing the main window hides it (kept in the tray / Dock) unless the user turned that
+        // off; then it ends the app, after asking about held projects while the page can still
+        // ask. See `tray::close_policy`.
         tauri::RunEvent::WindowEvent {
+            label,
             event: tauri::WindowEvent::CloseRequested { api, .. },
             ..
-        } => {
-            if let Some(state) = handle.try_state::<AppState>() {
-                let held = state.held_projects();
-                if !held.is_empty() {
-                    api.prevent_close();
-                    let _ = handle.emit("exit-blocked", held);
-                }
-            }
-        }
+        } if label == window::MAIN_WINDOW => tray::on_close_requested(handle, &api),
+        // Dock icon click while no window is visible (macOS).
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows: false,
+            ..
+        } => window::show_main_window(handle),
         // Edits are written 1 s after the last change; do not lose the last second on quit.
         // Edits that cannot be written to their own file (held, or the file changed on disk)
         // go to a recovery copy in `archive/` (in `<app data>/recovery/` when `archive/` cannot

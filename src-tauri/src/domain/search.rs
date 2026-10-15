@@ -128,6 +128,7 @@ mod tests {
             parent_no: None,
             labels: labels.iter().map(|s| s.to_string()).collect(),
             rrule: None,
+            rrule_label: None,
             reminders: vec![],
             order: 0,
             created_at: NaiveDateTime::default(),

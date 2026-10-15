@@ -7,7 +7,7 @@
 //! | ラベル | 名前 / 色 / 並び順 |
 //! | フィルター | 名前 / クエリ / 並び順 (written empty; not read yet) |
 //! | 祝日 | 日付 / 名称 |
-//! | 設定 | キー / 値 (表示名, 週の開始, タイムゾーン) |
+//! | 設定 | キー / 値 (表示名, 週の開始, タイムゾーン, 既定リマインダー, 時刻なしの通知時刻, 閉じたときトレイに残す, 通知) |
 //!
 //! Colors are the CSS variable strings the UI uses (e.g. `var(--color-priority-2)`); お気に入り
 //! and 受信トレイ are TRUE / FALSE cells. Sheets and columns are located by name, so a missing
@@ -23,14 +23,14 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use calamine::{Data, Reader, Xlsx, open_workbook};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use rust_xlsxwriter::{Workbook, Worksheet, XlsxError};
 use serde::{Deserialize, Serialize};
 
 use super::cells::{self, RawCell};
 use super::project_book::{persist_workbook, write_raw, xlsx_err, xlsx_write_err};
 use super::style;
-use crate::domain::{INBOX, Label, Project};
+use crate::domain::{INBOX, Label, Project, reminders};
 use crate::error::AppResult;
 
 pub const COMMON_FILE: &str = "_PowerToDo.xlsx";
@@ -49,6 +49,13 @@ const SETTINGS_HEADERS: &[&str] = &["キー", "値"];
 const KEY_DISPLAY_NAME: &str = "表示名";
 const KEY_WEEK_START: &str = "週の開始";
 const KEY_TIMEZONE: &str = "タイムゾーン";
+const KEY_DEFAULT_REMINDER: &str = "既定リマインダー";
+const KEY_NOTIFY_TIME: &str = "時刻なしの通知時刻";
+const KEY_KEEP_IN_TRAY: &str = "閉じたときトレイに残す";
+const KEY_NOTIFICATIONS: &str = "通知";
+const NONE_WORD: &str = "なし";
+const YES: &str = "はい";
+const NO: &str = "いいえ";
 
 const DEFAULT_COLOR: &str = "var(--color-text-muted)";
 
@@ -60,6 +67,12 @@ pub struct Settings {
     pub week_start: String,
     /// IANA name, or `"local"` (the OS time zone).
     pub timezone: String,
+    /// Reminder code added to tasks that get a time; `None` = no default.
+    pub default_reminder: Option<String>,
+    /// When tasks with only a date notify.
+    pub notify_time: NaiveTime,
+    pub keep_in_tray: bool,
+    pub notifications: bool,
 }
 
 impl Settings {
@@ -75,6 +88,10 @@ impl Settings {
             display_name: name,
             week_start: "mon".into(),
             timezone: "local".into(),
+            default_reminder: Some("-0m".into()),
+            notify_time: NaiveTime::from_hms_opt(9, 0, 0).expect("valid time"),
+            keep_in_tray: true,
+            notifications: true,
         }
     }
 }
@@ -238,6 +255,20 @@ fn date_of(d: &Data) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(cells::text(d).trim(), "%Y-%m-%d").ok()
 }
 
+/// A time of day from a settings cell: text `H:MM` / `HH:MM`, or an Excel time (what Excel
+/// stores when the user types 8:30 into the cell).
+fn time_of(d: &Data) -> Option<NaiveTime> {
+    match d {
+        Data::String(s) => NaiveTime::parse_from_str(s.trim(), "%H:%M").ok(),
+        Data::DateTime(_) => cells::datetime(d).ok().flatten().map(|dt| dt.time()),
+        Data::Float(f) if (0.0..1.0).contains(f) => {
+            let secs = (f * 86_400.0).round() as u32;
+            NaiveTime::from_num_seconds_from_midnight_opt(secs % 86_400, 0)
+        }
+        _ => None,
+    }
+}
+
 /// Reads the common workbook. Not an xlsx -> `Corrupt`; no such file -> `Io`.
 pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
     let mut wb: Xlsx<_> = open_workbook(path).map_err(xlsx_err)?;
@@ -319,7 +350,25 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
                 settings.week_start = value;
             }
             KEY_TIMEZONE if !value.is_empty() => settings.timezone = value,
-            KEY_DISPLAY_NAME | KEY_WEEK_START | KEY_TIMEZONE => {}
+            KEY_DEFAULT_REMINDER if value == NONE_WORD => settings.default_reminder = None,
+            KEY_DEFAULT_REMINDER
+                if reminders::parse_code(&value).is_some() && !reminders::is_absolute(&value) =>
+            {
+                settings.default_reminder = Some(value);
+            }
+            KEY_NOTIFY_TIME => {
+                if let Some(t) = time_of(&r[1]) {
+                    settings.notify_time = t;
+                }
+            }
+            KEY_KEEP_IN_TRAY if matches!(value.as_str(), YES | NO) => {
+                settings.keep_in_tray = value == YES;
+            }
+            KEY_NOTIFICATIONS if matches!(value.as_str(), YES | NO) => {
+                settings.notifications = value == YES;
+            }
+            KEY_DISPLAY_NAME | KEY_WEEK_START | KEY_TIMEZONE | KEY_DEFAULT_REMINDER
+            | KEY_KEEP_IN_TRAY | KEY_NOTIFICATIONS => {}
             _ if extra_settings.iter().any(|(k, _)| *k == key) => {}
             _ => extra_settings.push((key, value)),
         }
@@ -457,10 +506,19 @@ fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
     let ws = wb.add_worksheet();
     write_header(ws, SHEET_SETTINGS, SETTINGS_HEADERS)?;
     let s = &book.settings;
+    let notify_time = s.notify_time.format("%H:%M").to_string();
+    let yes_no = |b: bool| if b { YES } else { NO };
     let known = [
         (KEY_DISPLAY_NAME, s.display_name.as_str()),
         (KEY_WEEK_START, s.week_start.as_str()),
         (KEY_TIMEZONE, s.timezone.as_str()),
+        (
+            KEY_DEFAULT_REMINDER,
+            s.default_reminder.as_deref().unwrap_or(NONE_WORD),
+        ),
+        (KEY_NOTIFY_TIME, notify_time.as_str()),
+        (KEY_KEEP_IN_TRAY, yes_no(s.keep_in_tray)),
+        (KEY_NOTIFICATIONS, yes_no(s.notifications)),
     ];
     let extra = book
         .extra_settings
@@ -528,6 +586,7 @@ mod tests {
                 display_name: "はなこ".into(),
                 week_start: "sun".into(),
                 timezone: "Asia/Tokyo".into(),
+                ..Settings::default_for_user()
             },
             ..CommonBook::new_default()
         }
@@ -722,5 +781,103 @@ mod tests {
         );
         let rows = sheet_text(&out, "設定");
         assert!(rows.contains(&vec!["通知音".to_string(), "オン".to_string()]));
+    }
+
+    #[test]
+    fn phase3_settings_round_trip_and_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(COMMON_FILE);
+        let mut book = CommonBook::new_default();
+        assert_eq!(book.settings.default_reminder.as_deref(), Some("-0m"));
+        assert_eq!(
+            book.settings.notify_time,
+            NaiveTime::from_hms_opt(9, 0, 0).unwrap()
+        );
+        assert!(book.settings.keep_in_tray);
+        assert!(book.settings.notifications);
+        book.settings.default_reminder = None;
+        book.settings.notify_time = NaiveTime::from_hms_opt(8, 30, 0).unwrap();
+        book.settings.keep_in_tray = false;
+        book.settings.notifications = false;
+        write_common_book(&path, &book).unwrap();
+        let back = read_common_book(&path).unwrap();
+        assert_eq!(back.settings, book.settings);
+        assert!(back.extra_settings.is_empty());
+    }
+
+    #[test]
+    fn invalid_phase3_settings_fall_back_to_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        for (i, (k, v)) in [
+            ("既定リマインダー", "-5m"),
+            ("時刻なしの通知時刻", "25:00"),
+            ("閉じたときトレイに残す", "たぶん"),
+            ("通知", "maybe"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            ws.write_string(i as u32 + 1, 0, k).unwrap();
+            ws.write_string(i as u32 + 1, 1, v).unwrap();
+        }
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(b.settings.default_reminder.as_deref(), Some("-0m"));
+        assert_eq!(
+            b.settings.notify_time,
+            NaiveTime::from_hms_opt(9, 0, 0).unwrap()
+        );
+        assert!(b.settings.keep_in_tray && b.settings.notifications);
+        assert!(b.extra_settings.is_empty());
+    }
+
+    #[test]
+    fn notify_time_reads_an_excel_time_cell_and_short_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "時刻なしの通知時刻").unwrap();
+        let fmt = rust_xlsxwriter::Format::new().set_num_format("hh:mm");
+        let t = rust_xlsxwriter::ExcelDateTime::from_hms(8, 30, 0.0).unwrap();
+        ws.write_datetime_with_format(1, 1, &t, &fmt).unwrap();
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(
+            b.settings.notify_time,
+            NaiveTime::from_hms_opt(8, 30, 0).unwrap()
+        );
+        assert!(b.extra_settings.is_empty());
+
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "時刻なしの通知時刻").unwrap();
+        ws.write_string(1, 1, "8:30").unwrap();
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(
+            b.settings.notify_time,
+            NaiveTime::from_hms_opt(8, 30, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn absolute_default_reminder_in_the_sheet_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "既定リマインダー").unwrap();
+        ws.write_string(1, 1, "2026-10-13T07:00").unwrap();
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(b.settings.default_reminder.as_deref(), Some("-0m"));
     }
 }
