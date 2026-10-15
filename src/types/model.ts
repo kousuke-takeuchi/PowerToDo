@@ -48,6 +48,23 @@ export interface RecurrenceDto { rrule: string | null; label: string | null; }
 /** `summarize_recurrence`: label is the RRULE itself when it has no short form; valid = still yields a due date. */
 export interface RecurrenceLabelDto { label: string; valid: boolean; }
 
+/**
+ * A fired reminder (`reminder-fired` / `pending_reminders`). `at` is when it fired (local "YYYY-MM-DDTHH:MM"; the snooze time
+ * for a snoozed one). `code` is the reminder code ("-0m", "-1d", "2026-10-20T09:00", …).
+ */
+export interface ReminderItem {
+  project: string;
+  no: number;
+  title: string;
+  code: string;
+  at: string;
+  due: string | null;
+  dueTime: string | null;
+}
+export interface PendingRemindersDto { items: ReminderItem[]; }
+/** OS notification permission. Desktop always reports "granted"; whether banners show is up to the OS settings. */
+export type NotificationPermission = "granted" | "denied" | "prompt";
+
 export type AppErrorKind = "not_found" | "invalid" | "io" | "locked" | "corrupt" | "unsaved";
 export interface AppError { kind: AppErrorKind; message: string; }
 

@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import type { ChangeReason, ProjectsChanged, SaveStatus } from "../types/model";
+import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus } from "../types/model";
 
 /**
  * `listen` is async; the returned function unsubscribes even if it is called before the
@@ -59,4 +59,19 @@ export function onExitBlocked(cb: (projects: string[]) => void): () => void {
 /** `watch-failed`: the data-folder watcher could not start (the payload is the reason). */
 export function onWatchFailed(cb: (message: string) => void): () => void {
   return subscribe<string>("watch-failed", cb);
+}
+
+/** `reminder-fired`: reminders that fired now (and, at start-up, the ones missed while the app was not running). Sent even when notifications are off. */
+export function onReminderFired(cb: (items: ReminderItem[]) => void): () => void {
+  return subscribe<{ items: ReminderItem[] }>("reminder-fired", (p) => cb(p.items));
+}
+
+/** `open-task`: a reminder notification was clicked; open that task's details. */
+export function onOpenTask(cb: (project: string, no: number) => void): () => void {
+  return subscribe<{ project: string; no: number }>("open-task", (p) => cb(p.project, p.no));
+}
+
+/** `window-shown`: the hidden window came back (notification, tray, Dock); refresh what may have changed. */
+export function onWindowShown(cb: () => void): () => void {
+  return subscribe<Record<string, never>>("window-shown", () => cb());
 }

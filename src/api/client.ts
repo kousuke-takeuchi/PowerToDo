@@ -10,6 +10,8 @@ import type {
   LabelViewDto,
   LabelsDto,
   MoveOutcome,
+  NotificationPermission,
+  PendingRemindersDto,
   ProjectSummary,
   ProjectView,
   QuickAddOutcome,
@@ -88,6 +90,15 @@ export const api = {
   rescheduleOverdue: (today: string, due: string) => invoke<ChangedProjects>("reschedule_overdue", { today, due }),
   search: (query: string, includeDone: boolean, limit = 50) => invoke<SearchDto>("search", { query, includeDone, limit }),
   counts: (today: string) => invoke<CountsDto>("counts", { today }),
+
+  /** Fire the reminder again at `until` (local "YYYY-MM-DDTHH:MM"); the task's reminder codes do not change. */
+  snoozeReminder: (project: string, no: number, code: string, until: string) =>
+    invoke<null>("snooze_reminder", { project, no, code, until }),
+  /** Reminders fired (or summarized at start-up) that the UI has not shown yet; taking them clears the list. */
+  pendingReminders: () => invoke<PendingRemindersDto>("pending_reminders"),
+  notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
+  requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),
+  showMainWindow: () => invoke<null>("show_main_window"),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];

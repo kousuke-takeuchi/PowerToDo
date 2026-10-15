@@ -2,7 +2,9 @@ pub mod commands;
 pub mod domain;
 pub mod error;
 pub mod platform;
+pub mod scheduler;
 pub mod store;
+pub mod window;
 
 use tauri::{Emitter, Manager};
 
@@ -88,9 +90,14 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let dir = platform::app_data_dir(app.handle())?;
             app.manage(AppState::new(dir));
+            // Buttons and the action handler first: notifications shown before a handler
+            // exists report no clicks.
+            scheduler::register(app.handle());
+            scheduler::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -135,6 +142,11 @@ pub fn run() {
             commands::resolve_external_change,
             commands::held_projects,
             commands::quit,
+            commands::snooze_reminder,
+            commands::pending_reminders,
+            commands::notification_permission,
+            commands::request_notification_permission,
+            commands::show_main_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
