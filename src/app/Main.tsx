@@ -52,6 +52,8 @@ export function Main({ app }: { app: AppStateDto }) {
   const [summaries, setSummaries] = useState<ProjectSummary[]>(app.projects);
   const [displayName, setDisplayName] = useState<string | undefined>();
   const [openNo, setOpenNo] = useState<number | null>(null);
+  // 通知 / 帯から開いたタスク: プロジェクトが読み込まれたら、そのタスクがあるか一度だけ確かめる
+  const [pendingOpen, setPendingOpen] = useState<{ project: string; no: number } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -135,6 +137,7 @@ export function Main({ app }: { app: AppStateDto }) {
     (target: Nav) => {
       setNav(target);
       setOpenNo(null);
+      setPendingOpen(null);
       setDrawer(false);
       clearFocus();
     },
@@ -151,7 +154,7 @@ export function Main({ app }: { app: AppStateDto }) {
     refreshSummaries,
   });
   /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
-  const openTaskAt = (project: string, no: number) => {
+  const openTaskAt = (project: string, no: number, verify = false) => {
     // 消えたプロジェクト (通知を受けてから削除 / 改名した) は何も開かない
     if (project !== app.inbox && !summaries.some((s) => s.name === project)) {
       setFlash({ text: "タスクが見つかりません", tone: "error" });
@@ -159,22 +162,40 @@ export function Main({ app }: { app: AppStateDto }) {
     }
     navigate(project === app.inbox ? { kind: "inbox" } : { kind: "project", name: project });
     setOpenNo(no);
+    if (verify) setPendingOpen({ project, no });
   };
+  useEffect(() => {
+    if (!pendingOpen) return;
+    if (p.error && current === pendingOpen.project) {
+      setPendingOpen(null);
+      return;
+    }
+    if (!view || view.project.name !== pendingOpen.project || current !== pendingOpen.project) return;
+    setPendingOpen(null);
+    if (!view.tasks.some((t) => t.no === pendingOpen.no)) {
+      setOpenNo(null);
+      setFlash({ text: "タスクが見つかりません", tone: "error" });
+    }
+  }, [pendingOpen, view, current, p.error]);
   const openCross = (t: Task) => openTaskAt(t.project, t.no);
   const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current, setFlash });
 
   // リマインダーの帯と、通知 / トレイ由来のイベント (open-task / open-quick-add / window-shown)。
   const reminders = useReminders({
     onError: showError,
+    onInfo: (text) => setFlash({ text, tone: "info" }),
     complete: (project, no) => cross.setDone(project, no, true),
-    openTask: openTaskAt,
+    openTask: (project, no) => openTaskAt(project, no, true),
   });
   // イベントの購読は 1 回だけにして、呼ぶ先は毎描画の最新を参照する
-  const wired = useRef({ openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending });
-  wired.current = { openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending };
+  const wired = useRef({ openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
+  wired.current = { openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask };
   useEffect(() => {
     const offs = [
-      onOpenTask((project, no) => wired.current.openTaskAt(project, no)),
+      onOpenTask((project, no) => {
+        wired.current.removeTask(project, no); // 通知から開いたタスクの帯は要らない
+        wired.current.openTaskAt(project, no, true);
+      }),
       onOpenQuickAdd(() => wired.current.openQuickAdd()),
       // 隠れている間に変わった分 (Excel での編集、発火したリマインダー) を取り直す
       onWindowShown(() => {
@@ -246,6 +267,7 @@ export function Main({ app }: { app: AppStateDto }) {
   const dataDirChanged = () => {
     clearSaveErrors();
     readFailures.clear();
+    reminders.clear(); // 古いフォルダのタスクへの帯 (受信トレイは新しいフォルダにもある) で別のタスクを触らない
     setFlash(null);
     // set_data_dir の中で出た watch-failed のフラッシュは上で消えるので、状態を聞き直して出す
     void api
@@ -494,7 +516,7 @@ export function Main({ app }: { app: AppStateDto }) {
         onSnooze: (item, until) => void reminders.snooze(item, until),
         onOpen: reminders.open,
         onDismiss: reminders.dismiss,
-        onDismissAll: reminders.dismissAll,
+        onDismissAll: reminders.clear,
       }}
       saveErrors={saveErrors}
       onRetrySave={(project) => void api.retrySave(project).catch(() => undefined)}

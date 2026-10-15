@@ -168,6 +168,7 @@ export function ReminderBanner({ items, onDone, onSnooze, onOpen, onDismiss, onD
     <div
       role="region"
       aria-label="リマインダー"
+      aria-live="polite"
       style={{
         padding: "10px 24px",
         background: "var(--color-accent-soft)",
