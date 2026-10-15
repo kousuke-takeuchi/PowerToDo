@@ -30,7 +30,7 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   onMutated.current = opts.onMutated;
   const onWarnings = useRef(opts.onWarnings);
   onWarnings.current = opts.onWarnings;
-  // project/no of completions in flight: a second toggle of the same task is ignored until the first answers
+  // project/no of completions (done=true) in flight: a second completion of the same task is ignored until the first answers
   // (a recurring task would otherwise advance twice).
   const completing = useRef(new Set<string>());
 
@@ -128,6 +128,8 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   const updateTask = useCallback((no: number, patch: TaskPatch) => mutate(() => api.updateTask(name, no, patch)), [mutate, name]);
   const completeTask = useCallback(
     (no: number, done: boolean): Promise<boolean> => {
+      // Only a repeated completion is dropped; an undo (done=false) goes through the queue as before.
+      if (!done) return mutate(() => api.completeTask(name, no, done));
       const key = `${name}/${no}`;
       if (completing.current.has(key)) return Promise.resolve(false);
       completing.current.add(key);

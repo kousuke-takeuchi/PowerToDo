@@ -533,15 +533,7 @@ export function Main({ app }: { app: AppStateDto }) {
           setSearchOpen(false);
           openCross(h.task);
         }}
-        onToggleDone={(h, done) =>
-          void api
-            .completeTask(h.task.project, h.task.no, done)
-            .then(() => {
-              search.refresh();
-              refreshAll();
-            })
-            .catch(showError)
-        }
+        onToggleDone={(h, done) => void cross.toggleDone(h.task, done).then(() => search.refresh())}
         onClose={() => setSearchOpen(false)}
         today={today}
         busy={search.busy}

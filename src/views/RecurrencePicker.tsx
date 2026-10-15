@@ -38,6 +38,9 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse }: Recur
   const [rruleLabel, setRruleLabel] = useState<string | undefined>(value ? valueLabel : undefined);
   const [typed, setTyped] = useState<string | null>(null);
   const [preview, setPreview] = useState<RecurrenceParse | null>(null);
+  // IME の変換中は解釈しない (確定してから)。
+  const [composing, setComposing] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
   const current = rrule ? (rruleLabel ?? recurrenceLabel(rrule)) : "";
 
   // 古い応答は捨てる: 呼ぶたびに番号を進め、返ってきたときの番号が最新のものだけ採用する。
@@ -59,14 +62,14 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse }: Recur
   useEffect(() => {
     seq.current += 1;
     setPreview(null);
-    if (!parseRef.current || typed === null || typed.trim() === "") return;
-    const id = window.setTimeout(() => void run(typed).then((r) => r && setPreview(r)), PARSE_DELAY_MS);
+    if (!parseRef.current || typed === null || typed.trim() === "" || composing) return;
+    timer.current = window.setTimeout(() => void run(typed).then((r) => r && setPreview(r)), PARSE_DELAY_MS);
     return () => {
-      window.clearTimeout(id);
+      window.clearTimeout(timer.current);
       seq.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typed]);
+  }, [typed, composing]);
   const select = (r: string, label?: string) => {
     setRrule(r);
     setRruleLabel(label);
@@ -75,6 +78,7 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse }: Recur
   const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!onParse || e.key !== "Enter" || isImeKey(e) || typed === null || typed.trim() === "") return;
     e.preventDefault();
+    window.clearTimeout(timer.current);
     void run(typed).then((r) => {
       if (r?.rrule) select(r.rrule, r.label ?? undefined);
       else if (r) setPreview(r);
@@ -82,7 +86,14 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse }: Recur
   };
   return (
     <PopoverShell label="繰り返し" gap="var(--space-2)">
-      <TextField value={typed ?? current} placeholder="繰り返しを入力" onChange={setTyped} onKeyDown={onParse ? onEnter : undefined} />
+      <TextField
+        value={typed ?? current}
+        placeholder="繰り返しを入力"
+        onChange={setTyped}
+        onKeyDown={onParse ? onEnter : undefined}
+        onCompositionStart={onParse ? () => setComposing(true) : undefined}
+        onCompositionEnd={onParse ? () => setComposing(false) : undefined}
+      />
       {preview && (
         <div
           aria-live="polite"
@@ -118,7 +129,7 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse }: Recur
         >
           解除
         </Button>
-        <Button variant="primary" onClick={() => onChange?.(rrule)}>
+        <Button variant="primary" onClick={() => onChange?.(preview?.rrule ?? rrule)}>
           適用
         </Button>
       </div>
