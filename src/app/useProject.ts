@@ -6,6 +6,8 @@ import type { ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch
 export type UseProjectOptions = {
   /** Called after every successful command (the sidebar refreshes its counts here). */
   onMutated?: () => void;
+  /** Called whenever a command's result carries `warnings` (e.g. an unreadable recurrence rule was ignored). */
+  onWarnings?: (warnings: string[]) => void;
 };
 
 /**
@@ -26,6 +28,11 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const onMutated = useRef(opts.onMutated);
   onMutated.current = opts.onMutated;
+  const onWarnings = useRef(opts.onWarnings);
+  onWarnings.current = opts.onWarnings;
+  // project/no of completions in flight: a second toggle of the same task is ignored until the first answers
+  // (a recurring task would otherwise advance twice).
+  const completing = useRef(new Set<string>());
 
   const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
     const p = queue.current.then(job);
@@ -97,6 +104,7 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
             setNotice(null);
           }
           onMutated.current?.();
+          if (v.warnings?.length) onWarnings.current?.(v.warnings);
           return true;
         } catch (e) {
           if (g === gen.current) setNotice(errorMessage(e));
@@ -118,7 +126,15 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   );
   const addTask = useCallback((input: TaskInput) => mutate(() => api.addTask(name, input)), [mutate, name]);
   const updateTask = useCallback((no: number, patch: TaskPatch) => mutate(() => api.updateTask(name, no, patch)), [mutate, name]);
-  const completeTask = useCallback((no: number, done: boolean) => mutate(() => api.completeTask(name, no, done)), [mutate, name]);
+  const completeTask = useCallback(
+    (no: number, done: boolean): Promise<boolean> => {
+      const key = `${name}/${no}`;
+      if (completing.current.has(key)) return Promise.resolve(false);
+      completing.current.add(key);
+      return mutate(() => api.completeTask(name, no, done)).finally(() => completing.current.delete(key));
+    },
+    [mutate, name],
+  );
   const deleteTask = useCallback((no: number) => mutate(() => api.deleteTask(name, no)), [mutate, name]);
   const addSection = useCallback((section: string) => mutate(() => api.addSection(name, section)), [mutate, name]);
   const renameSection = useCallback((from: string, to: string) => mutate(() => api.renameSection(name, from, to)), [mutate, name]);
@@ -138,6 +154,7 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
           setError(null);
         }
         onMutated.current?.();
+        if (out.view.warnings?.length) onWarnings.current?.(out.view.warnings);
         return out;
       });
     },

@@ -12,12 +12,14 @@ export function useCrossViews({
   today,
   inbox,
   showError,
+  showWarnings,
   refreshSummaries,
 }: {
   nav: Nav;
   today: string;
   inbox: string;
   showError: (e: unknown) => void;
+  showWarnings?: (warnings: string[]) => void;
   refreshSummaries: () => Promise<void>;
 }) {
   const inactive = () => Promise.resolve(null);
@@ -47,6 +49,6 @@ export function useCrossViews({
     labelData.refresh();
     void refreshSummaries(); // 件数 (今日 / プロジェクト) も更新する
   };
-  const cross = useCrossActions(refreshAll, showError, inbox);
+  const cross = useCrossActions(refreshAll, showError, inbox, showWarnings);
   return { todayData, upcomingData, lastUpcoming, upFrom, setUpFrom, upDays, setUpDays, labelData, labelsData, cross, refreshAll, labelName };
 }

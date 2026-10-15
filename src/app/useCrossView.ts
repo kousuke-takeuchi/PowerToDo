@@ -60,7 +60,9 @@ export function useCrossView<T>(fetch: () => Promise<T>, deps: unknown[]) {
 }
 
 /** Task operations from a cross-project list: each calls the Phase 1 command for `t.project`, then refreshes. */
-export function useCrossActions(refresh: () => void, onError: (e: unknown) => void, inbox: string) {
+export function useCrossActions(refresh: () => void, onError: (e: unknown) => void, inbox: string, onWarnings?: (warnings: string[]) => void) {
+  // project/no of completions in flight: a second toggle of the same task is ignored until the first answers.
+  const completing = useRef(new Set<string>());
   const wrap = useCallback(
     async (call: () => Promise<unknown>) => {
       try {
@@ -74,7 +76,15 @@ export function useCrossActions(refresh: () => void, onError: (e: unknown) => vo
     [refresh, onError],
   );
   return {
-    toggleDone: (t: Task, done: boolean) => wrap(() => api.completeTask(t.project, t.no, done)),
+    toggleDone: (t: Task, done: boolean) => {
+      const key = `${t.project}/${t.no}`;
+      if (completing.current.has(key)) return Promise.resolve();
+      completing.current.add(key);
+      return wrap(async () => {
+        const v = await api.completeTask(t.project, t.no, done);
+        if (v.warnings?.length) onWarnings?.(v.warnings);
+      }).finally(() => completing.current.delete(key));
+    },
     setPriority: (t: Task, priority: 1 | 2 | 3 | 4) => wrap(() => api.updateTask(t.project, t.no, { priority })),
     setDue: (t: Task, due: string | null) => wrap(() => api.updateTask(t.project, t.no, { due, dueTime: due ? undefined : null })),
     remove: (t: Task) => wrap(() => api.deleteTask(t.project, t.no)),

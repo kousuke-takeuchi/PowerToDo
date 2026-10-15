@@ -148,6 +148,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
         done={isDone(t)}
         priority={t.priority}
         date={date?.(t)}
+        recurring={onToggleDone && t.rrule ? true : undefined}
         project={t.project}
         focused={focusedKey === taskKey(t)}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}

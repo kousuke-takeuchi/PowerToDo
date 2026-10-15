@@ -1,9 +1,22 @@
-import { useState } from "react";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
+import { isImeKey } from "../app/keys";
 import { Button } from "../components/Button";
 import { TextField } from "../components/TextField";
 import { PopRow, PopoverShell } from "./PopoverShell";
 
-export type RecurrencePickerProps = { value?: string; onChange?: (rrule?: string) => void };
+export type RecurrenceParse = { rrule: string | null; label: string | null };
+
+export type RecurrencePickerProps = {
+  value?: string;
+  onChange?: (rrule?: string) => void;
+  /** 入力欄の初期表示 (value の要約)。無ければ recurrenceLabel(value)。 */
+  valueLabel?: string;
+  /** 渡すと、入力が 300ms 止まったところで呼んで解釈結果をプレビューし、Enter で選択する。無ければ従来どおり。 */
+  onParse?: (text: string) => Promise<RecurrenceParse>;
+};
+
+const PARSE_DELAY_MS = 300;
 
 export const RECURRENCE_PRESETS = [
   { label: "毎日", short: "毎日", rrule: "FREQ=DAILY" },
@@ -20,21 +33,69 @@ export function recurrenceLabel(rrule?: string): string {
 }
 
 /** D-07b: 繰り返しポップオーバーの中身。選択は内部状態、適用 / 解除は onChange で通知する。 */
-export function RecurrencePicker({ value, onChange }: RecurrencePickerProps) {
+export function RecurrencePicker({ value, onChange, valueLabel, onParse }: RecurrencePickerProps) {
   const [rrule, setRrule] = useState<string | undefined>(value);
+  const [rruleLabel, setRruleLabel] = useState<string | undefined>(value ? valueLabel : undefined);
   const [typed, setTyped] = useState<string | null>(null);
-  const current = rrule ? recurrenceLabel(rrule) : "";
+  const [preview, setPreview] = useState<RecurrenceParse | null>(null);
+  const current = rrule ? (rruleLabel ?? recurrenceLabel(rrule)) : "";
+
+  // 古い応答は捨てる: 呼ぶたびに番号を進め、返ってきたときの番号が最新のものだけ採用する。
+  const seq = useRef(0);
+  const parseRef = useRef(onParse);
+  parseRef.current = onParse;
+  const run = async (text: string): Promise<RecurrenceParse | null> => {
+    const parse = parseRef.current;
+    if (!parse) return null;
+    const n = ++seq.current;
+    let r: RecurrenceParse;
+    try {
+      r = await parse(text);
+    } catch {
+      r = { rrule: null, label: null };
+    }
+    return n === seq.current ? r : null;
+  };
+  useEffect(() => {
+    seq.current += 1;
+    setPreview(null);
+    if (!parseRef.current || typed === null || typed.trim() === "") return;
+    const id = window.setTimeout(() => void run(typed).then((r) => r && setPreview(r)), PARSE_DELAY_MS);
+    return () => {
+      window.clearTimeout(id);
+      seq.current += 1;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typed]);
+  const select = (r: string, label?: string) => {
+    setRrule(r);
+    setRruleLabel(label);
+    setTyped(null);
+  };
+  const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!onParse || e.key !== "Enter" || isImeKey(e) || typed === null || typed.trim() === "") return;
+    e.preventDefault();
+    void run(typed).then((r) => {
+      if (r?.rrule) select(r.rrule, r.label ?? undefined);
+      else if (r) setPreview(r);
+    });
+  };
   return (
     <PopoverShell label="繰り返し" gap="var(--space-2)">
-      <TextField value={typed ?? current} placeholder="繰り返しを入力" onChange={setTyped} />
+      <TextField value={typed ?? current} placeholder="繰り返しを入力" onChange={setTyped} onKeyDown={onParse ? onEnter : undefined} />
+      {preview && (
+        <div
+          aria-live="polite"
+          style={{ fontSize: 12, lineHeight: "17px", color: preview.rrule ? "var(--color-text-secondary)" : "var(--color-text-muted)" }}
+        >
+          {preview.rrule ? `→ ${preview.label ?? preview.rrule}` : "解釈できません"}
+        </div>
+      )}
       {RECURRENCE_PRESETS.map((p) => (
         <PopRow
           key={p.rrule}
           selected={p.rrule === rrule}
-          onClick={() => {
-            setRrule(p.rrule);
-            setTyped(null);
-          }}
+          onClick={() => select(p.rrule)}
         >
           <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
             <span style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>{p.label}</span>
@@ -50,6 +111,7 @@ export function RecurrencePicker({ value, onChange }: RecurrencePickerProps) {
           variant="secondary"
           onClick={() => {
             setRrule(undefined);
+            setRruleLabel(undefined);
             setTyped(null);
             onChange?.(undefined);
           }}

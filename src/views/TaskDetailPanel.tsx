@@ -42,6 +42,8 @@ export type TaskDetailPanelProps = {
   onAddSubtask?: (title: string) => void;
   /** サブタスク行のチェック。渡すと完了状態は subtask.progress から決まる。 */
   onToggleSubtask?: (no: number, done: boolean) => void;
+  /** 繰り返しの自然言語入力の解釈 (api.parseRecurrence)。渡すと繰り返しピッカーが入力のプレビューと Enter 選択を持つ。 */
+  onParseRecurrence?: (text: string) => Promise<{ rrule: string | null; label: string | null }>;
   /** 「今日」の基準日 YYYY-MM-DD (期限ラベルと日付ポップオーバー)。既定は Storybook の固定日。 */
   today?: string;
 };
@@ -139,6 +141,7 @@ export function TaskDetailPanel({
   onDelete,
   onAddSubtask,
   onToggleSubtask,
+  onParseRecurrence,
   today = TODAY,
 }: TaskDetailPanelProps) {
   const editable = onChange !== undefined;
@@ -160,6 +163,8 @@ export function TaskDetailPanel({
   const dueNow = editable ? task.due : due;
   const timeNow = editable ? task.dueTime : time;
   const rruleNow = editable ? task.rrule : rrule;
+  // 編集モードでは Rust が埋めた要約 (読めなければ RRULE 文字列) を優先する。
+  const rruleText = editable && rruleNow && task.rruleLabel ? task.rruleLabel : recurrenceLabel(rruleNow);
   const remindersNow = editable ? task.reminders : reminders;
   const subDone = (t: Task) => (onToggleSubtask ? t.progress === 100 : sub.isDone(t));
   // 失敗したら入力欄を task の値 (そのときの最新) に戻す。成功なら task が変わり、上の effect が入力欄を合わせる。
@@ -319,7 +324,7 @@ export function TaskDetailPanel({
         />
         <PropRow icon={<Tag size={16} />} name="ラベル" value={task.labels.map((l) => `@${l}`).join(" ") || "なし"} />
         <PropRow icon={<Bell size={16} />} name="リマインダー" value={reminderSummary(remindersNow)} onClick={(row) => toggle("reminder", row)} expanded={popover === "reminder"} />
-        <PropRow icon={<Repeat size={16} />} name="繰り返し" value={recurrenceLabel(rruleNow)} onClick={(row) => toggle("recurrence", row)} expanded={popover === "recurrence"} />
+        <PropRow icon={<Repeat size={16} />} name="繰り返し" value={rruleText} onClick={(row) => toggle("recurrence", row)} expanded={popover === "recurrence"} />
       </div>
 
       <div>
@@ -407,7 +412,7 @@ export function TaskDetailPanel({
                 value={dueNow}
                 time={timeNow}
                 today={today}
-                recurrenceLabel={recurrenceLabel(rruleNow)}
+                recurrenceLabel={rruleText}
                 onChange={(v) => {
                   if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null });
                   else {
@@ -421,6 +426,8 @@ export function TaskDetailPanel({
             {popover === "recurrence" && (
               <RecurrencePicker
                 value={rruleNow}
+                valueLabel={rruleText}
+                onParse={onParseRecurrence}
                 onChange={(r) => {
                   if (onChange) onChange({ rrule: r ?? null });
                   else setRrule(r);

@@ -1,7 +1,7 @@
 import type React from "react";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree } from "lucide-react";
+import { ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree, Repeat } from "lucide-react";
 import { Checkbox } from "./Checkbox";
 import { DateChip } from "./DateChip";
 import { LabelChip } from "./LabelChip";
@@ -15,6 +15,8 @@ export type TaskRowProps = {
   done: boolean;
   priority: 1 | 2 | 3 | 4;
   date?: { label: string; tone: "success" | "danger" | "muted" };
+  /** 繰り返しのタスク: 期限チップの右に小さな繰り返しアイコンを出す。 */
+  recurring?: boolean;
   labels?: string[];
   moreCount?: number;
   project?: string;
@@ -127,9 +129,14 @@ export function TaskRow(p: TaskRowProps) {
         {p.description && (
           <div style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-secondary)" }}>{p.description}</div>
         )}
-        {(p.date || p.labels?.length || p.moreCount || p.project || p.subtasks) && (
+        {(p.date || p.recurring || p.labels?.length || p.moreCount || p.project || p.subtasks) && (
           <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "nowrap" }}>
             {p.date && <DateChip label={p.date.label} tone={p.date.tone} />}
+            {p.recurring && (
+              <span role="img" aria-label="繰り返し" style={{ display: "inline-flex", color: "var(--color-text-secondary)" }}>
+                <Repeat size={12} />
+              </span>
+            )}
             {p.labels?.map((l) => (
               <LabelChip key={l} name={l} />
             ))}

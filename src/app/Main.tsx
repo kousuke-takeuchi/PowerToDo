@@ -94,7 +94,9 @@ export function Main({ app }: { app: AppStateDto }) {
   // 横断ビュー (useProject は受信トレイを読み続ける)。
   const projectScreen = nav.kind === "inbox" || nav.kind === "project";
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
-  const p = useProject(current, { onMutated: refreshSummaries });
+  // 操作の通知 (例: 読めない繰り返しがあったので通常の完了にした) は、エラーと同じフラッシュで出す。
+  const showWarnings = useCallback((w: string[]) => setFlash({ text: w.join(" / "), tone: "error" }), []);
+  const p = useProject(current, { onMutated: refreshSummaries, onWarnings: showWarnings });
   const view = p.view;
   const { reduced, t } = useMotionTiming();
 
@@ -144,6 +146,7 @@ export function Main({ app }: { app: AppStateDto }) {
     today,
     inbox: app.inbox,
     showError,
+    showWarnings,
     refreshSummaries,
   });
   /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
@@ -307,6 +310,7 @@ export function Main({ app }: { app: AppStateDto }) {
           setOpenNo(null);
           void p.deleteTask(openTask.no);
         }}
+        onParseRecurrence={api.parseRecurrence}
         onAddSubtask={(title) => void p.addSubtask(openTask.no, title)}
         onToggleSubtask={(no, done) => void p.completeTask(no, done)}
       />
