@@ -40,12 +40,15 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   /** 最新の settings と、保存を一つずつ流す列 (続けて変えても前の保存の結果に上書きされない)。 */
   const latest = useRef<SettingsDto | null>(null);
   const queue = useRef<Promise<void>>(Promise.resolve());
+  /** ペインごとの保存中の数 (キーは busy の setState)。全部終わったときだけ busy を下ろす。 */
+  const inflight = useRef(new Map<(v: boolean) => void, number>());
 
   useEffect(() => {
     if (!open) return;
     const g = ++gen.current;
     setSettings(null);
     latest.current = null;
+    inflight.current.clear();
     setPermission(null);
     setNotifBusy(false);
     setNotifError(null);
@@ -116,7 +119,12 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   ): Promise<SettingsDto | null> => {
     const g = gen.current;
     const alive = () => g === gen.current;
-    setBusy(true);
+    const count = (d: number) => {
+      const n = (inflight.current.get(setBusy) ?? 0) + d;
+      inflight.current.set(setBusy, n);
+      setBusy(n > 0);
+    };
+    count(1);
     setError(null);
     const run = async (): Promise<SettingsDto | null> => {
       const cur = latest.current;
@@ -136,7 +144,7 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
     const result = queue.current.then(run);
     queue.current = result.then(() => undefined);
     return result.finally(() => {
-      if (alive()) setBusy(false);
+      if (alive()) count(-1);
     });
   };
 
@@ -157,7 +165,7 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   };
 
   const saveNotif = (patch: Partial<SettingsDto>) => void save(patch, setNotifBusy, setNotifError);
-  const saveDate = (patch: Partial<SettingsDto>) => void save(patch, setDateBusy, setDateError);
+  const saveDate = (patch: Partial<SettingsDto>) => save(patch, setDateBusy, setDateError);
 
   return {
     data: {
@@ -181,16 +189,18 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
       onRequestPermission,
       keepInTray: settings?.keepInTray ?? true,
       onToggleKeepInTray: (v) => saveNotif({ keepInTray: v }),
+      loading: !settings,
       busy: notifBusy,
       error: notifError,
     },
     datetime: {
       defaultReminder: settings?.defaultReminder ?? null,
-      onChangeDefaultReminder: (v) => saveDate({ defaultReminder: v }),
+      onChangeDefaultReminder: (v) => void saveDate({ defaultReminder: v }),
       notifyTime: settings?.notifyTime ?? "09:00",
-      onChangeNotifyTime: (v) => saveDate({ notifyTime: v }),
+      onChangeNotifyTime: async (v) => !!(await saveDate({ notifyTime: v })),
       weekStart: settings?.weekStart ?? "mon",
-      onChangeWeekStart: (v) => saveDate({ weekStart: v }),
+      onChangeWeekStart: (v) => void saveDate({ weekStart: v }),
+      loading: !settings,
       busy: dateBusy,
       error: dateError,
     },
