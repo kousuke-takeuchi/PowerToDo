@@ -2,6 +2,8 @@
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::commands::AppState;
+
 /// Label of the only window (`tauri.conf.json`).
 pub const MAIN_WINDOW: &str = "main";
 
@@ -23,4 +25,19 @@ pub fn show_main_window(app: &AppHandle) {
         None => eprintln!("the main window is gone"),
     }
     let _ = app.emit("window-shown", serde_json::json!({}));
+}
+
+/// The one place that decides whether the app may quit now: with held projects the UI has to
+/// ask first (`exit-blocked`, then the `quit` command), otherwise exit at once. Used by the
+/// macOS Quit item, the tray's 「終了」 and a window close that is not hidden.
+pub fn request_quit(app: &AppHandle) {
+    let held = app
+        .try_state::<AppState>()
+        .map(|state| state.held_projects())
+        .unwrap_or_default();
+    if held.is_empty() {
+        app.exit(0);
+    } else {
+        let _ = app.emit("exit-blocked", held);
+    }
 }

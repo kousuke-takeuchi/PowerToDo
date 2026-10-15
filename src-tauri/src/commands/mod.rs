@@ -48,6 +48,9 @@ pub struct AppState {
     /// because the failure happens in `app_state` / `set_data_dir`, before the main screen
     /// listens for `watch-failed`; the screen reads it from `AppStateDto::watch_error`.
     pub watch_error: Mutex<Option<String>>,
+    /// Why the tray icon could not be created (set once at start), `None` while it exists. The
+    /// settings pane notes it; with no tray, closing the window must not hide it.
+    pub tray_error: Mutex<Option<String>>,
     /// `fired.json` (仕様 §4.3): reminders already fired, snoozes, and the ones the UI has not
     /// taken yet. Loaded once at start; written by the scheduler and the reminder commands.
     pub fired: Mutex<Fired>,
@@ -77,6 +80,7 @@ impl AppState {
             watcher: Mutex::new(None),
             saving: Mutex::new(BTreeSet::new()),
             watch_error: Mutex::new(None),
+            tray_error: Mutex::new(None),
             fired: Mutex::new(Fired::load(&app_data_dir)),
             app_data_dir,
         }
@@ -180,6 +184,26 @@ impl AppState {
             .clone()
     }
 
+    /// Why the tray icon could not be created (see [`AppState::tray_error`]).
+    pub fn tray_error(&self) -> Option<String> {
+        self.tray_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Whether closing the window hides it (the 「トレイに常駐」 setting). `true` while no data
+    /// folder is open (the default setting), `false` when there is no tray to bring it back from.
+    pub fn keep_in_tray(&self) -> bool {
+        if self.tray_error().is_some() {
+            return false;
+        }
+        self.lock_store()
+            .as_ref()
+            .map(|store| store.settings().keep_in_tray)
+            .unwrap_or(true)
+    }
+
     /// Writes everything still dirty (used when the app quits). Held projects, and dirty ones
     /// whose file changed on disk, are not written to their own file: that would overwrite the
     /// external change the user has not decided about. Their in-memory workbook goes to a
@@ -278,6 +302,9 @@ pub struct AppStateDto {
     /// Watching the data folder could not start (仕様 §7); the main screen shows it once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watch_error: Option<String>,
+    /// The tray icon could not be created; the settings pane notes that closing quits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tray_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -446,6 +473,7 @@ fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateD
         inbox: INBOX.to_string(),
         warning,
         watch_error: None,
+        tray_error: None,
     }
 }
 
@@ -953,6 +981,7 @@ pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     }
     Ok(AppStateDto {
         watch_error: state.watch_error(),
+        tray_error: state.tray_error(),
         ..dto
     })
 }
@@ -969,6 +998,7 @@ pub async fn set_data_dir(
     start_watching(&app, state.inner());
     Ok(AppStateDto {
         watch_error: state.watch_error(),
+        tray_error: state.tray_error(),
         ..dto
     })
 }
@@ -1685,6 +1715,7 @@ mod tests {
         assert_eq!(json["projects"][0]["taskCount"], 0);
         assert!(json.get("warning").is_none());
         assert!(json.get("watchError").is_none());
+        assert!(json.get("trayError").is_none());
         let failed = AppStateDto {
             watch_error: Some("inotify".into()),
             ..state_dto(Some(&store), None)
@@ -1692,6 +1723,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(failed).unwrap()["watchError"],
             "inotify"
+        );
+        let no_tray = AppStateDto {
+            tray_error: Some("no tray".into()),
+            ..state_dto(Some(&store), None)
+        };
+        assert_eq!(
+            serde_json::to_value(no_tray).unwrap()["trayError"],
+            "no tray"
         );
 
         let first_run = serde_json::to_value(state_dto(None, Some("w".into()))).unwrap();

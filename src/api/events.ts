@@ -75,3 +75,8 @@ export function onOpenTask(cb: (project: string, no: number) => void): () => voi
 export function onWindowShown(cb: () => void): () => void {
   return subscribe<Record<string, never>>("window-shown", () => cb());
 }
+
+/** `open-quick-add`: the tray's 「タスクを追加…」; open the quick-add bar. */
+export function onOpenQuickAdd(cb: () => void): () => void {
+  return subscribe<Record<string, never>>("open-quick-add", () => cb());
+}

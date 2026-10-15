@@ -75,7 +75,7 @@ export type SaveState = "saving" | "saved" | "error";
 export interface SaveStatus { project: string; state: SaveState; message?: string; }
 
 /** `watchError`: watching the data folder could not start (the reason). Shown once by the main screen. */
-export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; }
+export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; trayError?: string; }
 export interface SettingsDto {
   displayName: string;
   weekStart: "mon" | "sun";
