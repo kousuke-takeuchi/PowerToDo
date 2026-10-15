@@ -43,6 +43,10 @@ export interface Span { start: number; end: number; kind: TokenKind; }
 export interface QuickAddResult { title: string; due: string | null; dueTime: string | null; rrule: string | null; priority: Priority | null; project: string | null; labels: string[]; spans: Span[]; }
 export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; }
 export interface MoveOutcome { from: ProjectView; to: ProjectView; }
+/** `parse_recurrence`: rrule and label are both null when the text is not a recurrence. */
+export interface RecurrenceDto { rrule: string | null; label: string | null; }
+/** `summarize_recurrence`: label is the RRULE itself when it has no short form; valid = still yields a due date. */
+export interface RecurrenceLabelDto { label: string; valid: boolean; }
 
 export type AppErrorKind = "not_found" | "invalid" | "io" | "locked" | "corrupt" | "unsaved";
 export interface AppError { kind: AppErrorKind; message: string; }

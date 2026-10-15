@@ -117,6 +117,8 @@ pub fn run() {
             commands::reorder_tasks,
             commands::quick_add,
             commands::parse_quick_add,
+            commands::parse_recurrence,
+            commands::summarize_recurrence,
             commands::settings,
             commands::update_settings,
             commands::today_view,

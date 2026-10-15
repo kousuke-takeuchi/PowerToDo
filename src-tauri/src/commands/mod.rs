@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::domain::model::{INBOX, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
 use crate::domain::recurrence;
+use crate::domain::recurrence_words;
 use crate::domain::search;
 use crate::domain::search::Hit;
 use crate::domain::views::{self, DayGroup};
@@ -312,6 +313,23 @@ pub struct SearchDto {
 pub struct CountsDto {
     pub today: u32,
     pub labels: BTreeMap<String, u32>,
+}
+
+/// `parse_recurrence`: the RRULE for a recurrence phrase (`null` when the text is not one) and
+/// its short label (the RRULE itself when no short form exists).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceDto {
+    pub rrule: Option<String>,
+    pub label: Option<String>,
+}
+
+/// `summarize_recurrence`: the label for a stored RRULE, and whether it still yields a due date.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceLabelDto {
+    pub label: String,
+    pub valid: bool,
 }
 
 fn parse_ymd(s: &str) -> AppResult<NaiveDate> {
@@ -1373,6 +1391,35 @@ fn settings_dto(store: &ProjectStore) -> SettingsDto {
     }
 }
 
+// ---- recurrence ----
+
+pub fn parse_recurrence_in(text: &str) -> RecurrenceDto {
+    let rrule = recurrence_words::parse_recurrence_text(text);
+    let label = rrule
+        .as_deref()
+        .map(|r| recurrence::summarize(r).unwrap_or_else(|| r.to_string()));
+    RecurrenceDto { rrule, label }
+}
+
+/// `valid` asks whether the rule still yields an occurrence after `today`; `Err` (an unreadable
+/// rule) and `Ok(None)` (COUNT / UNTIL used up) both count as not valid.
+pub fn summarize_recurrence_in(rrule: &str, today: NaiveDate) -> RecurrenceLabelDto {
+    RecurrenceLabelDto {
+        label: recurrence::summarize(rrule).unwrap_or_else(|| rrule.to_string()),
+        valid: matches!(recurrence::next_due(rrule, None, None, today), Ok(Some(_))),
+    }
+}
+
+#[tauri::command]
+pub async fn parse_recurrence(text: String) -> RecurrenceDto {
+    parse_recurrence_in(&text)
+}
+
+#[tauri::command]
+pub async fn summarize_recurrence(rrule: String) -> RecurrenceLabelDto {
+    summarize_recurrence_in(&rrule, now().date())
+}
+
 #[tauri::command]
 pub async fn settings(state: State<'_, AppState>) -> AppResult<SettingsDto> {
     with_store(state.inner(), |s| Ok(settings_dto(s)))
@@ -1448,6 +1495,22 @@ mod tests {
         assert!(first_run["dataDir"].is_null());
         assert_eq!(first_run["projects"], serde_json::json!([]));
         assert_eq!(first_run["warning"], "w");
+    }
+
+    #[test]
+    fn parse_recurrence_dto() {
+        let r = parse_recurrence_in("毎週月曜");
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO"));
+        assert_eq!(r.label.as_deref(), Some("毎週月曜"));
+        let r = parse_recurrence_in("あした");
+        assert_eq!(r.rrule, None);
+        assert_eq!(r.label, None);
+        let s = summarize_recurrence_in("FREQ=WEEKLY;BYDAY=MO", d("2026-10-15"));
+        assert!(s.valid);
+        assert_eq!(s.label, "毎週月曜");
+        let s = summarize_recurrence_in("FREQ=SOMETIMES", d("2026-10-15"));
+        assert!(!s.valid);
+        assert_eq!(s.label, "FREQ=SOMETIMES");
     }
 
     #[test]

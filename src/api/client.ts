@@ -14,6 +14,8 @@ import type {
   ProjectView,
   QuickAddOutcome,
   QuickAddResult,
+  RecurrenceDto,
+  RecurrenceLabelDto,
   SearchDto,
   SettingsDto,
   TaskInput,
@@ -68,6 +70,8 @@ export const api = {
 
   quickAdd: (text: string, defaultProject: string) => invoke<QuickAddOutcome>("quick_add", { text, defaultProject }),
   parseQuickAdd: (text: string) => invoke<QuickAddResult>("parse_quick_add", { text }),
+  parseRecurrence: (text: string) => invoke<RecurrenceDto>("parse_recurrence", { text }),
+  summarizeRecurrence: (rrule: string) => invoke<RecurrenceLabelDto>("summarize_recurrence", { rrule }),
 
   settings: () => invoke<SettingsDto>("settings"),
   updateSettings: (settings: SettingsDto) => invoke<SettingsDto>("update_settings", { settings }),
