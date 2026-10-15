@@ -19,7 +19,7 @@
 含まないもの
 - モバイルのローカル通知 (Phase 6。OS に事前登録する方式はそのときに)
 - OS 起動時の自動起動 (`tauri-plugin-autostart`。Phase 5 候補)
-- 通知音、通知のボタン (デスクトップのプラグインに無い。§4.3)
+- 通知音、通知からの「後で」の時間選択 (通知のボタンは固定の 2 つ。選択は帯で)
 - 繰り返しの例外日 (EXDATE)、終了条件 (COUNT / UNTIL) の UI (RRULE に書いてあれば尊重する)
 - 完了履歴 (全体設計どおり、1 行が繰り返し続ける)
 
@@ -128,7 +128,7 @@ src/
 - 起動時と 30 秒ごとに: 読み込めた全プロジェクトの未完了タスクについて、各リマインダーの発火時刻を計算し、`fired.json` に無く、`now - 24h < 発火時刻 <= now` のものを発火する。24 時間より古いものは「停止中に過ぎた」としてまとめの対象 (§4.5)。発火したら `fired.json` に `project/no/コード/発火時刻` を記録
 - `fired.json` は app data dir (`settings.json` の隣)。タスクの期限や時刻、リマインダーが変わると、そのタスクの記録を消す (再発火できる)。タスクが完了 / 削除されたら消す。起動時に、もう存在しないタスクの記録を掃除する
 - OS 通知: `tauri-plugin-notification` の Rust API (`app.notification().builder().title(タスク名).body("<プロジェクト> · <期限 15:00>").show()`)。通知の権限は起動時に確認し、未許可なら設定ペインに表示するだけで勝手に要求しない (初回は「通知」ペインの「許可を求める」から)。macOS の開発ビルドでも bundle id があれば出る (Phase 1 の debug bundle で確認)
-- **制約**: デスクトップ版のプラグインは通知のボタン (完了 / 後で) とクリックのコールバックを持たない (Actions API はモバイル限定)。通知はクリックでアプリが前面に出る OS 既定の挙動だけ。操作はアプリ内の帯 (§4.4) で行う。D-08b の「完了」「後で」ボタンは Phase 6 のモバイル通知で使う。全体設計 §5 の「通知クリックで該当タスクを開く」は「通知クリックでアプリが前面。帯の「開く」で該当タスク」に読み替える (決定ログ)
+- 通知のボタン: `tauri-plugin-notification` 2.6 はデスクトップでも action type のボタンと `on_action` (クリック = `tap`、ボタン = action id) を受け取れる (docs.rs の 2.6.0 で確認。Web ガイドの「Actions はモバイル限定」は古い)。ボタンは 2 つ: 「完了」「後で (10 分)」。macOS は 2 つ以上のボタンが「オプション」メニューに畳まれ、メニューボタン自体のクリックは先頭 (完了) として届く。Windows はトーストが画面にある間だけクリックが届く (アクションセンターに移ったら届かない)。届かなかった操作のための受け皿としてアプリ内の帯 (§4.4) を必ず出す。クリック (`tap`) はウィンドウを出して該当タスクの詳細を開く (`show_main_window` + イベント `open-task { project, no }`)
 - 発火と同時にイベント `reminder-fired { project, no, title, code, at }` を UI に送る。通知がオフでもイベントは送る (帯だけ出る)
 - 同じタスクの複数リマインダーが同じ 30 秒に重なったら 1 通にまとめる (本文に件数)
 
@@ -149,7 +149,7 @@ src/
 - メニュー: 「PowerToDo を開く」「タスクを追加…」(ウィンドウを出してクイック追加を開く: イベント `open-quick-add`)、区切り、「終了」(Phase 2 の held 確認を通す: macOS の独自 Quit 項目と同じ処理を関数にまとめる)
 - ウィンドウを閉じる (`CloseRequested`): 設定「閉じたときトレイに残す」が はい なら `prevent_close` して隠す。いいえ なら Phase 2 どおり終了 (held 確認あり)。macOS はウィンドウを閉じても Dock に残る (Tauri の既定)。Dock アイコンのクリックで再表示 (`RunEvent::Reopen`)
 - トレイクリック (左): ウィンドウを出す (Linux はイベントが来ないのでメニューで)
-- 隠れている間もスケジューラは動く。通知クリックでアプリが前面になったとき、隠れていたウィンドウを出す (macOS は `applicationShouldHandleReopen` 相当の `RunEvent::Reopen`。Windows / Linux は通知クリックで前面にならないことがある。その場合はトレイから開く)
+- 隠れている間もスケジューラは動く。通知のクリック (`tap`) は `on_action` で受けてウィンドウを出す。macOS の Dock クリックは `RunEvent::Reopen` (macOS 限定の variant。tauri 2.12.3 の `app.rs` で確認) で受けてウィンドウを出す
 - 単一インスタンス (`tauri-plugin-single-instance`) は入れない。2 つ目を起こしても Phase 2 の監視が同じフォルダを見て動くが、保存が競合しうるので README に注意書き (Phase 5 で検討)
 
 ## 6. Command API とイベント
@@ -164,11 +164,12 @@ src/
 | `notification_permission` | なし | `"granted" \| "denied" \| "prompt"` | 設定ペインの表示 |
 | `request_notification_permission` | なし | 同上 | 「許可を求める」 |
 | `show_main_window` | なし | なし | トレイ / 通知からの復帰 (UI からも使える) |
+| (Rust 内部) `on_action` | — | — | `tap` → ウィンドウを出し `open-task { project, no }` を emit。`done` → `complete_task`。`snooze` → 10 分後に再発火 (`snooze_reminder` と同じ処理) |
 | `settings` / `update_settings` | 既存 | `SettingsDto` に `defaultReminder`, `notifyTime`, `keepInTray`, `notifications` を追加 | 共通ファイルの設定シート |
 
 - `complete_task` の戻り値 `ProjectView` に `warnings: string[]` を追加 (RRULE が読めないときの文言)。`Task` に `rruleLabel?: string` を追加
 - `QuickAddResult` に `rrule`、`Span.kind` に `"recurrence"`
-- イベント: `reminder-fired { items: ReminderItem[] }` (`ReminderItem = { project, no, title, code, at, due, dueTime }`)、`open-quick-add {}` (トレイ)、`window-shown {}` (隠れていたウィンドウが出た。UI は横断ビューを再取得)
+- イベント: `reminder-fired { items: ReminderItem[] }`、`open-task { project, no }` (通知のクリック) (`ReminderItem = { project, no, title, code, at, due, dueTime }`)、`open-quick-add {}` (トレイ)、`window-shown {}` (隠れていたウィンドウが出た。UI は横断ビューを再取得)
 
 ## 7. エラー処理
 
@@ -196,8 +197,8 @@ src/
 | 2026-10-15 | `DTSTART` は保存せず、計算時に現在の期限から組む | 1 行が繰り返し続ける設計では期限が常に基準。保存すると二重管理になる |
 | 2026-10-15 | 繰り返しの取り消し (done = false) は期限を戻さない | 直前の完了で進んだ期限を区別できない。ユーザーが期限を直せば済む |
 | 2026-10-15 | 不正な RRULE でも完了は通す。`warnings` で知らせる | Excel で書き間違えたとき、完了できないほうが困る |
-| 2026-10-15 | 通知のボタンは使わない。操作はアプリ内の帯で行う | デスクトップのプラグインに Actions とクリックのコールバックが無い (公式ドキュメント確認 2026-10-15)。D-08b のボタンはモバイルで使う |
-| 2026-10-15 | 「通知クリックで該当タスクを開く」は「前面に出る + 帯の「開く」」に読み替え | 同上 |
+| 2026-10-15 | 通知にボタン「完了」「後で (10 分)」を付け、クリックで該当タスクを開く。アプリ内の帯も同じ内容で出す | プラグイン 2.6 はデスクトップでも action と `on_action` を受けられる (docs.rs 2.6.0)。ただし macOS はボタンがメニューに畳まれ、Windows はアクションセンターに移ると届かないので、帯を受け皿にする |
+| 2026-10-15 | 全体設計 §5 の「通知クリックで該当タスクを開く」はそのまま実現する (`tap` → `show_main_window` + `open-task`) | 同上 |
 | 2026-10-15 | 発火済みの記録は app data dir の `fired.json` (共通ファイルではない) | 端末ごとの状態。xlsx に書くと Phase 4 の同期で他端末に伝わり、別の端末で鳴らなくなる。各端末で 1 回ずつ鳴るほうが安全で、Excel 側にも余計な列が増えない |
 | 2026-10-15 | 時刻なしの期限に相対リマインダーは `-1d` / `-1w` だけ (9:00) | 「10 分前」は時刻が無いと意味が決まらない。前日 9:00 は Phase 0.5 の表示文言に合わせる |
 | 2026-10-15 | 既定リマインダーはアプリで時刻付き期限を付けたときだけ付与。Excel で作った行には付けない | 読み込み時にデータを足すと、ユーザーが書いていないものがファイルに増える |
