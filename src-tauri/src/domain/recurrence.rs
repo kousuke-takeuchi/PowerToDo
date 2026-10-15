@@ -65,14 +65,37 @@ pub fn next_due(
     base: NaiveDate,
 ) -> Result<Option<NaiveDate>, RecurrenceError> {
     let rule = split(rrule);
-    if rule.core.is_empty() {
-        return Err(RecurrenceError::Invalid(rrule.to_string()));
-    }
     let start_day = if rule.from_completed {
         base
     } else {
         due.unwrap_or(base)
     };
+    // The next occurrence is on a later *day* than DTSTART (仕様 §3.1: 当日は含まない), so rules
+    // with several occurrences a day (BYHOUR=9,18) still advance the due date.
+    first_matching(rrule, start_day, due_time, |d| d > start_day)
+}
+
+/// The first occurrence on or after `day`, with `DTSTART` = `day` at `due_time`: the start of a
+/// new series (e.g. quick add), where `day` itself counts when the rule matches it. `X-FROM` is
+/// ignored. `Ok(None)` / `Err` as for `next_due`.
+pub fn first_on_or_after(
+    rrule: &str,
+    day: NaiveDate,
+    due_time: Option<NaiveTime>,
+) -> Result<Option<NaiveDate>, RecurrenceError> {
+    first_matching(rrule, day, due_time, |d| d >= day)
+}
+
+fn first_matching(
+    rrule: &str,
+    start_day: NaiveDate,
+    due_time: Option<NaiveTime>,
+    accept: impl Fn(NaiveDate) -> bool,
+) -> Result<Option<NaiveDate>, RecurrenceError> {
+    let rule = split(rrule);
+    if rule.core.is_empty() {
+        return Err(RecurrenceError::Invalid(rrule.to_string()));
+    }
     let start = Tz::LOCAL
         .from_local_datetime(&dt_start(start_day, due_time))
         .single()
@@ -84,13 +107,10 @@ pub fn next_due(
         .map_err(|e| RecurrenceError::Invalid(format!("{rrule}: {e}")))?;
     // `limit` bounds the iteration (rules that never match must not loop forever).
     let set = RRuleSet::new(start).rrule(validated).limit();
-    // The next occurrence is on a later *day* than DTSTART (仕様 §3.1: 当日は含まない), so rules
-    // with several occurrences a day (BYHOUR=9,18) still advance the due date.
-    let start_day = start.date_naive();
     let next = (&set)
         .into_iter()
-        .find(|d| d.date_naive() > start_day)
-        .map(|d| d.date_naive());
+        .map(|d| d.date_naive())
+        .find(|d| accept(*d));
     match next {
         Some(day) => Ok(Some(day)),
         // COUNT / UNTIL used up: the recurrence is finished.
@@ -374,6 +394,38 @@ mod tests {
         assert_eq!(
             summarize("FREQ=WEEKLY;BYDAY=MO;UNTIL=20261231T000000Z"),
             None
+        );
+    }
+
+    #[test]
+    fn first_on_or_after_counts_the_start_day() {
+        // 2026-10-14 is a Wednesday.
+        let day = d("2026-10-14");
+        for (rule, want) in [
+            ("FREQ=WEEKLY", "2026-10-14"),
+            ("FREQ=WEEKLY;BYDAY=TU", "2026-10-20"),
+            ("FREQ=DAILY;INTERVAL=3", "2026-10-14"),
+            ("FREQ=MONTHLY", "2026-10-14"),
+            ("FREQ=MONTHLY;BYMONTHDAY=1", "2026-11-01"),
+            ("FREQ=DAILY;INTERVAL=3;X-FROM=COMPLETED", "2026-10-14"),
+        ] {
+            assert_eq!(
+                first_on_or_after(rule, day, None).unwrap(),
+                Some(d(want)),
+                "{rule}"
+            );
+        }
+        assert!(matches!(
+            first_on_or_after("FREQ=SOMETIMES", day, None),
+            Err(RecurrenceError::Invalid(_))
+        ));
+        assert!(matches!(
+            first_on_or_after("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30", day, None),
+            Err(RecurrenceError::Invalid(_))
+        ));
+        assert_eq!(
+            first_on_or_after("FREQ=DAILY;COUNT=1", day, None).unwrap(),
+            Some(day)
         );
     }
 }

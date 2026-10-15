@@ -1130,16 +1130,20 @@ impl ProjectStore {
             return Err(invalid("週の開始は mon か sun です"));
         }
         let timezone = non_empty(&s.timezone).ok_or_else(|| invalid("タイムゾーンが空です"))?;
-        if let Some(code) = &s.default_reminder
-            && reminders::parse_code(code).is_none()
-        {
-            return Err(invalid("既定リマインダーの指定が正しくありません"));
-        }
+        let default_reminder = match s.default_reminder.as_deref().map(str::trim) {
+            None => None,
+            Some(code)
+                if reminders::parse_code(code).is_some() && !reminders::is_absolute(code) =>
+            {
+                Some(code.to_string())
+            }
+            Some(_) => return Err(invalid("既定リマインダーの指定が正しくありません")),
+        };
         self.common.settings = Settings {
             display_name,
             week_start: s.week_start,
             timezone,
-            default_reminder: s.default_reminder,
+            default_reminder,
             notify_time: s.notify_time,
             keep_in_tray: s.keep_in_tray,
             notifications: s.notifications,
@@ -2724,11 +2728,14 @@ mod tests {
         let mut s = e.store.settings();
         s.default_reminder = Some("-5m".into());
         assert!(e.store.update_settings(s.clone()).is_err());
-        s.default_reminder = Some("-30m".into());
+        s.default_reminder = Some("2026-10-13T07:00".into());
+        assert!(e.store.update_settings(s.clone()).is_err());
+        s.default_reminder = Some(" -30m ".into());
         s.notify_time = hm(8, 15);
         s.keep_in_tray = false;
         s.notifications = false;
         let back = e.store.update_settings(s.clone()).unwrap();
+        s.default_reminder = Some("-30m".into()); // stored trimmed
         assert_eq!(back, s);
     }
 

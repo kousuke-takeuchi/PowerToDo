@@ -256,6 +256,20 @@ fn date_of(d: &Data) -> Option<NaiveDate> {
 }
 
 /// Reads the common workbook. Not an xlsx -> `Corrupt`; no such file -> `Io`.
+/// A time of day from a settings cell: text `H:MM` / `HH:MM`, or an Excel time (what Excel
+/// stores when the user types 8:30 into the cell).
+fn time_of(d: &Data) -> Option<NaiveTime> {
+    match d {
+        Data::String(s) => NaiveTime::parse_from_str(s.trim(), "%H:%M").ok(),
+        Data::DateTime(_) => cells::datetime(d).ok().flatten().map(|dt| dt.time()),
+        Data::Float(f) if (0.0..1.0).contains(f) => {
+            let secs = (f * 86_400.0).round() as u32;
+            NaiveTime::from_num_seconds_from_midnight_opt(secs % 86_400, 0)
+        }
+        _ => None,
+    }
+}
+
 pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
     let mut wb: Xlsx<_> = open_workbook(path).map_err(xlsx_err)?;
 
@@ -337,11 +351,13 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
             }
             KEY_TIMEZONE if !value.is_empty() => settings.timezone = value,
             KEY_DEFAULT_REMINDER if value == NONE_WORD => settings.default_reminder = None,
-            KEY_DEFAULT_REMINDER if reminders::parse_code(&value).is_some() => {
+            KEY_DEFAULT_REMINDER
+                if reminders::parse_code(&value).is_some() && !reminders::is_absolute(&value) =>
+            {
                 settings.default_reminder = Some(value);
             }
             KEY_NOTIFY_TIME => {
-                if let Ok(t) = NaiveTime::parse_from_str(&value, "%H:%M") {
+                if let Some(t) = time_of(&r[1]) {
                     settings.notify_time = t;
                 }
             }
@@ -817,5 +833,51 @@ mod tests {
         );
         assert!(b.settings.keep_in_tray && b.settings.notifications);
         assert!(b.extra_settings.is_empty());
+    }
+
+    #[test]
+    fn notify_time_reads_an_excel_time_cell_and_short_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "時刻なしの通知時刻").unwrap();
+        let fmt = rust_xlsxwriter::Format::new().set_num_format("hh:mm");
+        let t = rust_xlsxwriter::ExcelDateTime::from_hms(8, 30, 0.0).unwrap();
+        ws.write_datetime_with_format(1, 1, &t, &fmt).unwrap();
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(
+            b.settings.notify_time,
+            NaiveTime::from_hms_opt(8, 30, 0).unwrap()
+        );
+        assert!(b.extra_settings.is_empty());
+
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "時刻なしの通知時刻").unwrap();
+        ws.write_string(1, 1, "8:30").unwrap();
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(
+            b.settings.notify_time,
+            NaiveTime::from_hms_opt(8, 30, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn absolute_default_reminder_in_the_sheet_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(ws, "設定", &["キー", "値"]);
+        ws.write_string(1, 0, "既定リマインダー").unwrap();
+        ws.write_string(1, 1, "2026-10-13T07:00").unwrap();
+        wb.save(&p).unwrap();
+        let b = read_common_book(&p).unwrap();
+        assert_eq!(b.settings.default_reminder.as_deref(), Some("-0m"));
     }
 }

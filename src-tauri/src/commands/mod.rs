@@ -804,14 +804,12 @@ pub fn parse_quick_add_in(store: &ProjectStore, text: &str, today: NaiveDate) ->
     let projects: Vec<String> = store.summaries().into_iter().map(|p| p.name).collect();
     let labels: Vec<String> = store.labels().into_iter().map(|l| l.name).collect();
     let mut parsed = parse(text, today, &projects, &labels);
-    // A recurrence without a date starts on its first occurrence on or after today (the day
-    // before today is the base because the next occurrence is strictly after it). An unreadable
-    // rule leaves the date empty.
+    // A recurrence without a date starts on its first occurrence on or after today. An
+    // unreadable rule (or one that has no occurrence) leaves the date empty.
     if parsed.due.is_none()
         && let Some(rrule) = &parsed.rrule
     {
-        let base = today.pred_opt().unwrap_or(today);
-        parsed.due = recurrence::next_due(rrule, None, parsed.due_time, base)
+        parsed.due = recurrence::first_on_or_after(rrule, today, parsed.due_time)
             .ok()
             .flatten();
     }
@@ -1468,6 +1466,11 @@ mod tests {
         // When today matches, the first occurrence is today.
         let out = quick_add_in(&mut store, "朝会 毎週火曜", INBOX, d("2026-10-13")).unwrap();
         assert_eq!(out.parsed.due, Some(d("2026-10-13")));
+        // Rules without a weekday / day anchor start today.
+        let out = quick_add_in(&mut store, "週報 毎週", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-14")));
+        let out = quick_add_in(&mut store, "家賃 毎月", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-14")));
         // An explicit date wins over the first occurrence.
         let out = quick_add_in(&mut store, "x 毎週火曜 明日", INBOX, d("2026-10-14")).unwrap();
         assert_eq!(out.parsed.due, Some(d("2026-10-15")));
