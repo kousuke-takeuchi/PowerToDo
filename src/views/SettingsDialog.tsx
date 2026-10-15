@@ -6,8 +6,8 @@ import { useMotionTiming } from "../motion";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
-import { AccountPane, DataPane, Desc, KeyboardPane, LaterPane, Row, Section } from "./SettingsPanes";
-import type { AccountPaneProps, DataPaneProps } from "./SettingsPanes";
+import { AccountPane, DataPane, DateTimePane, Desc, KeyboardPane, LaterPane, NotificationsPane, Row, Section } from "./SettingsPanes";
+import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "./SettingsPanes";
 import { NasFields, syncTargetOptions } from "./SyncFields";
 
 export type SyncTarget = "google" | "nas" | "none";
@@ -26,6 +26,10 @@ export type SettingsDialogProps = {
   dataPane?: DataPaneProps;
   /** 「アカウント」ペインに渡す値とハンドラ。無ければ見た目だけ。 */
   accountPane?: AccountPaneProps;
+  /** 「通知」ペイン。無ければ従来の「実装予定」の表示。 */
+  notificationsPane?: NotificationsPaneProps;
+  /** 「日付と時刻」ペイン。無ければ従来の「実装予定」の表示。 */
+  datetimePane?: DateTimePaneProps;
 };
 
 type Icon = React.ComponentType<{ size?: number }>;
@@ -70,6 +74,8 @@ export function SettingsDialog({
   syncPlaceholder,
   dataPane,
   accountPane,
+  notificationsPane,
+  datetimePane,
 }: SettingsDialogProps) {
   const [pane, setPane] = useState<SettingsPane>(initialPane);
   const [target, setTarget] = useState<SyncTarget>(initialTarget);
@@ -289,7 +295,9 @@ export function SettingsDialog({
               {pane === "account" && <AccountPane {...accountPane} />}
               {pane === "data" && <DataPane {...dataPane} />}
               {pane === "keyboard" && <KeyboardPane />}
-              {(pane === "notifications" || pane === "appearance" || pane === "datetime") && <LaterPane pane={pane} />}
+              {pane === "notifications" && (notificationsPane ? <NotificationsPane {...notificationsPane} /> : <LaterPane pane={pane} />)}
+              {pane === "datetime" && (datetimePane ? <DateTimePane {...datetimePane} /> : <LaterPane pane={pane} />)}
+              {pane === "appearance" && <LaterPane pane={pane} />}
             </div>
           </motion.div>
         </motion.div>

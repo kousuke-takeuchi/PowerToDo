@@ -607,6 +607,8 @@ export function Main({ app }: { app: AppStateDto }) {
         onClose={() => setSettingsOpen(false)}
         dataPane={settingsPanes.data}
         accountPane={settingsPanes.account}
+        notificationsPane={{ ...settingsPanes.notifications, trayError: app.trayError }}
+        datetimePane={settingsPanes.datetime}
       />
     </>
   );
