@@ -519,6 +519,7 @@ export function Main({ app }: { app: AppStateDto }) {
         onDismissAll: reminders.clear,
       }}
       saveErrors={saveErrors}
+      // retry_save の失敗は save-status イベントで保存失敗の帯に出るので、catch は握りつぶすだけ (二重表示しない)
       onRetrySave={(project) => void api.retrySave(project).catch(() => undefined)}
       readFailures={readFailures}
       held={ext.held}

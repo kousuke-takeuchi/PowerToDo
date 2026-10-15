@@ -53,7 +53,6 @@ export function Banners({
           <ReminderBanner {...reminders} />
         </Collapse>
       )}
-      {/* retry_save の失敗は save-status イベントでこの帯に出るので、catch は握りつぶすだけ (二重表示しない) */}
       {Object.entries(saveErrors).map(([project, message]) => (
         <Collapse key={`save-${project}`} duration={0.15} enterY={-8}>
           <SaveBanner message={message} onRetry={() => onRetrySave(project)} />

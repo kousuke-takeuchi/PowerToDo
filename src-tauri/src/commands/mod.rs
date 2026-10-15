@@ -429,7 +429,8 @@ pub struct RecurrenceDto {
     pub label: Option<String>,
 }
 
-/// `summarize_recurrence`: the label for a stored RRULE, and whether it still yields a due date.
+/// `summarize_recurrence`: the label for a stored RRULE, and whether the rule computes without
+/// error (a finished COUNT / UNTIL rule is valid; only an unreadable one is not).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecurrenceLabelDto {

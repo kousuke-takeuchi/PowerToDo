@@ -21,7 +21,7 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
         borderRadius: 8,
         background: "var(--color-bg-hover)",
         boxSizing: "border-box",
-        opacity: disabled ? 0.5 : 1,
+        ...(disabled ? { opacity: 0.5 } : {}),
       }}
     >
       {options.map((o) => {

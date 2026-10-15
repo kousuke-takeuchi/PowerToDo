@@ -45,7 +45,7 @@ export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; }
 export interface MoveOutcome { from: ProjectView; to: ProjectView; }
 /** `parse_recurrence`: rrule and label are both null when the text is not a recurrence. */
 export interface RecurrenceDto { rrule: string | null; label: string | null; }
-/** `summarize_recurrence`: label is the RRULE itself when it has no short form; valid = still yields a due date. */
+/** `summarize_recurrence`: label is the RRULE itself when it has no short form; valid = the rule computes without error (a finished COUNT/UNTIL rule is valid; only an unreadable one is not). */
 export interface RecurrenceLabelDto { label: string; valid: boolean; }
 
 /**

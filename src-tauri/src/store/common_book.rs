@@ -255,7 +255,6 @@ fn date_of(d: &Data) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(cells::text(d).trim(), "%Y-%m-%d").ok()
 }
 
-/// Reads the common workbook. Not an xlsx -> `Corrupt`; no such file -> `Io`.
 /// A time of day from a settings cell: text `H:MM` / `HH:MM`, or an Excel time (what Excel
 /// stores when the user types 8:30 into the cell).
 fn time_of(d: &Data) -> Option<NaiveTime> {
@@ -270,6 +269,7 @@ fn time_of(d: &Data) -> Option<NaiveTime> {
     }
 }
 
+/// Reads the common workbook. Not an xlsx -> `Corrupt`; no such file -> `Io`.
 pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
     let mut wb: Xlsx<_> = open_workbook(path).map_err(xlsx_err)?;
 
