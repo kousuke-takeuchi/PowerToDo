@@ -1401,12 +1401,13 @@ pub fn parse_recurrence_in(text: &str) -> RecurrenceDto {
     RecurrenceDto { rrule, label }
 }
 
-/// `valid` asks whether the rule still yields an occurrence after `today`; `Err` (an unreadable
-/// rule) and `Ok(None)` (COUNT / UNTIL used up) both count as not valid.
+/// `valid` is true when the rule computes without error (`next_due` is `Ok`). A finished rule
+/// (COUNT / UNTIL used up, `Ok(None)`) is still well-formed, so it is valid; only an unreadable
+/// rule (`Err`) is not.
 pub fn summarize_recurrence_in(rrule: &str, today: NaiveDate) -> RecurrenceLabelDto {
     RecurrenceLabelDto {
         label: recurrence::summarize(rrule).unwrap_or_else(|| rrule.to_string()),
-        valid: matches!(recurrence::next_due(rrule, None, None, today), Ok(Some(_))),
+        valid: recurrence::next_due(rrule, None, None, today).is_ok(),
     }
 }
 
@@ -1511,6 +1512,9 @@ mod tests {
         let s = summarize_recurrence_in("FREQ=SOMETIMES", d("2026-10-15"));
         assert!(!s.valid);
         assert_eq!(s.label, "FREQ=SOMETIMES");
+        // A finished rule (COUNT used up) is still well-formed.
+        let s = summarize_recurrence_in("FREQ=DAILY;COUNT=1", d("2026-10-15"));
+        assert!(s.valid);
     }
 
     #[test]
