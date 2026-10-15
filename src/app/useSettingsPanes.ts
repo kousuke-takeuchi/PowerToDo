@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
-import type { NotificationPermission, SettingsDto } from "../types/model";
+import type { SettingsDto } from "../types/model";
 import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "../views/SettingsPanes";
 
 /** `trayError` は呼び出し側 (AppStateDto) が足す。 */
@@ -34,7 +34,6 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   const [notifError, setNotifError] = useState<string | null>(null);
   const [dateBusy, setDateBusy] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
-  const [permission, setPermission] = useState<NotificationPermission | null>(null);
   /** 開くたび / 閉じるたびに進める。古い世代の結果は捨てる。 */
   const gen = useRef(0);
   /** 最新の settings と、保存を一つずつ流す列 (続けて変えても前の保存の結果に上書きされない)。 */
@@ -49,7 +48,6 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
     setSettings(null);
     latest.current = null;
     inflight.current.clear();
-    setPermission(null);
     setNotifBusy(false);
     setNotifError(null);
     setDateBusy(false);
@@ -72,10 +70,6 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
         setNotifError(errorMessage(e));
         setDateError(errorMessage(e));
       });
-    api
-      .notificationPermission()
-      .then((v) => g === gen.current && setPermission(v))
-      .catch(() => undefined); // 取れなければ「許可済み」のまま (許可を求める欄を出さない)
     return () => {
       gen.current++;
     };
@@ -155,15 +149,6 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
     return !!next;
   };
 
-  const onRequestPermission = () => {
-    const g = gen.current;
-    setNotifError(null);
-    void api
-      .requestNotificationPermission()
-      .then((v) => g === gen.current && setPermission(v))
-      .catch((e) => g === gen.current && setNotifError(errorMessage(e)));
-  };
-
   const saveNotif = (patch: Partial<SettingsDto>) => void save(patch, setNotifBusy, setNotifError);
   const saveDate = (patch: Partial<SettingsDto>) => save(patch, setDateBusy, setDateError);
 
@@ -185,8 +170,6 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
     notifications: {
       enabled: settings?.notifications ?? true,
       onToggle: (v) => saveNotif({ notifications: v }),
-      permission: permission ?? "granted",
-      onRequestPermission,
       keepInTray: settings?.keepInTray ?? true,
       onToggleKeepInTray: (v) => saveNotif({ keepInTray: v }),
       loading: !settings,

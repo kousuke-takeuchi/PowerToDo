@@ -140,7 +140,7 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
     let builder = TrayIconBuilder::with_id(TRAY_ID)
-        .icon(tauri::include_image!("icons/tray.png"))
+        .icon(tray_icon(app))
         .tooltip("PowerToDo")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -164,10 +164,27 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
             QUIT_ID => request_quit(app),
             _ => {}
         });
-    // macOS: a template image, tinted by the menu bar (no effect elsewhere).
+    // macOS: a template image, tinted by the menu bar.
+    #[cfg(target_os = "macos")]
     let builder = builder.icon_as_template(true);
     builder.build(app)?;
     Ok(())
+}
+
+/// macOS: the single-colour `tray.png`, used as a template image (the menu bar tints it).
+#[cfg(target_os = "macos")]
+fn tray_icon(_app: &AppHandle) -> tauri::image::Image<'static> {
+    tauri::include_image!("icons/tray.png")
+}
+
+/// Windows / Linux: the coloured app icon. Their trays do not tint images, so the black
+/// `tray.png` would be invisible on a dark taskbar or panel. Falls back to `tray.png` if the
+/// bundle has no window icon.
+#[cfg(not(target_os = "macos"))]
+fn tray_icon(app: &AppHandle) -> tauri::image::Image<'static> {
+    app.default_window_icon()
+        .map(|icon| icon.clone().to_owned())
+        .unwrap_or_else(|| tauri::include_image!("icons/tray.png"))
 }
 
 #[cfg(test)]

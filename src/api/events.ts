@@ -4,14 +4,19 @@ import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus } from "..
 /**
  * `listen` is async; the returned function unsubscribes even if it is called before the
  * subscription finished (the late UnlistenFn is invoked as soon as it arrives).
+ * `onReady` runs once the subscription is in place (not after an early unsubscribe): an event
+ * sent before that is lost, so a caller that must not miss one re-reads its state there.
  */
-function subscribe<T>(event: string, cb: (payload: T) => void): () => void {
+function subscribe<T>(event: string, cb: (payload: T) => void, onReady?: () => void): () => void {
   let cancelled = false;
   let unlisten: (() => void) | undefined;
   listen<T>(event, (e) => cb(e.payload))
     .then((fn) => {
       if (cancelled) fn();
-      else unlisten = fn;
+      else {
+        unlisten = fn;
+        onReady?.();
+      }
     })
     .catch((err) => console.error(`listen(${event}) failed`, err));
   return () => {
@@ -61,9 +66,17 @@ export function onWatchFailed(cb: (message: string) => void): () => void {
   return subscribe<string>("watch-failed", cb);
 }
 
-/** `reminder-fired`: reminders that fired now (and, at start-up, the ones missed while the app was not running). Sent even when notifications are off. */
-export function onReminderFired(cb: (items: ReminderItem[]) => void): () => void {
-  return subscribe<{ items: ReminderItem[] }>("reminder-fired", (p) => cb(p.items));
+/**
+ * `reminder-fired`: reminders that fired now (and, at start-up, the ones missed while the app was not running). Sent even when notifications are off.
+ * `onReady`: the subscription is in place (see `subscribe`).
+ */
+export function onReminderFired(cb: (items: ReminderItem[]) => void, onReady?: () => void): () => void {
+  return subscribe<{ items: ReminderItem[] }>("reminder-fired", (p) => cb(p.items), onReady);
+}
+
+/** `notification-error`: a notification's button could not do its work (e.g. 完了 on a held project); the window was shown to say so. */
+export function onNotificationError(cb: (message: string) => void): () => void {
+  return subscribe<{ message: string }>("notification-error", (p) => cb(p.message));
 }
 
 /** `open-task`: a reminder notification was clicked; open that task's details. */

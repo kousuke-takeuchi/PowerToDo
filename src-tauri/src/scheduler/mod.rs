@@ -48,7 +48,8 @@ pub struct Decision {
 }
 
 /// The reminders of unfinished tasks that are due at `now` and not yet recorded in `fired`.
-/// A snoozed reminder is due at its snooze time instead of its own.
+/// A snoozed reminder is due at its snooze time instead of its own, but only while its own
+/// time is the one it was snoozed at: after the due date moved, the new time fires.
 pub fn due_reminders(
     tasks: &[Task],
     fired: &Fired,
@@ -64,13 +65,11 @@ pub fn due_reminders(
                 no: t.no,
                 code: code.clone(),
             };
-            let at = match fired.snooze_until(&key) {
-                Some(until) => until,
-                None => match reminders::fire_time(code, t.due, t.due_time, settings.notify_time) {
-                    Some(at) => at,
-                    None => continue,
-                },
+            let Some(own) = reminders::fire_time(code, t.due, t.due_time, settings.notify_time)
+            else {
+                continue;
             };
+            let at = fired.snooze_until(&key, own).unwrap_or(own);
             if at > now || fired.contains(&key, at) {
                 continue;
             }
@@ -573,7 +572,7 @@ mod tests {
             code: "-0m".into(),
         };
         fired.mark(&key, dt("2026-10-13T09:00"));
-        fired.snooze(&key, dt("2026-10-13T09:10"));
+        fired.snooze(&key, Some(dt("2026-10-13T09:00")), dt("2026-10-13T09:10"));
         assert!(
             due_reminders(
                 std::slice::from_ref(&t),
@@ -599,6 +598,43 @@ mod tests {
                 .fire
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_snooze_does_not_outlive_a_due_date_change() {
+        // Snoozed at 10/13 15:00, then 「期限切れを今日に」 (or Excel) moves the due date to
+        // 10/14 without forgetting the records: the 10/14 15:00 reminder still fires.
+        let t = task(1, "2026-10-13", Some((15, 0)), &["-0m"], 0);
+        let mut fired = Fired::default();
+        let d = due_reminders(
+            std::slice::from_ref(&t),
+            &fired,
+            dt("2026-10-13T15:00"),
+            &settings(),
+        );
+        assert_eq!(d.fire.len(), 1);
+        let key = ReminderKey::of(&d.fire[0]);
+        fired.mark(&key, d.fire[0].at);
+        fired.snooze(&key, Some(dt("2026-10-13T15:00")), dt("2026-10-13T15:10"));
+        // The snoozed firing comes and is recorded.
+        let d = due_reminders(
+            std::slice::from_ref(&t),
+            &fired,
+            dt("2026-10-13T15:10"),
+            &settings(),
+        );
+        assert_eq!(d.fire.len(), 1);
+        fired.mark(&key, d.fire[0].at);
+
+        let moved = task(1, "2026-10-14", Some((15, 0)), &["-0m"], 0);
+        let d = due_reminders(
+            std::slice::from_ref(&moved),
+            &fired,
+            dt("2026-10-14T15:00"),
+            &settings(),
+        );
+        assert_eq!(d.fire.len(), 1);
+        assert_eq!(d.fire[0].at, dt("2026-10-14T15:00"));
     }
 
     #[test]

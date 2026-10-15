@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
-import { onOpenQuickAdd, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
+import { onNotificationError, onOpenQuickAdd, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import type { Counts } from "../mock/data";
 import type { AppStateDto, CountsDto, ProjectSummary, Task } from "../types/model";
 import { useMotionTiming } from "../motion";
@@ -184,7 +184,8 @@ export function Main({ app }: { app: AppStateDto }) {
   const reminders = useReminders({
     onError: showError,
     onInfo: (text) => setFlash({ text, tone: "info" }),
-    complete: (project, no) => cross.setDone(project, no, true),
+    // 開いているプロジェクトのタスクはその画面の処理で (すぐ画面に反映し、行のチェックと同時押しを防ぐ)
+    complete: (project, no) => (projectScreen && project === current ? p.completeTask(no, true) : cross.setDone(project, no, true)),
     openTask: (project, no) => openTaskAt(project, no, true),
   });
   // イベントの購読は 1 回だけにして、呼ぶ先は毎描画の最新を参照する
@@ -197,6 +198,8 @@ export function Main({ app }: { app: AppStateDto }) {
         wired.current.openTaskAt(project, no, true);
       }),
       onOpenQuickAdd(() => wired.current.openQuickAdd()),
+      // 通知のボタン (完了) が失敗した (保留中のプロジェクトなど)。Rust 側がウィンドウを出してから送る
+      onNotificationError((text) => setFlash({ text, tone: "error" })),
       // 隠れている間に変わった分 (Excel での編集、発火したリマインダー) を取り直す
       onWindowShown(() => {
         wired.current.refreshAll();

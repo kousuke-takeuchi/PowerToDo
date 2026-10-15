@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { fn } from "storybook/test";
 import { DateTimePane, NotificationsPane } from "./SettingsPanes";
 import type { DateTimePaneProps, NotificationsPaneProps } from "./SettingsPanes";
 
@@ -23,8 +22,6 @@ function Notifications(initial: Partial<NotificationsPaneProps>) {
     <NotificationsPane
       enabled={enabled}
       onToggle={setEnabled}
-      permission="granted"
-      onRequestPermission={fn()}
       keepInTray={keepInTray}
       onToggleKeepInTray={setKeepInTray}
       {...initial}
@@ -33,7 +30,6 @@ function Notifications(initial: Partial<NotificationsPaneProps>) {
 }
 
 export const 通知: Story = { render: () => <Notifications /> };
-export const 通知_未許可: Story = { render: () => <Notifications permission="prompt" /> };
 export const 通知_トレイを作れない: Story = { render: () => <Notifications trayError="トレイアイコンを作れませんでした: no system tray available" /> };
 
 function DateTime(initial: Partial<DateTimePaneProps>) {

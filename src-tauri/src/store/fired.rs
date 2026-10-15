@@ -60,7 +60,7 @@ impl ReminderKey {
 }
 
 /// A reminder that fired at `at`. `snooze_until` set: fire it again then instead of at its
-/// own time.
+/// own time, as long as its own time is still `at` (see [`Fired::snooze_until`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FiredEntry {
@@ -100,14 +100,6 @@ pub struct Fired {
     /// next look as a start (one summary instead of a notification per task). Not saved.
     #[serde(skip)]
     pub rebound: bool,
-}
-
-/// A fire time no real reminder has: the `at` of an entry made by snoozing a reminder that
-/// had not been recorded as fired.
-fn placeholder_at() -> NaiveDateTime {
-    NaiveDate::from_ymd_opt(1970, 1, 1)
-        .expect("valid date")
-        .and_time(NaiveTime::MIN)
 }
 
 impl Fired {
@@ -166,11 +158,14 @@ impl Fired {
         self.entries.iter().any(|e| e.is(key) && e.at == at)
     }
 
-    /// The time `key` was snoozed to, if it was.
-    pub fn snooze_until(&self, key: &ReminderKey) -> Option<NaiveDateTime> {
+    /// The time `key` was snoozed to, if the snooze is about its current fire time
+    /// `fire_at`. A snooze made before the task's due date moved (「期限切れを今日に」, an edit in
+    /// Excel: neither forgets the records) is about the old time and is ignored, so the new
+    /// time fires instead of being silently skipped.
+    pub fn snooze_until(&self, key: &ReminderKey, fire_at: NaiveDateTime) -> Option<NaiveDateTime> {
         self.entries
             .iter()
-            .filter(|e| e.is(key))
+            .filter(|e| e.is(key) && e.at == fire_at)
             .filter_map(|e| e.snooze_until)
             .max()
     }
@@ -189,22 +184,22 @@ impl Fired {
         }
     }
 
-    /// Fire `key` again at `until` instead of at its own time. The task's reminder codes are
-    /// not changed. Drops `key` from `pending`: the user acted on it.
-    pub fn snooze(&mut self, key: &ReminderKey, until: NaiveDateTime) {
-        let mut found = false;
+    /// Fire `key` again at `until` instead of at its own time. `fire_at` is the reminder's
+    /// current fire time (`None`: the task is gone or the reminder has no time): when it has no
+    /// record yet (a banner row whose record was dropped), one is made, since the snooze only
+    /// holds for the record of the current fire time. The task's reminder codes are not
+    /// changed. Drops `key` from `pending`: the user acted on it.
+    pub fn snooze(
+        &mut self,
+        key: &ReminderKey,
+        fire_at: Option<NaiveDateTime>,
+        until: NaiveDateTime,
+    ) {
+        if let Some(at) = fire_at {
+            self.mark(key, at);
+        }
         for e in self.entries.iter_mut().filter(|e| e.is(key)) {
             e.snooze_until = Some(until);
-            found = true;
-        }
-        if !found {
-            self.entries.push(FiredEntry {
-                project: key.project.clone(),
-                no: key.no,
-                code: key.code.clone(),
-                at: placeholder_at(),
-                snooze_until: Some(until),
-            });
         }
         self.pending.retain(|i| !key.is_item(i));
     }
@@ -320,7 +315,11 @@ mod tests {
             ..Fired::default()
         };
         f.mark(&key("p", 1, "-0m"), dt("2026-10-13T09:00"));
-        f.snooze(&key("p", 1, "-0m"), dt("2026-10-13T09:10:42"));
+        f.snooze(
+            &key("p", 1, "-0m"),
+            Some(dt("2026-10-13T09:00")),
+            dt("2026-10-13T09:10:42"),
+        );
         f.mark(&key("仕事", 2, "2026-10-20T09:00"), dt("2026-10-20T09:00"));
         f.push_pending([ReminderItem {
             due: Some(NaiveDate::from_ymd_opt(2026, 10, 13).unwrap()),
@@ -331,7 +330,7 @@ mod tests {
         let back = Fired::load(&dir);
         assert_eq!(back, f);
         assert_eq!(
-            back.snooze_until(&key("p", 1, "-0m")),
+            back.snooze_until(&key("p", 1, "-0m"), dt("2026-10-13T09:00")),
             Some(dt("2026-10-13T09:10:42"))
         );
 
@@ -453,11 +452,28 @@ mod tests {
         let mut f = Fired::default();
         let k = key("p", 1, "-0m");
         f.push_pending([item("p", 1, "-0m", "2026-10-13T09:00")]);
-        f.snooze(&k, dt("2026-10-13T09:10"));
-        assert_eq!(f.snooze_until(&k), Some(dt("2026-10-13T09:10")));
+        f.snooze(&k, Some(dt("2026-10-13T09:00")), dt("2026-10-13T09:10"));
+        assert_eq!(
+            f.snooze_until(&k, dt("2026-10-13T09:00")),
+            Some(dt("2026-10-13T09:10"))
+        );
         assert!(!f.contains(&k, dt("2026-10-13T09:10")));
         assert!(f.pending.is_empty());
         f.mark(&k, dt("2026-10-13T09:10"));
         assert!(f.contains(&k, dt("2026-10-13T09:10")));
+    }
+
+    #[test]
+    fn a_snooze_holds_only_for_the_fire_time_it_was_made_for() {
+        let mut f = Fired::default();
+        let k = key("p", 1, "-0m");
+        f.mark(&k, dt("2026-10-13T15:00"));
+        f.snooze(&k, Some(dt("2026-10-13T15:00")), dt("2026-10-13T15:10"));
+        assert_eq!(
+            f.snooze_until(&k, dt("2026-10-13T15:00")),
+            Some(dt("2026-10-13T15:10"))
+        );
+        // The due date moved without the records being forgotten.
+        assert_eq!(f.snooze_until(&k, dt("2026-10-14T15:00")), None);
     }
 }

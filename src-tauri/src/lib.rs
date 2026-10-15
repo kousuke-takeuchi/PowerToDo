@@ -67,6 +67,14 @@ fn app_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri:
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
+    // One app per user (仕様 §9): with close-to-tray, launching the app again while it runs
+    // hidden would start a second scheduler and a second saver on the same xlsx files. The
+    // second launch exits and the running one shows its window instead. Must be the first
+    // plugin (the plugin's README: plugins run in the order they are added).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        window::show_main_window(app);
+    }));
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {

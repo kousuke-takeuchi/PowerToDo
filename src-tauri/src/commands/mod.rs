@@ -17,6 +17,7 @@ use crate::domain::model::{INBOX, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
 use crate::domain::recurrence;
 use crate::domain::recurrence_words;
+use crate::domain::reminders;
 use crate::domain::search;
 use crate::domain::search::Hit;
 use crate::domain::views::{self, DayGroup};
@@ -138,9 +139,18 @@ impl AppState {
         self.update_fired(|f| f.forget_task(project, no));
     }
 
-    /// Fires `key` again at `until` (the notification's 「後で」 and `snooze_reminder`).
+    /// Fires `key` again at `until` (the notification's 「後で」 and `snooze_reminder`). The
+    /// snooze is tied to the reminder's current fire time (store lock taken and released
+    /// first), so it lapses when the due date moves (see `Fired::snooze_until`).
     pub(crate) fn snooze_fired(&self, key: &ReminderKey, until: NaiveDateTime) {
-        self.update_fired(|f| f.snooze(key, until));
+        let fire_at = self.lock_store().as_ref().and_then(|s| {
+            let task = s
+                .all_tasks()
+                .into_iter()
+                .find(|t| t.project == key.project && t.no == key.no)?;
+            reminders::fire_time(&key.code, task.due, task.due_time, s.settings().notify_time)
+        });
+        self.update_fired(|f| f.snooze(key, fire_at, until));
     }
 
     /// The fired reminders the UI has not taken yet; they are removed.
@@ -1286,13 +1296,29 @@ fn complete_task_in(
 }
 
 /// The notification's 「完了」 button (`on_action` `done`). Open views refresh on
-/// `project-changed` (reason `bulk`). Errors are logged; there is no UI to report them to.
+/// `project-changed` (reason `bulk`). A failure (a held project, a missing task) brings the
+/// window back and tells the UI (`notification-error { message }`), which shows it.
 pub(crate) fn complete_from_notification(app: &AppHandle, project: &str, no: u32) {
     let state = app.state::<AppState>();
     match complete_task_in(app, &state, project, no, true) {
         Ok(_) => emit_changed(app, &[project.to_string()], ChangeReason::Bulk),
-        Err(e) => eprintln!("could not complete {project}#{no} from a notification: {e}"),
+        Err(e) => {
+            eprintln!("could not complete {project}#{no} from a notification: {e}");
+            crate::window::show_main_window(app);
+            let _ = app.emit(
+                "notification-error",
+                NotificationErrorEvent {
+                    message: format!("通知から完了にできませんでした: {e}"),
+                },
+            );
+        }
     }
+}
+
+/// Payload of `notification-error`.
+#[derive(Debug, Clone, Serialize)]
+struct NotificationErrorEvent {
+    message: String,
 }
 
 #[tauri::command]
@@ -1458,6 +1484,19 @@ pub async fn delete_label(
     })
 }
 
+/// The tasks whose due date differs between two copies of the store's tasks (`(project, no)`).
+fn moved_due(before: &[Task], after: &[Task]) -> Vec<(String, u32)> {
+    after
+        .iter()
+        .filter(|t| {
+            before
+                .iter()
+                .any(|b| b.project == t.project && b.no == t.no && b.due != t.due)
+        })
+        .map(|t| (t.project.clone(), t.no))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn reschedule_overdue(
     today: String,
@@ -1467,11 +1506,21 @@ pub async fn reschedule_overdue(
 ) -> AppResult<ChangedProjects> {
     let today = parse_ymd(&today)?;
     let due = parse_ymd(&due)?;
-    let changed = mutate(&app, state.inner(), &[], false, |s| {
-        s.reschedule_overdue(today, due)
+    let (changed, moved) = mutate(&app, state.inner(), &[], false, |s| {
+        let before = s.all_tasks();
+        let changed = s.reschedule_overdue(today, due)?;
+        Ok((changed, moved_due(&before, &s.all_tasks())))
     })?;
     for p in &changed {
         state.saver.schedule(app.clone(), p.clone());
+    }
+    // The due dates moved: their reminders can fire again on the new date (仕様 §4.3).
+    if !moved.is_empty() {
+        state.update_fired(|f| {
+            for (project, no) in &moved {
+                f.forget_task(project, *no);
+            }
+        });
     }
     emit_changed(&app, &changed, ChangeReason::Bulk);
     Ok(ChangedProjects {
@@ -1794,7 +1843,7 @@ mod tests {
         assert!(tmp.path().join(Fired::FILE).exists());
         let again = AppState::new(tmp.path().to_path_buf());
         assert_eq!(
-            again.lock_fired().snooze_until(&key),
+            again.lock_fired().snooze_until(&key, at),
             Some(at + chrono::Duration::minutes(10))
         );
         again.forget_fired("p", 1);
@@ -1827,6 +1876,58 @@ mod tests {
         let fired = reloaded.lock_fired();
         assert!(fired.entries.is_empty());
         assert_eq!(fired.data_dir.as_deref(), Some(data.path()));
+    }
+
+    #[test]
+    fn rescheduling_reports_moved_tasks_and_snoozes_bind_to_the_current_fire_time() {
+        let data = tempfile::tempdir().unwrap();
+        let app_dir = tempfile::tempdir().unwrap();
+        let mut store = open_store(data.path());
+        let input: TaskInput = serde_json::from_value(serde_json::json!({
+            "title": "t",
+            "due": "2026-10-13",
+            "dueTime": "15:00",
+            "reminders": ["-0m"],
+        }))
+        .unwrap();
+        let no = store
+            .add_task(INBOX, input)
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|t| t.title == "t")
+            .unwrap()
+            .no;
+        let key = ReminderKey {
+            project: INBOX.into(),
+            no,
+            code: "-0m".into(),
+        };
+        let state = AppState::new(app_dir.path().to_path_buf());
+        *state.store.lock().unwrap() = Some(store);
+        let at = |s: &str| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M").unwrap();
+
+        // The banner's 後で for a reminder with no record ties the snooze to 10/13 15:00.
+        state.snooze_fired(&key, at("2026-10-13T15:10"));
+        assert_eq!(
+            state
+                .lock_fired()
+                .snooze_until(&key, at("2026-10-13T15:00")),
+            Some(at("2026-10-13T15:10"))
+        );
+
+        let moved = {
+            let mut guard = state.store.lock().unwrap();
+            let s = guard.as_mut().unwrap();
+            let before = s.all_tasks();
+            s.reschedule_overdue(d("2026-10-14"), d("2026-10-14"))
+                .unwrap();
+            moved_due(&before, &s.all_tasks())
+        };
+        assert_eq!(moved, vec![(INBOX.to_string(), no)]);
+        // Unchanged tasks are not reported.
+        let tasks = state.store.lock().unwrap().as_ref().unwrap().all_tasks();
+        assert!(moved_due(&tasks, &tasks).is_empty());
     }
 
     #[test]

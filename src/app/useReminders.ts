@@ -29,8 +29,8 @@ function merge(list: ReminderItem[], incoming: ReminderItem[]): ReminderItem[] {
  * その戻り値を足す (イベントのペイロードは見ない。pending_reminders は溜まった分を渡して空にするので重複しない)。
  * 帯の内容はウィンドウを隠している間もここに溜まる。
  *
- * `complete` は横断ビューの完了処理 (警告の表示・refreshAll つき。成功で true)、`openTask` は
- * そのプロジェクトを開いて詳細パネルを出す処理。
+ * `complete` は完了処理 (開いているプロジェクトのタスクならその画面の処理、それ以外は横断ビューの処理。成功で true)、
+ * `openTask` はそのプロジェクトを開いて詳細パネルを出す処理。
  */
 export function useReminders({
   onError,
@@ -67,7 +67,11 @@ export function useReminders({
 
   useEffect(() => {
     void fetchPending();
-    return onReminderFired(() => void fetchPending());
+    // 購読が張られるまで (listen は非同期) に発火した分のイベントは届かないので、張れた時点でもう一度取る
+    return onReminderFired(
+      () => void fetchPending(),
+      () => void fetchPending(),
+    );
   }, [fetchPending]);
 
   // 押した行だけを消す (同じタスクが再発火して置き換わった行は残す)
@@ -109,7 +113,8 @@ export function useReminders({
         live.current.onInfo("このリマインダーは既に処理されています");
         return;
       }
-      if (await live.current.complete(item.project, item.no)) remove(item);
+      // 完了したタスクの行はすべて消す (同じタスクの別のリマインダーの行も)
+      if (await live.current.complete(item.project, item.no)) removeTask(item.project, item.no);
     },
     /** `until` (ローカルの YYYY-MM-DDTHH:MM) に再通知するよう頼み、帯から消す。 */
     snooze: async (item: ReminderItem, until: string) => {

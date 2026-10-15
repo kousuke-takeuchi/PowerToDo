@@ -108,6 +108,8 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
       const fn = own(key) ?? own(key.toLowerCase());
       if (!fn) return;
       e.preventDefault();
+      // 押しっぱなしの自動リピートで、完了の切り替えや削除を繰り返さない
+      if (e.repeat && (key.toLowerCase() === "e" || key === "Delete" || key === "Backspace")) return;
       fn();
     };
     window.addEventListener("keydown", onKey);

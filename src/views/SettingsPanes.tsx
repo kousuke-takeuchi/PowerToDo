@@ -4,7 +4,6 @@ import { isImeKey } from "../app/keys";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import { TextField } from "../components/TextField";
-import type { NotificationPermission } from "../types/model";
 import { hintStyle, labelStyle } from "./SyncFields";
 
 /** 設定ダイアログの右側に並べる部品 (ラベル + 内容)。 */
@@ -130,9 +129,6 @@ function isLinux(): boolean {
 export type NotificationsPaneProps = {
   enabled: boolean;
   onToggle?: (v: boolean) => void;
-  /** OS の通知の権限。granted 以外のとき状態と「許可を求める」を出す。 */
-  permission?: NotificationPermission;
-  onRequestPermission?: () => void;
   keepInTray: boolean;
   onToggleKeepInTray?: (v: boolean) => void;
   /** トレイを作れなかった理由 (あれば「トレイに残す」は使えない)。 */
@@ -143,18 +139,13 @@ export type NotificationsPaneProps = {
   error?: string | null;
 };
 
-const PERMISSION_TEXT: Record<NotificationPermission, string> = {
-  granted: "許可済み",
-  denied: "未許可 (OS の設定で PowerToDo の通知を許可してください)",
-  prompt: "未許可",
-};
-
-/** 「通知」ペイン: 通知のオン / オフ、OS の権限、閉じたときトレイに残す。変更は呼び出し側がすぐ保存する。 */
+/**
+ * 「通知」ペイン: 通知のオン / オフ、閉じたときトレイに残す。変更は呼び出し側がすぐ保存する。
+ * OS の権限は出さない: デスクトップの通知プラグインは常に「許可済み」と答え、実際に出るかは OS の通知設定で決まる。
+ */
 export function NotificationsPane({
   enabled,
   onToggle,
-  permission = "granted",
-  onRequestPermission,
   keepInTray,
   onToggleKeepInTray,
   trayError,
@@ -176,14 +167,7 @@ export function NotificationsPane({
           disabled={loading}
         />
         <Desc>リマインダーの時刻になると OS の通知を出します。オフでもアプリ内の帯は出ます。</Desc>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <span style={{ ...hintStyle, flex: 1 }}>OS の権限: {PERMISSION_TEXT[permission]}</span>
-          {permission !== "granted" && (
-            <Button variant="secondary" onClick={onRequestPermission} disabled={busy || loading}>
-              許可を求める
-            </Button>
-          )}
-        </div>
+        <Desc>{"通知の表示は OS の通知設定で決まります (macOS: システム設定 > 通知 > PowerToDo)"}</Desc>
       </Section>
       <Section label="閉じたときトレイに残す">
         <Segmented
