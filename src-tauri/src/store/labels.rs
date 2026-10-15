@@ -235,6 +235,8 @@ mod tests {
             note: None,
             labels: labels.iter().map(|s| s.to_string()).collect(),
             parent_no: None,
+            rrule: None,
+            reminders: vec![],
         }
     }
 

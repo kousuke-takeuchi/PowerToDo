@@ -213,6 +213,8 @@ mod tests {
                 note: None,
                 labels: vec![],
                 parent_no: None,
+                rrule: None,
+                reminders: vec![],
             },
         )
         .unwrap();

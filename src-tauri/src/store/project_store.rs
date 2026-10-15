@@ -28,6 +28,7 @@ use super::project_book::{
 use crate::domain::dates::business_days;
 use crate::domain::ids::next_no;
 use crate::domain::{INBOX, InvalidRow, Label, Project, Section, Task, TaskInput, TaskPatch};
+use crate::domain::{recurrence, reminders};
 use crate::error::{AppError, AppResult};
 
 pub(super) const DEFAULT_COLOR: &str = "var(--color-text-muted)";
@@ -61,6 +62,10 @@ pub struct ProjectView {
     pub sections: Vec<Section>,
     pub tasks: Vec<Task>,
     pub invalid_rows: Vec<InvalidRow>,
+    /// Messages for the UI about the operation that produced this view (e.g. a recurrence that
+    /// could not be read when completing a task).
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 pub struct ProjectStore {
@@ -86,6 +91,7 @@ const COMMON_KEY: &str = "_common";
 struct Ctx {
     now: NaiveDateTime,
     display_name: String,
+    settings: Settings,
     high_water: u32,
 }
 
@@ -134,6 +140,25 @@ pub(super) fn recompute_days(book: &mut ProjectBook, holidays: &[NaiveDate]) {
             _ => None,
         };
     }
+}
+
+/// Adds the default reminder to a task that has a due date and time but no reminder.
+fn apply_default_reminder(t: &mut Task, settings: &Settings) {
+    if t.due.is_some()
+        && t.due_time.is_some()
+        && t.reminders.is_empty()
+        && let Some(code) = &settings.default_reminder
+    {
+        t.reminders.push(code.clone());
+    }
+}
+
+/// Fills `rrule_label` (display text) for tasks that repeat. Never stored.
+fn label_recurrence(t: &mut Task) {
+    t.rrule_label = t
+        .rrule
+        .as_ref()
+        .map(|r| recurrence::summarize(r).unwrap_or_else(|| r.clone()));
 }
 
 fn non_empty(s: &str) -> Option<String> {
@@ -444,8 +469,17 @@ impl ProjectStore {
         Ok(ProjectView {
             project,
             sections: sections_of(book),
-            tasks: book.tasks.clone(),
+            tasks: book
+                .tasks
+                .iter()
+                .cloned()
+                .map(|mut t| {
+                    label_recurrence(&mut t);
+                    t
+                })
+                .collect(),
             invalid_rows: book.invalid_rows.clone(),
+            warnings: Vec::new(),
         })
     }
 
@@ -696,6 +730,7 @@ impl ProjectStore {
         let ctx = Ctx {
             now: self.now(),
             display_name: self.common.settings.display_name.clone(),
+            settings: self.common.settings.clone(),
             high_water: self.high_water.get(name).copied().unwrap_or(0),
         };
         let book = match self.books.get_mut(name) {
@@ -761,14 +796,20 @@ impl ProjectStore {
                 note: input.note.as_deref().and_then(non_empty),
                 parent_no: input.parent_no,
                 labels: input.labels.iter().filter_map(|l| non_empty(l)).collect(),
-                rrule: None,
-                reminders: Vec::new(),
+                rrule: input.rrule.as_deref().and_then(non_empty),
+                rrule_label: None,
+                reminders: input
+                    .reminders
+                    .iter()
+                    .filter_map(|c| non_empty(c))
+                    .collect(),
                 order,
                 created_at: ctx.now,
                 completed_at: None,
                 extra: BTreeMap::new(),
             };
             normalize_due(&mut task);
+            apply_default_reminder(&mut task, &ctx.settings);
             book.tasks.push(task);
             Ok(())
         })?;
@@ -820,6 +861,8 @@ impl ProjectStore {
                 book.assignees.push(a.clone());
             }
             let t = &mut book.tasks[idx];
+            let had_time = t.due_time.is_some();
+            let sets_reminders = patch.reminders.is_some();
             if let Some(v) = title {
                 t.title = v;
             }
@@ -868,28 +911,58 @@ impl ProjectStore {
                 t.order = v;
             }
             normalize_due(t);
+            // A time was just added: give the task the default reminder (only when it has none
+            // and this patch did not set the reminders itself).
+            if !had_time && t.due_time.is_some() && !sets_reminders {
+                apply_default_reminder(t, &ctx.settings);
+            }
             Ok(())
         })?;
         self.view(project)
     }
 
+    /// Completes (or reopens) a task. A repeating task is not finished: its due date moves to
+    /// the next occurrence and it starts over. A recurrence that has run out is dropped and the
+    /// task completes normally; one that cannot be read completes normally with a warning.
     pub fn complete_task(&mut self, project: &str, no: u32, done: bool) -> AppResult<ProjectView> {
+        let mut warning: Option<String> = None;
         self.mutate(project, |book, ctx| {
             let idx = find_task(book, no)?;
             let t = &mut book.tasks[idx];
-            if done {
-                if t.progress != 100 {
-                    t.completed_at = None;
-                }
-                t.progress = 100;
-                t.completed_at.get_or_insert(ctx.now);
-            } else {
+            if !done {
                 t.progress = 0;
                 t.completed_at = None;
+                return Ok(());
             }
+            if let Some(rrule) = t.rrule.clone() {
+                let today = ctx.now.date();
+                let base = if recurrence::split(&rrule).from_completed {
+                    today
+                } else {
+                    t.due.unwrap_or(today)
+                };
+                match recurrence::next_due(&rrule, t.due, t.due_time, base) {
+                    Ok(Some(next)) => {
+                        t.due = Some(next);
+                        t.progress = 0;
+                        t.completed_at = None;
+                        t.reminders.retain(|c| !reminders::is_absolute(c));
+                        return Ok(());
+                    }
+                    Ok(None) => t.rrule = None,
+                    Err(e) => warning = Some(e.to_string()),
+                }
+            }
+            if t.progress != 100 {
+                t.completed_at = None;
+            }
+            t.progress = 100;
+            t.completed_at.get_or_insert(ctx.now);
             Ok(())
         })?;
-        self.view(project)
+        let mut view = self.view(project)?;
+        view.warnings.extend(warning);
+        Ok(view)
     }
 
     /// Deletes the task and all of its descendants.
@@ -1057,10 +1130,19 @@ impl ProjectStore {
             return Err(invalid("週の開始は mon か sun です"));
         }
         let timezone = non_empty(&s.timezone).ok_or_else(|| invalid("タイムゾーンが空です"))?;
+        if let Some(code) = &s.default_reminder
+            && reminders::parse_code(code).is_none()
+        {
+            return Err(invalid("既定リマインダーの指定が正しくありません"));
+        }
         self.common.settings = Settings {
             display_name,
             week_start: s.week_start,
             timezone,
+            default_reminder: s.default_reminder,
+            notify_time: s.notify_time,
+            keep_in_tray: s.keep_in_tray,
+            notifications: s.notifications,
         };
         self.common_dirty = true;
         Ok(self.common.settings.clone())
@@ -1081,6 +1163,10 @@ impl ProjectStore {
                 _ => None,
             })
             .flatten()
+            .map(|mut t| {
+                label_recurrence(&mut t);
+                t
+            })
             .collect()
     }
 
@@ -1480,6 +1566,8 @@ mod tests {
             note: None,
             labels: vec![],
             parent_no: None,
+            rrule: None,
+            reminders: vec![],
         }
     }
 
@@ -1930,6 +2018,7 @@ mod tests {
             parent_no: None,
             labels: vec![],
             rrule: None,
+            rrule_label: None,
             reminders: vec![],
             order: 1,
             created_at: dt("2026-10-01T09:00"),
@@ -2133,6 +2222,7 @@ mod tests {
             parent_no: None,
             labels: vec![],
             rrule: None,
+            rrule_label: None,
             reminders: vec![],
             order: 1,
             created_at: created_at_sentinel(),
@@ -2456,5 +2546,204 @@ mod tests {
             b.assignees
         );
         assert_eq!(b.assignees.iter().filter(|a| **a == me).count(), 1);
+    }
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn hm(h: u32, m: u32) -> NaiveTime {
+        NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn completing_a_recurring_task_moves_the_due_date() {
+        let mut e = env(); // clock = 2026-10-14 (Wednesday) 09:30
+        let mut i = input("ゴミ出し");
+        i.due = Some(ymd(2026, 10, 13)); // a Tuesday
+        i.due_time = Some(hm(8, 0));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let no = v.tasks[0].no;
+        assert_eq!(v.tasks[0].reminders, vec!["-0m".to_string()]); // default reminder
+        let v = e.store.complete_task(INBOX, no, true).unwrap();
+        let t = &v.tasks[0];
+        assert_eq!(t.progress, 0);
+        assert_eq!(t.completed_at, None);
+        assert_eq!(t.due, Some(ymd(2026, 10, 20)));
+        assert_eq!(t.due_time, Some(hm(8, 0)));
+        assert_eq!(t.rrule_label.as_deref(), Some("毎週火曜"));
+        assert!(v.warnings.is_empty());
+        assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);
+    }
+
+    #[test]
+    fn completion_based_recurrence_counts_from_today() {
+        let mut e = env();
+        let mut i = input("水やり");
+        i.due = Some(ymd(2026, 10, 1));
+        i.rrule = Some("FREQ=DAILY;INTERVAL=3;X-FROM=COMPLETED".into());
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let v = e.store.complete_task(INBOX, v.tasks[0].no, true).unwrap();
+        assert_eq!(v.tasks[0].due, Some(ymd(2026, 10, 17)));
+    }
+
+    #[test]
+    fn unreadable_rrule_completes_normally_with_a_warning() {
+        let mut e = env();
+        let mut i = input("x");
+        i.rrule = Some("FREQ=SOMETIMES".into());
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let v = e.store.complete_task(INBOX, v.tasks[0].no, true).unwrap();
+        assert_eq!(v.tasks[0].progress, 100);
+        assert_eq!(v.warnings.len(), 1);
+        assert!(v.warnings[0].contains("FREQ=SOMETIMES"));
+        // The label falls back to the raw string.
+        assert_eq!(v.tasks[0].rrule_label.as_deref(), Some("FREQ=SOMETIMES"));
+    }
+
+    #[test]
+    fn exhausted_recurrence_is_removed() {
+        let mut e = env();
+        let mut i = input("最後");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=DAILY;COUNT=1".into());
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let v = e.store.complete_task(INBOX, v.tasks[0].no, true).unwrap();
+        assert_eq!(v.tasks[0].progress, 100);
+        assert_eq!(v.tasks[0].rrule, None);
+        assert_eq!(v.tasks[0].rrule_label, None);
+    }
+
+    #[test]
+    fn reopening_a_task_does_not_touch_the_recurrence() {
+        let mut e = env();
+        let mut i = input("z");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=DAILY;COUNT=1".into());
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let no = v.tasks[0].no;
+        e.store.complete_task(INBOX, no, true).unwrap();
+        let v = e.store.complete_task(INBOX, no, false).unwrap();
+        assert_eq!(v.tasks[0].progress, 0);
+        assert_eq!(v.tasks[0].due, Some(ymd(2026, 10, 13)));
+    }
+
+    #[test]
+    fn default_reminder_only_when_a_time_is_set_and_none_exist() {
+        let mut e = env();
+        let mut i = input("時刻なし");
+        i.due = Some(ymd(2026, 10, 13));
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let no = v.tasks[0].no;
+        assert!(v.tasks[0].reminders.is_empty());
+        let v = e
+            .store
+            .update_task(
+                INBOX,
+                no,
+                TaskPatch {
+                    due_time: Some(Some(hm(10, 0))),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(v.tasks[0].reminders, vec!["-0m".to_string()]);
+        // Already has one: untouched when the time changes again.
+        let v = e
+            .store
+            .update_task(
+                INBOX,
+                no,
+                TaskPatch {
+                    reminders: Some(vec!["-30m".into()]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let v2 = e
+            .store
+            .update_task(
+                INBOX,
+                no,
+                TaskPatch {
+                    due_time: Some(Some(hm(11, 0))),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(v2.tasks[0].reminders, v.tasks[0].reminders);
+        // Setting 「なし」 disables it.
+        let mut s = e.store.settings();
+        s.default_reminder = None;
+        e.store.update_settings(s).unwrap();
+        let mut i = input("なし設定");
+        i.due = Some(ymd(2026, 10, 13));
+        i.due_time = Some(hm(10, 0));
+        let v = e.store.add_task(INBOX, i).unwrap();
+        assert!(v.tasks[1].reminders.is_empty());
+    }
+
+    #[test]
+    fn a_patch_that_sets_reminders_wins_over_the_default() {
+        let mut e = env();
+        let mut i = input("a");
+        i.due = Some(ymd(2026, 10, 13));
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let v = e
+            .store
+            .update_task(
+                INBOX,
+                v.tasks[0].no,
+                TaskPatch {
+                    due_time: Some(Some(hm(10, 0))),
+                    reminders: Some(vec![]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(v.tasks[0].reminders.is_empty());
+    }
+
+    #[test]
+    fn recurring_completion_drops_absolute_reminders() {
+        let mut e = env();
+        let mut i = input("y");
+        i.due = Some(ymd(2026, 10, 13));
+        i.due_time = Some(hm(8, 0));
+        i.rrule = Some("FREQ=DAILY".into());
+        i.reminders = vec!["-30m".into(), "2026-10-13T07:00".into()];
+        let v = e.store.add_task(INBOX, i).unwrap();
+        let v = e.store.complete_task(INBOX, v.tasks[0].no, true).unwrap();
+        assert_eq!(v.tasks[0].reminders, vec!["-30m".to_string()]);
+    }
+
+    #[test]
+    fn update_settings_validates_the_new_keys() {
+        let mut e = env();
+        let mut s = e.store.settings();
+        s.default_reminder = Some("-5m".into());
+        assert!(e.store.update_settings(s.clone()).is_err());
+        s.default_reminder = Some("-30m".into());
+        s.notify_time = hm(8, 15);
+        s.keep_in_tray = false;
+        s.notifications = false;
+        let back = e.store.update_settings(s.clone()).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn rrule_label_is_not_written_to_the_workbook() {
+        let mut e = env();
+        let mut i = input("w");
+        i.rrule = Some("FREQ=DAILY".into());
+        let v = e.store.add_task(INBOX, i).unwrap();
+        assert!(v.tasks[0].rrule_label.is_some());
+        assert!(e.store.all_tasks()[0].rrule_label.is_some());
+        e.store.save(INBOX).unwrap();
+        let again = e.reopen();
+        let t = again.view(INBOX).unwrap().tasks.remove(0);
+        assert_eq!(t.rrule.as_deref(), Some("FREQ=DAILY"));
+        assert!(t.rrule_label.is_some()); // recomputed from rrule on view
     }
 }

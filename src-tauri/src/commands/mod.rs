@@ -8,12 +8,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use chrono::{Local, NaiveDate, NaiveDateTime};
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::domain::model::{INBOX, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
+use crate::domain::recurrence;
 use crate::domain::search;
 use crate::domain::search::Hit;
 use crate::domain::views::{self, DayGroup};
@@ -222,6 +223,12 @@ pub struct MoveOutcome {
 pub struct SettingsDto {
     pub display_name: String,
     pub week_start: String,
+    /// Reminder code for tasks that get a time; `null` = none.
+    pub default_reminder: Option<String>,
+    /// `HH:MM`: when tasks without a time notify.
+    pub notify_time: String,
+    pub keep_in_tray: bool,
+    pub notifications: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
 }
@@ -796,7 +803,19 @@ fn start_watching(app: &AppHandle, state: &AppState) {
 pub fn parse_quick_add_in(store: &ProjectStore, text: &str, today: NaiveDate) -> QuickAddResult {
     let projects: Vec<String> = store.summaries().into_iter().map(|p| p.name).collect();
     let labels: Vec<String> = store.labels().into_iter().map(|l| l.name).collect();
-    parse(text, today, &projects, &labels)
+    let mut parsed = parse(text, today, &projects, &labels);
+    // A recurrence without a date starts on its first occurrence on or after today (the day
+    // before today is the base because the next occurrence is strictly after it). An unreadable
+    // rule leaves the date empty.
+    if parsed.due.is_none()
+        && let Some(rrule) = &parsed.rrule
+    {
+        let base = today.pred_opt().unwrap_or(today);
+        parsed.due = recurrence::next_due(rrule, None, parsed.due_time, base)
+            .ok()
+            .flatten();
+    }
+    parsed
 }
 
 pub fn quick_add_in(
@@ -819,6 +838,8 @@ pub fn quick_add_in(
         note: None,
         labels: parsed.labels.clone(),
         parent_no: None,
+        rrule: parsed.rrule.clone(),
+        reminders: Vec::new(),
     };
     let view = store.add_task(&project, input)?;
     Ok(QuickAddOutcome { parsed, view })
@@ -1346,6 +1367,10 @@ fn settings_dto(store: &ProjectStore) -> SettingsDto {
     SettingsDto {
         display_name: s.display_name,
         week_start: s.week_start,
+        default_reminder: s.default_reminder,
+        notify_time: s.notify_time.format("%H:%M").to_string(),
+        keep_in_tray: s.keep_in_tray,
+        notifications: s.notifications,
         data_dir: Some(dir_string(store)),
     }
 }
@@ -1365,10 +1390,20 @@ pub async fn update_settings(
         // The time zone is not editable yet; keep what the workbook has. `data_dir` is
         // changed with `set_data_dir`, not here.
         let timezone = s.settings().timezone;
+        let notify_time =
+            NaiveTime::parse_from_str(&settings.notify_time, "%H:%M").map_err(|_| {
+                AppError::Invalid {
+                    message: "時刻なしの通知時刻は HH:MM で指定してください".into(),
+                }
+            })?;
         s.update_settings(Settings {
             display_name: settings.display_name,
             week_start: settings.week_start,
             timezone,
+            default_reminder: settings.default_reminder,
+            notify_time,
+            keep_in_tray: settings.keep_in_tray,
+            notifications: settings.notifications,
         })?;
         Ok(settings_dto(s))
     })
@@ -1415,6 +1450,41 @@ mod tests {
         assert!(first_run["dataDir"].is_null());
         assert_eq!(first_run["projects"], serde_json::json!([]));
         assert_eq!(first_run["warning"], "w");
+    }
+
+    #[test]
+    fn quick_add_with_a_recurrence_starts_on_the_first_occurrence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        // 2026-10-14 is a Wednesday: the next Tuesday is 10-20.
+        let out =
+            quick_add_in(&mut store, "ゴミ出し 毎週火曜 8:00", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-20")));
+        let t = &out.view.tasks[0];
+        assert_eq!(t.title, "ゴミ出し");
+        assert_eq!(t.due, Some(d("2026-10-20")));
+        assert_eq!(t.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+        assert_eq!(t.rrule_label.as_deref(), Some("毎週火曜"));
+        // When today matches, the first occurrence is today.
+        let out = quick_add_in(&mut store, "朝会 毎週火曜", INBOX, d("2026-10-13")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-13")));
+        // An explicit date wins over the first occurrence.
+        let out = quick_add_in(&mut store, "x 毎週火曜 明日", INBOX, d("2026-10-14")).unwrap();
+        assert_eq!(out.parsed.due, Some(d("2026-10-15")));
+        assert_eq!(out.parsed.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+    }
+
+    #[test]
+    fn settings_dto_carries_the_phase3_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = open_store(tmp.path());
+        let dto = settings_dto(&store);
+        assert_eq!(dto.default_reminder.as_deref(), Some("-0m"));
+        assert_eq!(dto.notify_time, "09:00");
+        assert!(dto.keep_in_tray && dto.notifications);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["notifyTime"], "09:00");
+        assert_eq!(json["defaultReminder"], "-0m");
     }
 
     #[test]
