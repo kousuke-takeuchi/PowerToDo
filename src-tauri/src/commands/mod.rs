@@ -193,15 +193,18 @@ impl AppState {
     }
 
     /// Whether closing the window hides it (the 「トレイに常駐」 setting). `true` while no data
-    /// folder is open (the default setting), `false` when there is no tray to bring it back from.
+    /// folder is open (the default setting). Always `false` when there is no tray to bring the
+    /// window back from (`tray_error`), and on Linux regardless of the setting: stock GNOME has
+    /// no tray host, so a hidden window could not be reached again (the settings pane says so).
     pub fn keep_in_tray(&self) -> bool {
-        if self.tray_error().is_some() {
+        if cfg!(target_os = "linux") {
             return false;
         }
-        self.lock_store()
+        let setting = self
+            .lock_store()
             .as_ref()
-            .map(|store| store.settings().keep_in_tray)
-            .unwrap_or(true)
+            .map(|store| store.settings().keep_in_tray);
+        resolve_keep_in_tray(self.tray_error().is_some(), setting)
     }
 
     /// Writes everything still dirty (used when the app quits). Held projects, and dirty ones
@@ -464,6 +467,12 @@ fn no_data_dir() -> AppError {
 
 fn dir_string(store: &ProjectStore) -> String {
     store.paths().data_dir.to_string_lossy().into_owned()
+}
+
+/// The cfg-independent part of [`AppState::keep_in_tray`]: no tray beats the setting; no data
+/// folder (`None`) means the default, which is on.
+fn resolve_keep_in_tray(tray_failed: bool, setting: Option<bool>) -> bool {
+    !tray_failed && setting.unwrap_or(true)
 }
 
 fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateDto {
@@ -1702,6 +1711,15 @@ mod tests {
 
     fn open_store(dir: &Path) -> ProjectStore {
         ProjectStore::open(Paths::new(dir), fixed_now, true).unwrap()
+    }
+
+    #[test]
+    fn keep_in_tray_resolution() {
+        assert!(resolve_keep_in_tray(false, Some(true)));
+        assert!(!resolve_keep_in_tray(false, Some(false)));
+        assert!(resolve_keep_in_tray(false, None));
+        assert!(!resolve_keep_in_tray(true, Some(true)));
+        assert!(!resolve_keep_in_tray(true, None));
     }
 
     #[test]

@@ -28,7 +28,7 @@ pub fn show_main_window(app: &AppHandle) {
 }
 
 /// The one place that decides whether the app may quit now: with held projects the UI has to
-/// ask first (`exit-blocked`, then the `quit` command), otherwise exit at once. Used by the
+/// ask first (the window is shown, then `exit-blocked`, then the `quit` command), otherwise exit at once. Used by the
 /// macOS Quit item, the tray's 「終了」 and a window close that is not hidden.
 pub fn request_quit(app: &AppHandle) {
     let held = app
@@ -38,6 +38,9 @@ pub fn request_quit(app: &AppHandle) {
     if held.is_empty() {
         app.exit(0);
     } else {
+        // The UI asks with a native dialog, a sheet on the window: with the window hidden (in
+        // the tray) it would be invisible. Show it first.
+        show_main_window(app);
         let _ = app.emit("exit-blocked", held);
     }
 }
