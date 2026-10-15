@@ -1,10 +1,11 @@
 //! Reminder firing (仕様 §4.3–4.5): every 30 seconds, find the reminders that are due, record
 //! them in `fired.json`, show OS notifications and tell the UI (`reminder-fired`).
 //!
-//! The decision is the pure [`due_reminders`]; everything that touches Tauri is in [`tick`] and
-//! [`on_action`], which are checked by hand.
+//! The decisions are pure ([`due_reminders`], [`apply`], [`action_is_current`]); what touches
+//! Tauri is in [`tick`] and [`on_action`], which are checked by hand.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Local, NaiveDateTime};
@@ -140,6 +141,134 @@ pub fn notification_body(item: &ReminderItem, count: usize) -> String {
     body
 }
 
+/// One OS notification to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationPlan {
+    /// One task: the first of its reminders that fired and how many fired together. Has the
+    /// buttons and the extras the actions need.
+    Single { item: ReminderItem, count: usize },
+    /// 「N 件のリマインダーがありました」: no buttons, a click only shows the window.
+    Summary { count: usize },
+}
+
+/// What one look decided, for the part of [`tick`] that runs without locks.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Outcome {
+    /// Empty when notifications are off in the settings.
+    pub notify: Vec<NotificationPlan>,
+    /// `reminder-fired` (sent even when notifications are off); also added to `pending`.
+    pub emit: Vec<ReminderItem>,
+}
+
+/// One look at the tasks, applied to `fired` (pure apart from `fired`):
+///
+/// - due reminders (see [`due_reminders`]); missed ones count only after the base
+///   ([`select_missed`]: `last_seen`, or 24 hours ago when there is none). Older ones are
+///   dropped without a record.
+/// - every reminder found is recorded before anything is shown (仕様 §7: no retry), added to
+///   `pending` and emitted; `last_seen = now`.
+/// - `startup` (the first look after launch, or after a data folder switch): records of tasks
+///   that no longer exist are dropped, and 2 or more reminders become one summary notification
+///   (仕様 §4.5); exactly 1 gets the normal notification.
+/// - a regular look: one notification per task; reminders missed while the machine slept get
+///   one summary.
+pub fn apply(
+    fired: &mut Fired,
+    tasks: &[Task],
+    settings: &Settings,
+    now: NaiveDateTime,
+    startup: bool,
+) -> Outcome {
+    let decision = due_reminders(tasks, fired, now, settings);
+    let missed = select_missed(decision.missed, fired.last_seen, now);
+    let fire = decision.fire;
+    for item in fire.iter().chain(&missed) {
+        fired.mark(&ReminderKey::of(item), item.at);
+    }
+    if startup {
+        let existing: BTreeSet<(String, u32)> =
+            tasks.iter().map(|t| (t.project.clone(), t.no)).collect();
+        fired.retain_existing(&existing);
+    }
+    fired.last_seen = Some(now);
+
+    let mut notify = Vec::new();
+    if startup {
+        let all: Vec<&ReminderItem> = fire.iter().chain(&missed).collect();
+        match all.as_slice() {
+            [] => {}
+            [one] => notify.push(NotificationPlan::Single {
+                item: (*one).clone(),
+                count: 1,
+            }),
+            many => notify.push(NotificationPlan::Summary { count: many.len() }),
+        }
+    } else {
+        for (item, count) in group_by_task(&fire) {
+            notify.push(NotificationPlan::Single {
+                item: item.clone(),
+                count,
+            });
+        }
+        if !missed.is_empty() {
+            notify.push(NotificationPlan::Summary {
+                count: missed.len(),
+            });
+        }
+    }
+    if !settings.notifications {
+        notify.clear();
+    }
+    let emit: Vec<ReminderItem> = fire.into_iter().chain(missed).collect();
+    fired.push_pending(emit.iter().cloned());
+    Outcome { notify, emit }
+}
+
+/// The reminder a notification was about, from its extra payload
+/// (`ActionPerformed::notification()` → `ActiveNotification::extra()`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionTarget {
+    /// The data folder the reminder came from (`dataDir`).
+    pub data_dir: String,
+    pub key: ReminderKey,
+    /// The fire time the notification was shown for, to the minute (`at`).
+    pub at: NaiveDateTime,
+}
+
+/// Extra keys of a reminder notification.
+const EXTRA_DATA_DIR: &str = "dataDir";
+const EXTRA_PROJECT: &str = "project";
+const EXTRA_NO: &str = "no";
+const EXTRA_CODE: &str = "code";
+const EXTRA_AT: &str = "at";
+const AT_FORMAT: &str = "%Y-%m-%dT%H:%M";
+
+/// Reads the extras set by [`notify`]; `None` when any is missing (the summary has none).
+pub fn action_target(extra: &HashMap<String, Value>) -> Option<ActionTarget> {
+    let text = |k: &str| extra.get(k).and_then(Value::as_str).map(str::to_string);
+    Some(ActionTarget {
+        data_dir: text(EXTRA_DATA_DIR)?,
+        key: ReminderKey {
+            project: text(EXTRA_PROJECT)?,
+            no: u32::try_from(extra.get(EXTRA_NO)?.as_u64()?).ok()?,
+            code: text(EXTRA_CODE)?,
+        },
+        at: NaiveDateTime::parse_from_str(&text(EXTRA_AT)?, AT_FORMAT).ok()?,
+    })
+}
+
+/// A 完了 / 後で button still means what it said: the notification is from the open data
+/// folder, and the reminder is still recorded as fired at that time. Completing the task,
+/// changing its date or reminders, or switching folders drops the record, so an old
+/// notification left in the notification center cannot complete the next occurrence of a
+/// recurring task.
+pub fn action_is_current(fired: &Fired, current_dir: Option<&Path>, target: &ActionTarget) -> bool {
+    let dir = Path::new(&target.data_dir);
+    current_dir == Some(dir)
+        && fired.data_dir.as_deref() == Some(dir)
+        && fired.contains_minute(&target.key, target.at)
+}
+
 fn now() -> NaiveDateTime {
     Local::now().naive_local()
 }
@@ -157,12 +286,15 @@ struct OpenTask {
 
 /// Registers the reminder buttons and the handler of what the user does with a notification.
 /// Call before [`start`]: notifications shown before a handler exists report nothing.
+///
+/// 後で comes first: macOS folds two buttons into an "Options" menu, and a click on the menu
+/// button itself is reported as the first action, which must be the harmless one.
 pub fn register(app: &AppHandle) {
     let notification = app.notification();
     let reminder = ActionType::builder(ACTION_TYPE)
         .actions(vec![
-            Action::builder(ACTION_DONE, "完了").build(),
             Action::builder(ACTION_SNOOZE, "後で (10 分)").build(),
+            Action::builder(ACTION_DONE, "完了").build(),
         ])
         .build();
     if let Err(e) = notification.register_action_types(vec![reminder]) {
@@ -194,61 +326,57 @@ pub fn start(app: AppHandle) {
 
 /// One look at the tasks. `false` when no data folder is open (nothing was done).
 ///
-/// Lock order (see `commands`): the store lock is taken and released first (copying the tasks
-/// and settings), then the `fired` lock alone. Notifications and events go out with no lock
-/// held.
+/// Lock order (see `commands`): the store lock is taken and released first (copying the tasks,
+/// settings and data folder), then the `fired` lock alone. Notifications and events go out
+/// with no lock held.
 fn tick(app: &AppHandle, startup: bool) -> bool {
     let state = app.state::<AppState>();
-    let Some((tasks, settings)) = state.reminder_inputs() else {
+    let Some((tasks, settings, data_dir)) = state.reminder_inputs() else {
         return false;
     };
     let now = now();
-    let (fire, missed) = {
+    let outcome = {
         let mut fired = state.lock_fired();
-        let decision = due_reminders(&tasks, &fired, now, &settings);
-        let missed = select_missed(decision.missed, fired.last_seen, now);
-        // Recorded before notifying: a failed notification is not retried (仕様 §7).
-        for item in decision.fire.iter().chain(&missed) {
-            fired.mark(&ReminderKey::of(item), item.at);
-        }
-        if startup {
-            let existing: BTreeSet<(String, u32)> =
-                tasks.iter().map(|t| (t.project.clone(), t.no)).collect();
-            fired.retain_existing(&existing);
-        }
-        fired.last_seen = Some(now);
-        fired.push_pending(decision.fire.iter().chain(&missed).cloned());
+        // Normally already bound by `app_state` / `set_data_dir`; a switch counts as a start.
+        fired.bind(&data_dir);
+        let switched = std::mem::take(&mut fired.rebound);
+        let outcome = apply(&mut fired, &tasks, &settings, now, startup || switched);
         if let Err(e) = fired.save(state.app_data_dir()) {
             eprintln!("could not write {}: {e}", Fired::FILE);
         }
-        (decision.fire, missed)
+        outcome
     };
 
-    if settings.notifications {
-        for (item, count) in group_by_task(&fire) {
-            notify(app, item, count);
-        }
-        if !missed.is_empty() {
-            notify_summary(app, missed.len());
+    let dir = data_dir.to_string_lossy();
+    for plan in &outcome.notify {
+        match plan {
+            NotificationPlan::Single { item, count } => notify(app, item, *count, &dir),
+            NotificationPlan::Summary { count } => notify_summary(app, *count),
         }
     }
-    let items: Vec<ReminderItem> = fire.into_iter().chain(missed).collect();
-    if !items.is_empty() {
-        let _ = app.emit("reminder-fired", ReminderFired { items });
+    if !outcome.emit.is_empty() {
+        let _ = app.emit(
+            "reminder-fired",
+            ReminderFired {
+                items: outcome.emit,
+            },
+        );
     }
     true
 }
 
-fn notify(app: &AppHandle, item: &ReminderItem, count: usize) {
+fn notify(app: &AppHandle, item: &ReminderItem, count: usize, data_dir: &str) {
     let shown = app
         .notification()
         .builder()
         .title(item.title.clone())
         .body(notification_body(item, count))
         .action_type_id(ACTION_TYPE)
-        .extra("project", &item.project)
-        .extra("no", item.no)
-        .extra("code", &item.code)
+        .extra(EXTRA_DATA_DIR, data_dir)
+        .extra(EXTRA_PROJECT, &item.project)
+        .extra(EXTRA_NO, item.no)
+        .extra(EXTRA_CODE, &item.code)
+        .extra(EXTRA_AT, item.at.format(AT_FORMAT).to_string())
         .show();
     if let Err(e) = shown {
         eprintln!(
@@ -258,7 +386,7 @@ fn notify(app: &AppHandle, item: &ReminderItem, count: usize) {
     }
 }
 
-/// The start-up summary (仕様 §4.5). A click only brings the window back; the banner lists them.
+/// The summary (仕様 §4.5). A click only brings the window back; the banner lists them.
 fn notify_summary(app: &AppHandle, count: usize) {
     let shown = app
         .notification()
@@ -271,49 +399,47 @@ fn notify_summary(app: &AppHandle, count: usize) {
     }
 }
 
-/// The task a notification was about, from its extra payload
-/// (`ActionPerformed::notification()` → `ActiveNotification::extra()`).
-fn target(performed: &ActionPerformed) -> Option<(String, u32, Option<String>)> {
-    let extra = performed.notification()?.extra();
-    let project = extra.get("project")?.as_str()?.to_string();
-    let no = u32::try_from(extra.get("no")?.as_u64()?).ok()?;
-    let code = extra
-        .get("code")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    Some((project, no, code))
+/// What the user did with a notification. Runs on the plugin's notification thread: the work
+/// goes to the async runtime (the saver needs it) and this returns at once.
+fn on_action(app: &AppHandle, performed: &ActionPerformed) {
+    let action = performed.action_id().to_string();
+    let target = performed
+        .notification()
+        .and_then(|n| action_target(n.extra()));
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move { act(&app, &action, target) });
 }
 
-/// What the user did with a notification. Runs on the plugin's notification thread, so the
-/// work that saves goes to the async runtime (the saver needs it) and this returns at once.
-fn on_action(app: &AppHandle, performed: &ActionPerformed) {
-    let target = target(performed);
-    match performed.action_id() {
-        ACTION_TAP => {
+/// 完了 / 後で act only on a current reminder ([`action_is_current`]); a stale button, like a
+/// click on the notification, shows the window and opens the task. Notifications of another
+/// data folder (and the summary) only show the window.
+fn act(app: &AppHandle, action: &str, target: Option<ActionTarget>) {
+    let state = app.state::<AppState>();
+    // Store lock, released; then the `fired` lock alone.
+    let current_dir = state.current_data_dir();
+    let Some(target) = target.filter(|t| current_dir.as_deref() == Some(Path::new(&t.data_dir)))
+    else {
+        window::show_main_window(app);
+        return;
+    };
+    let current = action_is_current(&state.lock_fired(), current_dir.as_deref(), &target);
+    match action {
+        ACTION_DONE if current => {
+            commands::complete_from_notification(app, &target.key.project, target.key.no);
+        }
+        ACTION_SNOOZE if current => {
+            state.snooze_fired(&target.key, now() + Duration::minutes(SNOOZE_MINUTES));
+        }
+        _ => {
             window::show_main_window(app);
-            if let Some((project, no, _)) = target {
-                let _ = app.emit("open-task", OpenTask { project, no });
-            }
+            let _ = app.emit(
+                "open-task",
+                OpenTask {
+                    project: target.key.project,
+                    no: target.key.no,
+                },
+            );
         }
-        ACTION_DONE => {
-            if let Some((project, no, _)) = target {
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::complete_from_notification(&app, &project, no);
-                });
-            }
-        }
-        ACTION_SNOOZE => {
-            if let Some((project, no, Some(code))) = target {
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let key = ReminderKey { project, no, code };
-                    let until = now() + Duration::minutes(SNOOZE_MINUTES);
-                    app.state::<AppState>().snooze_fired(&key, until);
-                });
-            }
-        }
-        _ => {}
     }
 }
 
@@ -535,5 +661,201 @@ mod tests {
             ..timeless
         };
         assert_eq!(notification_body(&undated, 1), "p");
+    }
+
+    fn plans(o: &Outcome) -> Vec<String> {
+        o.notify
+            .iter()
+            .map(|p| match p {
+                NotificationPlan::Single { item, count } => format!("single {}x{count}", item.no),
+                NotificationPlan::Summary { count } => format!("summary {count}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn startup_with_several_reminders_shows_one_summary() {
+        let tasks = [
+            task(1, "2026-10-13", Some((8, 0)), &["-0m"], 0),
+            task(2, "2026-10-13", Some((8, 30)), &["-0m"], 0),
+            task(3, "2026-10-11", Some((9, 0)), &["-0m"], 0), // missed while stopped
+        ];
+        let mut fired = Fired {
+            last_seen: Some(dt("2026-10-10T18:00")),
+            ..Fired::default()
+        };
+        let now = dt("2026-10-13T09:00");
+        let o = apply(&mut fired, &tasks, &settings(), now, true);
+        assert_eq!(plans(&o), vec!["summary 3"]);
+        assert_eq!(
+            o.emit.iter().map(|i| i.no).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(fired.pending, o.emit);
+        assert_eq!(fired.entries.len(), 3);
+        assert_eq!(fired.last_seen, Some(now));
+        // Recorded: the next look is quiet.
+        let o = apply(
+            &mut fired,
+            &tasks,
+            &settings(),
+            dt("2026-10-13T09:00:30"),
+            false,
+        );
+        assert_eq!(o, Outcome::default());
+    }
+
+    #[test]
+    fn startup_with_one_reminder_shows_it_normally() {
+        let tasks = [task(1, "2026-10-13", Some((8, 0)), &["-0m"], 0)];
+        let mut fired = Fired {
+            last_seen: Some(dt("2026-10-13T07:00")),
+            ..Fired::default()
+        };
+        let o = apply(
+            &mut fired,
+            &tasks,
+            &settings(),
+            dt("2026-10-13T09:00"),
+            true,
+        );
+        assert_eq!(plans(&o), vec!["single 1x1"]);
+    }
+
+    #[test]
+    fn regular_look_notifies_per_task() {
+        let tasks = [
+            task(1, "2026-10-13", Some((9, 0)), &["-0m", "-10m"], 0),
+            task(2, "2026-10-13", Some((9, 0)), &["-0m"], 0),
+        ];
+        let mut fired = Fired {
+            last_seen: Some(dt("2026-10-13T08:59:30")),
+            ..Fired::default()
+        };
+        let o = apply(
+            &mut fired,
+            &tasks,
+            &settings(),
+            dt("2026-10-13T09:00"),
+            false,
+        );
+        assert_eq!(plans(&o), vec!["single 1x2", "single 2x1"]);
+        assert_eq!(o.emit.len(), 3);
+        // Notifications off: nothing shown, still emitted and pending.
+        let mut quiet = Fired::default();
+        let off = Settings {
+            notifications: false,
+            ..settings()
+        };
+        let o = apply(&mut quiet, &tasks, &off, dt("2026-10-13T09:00"), false);
+        assert!(o.notify.is_empty());
+        assert_eq!(o.emit.len(), 3);
+        assert_eq!(quiet.pending.len(), 3);
+    }
+
+    #[test]
+    fn without_last_seen_the_base_is_24_hours_ago() {
+        // First run, or a corrupt fired.json: only the last 24 hours count.
+        let tasks = [
+            task(1, "2026-10-10", Some((9, 0)), &["-0m"], 0),
+            task(2, "2026-10-13", Some((8, 0)), &["-0m"], 0),
+        ];
+        let mut fired = Fired::default();
+        let o = apply(
+            &mut fired,
+            &tasks,
+            &settings(),
+            dt("2026-10-13T09:00"),
+            true,
+        );
+        assert_eq!(plans(&o), vec!["single 2x1"]);
+        assert_eq!(o.emit.iter().map(|i| i.no).collect::<Vec<_>>(), vec![2]);
+        // The old one is dropped without a record.
+        assert_eq!(fired.entries.len(), 1);
+    }
+
+    #[test]
+    fn startup_drops_records_of_vanished_tasks() {
+        let mut fired = Fired::default();
+        fired.mark(
+            &ReminderKey {
+                project: "gone".into(),
+                no: 9,
+                code: "-0m".into(),
+            },
+            dt("2026-10-13T08:00"),
+        );
+        let tasks = [task(1, "2026-10-20", Some((9, 0)), &["-0m"], 0)];
+        apply(
+            &mut fired,
+            &tasks,
+            &settings(),
+            dt("2026-10-13T09:00"),
+            false,
+        );
+        assert_eq!(fired.entries.len(), 1);
+        apply(
+            &mut fired,
+            &tasks,
+            &settings(),
+            dt("2026-10-13T09:00"),
+            true,
+        );
+        assert!(fired.entries.is_empty());
+    }
+
+    fn extras(dir: &str, at: &str) -> HashMap<String, Value> {
+        HashMap::from([
+            ("dataDir".to_string(), Value::from(dir)),
+            ("project".to_string(), Value::from("p")),
+            ("no".to_string(), Value::from(1)),
+            ("code".to_string(), Value::from("-0m")),
+            ("at".to_string(), Value::from(at)),
+        ])
+    }
+
+    #[test]
+    fn notification_extras_are_read_back() {
+        let t = action_target(&extras("/data", "2026-10-13T09:00")).unwrap();
+        assert_eq!(t.data_dir, "/data");
+        assert_eq!(
+            t.key,
+            ReminderKey {
+                project: "p".into(),
+                no: 1,
+                code: "-0m".into()
+            }
+        );
+        assert_eq!(t.at, dt("2026-10-13T09:00"));
+        let mut partial = extras("/data", "2026-10-13T09:00");
+        partial.remove("at");
+        assert_eq!(action_target(&partial), None);
+        assert_eq!(action_target(&HashMap::new()), None);
+    }
+
+    #[test]
+    fn only_a_current_reminder_can_be_completed_or_snoozed() {
+        let dir = Path::new("/data");
+        let t = action_target(&extras("/data", "2026-10-13T09:00")).unwrap();
+        let mut fired = Fired::default();
+        fired.bind(dir);
+        // Not recorded (completed, edited, or never fired here): stale.
+        assert!(!action_is_current(&fired, Some(dir), &t));
+        fired.mark(&t.key, dt("2026-10-13T09:00"));
+        assert!(action_is_current(&fired, Some(dir), &t));
+        // Another folder is open, or the records belong to another folder.
+        assert!(!action_is_current(&fired, Some(Path::new("/other")), &t));
+        assert!(!action_is_current(&fired, None, &t));
+        let mut other = fired.clone();
+        other.bind(Path::new("/other"));
+        assert!(!action_is_current(&other, Some(dir), &t));
+        // A recurring task completed in the app: its records are forgotten, the old
+        // notification no longer completes the next occurrence.
+        fired.forget_task("p", 1);
+        assert!(!action_is_current(&fired, Some(dir), &t));
+        // A snoozed firing (seconds in the record) matches its notification to the minute.
+        fired.mark(&t.key, dt("2026-10-13T09:10:42"));
+        let snoozed = action_target(&extras("/data", "2026-10-13T09:10")).unwrap();
+        assert!(action_is_current(&fired, Some(dir), &snoozed));
     }
 }

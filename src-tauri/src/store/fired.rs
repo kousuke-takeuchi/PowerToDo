@@ -3,7 +3,7 @@
 //! `settings.json`, not in the data folder: it is this machine's state, not the user's data.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,11 @@ use crate::store::paths::write_atomic;
 const PENDING_LIMIT: usize = 200;
 
 /// One reminder that fired (or was found missed at start-up), as the UI shows it.
+///
+/// Contract with the UI: `reminder-fired` carries the reminders of one look, and every one of
+/// them also waits in [`Fired::pending`]. The UI calls `pending_reminders` on mount and on
+/// every `reminder-fired` event and shows what that returns; the call drains the list, so a
+/// reminder is shown once even when the window was hidden or the page reloaded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReminderItem {
@@ -78,6 +83,10 @@ impl FiredEntry {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Fired {
+    /// The data folder the records belong to. Project names repeat across folders (受信トレイ
+    /// is in every one), so records of another folder are dropped on a switch ([`Fired::bind`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_dir: Option<PathBuf>,
     /// The last time the scheduler ran: reminders after it and before now passed while the
     /// app was not running (仕様 §4.5). `None` on the first run (or after a corrupt file).
     #[serde(default)]
@@ -87,6 +96,10 @@ pub struct Fired {
     /// Fired reminders the UI has not taken yet (`pending_reminders`).
     #[serde(default)]
     pub pending: Vec<ReminderItem>,
+    /// Set by [`Fired::bind`] when the folder changed; the scheduler takes it and treats its
+    /// next look as a start (one summary instead of a notification per task). Not saved.
+    #[serde(skip)]
+    pub rebound: bool,
 }
 
 /// A fire time no real reminder has: the `at` of an entry made by snoozing a reminder that
@@ -124,6 +137,28 @@ impl Fired {
             message: e.to_string(),
         })?;
         write_atomic(&app_data_dir.join(Self::FILE), json.as_bytes())
+    }
+
+    /// Ties the records to `data_dir`. Records of another folder are dropped (the run times in
+    /// `last_seen` stay: they are about the app, not the folder). A file without a folder (the
+    /// first run, a file from before folders were recorded) adopts this one. `true` when
+    /// something changed.
+    pub fn bind(&mut self, data_dir: &Path) -> bool {
+        match self.data_dir.as_deref() {
+            Some(d) if d == data_dir => false,
+            Some(_) => {
+                self.entries.clear();
+                self.pending.clear();
+                self.data_dir = Some(data_dir.to_path_buf());
+                self.rebound = true;
+                true
+            }
+            None => {
+                self.data_dir = Some(data_dir.to_path_buf());
+                self.rebound = true;
+                true
+            }
+        }
     }
 
     /// `key` already fired at `at`.
@@ -181,6 +216,32 @@ impl Fired {
             .retain(|e| !(e.project == project && e.no == no));
         self.pending
             .retain(|i| !(i.project == project && i.no == no));
+    }
+
+    /// `key` has a record whose fire time is `at` to the minute (notification extras and the UI
+    /// carry minutes; a snooze time can have seconds).
+    pub fn contains_minute(&self, key: &ReminderKey, at: NaiveDateTime) -> bool {
+        let minute = |t: NaiveDateTime| t.format("%Y-%m-%dT%H:%M").to_string();
+        let at = minute(at);
+        self.entries.iter().any(|e| e.is(key) && minute(e.at) == at)
+    }
+
+    /// Forgets every task of a deleted project.
+    pub fn forget_project(&mut self, project: &str) {
+        self.entries.retain(|e| e.project != project);
+        self.pending.retain(|i| i.project != project);
+    }
+
+    /// Moves the records of a renamed project to its new name (the task numbers stay), so its
+    /// reminders do not fire a second time.
+    pub fn rename_project(&mut self, from: &str, to: &str) {
+        self.forget_project(to);
+        for e in self.entries.iter_mut().filter(|e| e.project == from) {
+            e.project = to.to_string();
+        }
+        for i in self.pending.iter_mut().filter(|i| i.project == from) {
+            i.project = to.to_string();
+        }
     }
 
     /// Drops records of tasks that no longer exist (`keys` = every `(project, no)` there is).
@@ -332,6 +393,59 @@ mod tests {
         assert_eq!(f.pending.last().unwrap().no, PENDING_LIMIT as u32 + 4);
         assert_eq!(f.take_pending().len(), PENDING_LIMIT);
         assert!(f.pending.is_empty());
+    }
+
+    #[test]
+    fn switching_folders_drops_the_other_folders_records() {
+        let mut f = Fired {
+            last_seen: Some(dt("2026-10-13T09:00")),
+            ..Fired::default()
+        };
+        f.mark(&key("受信トレイ", 1, "-0m"), dt("2026-10-13T09:00"));
+        // No folder recorded yet: adopt it, keep the records.
+        assert!(f.bind(Path::new("/a")));
+        assert_eq!(f.entries.len(), 1);
+        assert!(!f.bind(Path::new("/a")));
+        f.push_pending([item("受信トレイ", 1, "-0m", "2026-10-13T09:00")]);
+        // Another folder has its own 受信トレイ #1: nothing carries over.
+        assert!(f.bind(Path::new("/b")));
+        assert!(f.entries.is_empty());
+        assert!(f.pending.is_empty());
+        assert_eq!(f.data_dir.as_deref(), Some(Path::new("/b")));
+        assert_eq!(f.last_seen, Some(dt("2026-10-13T09:00")));
+        // Persisted with the folder.
+        let tmp = tempfile::tempdir().unwrap();
+        f.save(tmp.path()).unwrap();
+        assert_eq!(
+            Fired::load(tmp.path()).data_dir.as_deref(),
+            Some(Path::new("/b"))
+        );
+    }
+
+    #[test]
+    fn rename_moves_records_and_delete_forgets_them() {
+        let mut f = Fired::default();
+        f.mark(&key("p", 1, "-0m"), dt("2026-10-13T09:00"));
+        f.mark(&key("q", 1, "-0m"), dt("2026-10-13T09:00"));
+        f.push_pending([item("p", 1, "-0m", "2026-10-13T09:00")]);
+        f.rename_project("p", "r");
+        assert!(f.contains(&key("r", 1, "-0m"), dt("2026-10-13T09:00")));
+        assert!(!f.contains(&key("p", 1, "-0m"), dt("2026-10-13T09:00")));
+        assert_eq!(f.pending[0].project, "r");
+        f.forget_project("r");
+        assert_eq!(f.entries.len(), 1);
+        assert_eq!(f.entries[0].project, "q");
+        assert!(f.pending.is_empty());
+    }
+
+    #[test]
+    fn contains_minute_ignores_seconds() {
+        let mut f = Fired::default();
+        let k = key("p", 1, "-0m");
+        f.mark(&k, dt("2026-10-13T09:10:42"));
+        assert!(f.contains_minute(&k, dt("2026-10-13T09:10")));
+        assert!(!f.contains_minute(&k, dt("2026-10-13T09:11")));
+        assert!(!f.contains_minute(&key("p", 1, "-1d"), dt("2026-10-13T09:10")));
     }
 
     #[test]

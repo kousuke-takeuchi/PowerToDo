@@ -51,6 +51,8 @@ export interface RecurrenceLabelDto { label: string; valid: boolean; }
 /**
  * A fired reminder (`reminder-fired` / `pending_reminders`). `at` is when it fired (local "YYYY-MM-DDTHH:MM"; the snooze time
  * for a snoozed one). `code` is the reminder code ("-0m", "-1d", "2026-10-20T09:00", …).
+ * Contract: every item of `reminder-fired` also waits in the pending list. The UI calls `api.pendingReminders()` on mount and on
+ * every `reminder-fired` event and shows what it returns; the call drains the list, so each reminder is shown once.
  */
 export interface ReminderItem {
   project: string;

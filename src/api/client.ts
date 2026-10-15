@@ -94,7 +94,7 @@ export const api = {
   /** Fire the reminder again at `until` (local "YYYY-MM-DDTHH:MM"); the task's reminder codes do not change. */
   snoozeReminder: (project: string, no: number, code: string, until: string) =>
     invoke<null>("snooze_reminder", { project, no, code, until }),
-  /** Reminders fired (or summarized at start-up) that the UI has not shown yet; taking them clears the list. */
+  /** Drains the reminders fired (or summarized at start-up) that the UI has not shown yet. Call on mount and on every `reminder-fired`, and show the result. */
   pendingReminders: () => invoke<PendingRemindersDto>("pending_reminders"),
   notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
   requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),

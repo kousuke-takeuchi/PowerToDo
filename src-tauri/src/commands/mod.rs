@@ -91,12 +91,32 @@ impl AppState {
         &self.app_data_dir
     }
 
-    /// What the scheduler needs, copied under the store lock (released on return). `None`
-    /// while no data folder is open.
-    pub(crate) fn reminder_inputs(&self) -> Option<(Vec<Task>, Settings)> {
+    /// What the scheduler needs, copied under the store lock (released on return): the tasks,
+    /// the settings and the data folder. `None` while no data folder is open.
+    pub(crate) fn reminder_inputs(&self) -> Option<(Vec<Task>, Settings, PathBuf)> {
         self.lock_store()
             .as_ref()
-            .map(|s| (s.all_tasks(), s.settings()))
+            .map(|s| (s.all_tasks(), s.settings(), s.paths().data_dir.clone()))
+    }
+
+    /// The open data folder (store lock taken and released).
+    pub(crate) fn current_data_dir(&self) -> Option<PathBuf> {
+        self.lock_store()
+            .as_ref()
+            .map(|s| s.paths().data_dir.clone())
+    }
+
+    /// Ties `fired.json` to the open data folder, dropping another folder's records (see
+    /// `Fired::bind`). Called after the store lock is released.
+    fn bind_fired_to_store(&self) {
+        if let Some(dir) = self.current_data_dir() {
+            let mut fired = self.lock_fired();
+            if fired.bind(&dir)
+                && let Err(e) = fired.save(&self.app_data_dir)
+            {
+                eprintln!("could not write {}: {e}", Fired::FILE);
+            }
+        }
     }
 
     /// Changes `fired.json` and writes it. A failed write is logged: the in-memory record
@@ -921,6 +941,7 @@ pub fn quick_add_in(
 #[tauri::command]
 pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStateDto> {
     let dto = startup(state.inner())?;
+    state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
     let watching = state
         .watcher
@@ -943,6 +964,7 @@ pub async fn set_data_dir(
     state: State<'_, AppState>,
 ) -> AppResult<AppStateDto> {
     let dto = switch_data_dir(state.inner(), &path)?;
+    state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
     start_watching(&app, state.inner());
     Ok(AppStateDto {
@@ -1110,9 +1132,12 @@ pub async fn rename_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectSummary> {
-    mutate_structure(&app, state.inner(), &[&new_name], |s| {
+    let summary = mutate_structure(&app, state.inner(), &[&new_name], |s| {
         s.rename_project(&name, &new_name)
-    })
+    })?;
+    // The records follow the project (task numbers stay), so nothing fires twice.
+    state.update_fired(|f| f.rename_project(&name, &new_name));
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -1121,7 +1146,9 @@ pub async fn delete_project(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    mutate_structure(&app, state.inner(), &[], |s| s.delete_project(&name))
+    mutate_structure(&app, state.inner(), &[], |s| s.delete_project(&name))?;
+    state.update_fired(|f| f.forget_project(&name));
+    Ok(())
 }
 
 // ---- commands: sections ----
@@ -1266,6 +1293,8 @@ pub async fn move_task(
         s.move_task(&project, no, &to_project, to_section.as_deref())
     })?;
     if project != to_project {
+        // The task has a new key in the other project; the old records would never match.
+        state.forget_fired(&project, no);
         emit_changed(&app, &[project, to_project], ChangeReason::Move);
     }
     Ok(MoveOutcome { from, to })
@@ -1594,8 +1623,9 @@ pub async fn snooze_reminder(
     Ok(())
 }
 
-/// Reminders fired (or summarized at start-up) that the UI has not shown yet; taking them
-/// clears the list.
+/// Reminders fired (or summarized at start-up) that the UI has not shown yet. Drains the list
+/// (returns and clears it, and writes `fired.json`). The UI calls this on mount and on every
+/// `reminder-fired` event and shows what it returns (see `ReminderItem`).
 #[tauri::command]
 pub async fn pending_reminders(state: State<'_, AppState>) -> AppResult<PendingRemindersDto> {
     Ok(PendingRemindersDto {
@@ -1716,6 +1746,29 @@ mod tests {
                 .entries
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn opening_another_folder_resets_and_persists_fired() {
+        let app_dir = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let key = ReminderKey {
+            project: INBOX.into(),
+            no: 1,
+            code: "-0m".into(),
+        };
+        let state = AppState::new(app_dir.path().to_path_buf());
+        {
+            let mut fired = state.lock_fired();
+            fired.bind(Path::new("/some/other/folder"));
+            fired.mark(&key, d("2026-10-13").and_hms_opt(9, 0, 0).unwrap());
+        }
+        *state.store.lock().unwrap() = Some(open_store(data.path()));
+        state.bind_fired_to_store();
+        let reloaded = AppState::new(app_dir.path().to_path_buf());
+        let fired = reloaded.lock_fired();
+        assert!(fired.entries.is_empty());
+        assert_eq!(fired.data_dir.as_deref(), Some(data.path()));
     }
 
     #[test]
