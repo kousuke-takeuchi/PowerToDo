@@ -2,12 +2,16 @@ import { AnimatePresence } from "motion/react";
 import { Collapse } from "../motion";
 import { ExternalChangeBanner } from "../views/ExternalChangeBanner";
 import { FixBanner } from "../views/FixBanner";
+import { ReminderBanner } from "../views/ReminderBanner";
+import type { ReminderBannerProps } from "../views/ReminderBanner";
 import { NoticeBanner, SaveBanner } from "./SaveBanner";
 import type { useExternalReadFailures } from "./useExternalChanges";
 
 type Flash = { text: string; tone: "error" | "info" };
 
 export type BannersProps = {
+  /** リマインダーの帯 (items が空なら出さない)。 */
+  reminders: ReminderBannerProps;
   saveErrors: Record<string, string>;
   onRetrySave: (project: string) => void;
   readFailures: ReturnType<typeof useExternalReadFailures>;
@@ -23,8 +27,9 @@ export type BannersProps = {
   onClearFlash: () => void;
 };
 
-/** 画面上部の帯 (保存失敗 / 読み込めない変更 / 外部変更の保留 / 型の不整合 / 通知 / 一時メッセージ)。 */
+/** 画面上部の帯 (リマインダー / 保存失敗 / 読み込めない変更 / 外部変更の保留 / 型の不整合 / 通知 / 一時メッセージ)。 */
 export function Banners({
+  reminders,
   saveErrors,
   onRetrySave,
   readFailures,
@@ -42,6 +47,12 @@ export function Banners({
   // 帯は上から 8px 降りてくる + フェードで出て、消えるときはフェードしながら畳む (150ms)。最初の描画では動かさない。
   return (
     <AnimatePresence initial={false}>
+      {/* リマインダーは時間に追われるので、他の帯より上。1 件でも複数でも 1 つの帯 (中の行の出入りは ReminderBanner が動かす) */}
+      {reminders.items.length > 0 && (
+        <Collapse key="rem-banner" duration={0.15} enterY={-8}>
+          <ReminderBanner {...reminders} />
+        </Collapse>
+      )}
       {/* retry_save の失敗は save-status イベントでこの帯に出るので、catch は握りつぶすだけ (二重表示しない) */}
       {Object.entries(saveErrors).map(([project, message]) => (
         <Collapse key={`save-${project}`} duration={0.15} enterY={-8}>

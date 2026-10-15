@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
-import { onProjectChanged, onProjectsChanged, onWatchFailed } from "../api/events";
+import { onOpenQuickAdd, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import type { Counts } from "../mock/data";
 import type { AppStateDto, CountsDto, ProjectSummary, Task } from "../types/model";
 import { useMotionTiming } from "../motion";
@@ -29,6 +29,7 @@ import { useProject } from "./useProject";
 import { useRowFocus } from "./useRowFocus";
 import { PALETTE, useProjectActions } from "./useProjectActions";
 import { useQuickAdd } from "./useQuickAdd";
+import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
@@ -150,11 +151,39 @@ export function Main({ app }: { app: AppStateDto }) {
     refreshSummaries,
   });
   /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
-  const openCross = (t: Task) => {
-    navigate(t.project === app.inbox ? { kind: "inbox" } : { kind: "project", name: t.project });
-    setOpenNo(t.no);
+  const openTaskAt = (project: string, no: number) => {
+    // 消えたプロジェクト (通知を受けてから削除 / 改名した) は何も開かない
+    if (project !== app.inbox && !summaries.some((s) => s.name === project)) {
+      setFlash({ text: "タスクが見つかりません", tone: "error" });
+      return;
+    }
+    navigate(project === app.inbox ? { kind: "inbox" } : { kind: "project", name: project });
+    setOpenNo(no);
   };
+  const openCross = (t: Task) => openTaskAt(t.project, t.no);
   const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current, setFlash });
+
+  // リマインダーの帯と、通知 / トレイ由来のイベント (open-task / open-quick-add / window-shown)。
+  const reminders = useReminders({
+    onError: showError,
+    complete: (project, no) => cross.setDone(project, no, true),
+    openTask: openTaskAt,
+  });
+  // イベントの購読は 1 回だけにして、呼ぶ先は毎描画の最新を参照する
+  const wired = useRef({ openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending });
+  wired.current = { openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending };
+  useEffect(() => {
+    const offs = [
+      onOpenTask((project, no) => wired.current.openTaskAt(project, no)),
+      onOpenQuickAdd(() => wired.current.openQuickAdd()),
+      // 隠れている間に変わった分 (Excel での編集、発火したリマインダー) を取り直す
+      onWindowShown(() => {
+        wired.current.refreshAll();
+        void wired.current.fetchPending();
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, []);
 
   // 情報メッセージは数秒で消す (エラーは閉じるまで残す)。
   useEffect(() => {
@@ -457,6 +486,16 @@ export function Main({ app }: { app: AppStateDto }) {
   const invalidCount = projectScreen && !p.error && view ? view.invalidRows.length : 0;
   const banner = (
     <Banners
+      reminders={{
+        items: reminders.items,
+        today,
+        notifyTime: reminders.notifyTime,
+        onDone: (item) => void reminders.done(item),
+        onSnooze: (item, until) => void reminders.snooze(item, until),
+        onOpen: reminders.open,
+        onDismiss: reminders.dismiss,
+        onDismissAll: reminders.dismissAll,
+      }}
       saveErrors={saveErrors}
       onRetrySave={(project) => void api.retrySave(project).catch(() => undefined)}
       readFailures={readFailures}

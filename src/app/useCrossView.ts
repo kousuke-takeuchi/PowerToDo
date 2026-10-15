@@ -63,31 +63,37 @@ export function useCrossView<T>(fetch: () => Promise<T>, deps: unknown[]) {
 export function useCrossActions(refresh: () => void, onError: (e: unknown) => void, inbox: string, onWarnings?: (warnings: string[]) => void) {
   // project/no of completions (done=true) in flight: a second completion of the same task is ignored until the first answers.
   const completing = useRef(new Set<string>());
+  /** Runs `call`, reports a failure through `onError`, always refreshes. Resolves true when the call succeeded. */
   const wrap = useCallback(
-    async (call: () => Promise<unknown>) => {
+    async (call: () => Promise<unknown>): Promise<boolean> => {
       try {
         await call();
+        return true;
       } catch (e) {
         onError(e);
+        return false;
       } finally {
         refresh();
       }
     },
     [refresh, onError],
   );
+  /** Complete / undo the task `project/no` (also used by the reminder banner, which has no Task). Resolves true when done; a repeated completion in flight resolves false. */
+  const setDone = (project: string, no: number, done: boolean): Promise<boolean> => {
+    const call = async () => {
+      const v = await api.completeTask(project, no, done);
+      if (v.warnings?.length) onWarnings?.(v.warnings);
+    };
+    // Only a repeated completion is dropped; an undo (done=false) goes through as before.
+    if (!done) return wrap(call);
+    const key = `${project}/${no}`;
+    if (completing.current.has(key)) return Promise.resolve(false);
+    completing.current.add(key);
+    return wrap(call).finally(() => completing.current.delete(key));
+  };
   return {
-    toggleDone: (t: Task, done: boolean) => {
-      const call = async () => {
-        const v = await api.completeTask(t.project, t.no, done);
-        if (v.warnings?.length) onWarnings?.(v.warnings);
-      };
-      // Only a repeated completion is dropped; an undo (done=false) goes through as before.
-      if (!done) return wrap(call);
-      const key = `${t.project}/${t.no}`;
-      if (completing.current.has(key)) return Promise.resolve();
-      completing.current.add(key);
-      return wrap(call).finally(() => completing.current.delete(key));
-    },
+    setDone,
+    toggleDone: (t: Task, done: boolean) => setDone(t.project, t.no, done),
     setPriority: (t: Task, priority: 1 | 2 | 3 | 4) => wrap(() => api.updateTask(t.project, t.no, { priority })),
     setDue: (t: Task, due: string | null) => wrap(() => api.updateTask(t.project, t.no, { due, dueTime: due ? undefined : null })),
     remove: (t: Task) => wrap(() => api.deleteTask(t.project, t.no)),
