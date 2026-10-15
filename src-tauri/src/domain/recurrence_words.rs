@@ -11,18 +11,33 @@ const JA_DAYS: [(char, &str); 7] = [
     ('土', "SA"),
     ('日', "SU"),
 ];
-const EN_DAYS: [(&str, &str); 7] = [
-    ("mon", "MO"),
-    ("tue", "TU"),
-    ("wed", "WE"),
-    ("thu", "TH"),
-    ("fri", "FR"),
-    ("sat", "SA"),
-    ("sun", "SU"),
+/// (3-letter abbreviation, full name, code). Only these exact spellings are accepted.
+const EN_DAYS: [(&str, &str, &str); 7] = [
+    ("mon", "monday", "MO"),
+    ("tue", "tuesday", "TU"),
+    ("wed", "wednesday", "WE"),
+    ("thu", "thursday", "TH"),
+    ("fri", "friday", "FR"),
+    ("sat", "saturday", "SA"),
+    ("sun", "sunday", "SU"),
 ];
-const EN_MONTHS: [&str; 12] = [
-    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+/// (3-letter abbreviation, full name).
+const EN_MONTHS: [(&str, &str); 12] = [
+    ("jan", "january"),
+    ("feb", "february"),
+    ("mar", "march"),
+    ("apr", "april"),
+    ("may", "may"),
+    ("jun", "june"),
+    ("jul", "july"),
+    ("aug", "august"),
+    ("sep", "september"),
+    ("oct", "october"),
+    ("nov", "november"),
+    ("dec", "december"),
 ];
+/// Longest day count per month (February allows the 29th).
+const MONTH_MAX_DAY: [u32; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /// Full-width digits → ASCII; everything else unchanged.
 fn ascii_digits(s: &str) -> String {
@@ -73,11 +88,29 @@ fn en_weekdays(s: &str) -> Option<String> {
             let d = d.trim().to_ascii_lowercase();
             EN_DAYS
                 .iter()
-                .find(|(name, _)| d.starts_with(name))
-                .map(|(_, code)| *code)
+                .find(|(abbr, full, _)| d == *abbr || d == *full)
+                .map(|(_, _, code)| *code)
         })
         .collect();
     codes.filter(|c| !c.is_empty()).map(|c| c.join(","))
+}
+
+fn day_of_month(s: &str) -> Option<u32> {
+    number(s).filter(|d| (1..=31).contains(d))
+}
+
+fn month_number(s: &str) -> Option<u32> {
+    number(s).filter(|m| (1..=12).contains(m))
+}
+
+/// `month` / `day` as a real calendar date (any year: Feb 29 is allowed).
+fn month_day(month: u32, day: u32) -> Option<(u32, u32)> {
+    let max = *MONTH_MAX_DAY.get(month.checked_sub(1)? as usize)?;
+    (1..=max).contains(&day).then_some((month, day))
+}
+
+fn interval(s: &str) -> Option<u32> {
+    number(s).filter(|n| (1..=999).contains(n))
 }
 
 fn number(s: &str) -> Option<u32> {
@@ -110,23 +143,20 @@ fn ja_single(word: &str) -> Option<String> {
         // 10月18日
         let (m, d) = rest.split_once('月')?;
         let d = d.strip_suffix('日')?;
-        return Some(format!(
-            "FREQ=YEARLY;BYMONTH={};BYMONTHDAY={}",
-            number(m)?,
-            number(d)?
-        ));
+        let (m, d) = month_day(month_number(m)?, day_of_month(d)?)?;
+        return Some(format!("FREQ=YEARLY;BYMONTH={m};BYMONTHDAY={d}"));
     }
     if let Some(rest) = w.strip_prefix("毎月") {
         let d = rest.strip_suffix('日')?;
-        return Some(format!("FREQ=MONTHLY;BYMONTHDAY={}", number(d)?));
+        return Some(format!("FREQ=MONTHLY;BYMONTHDAY={}", day_of_month(d)?));
     }
     if let Some(n) = w.strip_suffix("日ごと").or_else(|| w.strip_suffix("日毎")) {
-        return Some(format!("FREQ=DAILY;INTERVAL={}", number(n)?));
+        return Some(format!("FREQ=DAILY;INTERVAL={}", interval(n)?));
     }
     if let Some(rest) = w.strip_prefix('毎') {
         // 毎3日 (Todoist style)
         let n = rest.strip_suffix('日')?;
-        return Some(format!("FREQ=DAILY;INTERVAL={}", number(n)?));
+        return Some(format!("FREQ=DAILY;INTERVAL={}", interval(n)?));
     }
     None
 }
@@ -153,13 +183,13 @@ pub fn parse_recurrence(words: &[&str]) -> Option<(String, usize)> {
         {
             // 毎月 15日  /  毎月 15 日
             let n = ascii_digits(next);
-            if let Some(d) = n.strip_suffix('日').and_then(number) {
+            if let Some(d) = n.strip_suffix('日').and_then(day_of_month) {
                 return Some((
                     join(&format!("FREQ=MONTHLY;BYMONTHDAY={d}"), from_completed),
                     2,
                 ));
             }
-            if let Some(d) = number(&n)
+            if let Some(d) = day_of_month(&n)
                 && words.get(2).is_some_and(|w| *w == "日")
             {
                 return Some((
@@ -177,18 +207,22 @@ pub fn parse_recurrence(words: &[&str]) -> Option<(String, usize)> {
     let (lw, from_completed) = bang(lower.as_str());
     match lw {
         "daily" => return Some((join("FREQ=DAILY", from_completed), 1)),
-        "weekdays" => return Some(("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".into(), 1)),
-        "weekly" => return Some(("FREQ=WEEKLY".into(), 1)),
+        "weekdays" => {
+            return Some((join("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", from_completed), 1));
+        }
+        "weekly" => return Some((join("FREQ=WEEKLY", from_completed), 1)),
         "monthly" => {
             // monthly on 15
             if words.get(1).is_some_and(|w| w.eq_ignore_ascii_case("on"))
-                && let Some(d) = words.get(2).and_then(|w| number(w))
+                && let Some(d) = words
+                    .get(2)
+                    .and_then(|w| day_of_month(&w.to_ascii_lowercase()))
             {
                 return Some((format!("FREQ=MONTHLY;BYMONTHDAY={d}"), 3));
             }
-            return Some(("FREQ=MONTHLY".into(), 1));
+            return Some((join("FREQ=MONTHLY", from_completed), 1));
         }
-        "yearly" => return Some(("FREQ=YEARLY".into(), 1)),
+        "yearly" => return Some((join("FREQ=YEARLY", from_completed), 1)),
         _ => {}
     }
     if lw == "last"
@@ -206,8 +240,10 @@ pub fn parse_recurrence(words: &[&str]) -> Option<(String, usize)> {
     let (s, from_completed) = bang(&second_lower);
     match s {
         "day" => return Some((join("FREQ=DAILY", from_completed), 2)),
-        "weekday" => return Some(("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".into(), 2)),
-        "week" => return Some(("FREQ=WEEKLY".into(), 2)),
+        "weekday" => {
+            return Some((join("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", from_completed), 2));
+        }
+        "week" => return Some((join("FREQ=WEEKLY", from_completed), 2)),
         "other" => {
             if words.get(2).is_some_and(|w| w.eq_ignore_ascii_case("week")) {
                 return Some(("FREQ=WEEKLY;INTERVAL=2".into(), 3));
@@ -224,28 +260,36 @@ pub fn parse_recurrence(words: &[&str]) -> Option<(String, usize)> {
                 if words.get(i).is_some_and(|w| w.eq_ignore_ascii_case("the")) {
                     i += 1;
                 }
-                if let Some(d) = words.get(i).and_then(|w| number(&w.to_ascii_lowercase())) {
+                if let Some(d) = words
+                    .get(i)
+                    .and_then(|w| day_of_month(&w.to_ascii_lowercase()))
+                {
                     return Some((format!("FREQ=MONTHLY;BYMONTHDAY={d}"), i + 1));
                 }
             }
-            return Some(("FREQ=MONTHLY".into(), 2));
+            return Some((join("FREQ=MONTHLY", from_completed), 2));
         }
-        "year" => return Some(("FREQ=YEARLY".into(), 2)),
+        "year" => return Some((join("FREQ=YEARLY", from_completed), 2)),
         _ => {}
     }
     if let Some(days) = en_weekdays(s) {
-        return Some((format!("FREQ=WEEKLY;BYDAY={days}"), 2));
-    }
-    if let Some(month) = EN_MONTHS.iter().position(|m| s.starts_with(m))
-        && let Some(d) = words.get(2).and_then(|w| number(&w.to_ascii_lowercase()))
-    {
         return Some((
-            format!("FREQ=YEARLY;BYMONTH={};BYMONTHDAY={d}", month + 1),
-            3,
+            join(&format!("FREQ=WEEKLY;BYDAY={days}"), from_completed),
+            2,
         ));
     }
+    if let Some(month) = EN_MONTHS
+        .iter()
+        .position(|(abbr, full)| s == *abbr || s == *full)
+        && let Some(d) = words
+            .get(2)
+            .and_then(|w| day_of_month(&w.to_ascii_lowercase()))
+        && let Some((m, d)) = month_day(month as u32 + 1, d)
+    {
+        return Some((format!("FREQ=YEARLY;BYMONTH={m};BYMONTHDAY={d}"), 3));
+    }
     // every 3 days / every 2 weeks (optionally with a trailing !)
-    if let Some(n) = number(s)
+    if let Some(n) = interval(s)
         && let Some(unit) = words.get(2)
     {
         let unit_lower = unit.to_ascii_lowercase();
@@ -391,6 +435,76 @@ mod tests {
         assert_eq!(
             one("every 3 days!").as_deref(),
             Some("FREQ=DAILY;INTERVAL=3;X-FROM=COMPLETED")
+        );
+    }
+
+    #[test]
+    fn impossible_values_are_not_recurrences() {
+        assert_eq!(one("毎月32日"), None);
+        assert_eq!(one("毎月0日"), None);
+        assert_eq!(one("毎年13月1日"), None);
+        assert_eq!(one("毎年2月30日"), None);
+        assert_eq!(one("毎年4月31日"), None);
+        assert_eq!(one("0日ごと"), None);
+        assert_eq!(one("毎1000日"), None);
+        assert_eq!(one("every month on the 32nd"), None);
+        assert_eq!(one("every 0 days"), None);
+        assert_eq!(one("every 70000 days"), None);
+        assert_eq!(one("every feb 30"), None);
+        assert_eq!(
+            one("毎年2月29日").as_deref(),
+            Some("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29")
+        );
+        assert_eq!(
+            one("every 999 days").as_deref(),
+            Some("FREQ=DAILY;INTERVAL=999")
+        );
+    }
+
+    #[test]
+    fn english_names_are_exact() {
+        assert_eq!(one("every satisfaction"), None);
+        assert_eq!(one("every monster"), None);
+        assert_eq!(one("every octopus 18"), None);
+        assert_eq!(
+            one("every saturday").as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=SA")
+        );
+        assert_eq!(
+            one("every october 18").as_deref(),
+            Some("FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=18")
+        );
+    }
+
+    #[test]
+    fn trailing_bang_means_from_completed() {
+        assert_eq!(
+            one("weekly!").as_deref(),
+            Some("FREQ=WEEKLY;X-FROM=COMPLETED")
+        );
+        assert_eq!(
+            one("monthly!").as_deref(),
+            Some("FREQ=MONTHLY;X-FROM=COMPLETED")
+        );
+        assert_eq!(
+            one("weekdays!").as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;X-FROM=COMPLETED")
+        );
+        assert_eq!(
+            one("every week!").as_deref(),
+            Some("FREQ=WEEKLY;X-FROM=COMPLETED")
+        );
+        assert_eq!(
+            one("every month!").as_deref(),
+            Some("FREQ=MONTHLY;X-FROM=COMPLETED")
+        );
+        assert_eq!(
+            one("every monday!").as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=MO;X-FROM=COMPLETED")
+        );
+        assert_eq!(
+            one("every weekday!").as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;X-FROM=COMPLETED")
         );
     }
 

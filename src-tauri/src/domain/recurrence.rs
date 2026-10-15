@@ -82,14 +82,28 @@ pub fn next_due(
     let validated = parsed
         .validate(start)
         .map_err(|e| RecurrenceError::Invalid(format!("{rrule}: {e}")))?;
-    let set = RRuleSet::new(start).rrule(validated);
-    // `all` includes DTSTART itself when it matches the rule; take the first date strictly after it.
-    let result = set.all(3);
-    Ok(result
-        .dates
+    // `limit` bounds the iteration (rules that never match must not loop forever).
+    let set = RRuleSet::new(start).rrule(validated).limit();
+    // The next occurrence is on a later *day* than DTSTART (仕様 §3.1: 当日は含まない), so rules
+    // with several occurrences a day (BYHOUR=9,18) still advance the due date.
+    let start_day = start.date_naive();
+    let next = (&set)
         .into_iter()
-        .find(|d| *d > start)
-        .map(|d| d.date_naive()))
+        .find(|d| d.date_naive() > start_day)
+        .map(|d| d.date_naive());
+    match next {
+        Some(day) => Ok(Some(day)),
+        // COUNT / UNTIL used up: the recurrence is finished.
+        None if has_end(&rule.core) => Ok(None),
+        // No end condition yet no occurrence: the rule can never match (e.g. Feb 30).
+        None => Err(RecurrenceError::Invalid(rrule.to_string())),
+    }
+}
+
+fn has_end(core: &str) -> bool {
+    params(core)
+        .iter()
+        .any(|(k, _)| k == "COUNT" || k == "UNTIL")
 }
 
 const WEEKDAYS: [(&str, &str); 7] = [
@@ -255,6 +269,50 @@ mod tests {
         )
         .unwrap();
         assert_eq!(next, None);
+    }
+
+    #[test]
+    fn several_occurrences_a_day_still_advance_a_day() {
+        let mut dt_due = d("2026-10-19");
+        for rule in ["FREQ=DAILY;BYHOUR=9,18", "FREQ=HOURLY;BYMINUTE=0"] {
+            let next = next_due(rule, Some(dt_due), Some(t(9, 0)), dt_due).unwrap();
+            assert_eq!(next, Some(d("2026-10-20")), "{rule}");
+            dt_due = d("2026-10-19");
+        }
+    }
+
+    #[test]
+    fn rule_that_never_matches_is_an_error_not_the_end() {
+        assert!(matches!(
+            next_due(
+                "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30",
+                Some(d("2026-10-13")),
+                None,
+                d("2026-10-13")
+            ),
+            Err(RecurrenceError::Invalid(_))
+        ));
+        // COUNT / UNTIL used up is a normal end.
+        assert_eq!(
+            next_due(
+                "FREQ=DAILY;COUNT=1",
+                Some(d("2026-10-13")),
+                None,
+                d("2026-10-13")
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            next_due(
+                "FREQ=DAILY;UNTIL=20261013T000000Z",
+                Some(d("2026-10-13")),
+                None,
+                d("2026-10-13")
+            )
+            .unwrap(),
+            None
+        );
     }
 
     #[test]

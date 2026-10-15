@@ -53,7 +53,7 @@ pub fn fire_time(
 ) -> Option<NaiveDateTime> {
     match parse_code(code)? {
         Reminder::At(t) => Some(t),
-        Reminder::Before(d) => Some(due?.and_time(due_time?) - d),
+        Reminder::Before(d) => due?.and_time(due_time?).checked_sub_signed(d),
         Reminder::DayBefore => Some(due?.checked_sub_days(Days::new(1))?.and_time(notify_time)),
         Reminder::WeekBefore => Some(due?.checked_sub_days(Days::new(7))?.and_time(notify_time)),
     }
