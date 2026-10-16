@@ -221,7 +221,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// Files that are not project workbooks: Excel lock files (`~$`), our temp files (`.`), and
 /// the common workbook / other reserved names (`_`).
-pub(super) fn adoptable_stem(path: &Path) -> Option<String> {
+pub(crate) fn adoptable_stem(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     if !ext.eq_ignore_ascii_case("xlsx") {
         return None;
