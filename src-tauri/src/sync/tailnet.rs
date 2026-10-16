@@ -29,6 +29,9 @@ pub const RESOLVE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 pub const LOGOUT_TIMEOUT: Duration = Duration::from_secs(95);
 
+/// How long a `failed` status waits to see whether the sidecar exits right after it.
+const FAILED_GRACE: Duration = Duration::from_millis(500);
+
 const FAILED_REASON: &str = "Tailscale を起動できません";
 
 // ---------------------------------------------------------------------------------------------
@@ -313,6 +316,9 @@ struct Inner {
     /// is no longer current belongs to a child that was stopped on purpose.
     generation: AtomicU64,
     restarts: AtomicU32,
+    /// Error text of a `failed` status from a sidecar that was exiting; used as the reason if
+    /// the restarts run out. Cleared when a child is spawned.
+    last_failure: Mutex<Option<String>>,
     shutdown: Mutex<bool>,
     shutdown_cv: Condvar,
 }
@@ -347,6 +353,29 @@ impl Inner {
             since: Instant::now(),
         };
         Some(state.clone())
+    }
+
+    /// True if the child has exited, or does within a short grace period. A `failed` status is
+    /// usually the sidecar's last words; whether it is final is told by the process ending.
+    fn child_exits_soon(&self, generation: u64) -> bool {
+        let deadline = Instant::now() + FAILED_GRACE;
+        loop {
+            if self.is_stale(generation) {
+                return false;
+            }
+            match lock(&self.child).as_mut() {
+                None => return true,
+                Some(running) => {
+                    if !matches!(running.child.try_wait(), Ok(None)) {
+                        return true;
+                    }
+                }
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Drops every waiting request (their receivers see a disconnect).
@@ -437,6 +466,7 @@ fn spawn_child(inner: &Arc<Inner>) -> Result<(), TailnetError> {
 
     let generation = inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
     *lock(&inner.proxy) = None;
+    *lock(&inner.last_failure) = None;
     *lock(&inner.child) = Some(Running { child, stdin });
 
     let reader_inner = Arc::clone(inner);
@@ -478,6 +508,16 @@ fn reader_loop(inner: Arc<Inner>, stdout: ChildStdout, generation: u64) {
             return;
         }
         if let Some(msg) = parse_line(&String::from_utf8_lossy(&buf)) {
+            // The sidecar says `failed` and exits when it cannot start. Do not show that as a
+            // state (and then flip back to starting); remember the text and let the restart
+            // logic decide.
+            if let Message::Status { state, error, .. } = &msg
+                && state == "failed"
+                && inner.child_exits_soon(generation)
+            {
+                *lock(&inner.last_failure) = error.clone().filter(|e| !e.is_empty());
+                continue;
+            }
             inner.handle_message(msg);
         }
     }
@@ -485,7 +525,7 @@ fn reader_loop(inner: Arc<Inner>, stdout: ChildStdout, generation: u64) {
 }
 
 /// The child's output ended. If that was not asked for, restart it after a pause, or give up.
-fn on_exit(inner: &Arc<Inner>, generation: u64) {
+fn on_exit(inner: &Arc<Inner>, mut generation: u64) {
     loop {
         let announce = {
             let _life = lock(&inner.lifecycle);
@@ -501,7 +541,9 @@ fn on_exit(inner: &Arc<Inner>, generation: u64) {
             }
             if inner.restarts.fetch_add(1, Ordering::SeqCst) >= MAX_RESTARTS {
                 let failed = TailnetState::Failed {
-                    reason: FAILED_REASON.to_string(),
+                    reason: lock(&inner.last_failure)
+                        .take()
+                        .unwrap_or_else(|| FAILED_REASON.to_string()),
                 };
                 *lock(&inner.state) = failed.clone();
                 drop(_life);
@@ -523,7 +565,9 @@ fn on_exit(inner: &Arc<Inner>, generation: u64) {
         if spawn_child(inner).is_ok() {
             return;
         }
-        // Could not even start: counts as another failed run.
+        // Could not even start: counts as another failed run. A failed spawn may have bumped
+        // the generation (we hold `lifecycle`, so nobody else did).
+        generation = inner.generation.load(Ordering::SeqCst);
     }
 }
 
@@ -536,7 +580,10 @@ pub struct Tailnet {
 
 impl Tailnet {
     /// Starts the sidecar. `dir` is the Tailscale state folder (created with mode 0700 on Unix).
-    /// `on_status` is called from a background thread whenever the state changes.
+    /// `on_status` is called from a background thread whenever the state changes. It must not
+    /// call back into this `Tailnet` and should return quickly: it runs on the reader thread, so
+    /// a slow or re-entrant callback blocks the sidecar's output and can deadlock `reset()` /
+    /// `Drop`.
     pub fn start(
         binary: PathBuf,
         dir: PathBuf,
@@ -569,6 +616,7 @@ impl Tailnet {
             lifecycle: Mutex::new(()),
             generation: AtomicU64::new(0),
             restarts: AtomicU32::new(0),
+            last_failure: Mutex::new(None),
             shutdown: Mutex::new(false),
             shutdown_cv: Condvar::new(),
         });
@@ -643,11 +691,18 @@ impl Tailnet {
                 return Err(TailnetError::NotRunning);
             }
             stop_child(inner);
-            match std::fs::remove_dir_all(&inner.dir) {
-                Err(e) if e.kind() != io::ErrorKind::NotFound => {
-                    return Err(e.into());
-                }
-                _ => {}
+            if let Err(e) = std::fs::remove_dir_all(&inner.dir)
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                let failed = TailnetState::Failed {
+                    reason: format!("Tailscale の状態を消せません: {e}"),
+                };
+                *lock(&inner.state) = failed.clone();
+                drop(_life);
+                inner.emit(&failed);
+                return Err(TailnetError::Failed(format!(
+                    "could not remove the Tailscale state folder: {e}"
+                )));
             }
             inner.restarts.store(0, Ordering::SeqCst);
             let starting = TailnetState::Starting {
@@ -1060,9 +1115,23 @@ mod tests {
             Tailnet,
             Receiver<TailnetStatusView>,
         ) {
+            start_at(body, delay, "state")
+        }
+
+        /// Like `start`, with the state folder at `tmp/<rel>`.
+        fn start_at(
+            body: &str,
+            delay: Duration,
+            rel: &str,
+        ) -> (
+            tempfile::TempDir,
+            PathBuf,
+            Tailnet,
+            Receiver<TailnetStatusView>,
+        ) {
             let tmp = tempfile::tempdir().unwrap();
             let bin = script(tmp.path(), body);
-            let dir = tmp.path().join("state");
+            let dir = tmp.path().join(rel);
             let (tx, rx) = channel();
             let t =
                 Tailnet::start_with_delay(bin, dir.clone(), "powertodo-test", delay, move |v| {
@@ -1246,16 +1315,108 @@ mod tests {
         }
 
         #[test]
-        fn missing_binary_is_a_start_error() {
-            let tmp = tempfile::tempdir().unwrap();
-            let r = Tailnet::start(
-                tmp.path().join("nope"),
-                tmp.path().join("state"),
-                "powertodo-test",
-                |_| {},
-            );
-            assert!(matches!(r, Err(TailnetError::Spawn(_))));
+        fn failed_reset_reports_failed() {
+            use std::os::unix::fs::PermissionsExt;
+            let _g = lock(&SERIAL);
+            let body = format!("{READY}\n{RUNNING}\n{WAIT_EOF}");
+            let (tmp, _dir, t, rx) = start_at(&body, Duration::from_millis(10), "parent/state");
+            wait_for("running", || {
+                matches!(t.state(), TailnetState::Running { .. })
+            });
+            // A read-only parent makes removing the state folder fail.
+            let parent = tmp.path().join("parent");
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let result = t.reset();
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(matches!(result, Err(TailnetError::Failed(_))), "{result:?}");
+            match t.state() {
+                TailnetState::Failed { reason } => {
+                    assert!(
+                        reason.starts_with("Tailscale の状態を消せません: "),
+                        "{reason}"
+                    );
+                }
+                other => panic!("{other:?}"),
+            }
+            assert_eq!(rx.try_iter().last().unwrap().state, "failed");
+            assert_eq!(t.proxy_url(), None);
         }
+
+        #[test]
+        fn failed_with_exit_is_not_shown_and_its_reason_is_kept() {
+            let _g = lock(&SERIAL);
+            let body = r#"echo '{"type":"status","state":"failed","error":"start: boom"}'; exit 1"#;
+            let (_tmp, dir, t, rx) = start(body, Duration::from_millis(10));
+            wait_for("failed state", || {
+                matches!(t.state(), TailnetState::Failed { .. })
+            });
+            assert_eq!(
+                t.state(),
+                TailnetState::Failed {
+                    reason: "start: boom".into()
+                }
+            );
+            thread::sleep(Duration::from_millis(100));
+            assert_eq!(spawns(&dir), 4);
+            // Only the final give-up is announced as `failed`; the rest is `starting`.
+            let states: Vec<_> = rx.try_iter().map(|v| v.state).collect();
+            assert_eq!(
+                states.iter().filter(|s| **s == "failed").count(),
+                1,
+                "{states:?}"
+            );
+            assert_eq!(*states.last().unwrap(), "failed");
+        }
+
+        #[test]
+        fn starting_since_is_stable_across_restarts() {
+            let _g = lock(&SERIAL);
+            let body = r#"echo '{"type":"status","state":"failed","error":"x"}'; exit 1"#;
+            let (_tmp, _dir, t, _rx) = start(body, Duration::from_millis(100));
+            let TailnetState::Starting { since: first } = t.state() else {
+                panic!("not starting");
+            };
+            thread::sleep(Duration::from_millis(250));
+            assert_eq!(t.state(), TailnetState::Starting { since: first });
+        }
+
+        #[test]
+        fn failed_without_exit_is_shown() {
+            let _g = lock(&SERIAL);
+            let body = format!(
+                "echo '{{\"type\":\"status\",\"state\":\"failed\",\"error\":\"lc: down\"}}'\n{WAIT_EOF}"
+            );
+            let (_tmp, _dir, t, rx) = start(&body, Duration::from_millis(10));
+            let view = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            assert_eq!(view.state, "failed");
+            assert_eq!(view.error.as_deref(), Some("lc: down"));
+            assert!(matches!(t.state(), TailnetState::Failed { .. }));
+        }
+
+        #[test]
+        fn request_in_flight_when_the_child_exits_is_not_running() {
+            let _g = lock(&SERIAL);
+            let body = format!("{READY}\nread line\nexit 0");
+            let (_tmp, _dir, t, _rx) = start(&body, Duration::from_secs(5));
+            let started = Instant::now();
+            assert_eq!(
+                t.resolve("nas", Duration::from_secs(30)),
+                Err(ResolveError::NotRunning)
+            );
+            assert!(started.elapsed() < Duration::from_secs(3));
+        }
+    }
+
+    #[test]
+    fn missing_binary_is_a_start_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = Tailnet::start(
+            tmp.path().join("nope"),
+            tmp.path().join("state"),
+            "powertodo-test",
+            |_| {},
+        );
+        assert!(matches!(r, Err(TailnetError::Spawn(_))));
     }
 
     // -- the real sidecar ------------------------------------------------------------------
