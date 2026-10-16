@@ -4,6 +4,7 @@ pub mod error;
 pub mod platform;
 pub mod scheduler;
 pub mod store;
+pub mod sync;
 pub mod tray;
 pub mod window;
 
