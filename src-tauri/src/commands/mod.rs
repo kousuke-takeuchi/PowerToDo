@@ -30,6 +30,7 @@ use crate::store::fired::{Fired, ReminderItem, ReminderKey};
 use crate::store::paths::{AppSettings, Paths};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
 use crate::store::watcher::{self, Watcher};
+use crate::sync::{SyncEngine, SyncHost, SyncReason, SyncStatusView};
 
 use saver::{COMMON_KEY, SaveSink, SaveStatus, Saver};
 
@@ -55,6 +56,8 @@ pub struct AppState {
     /// `fired.json` (仕様 §4.3): reminders already fired, snoozes, and the ones the UI has not
     /// taken yet. Loaded once at start; written by the scheduler and the reminder commands.
     pub fired: Mutex<Fired>,
+    /// The sync with the NAS / Google Drive (Phase 4). Off until a target is set.
+    pub sync: SyncEngine,
     app_data_dir: PathBuf,
 }
 
@@ -67,6 +70,10 @@ pub struct AppState {
 // the tasks and settings under the store lock, releases it, then takes `fired`; the task
 // commands take `fired` only after their mutation released the store. Notifications are sent
 // and events emitted with neither lock held.
+//
+// `sync_state` (the sync engine's own lock, `SyncEngine`) is a leaf as well: the engine takes
+// the store lock (and `saving` under it) only while not holding its own, and never holds the
+// store lock across network I/O. Order: store, then saver / fired / sync_state.
 
 impl AppState {
     pub fn new(app_data_dir: PathBuf) -> Self {
@@ -83,6 +90,7 @@ impl AppState {
             watch_error: Mutex::new(None),
             tray_error: Mutex::new(None),
             fired: Mutex::new(Fired::load(&app_data_dir)),
+            sync: SyncEngine::new(app_data_dir.clone()),
             app_data_dir,
         }
     }
@@ -356,6 +364,8 @@ pub enum ChangeReason {
     Bulk,
     External,
     Move,
+    /// Re-read after the sync downloaded the file (the UI updates quietly).
+    Sync,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -567,6 +577,9 @@ impl SaveSink for TauriSink {
                     project: key.to_string(),
                 },
             );
+        } else {
+            // Written: send it to the sync target a little later (仕様 Phase 4 §3.4).
+            state.sync.request(SyncReason::AfterSave);
         }
         Ok(())
     }
@@ -594,6 +607,64 @@ impl Saver {
     pub fn schedule_common(&self, app: AppHandle) {
         self.schedule(app, COMMON_KEY.to_string());
     }
+}
+
+// ---- sync glue (Phase 4) ----
+
+/// The sync engine's view of the app: the store, the saves in flight, and the events.
+struct TauriSyncHost {
+    app: AppHandle,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncConflict {
+    file: String,
+    conflict_file: String,
+}
+
+impl SyncHost for TauriSyncHost {
+    fn lock_store(&self) -> MutexGuard<'_, Option<ProjectStore>> {
+        self.app.state::<AppState>().inner().lock_store()
+    }
+
+    fn saving_keys(&self) -> BTreeSet<String> {
+        self.app.state::<AppState>().lock_saving().clone()
+    }
+
+    fn status_changed(&self, status: &SyncStatusView) {
+        let _ = self.app.emit("sync-status", status);
+    }
+
+    fn conflict(&self, file: &str, conflict_file: &str) {
+        let _ = self.app.emit(
+            "sync-conflict",
+            SyncConflict {
+                file: file.to_string(),
+                conflict_file: conflict_file.to_string(),
+            },
+        );
+    }
+
+    fn projects_reloaded(&self, names: &[String]) {
+        emit_changed(&self.app, names, ChangeReason::Sync);
+        // A re-read file can come back normalized (dirty).
+        schedule_dirty(&self.app, &self.app.state::<AppState>());
+    }
+
+    fn project_list_changed(&self, common_reloaded: bool) {
+        emit_projects_changed(&self.app, common_reloaded);
+        // An adopted file or a re-listed project dirties the common workbook.
+        schedule_dirty(&self.app, &self.app.state::<AppState>());
+    }
+}
+
+/// Starts the sync engine's task (one per app; see `SyncEngine::run_loop`). It stays idle until
+/// a sync target is set.
+pub fn start_sync(app: &AppHandle) {
+    let engine = app.state::<AppState>().sync.clone();
+    let host = Arc::new(TauriSyncHost { app: app.clone() });
+    tauri::async_runtime::spawn(engine.run_loop(host));
 }
 
 // ---- helpers ----
@@ -992,6 +1063,8 @@ pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     let dto = startup(state.inner())?;
     state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
+    // The store is open now (the sync plans only against an opened store).
+    state.sync.request(SyncReason::Startup);
     let watching = state
         .watcher
         .lock()
@@ -1016,6 +1089,8 @@ pub async fn set_data_dir(
     let dto = switch_data_dir(state.inner(), &path)?;
     state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
+    // `sync.json` belongs to the old folder; the new one starts from fresh records.
+    state.sync.request(SyncReason::Settings);
     start_watching(&app, state.inner());
     Ok(AppStateDto {
         watch_error: state.watch_error(),

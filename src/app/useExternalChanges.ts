@@ -122,7 +122,8 @@ export function useExternalReadFailures() {
   useEffect(
     () =>
       onProjectChanged((name, reason) => {
-        if (reason === "external") drop(name);
+        // The sync re-reads the file too: a successful read clears an earlier read failure.
+        if (reason === "external" || reason === "sync") drop(name);
       }),
     [drop],
   );

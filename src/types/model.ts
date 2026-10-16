@@ -100,7 +100,8 @@ export type Matched = "title" | "note" | "label";
 export interface SearchHit { task: Task; matched: Matched; }
 export interface SearchDto { hits: SearchHit[]; }
 export interface CountsDto { today: number; labels: Record<string, number>; }
-export type ChangeReason = "bulk" | "external" | "move";
+/** `sync`: re-read after the sync downloaded the file (updated quietly, no flash). */
+export type ChangeReason = "bulk" | "external" | "move" | "sync";
 
 /** `projects-changed` payload. `commonReloaded`: the common workbook was re-read from its file in this batch. */
 export interface ProjectsChanged {

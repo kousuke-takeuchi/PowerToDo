@@ -2,28 +2,32 @@
 //!
 //! This module holds the pure part: which files take part ([`is_sync_target`]), how a conflict
 //! copy is named ([`conflict_name`]) and what to do with each file ([`plan`]). Talking to the
-//! remote is [`backend`], the record of the last sync is [`state`].
+//! remote is [`backend`], the record of the last sync is [`state`], running a sync against the
+//! store is [`engine`].
 
 pub mod backend;
+pub mod engine;
 pub mod state;
 pub mod tailnet;
+
+pub use engine::{
+    RunOutcome, SyncEngine, SyncHost, SyncPhase, SyncReason, SyncReport, SyncStatusView,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use chrono::{NaiveDateTime, Timelike};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::domain::INBOX;
 use crate::store::common_book::COMMON_FILE;
-use crate::store::project_store::adoptable_stem;
+use crate::store::project_store::{CONFLICT_MARK, adoptable_stem};
 
 use self::backend::RemoteFile;
 use self::state::{FileRecord, SyncState};
-
-/// Marks a conflict copy: `<name> (競合 yyyy-mm-dd hhmm).xlsx`. Such files never sync.
-const CONFLICT_MARK: &str = "(競合 ";
 
 /// A `*.xlsx` file in the data folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +39,8 @@ pub struct LocalFile {
     pub modified: NaiveDateTime,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Side {
     Local,
     Remote,

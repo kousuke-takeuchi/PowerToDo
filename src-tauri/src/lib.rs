@@ -93,6 +93,7 @@ pub fn run() {
             // exists report no clicks.
             scheduler::register(app.handle());
             scheduler::start(app.handle().clone());
+            commands::start_sync(app.handle());
             tray::setup(app.handle());
             Ok(())
         })
