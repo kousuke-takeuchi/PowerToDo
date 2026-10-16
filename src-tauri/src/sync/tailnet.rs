@@ -460,13 +460,19 @@ fn spawn_child(inner: &Arc<Inner>) -> Result<(), TailnetError> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd.spawn()?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            *lock(&inner.last_failure) = None;
+            return Err(e.into());
+        }
+    };
     let stdin = child.stdin.take();
     let stdout = child.stdout.take().expect("stdout is piped");
 
     let generation = inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
     *lock(&inner.proxy) = None;
-    *lock(&inner.last_failure) = None;
+    *lock(&inner.last_failure) = None; // after the bump: see `reader_loop`
     *lock(&inner.child) = Some(Running { child, stdin });
 
     let reader_inner = Arc::clone(inner);
@@ -513,10 +519,19 @@ fn reader_loop(inner: Arc<Inner>, stdout: ChildStdout, generation: u64) {
             // logic decide.
             if let Message::Status { state, error, .. } = &msg
                 && state == "failed"
-                && inner.child_exits_soon(generation)
             {
-                *lock(&inner.last_failure) = error.clone().filter(|e| !e.is_empty());
-                continue;
+                let exits = inner.child_exits_soon(generation);
+                // Stopped on purpose while we waited: this child's words no longer count.
+                // (Checked under the `last_failure` lock; `spawn_child` clears it after
+                // bumping the generation, so a stale reader cannot leave text behind.)
+                let mut held = lock(&inner.last_failure);
+                if inner.is_stale(generation) {
+                    return;
+                }
+                if exits {
+                    *held = error.clone().filter(|e| !e.is_empty());
+                    continue;
+                }
             }
             inner.handle_message(msg);
         }
@@ -1326,6 +1341,12 @@ mod tests {
             // A read-only parent makes removing the state folder fail.
             let parent = tmp.path().join("parent");
             std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+            // Root ignores directory permissions; nothing to test then.
+            let probe = parent.join("probe");
+            if std::fs::File::create(&probe).is_ok() {
+                std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+                return;
+            }
             let result = t.reset();
             std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
             assert!(matches!(result, Err(TailnetError::Failed(_))), "{result:?}");
@@ -1381,6 +1402,27 @@ mod tests {
         }
 
         #[test]
+        fn held_back_failed_from_a_stopped_sidecar_is_ignored() {
+            let _g = lock(&SERIAL);
+            // Only the first child says `failed`; it stays alive, so the reader is inside its
+            // grace period when the test resets.
+            let body = format!(
+                "m=\"$(dirname \"$0\")/seen\"\nif [ ! -e \"$m\" ]; then touch \"$m\"; echo '{{\"type\":\"status\",\"state\":\"failed\",\"error\":\"old\"}}'; fi\n{WAIT_EOF}"
+            );
+            let (tmp, _dir, t, rx) = start(&body, Duration::from_millis(10));
+            let seen = tmp.path().join("seen");
+            wait_for("the first child to say failed", || seen.exists());
+            thread::sleep(Duration::from_millis(100));
+            t.reset().unwrap();
+            // Outlast the 500 ms grace period of the old reader.
+            thread::sleep(FAILED_GRACE + Duration::from_millis(300));
+            let states: Vec<_> = rx.try_iter().map(|v| v.state).collect();
+            assert!(!states.contains(&"failed"), "{states:?}");
+            assert!(matches!(t.state(), TailnetState::Starting { .. }));
+            assert_eq!(*lock(&t.inner.last_failure), None);
+        }
+
+        #[test]
         fn failed_without_exit_is_shown() {
             let _g = lock(&SERIAL);
             let body = format!(
@@ -1398,6 +1440,7 @@ mod tests {
             let _g = lock(&SERIAL);
             let body = format!("{READY}\nread line\nexit 0");
             let (_tmp, _dir, t, _rx) = start(&body, Duration::from_secs(5));
+            wait_for("ready", || t.proxy_url().is_some());
             let started = Instant::now();
             assert_eq!(
                 t.resolve("nas", Duration::from_secs(30)),
