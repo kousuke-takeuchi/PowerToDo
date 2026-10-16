@@ -43,6 +43,14 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tailnet/go.mod
+          cache-dependency-path: tailnet/go.sum
+      - run: go test ./...
+        working-directory: tailnet
+      # tauri-build checks that bundle.externalBin exists, so build the sidecar first.
+      - run: npm run build:tailnet
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
