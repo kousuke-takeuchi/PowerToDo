@@ -7,8 +7,10 @@
 
 pub mod backend;
 pub mod engine;
+pub mod secrets;
 pub mod state;
 pub mod tailnet;
+pub mod webdav;
 
 pub use engine::{
     RunOutcome, SyncEngine, SyncHost, SyncPhase, SyncReason, SyncReport, SyncStatusView,

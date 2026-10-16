@@ -34,6 +34,13 @@ unicode-normalization = "0.1"
 notify = "8.2"
 rrule = "0.14"
 sha2 = "0.10"
+# `rustls` is reqwest's own default TLS (aws-lc-rs provider, the platform's certificate store);
+# `socks` is for the tailnet proxy. Google Drive (https) needs the TLS part.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "socks"] }
+keyring = { version = "4.2", features = ["v1"] }
+quick-xml = "0.42"
+percent-encoding = "2.3"
+url = "2.5"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -45,7 +52,8 @@ panic = "abort"
 strip = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "time", "test-util"] }
+tokio = { version = "1", features = ["macros", "rt", "time", "test-util", "net", "io-util"] }
+wiremock = "0.6"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
