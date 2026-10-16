@@ -66,8 +66,9 @@ pub enum Action {
     },
     /// The listing of `side` looks wiped: the state knows files other than the protected ones
     /// but the side lists none (an empty or unmounted folder, a remote that was reset). `plan`
-    /// writes nothing that could spread the damage while this holds; the engine reports it
-    /// (「同期先が空に見えるため同期を止めました」) and does not sync.
+    /// returns only this (see [`PlanMode`]); the engine reports it
+    /// (「同期先が空に見えるため同期を止めました」) and does not sync until the user chooses
+    /// `MirrorRemote` or `MirrorLocal`.
     Suspect {
         side: Side,
     },
@@ -119,6 +120,23 @@ fn secs(t: NaiveDateTime) -> NaiveDateTime {
     t.with_nanosecond(0).unwrap_or(t)
 }
 
+/// How [`plan`] reads the two sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanMode {
+    /// The normal sync: the records say what changed since the last sync.
+    Normal,
+    /// One-shot, chosen by the user after a [`Action::Suspect`]: make this folder equal to the
+    /// remote. Guard and records are ignored (a record only tells apart Drive files of the same
+    /// name). `Download` for every remote target (the engine skips the ones whose content is
+    /// equal), `ArchiveLocal` for every local-only target except the protected files. The
+    /// remote is never touched.
+    MirrorRemote,
+    /// One-shot, the other way: make the remote equal to this folder. `Upload` for every local
+    /// target (the engine skips equal content), `ArchiveRemote` for every remote-only target
+    /// except the protected files. The local folder is never touched.
+    MirrorLocal,
+}
+
 /// Decides what to do with every file (spec section 3.2). `state` is what the last sync left.
 ///
 /// Both listings must be complete. A local file that could not be read (hashing failed, locked)
@@ -126,16 +144,13 @@ fn secs(t: NaiveDateTime) -> NaiveDateTime {
 /// `plan` only after the store has been opened: opening recreates the protected files in an
 /// empty folder, and the guard below is what keeps that from looking like a healthy folder.
 ///
-/// Wiped-side guard: a side is wiped when `state` has records for files other than the
-/// protected ones (the inbox and the common workbook) while that side lists no such file. A
-/// wiped listing is far likelier than everything having been deleted. The guard puts one
-/// `Suspect { side }` at the front (local first) and keeps `plan` from writing anything the
-/// wiped side makes unsafe:
-/// - local wiped: no `ArchiveRemote`, no `Upload` (also not of protected files), no `Conflict`.
-///   `Download`, `Record` and `NameClash` stay.
-/// - remote wiped: no `ArchiveLocal`, no `Upload` (new local files too), no `ArchiveRemote`, no
-///   `Conflict`: nothing that writes the remote, whose listing is suspect.
-///   `Download`, `Record` and `NameClash` stay.
+/// Wiped-side guard (`PlanMode::Normal`): a side is wiped when `state` has records for files
+/// other than the protected ones (the inbox and the common workbook) while that side lists no
+/// such file. A wiped listing is far likelier than everything having been deleted. Then `plan`
+/// returns only `Suspect { side }` (local first, both when both are wiped): no upload, download,
+/// archive, conflict or record. Anything else could make the next round look healthy (a
+/// download makes the local side list a file again) and spread the damage. The sync stays
+/// stopped until the user picks [`PlanMode::MirrorRemote`] or [`PlanMode::MirrorLocal`] once.
 ///
 /// Names are compared folded (NFC, lower case). Names that fold alike but are spelled
 /// differently, on one side or across sides, give a [`Action::NameClash`] and nothing else. The
@@ -154,7 +169,27 @@ pub fn plan(
     remote: &[RemoteFile],
     state: &SyncState,
     skip: &BTreeSet<String>,
+    mode: PlanMode,
 ) -> Vec<Action> {
+    if mode == PlanMode::Normal {
+        let suspects: Vec<Action> = [
+            (
+                is_wiped(local.iter().map(|f| f.name.as_str()), state),
+                Side::Local,
+            ),
+            (
+                is_wiped(remote.iter().map(|f| f.name.as_str()), state),
+                Side::Remote,
+            ),
+        ]
+        .into_iter()
+        .filter(|(wiped, _)| *wiped)
+        .map(|(_, side)| Action::Suspect { side })
+        .collect();
+        if !suspects.is_empty() {
+            return suspects;
+        }
+    }
     let skip: BTreeSet<String> = skip.iter().map(|n| fold(n)).collect();
     let keep = |name: &str| is_sync_target(name) && !skip.contains(&fold(name));
     let mut locals: BTreeMap<String, Vec<&LocalFile>> = BTreeMap::new();
@@ -167,28 +202,33 @@ pub fn plan(
     }
     // A record alone (no file on either side) needs no action, so keys come from the files.
     let keys: BTreeSet<&String> = locals.keys().chain(remotes.keys()).collect();
-    let local_wiped = is_wiped(local.iter().map(|f| f.name.as_str()), state);
-    let remote_wiped = is_wiped(remote.iter().map(|f| f.name.as_str()), state);
-    let suspects = [(local_wiped, Side::Local), (remote_wiped, Side::Remote)]
-        .into_iter()
-        .filter(|(wiped, _)| *wiped)
-        .map(|(_, side)| Action::Suspect { side });
-    let actions = keys.into_iter().filter_map(|key| {
-        let action = decide_key(
-            locals.get(key).map(Vec::as_slice).unwrap_or(&[]),
-            remotes.get(key).map(Vec::as_slice).unwrap_or(&[]),
-            state,
-            is_protected(key),
-        )?;
-        let writes_remote = matches!(
-            action,
-            Action::Upload(_) | Action::ArchiveRemote(_) | Action::Conflict { .. }
-        );
-        let blocked = (local_wiped && writes_remote)
-            || (remote_wiped && (writes_remote || matches!(action, Action::ArchiveLocal(_))));
-        (!blocked).then_some(action)
-    });
-    suspects.chain(actions).collect()
+    keys.into_iter()
+        .filter_map(|key| {
+            let r = match resolve(
+                locals.get(key).map(Vec::as_slice).unwrap_or(&[]),
+                remotes.get(key).map(Vec::as_slice).unwrap_or(&[]),
+                state,
+            ) {
+                Ok(r) => r,
+                Err(clash) => return Some(clash),
+            };
+            let protected = is_protected(key);
+            let name = r.name.to_string();
+            match mode {
+                PlanMode::Normal => decide(r.name, r.local, r.remote, r.record, protected),
+                PlanMode::MirrorRemote => match (r.local, r.remote) {
+                    (_, Some(_)) => Some(Action::Download(name)),
+                    (Some(_), None) if !protected => Some(Action::ArchiveLocal(name)),
+                    _ => None,
+                },
+                PlanMode::MirrorLocal => match (r.local, r.remote) {
+                    (Some(_), _) => Some(Action::Upload(name)),
+                    (None, Some(_)) if !protected => Some(Action::ArchiveRemote(name)),
+                    _ => None,
+                },
+            }
+        })
+        .collect()
 }
 
 /// `true` when the state has records for files other than the protected ones but `names` (one
@@ -198,53 +238,64 @@ fn is_wiped<'a>(names: impl Iterator<Item = &'a str>, state: &SyncState) -> bool
     state.files.keys().any(|n| ordinary(n)) && !{ names }.any(ordinary)
 }
 
-/// One folded name: checks for clashes, picks the files and the record, then `decide`.
-fn decide_key(
-    locals: &[&LocalFile],
-    remotes: &[&RemoteFile],
-    state: &SyncState,
-    protected: bool,
-) -> Option<Action> {
+/// The files and the record behind one folded name.
+struct Resolved<'a> {
+    name: &'a str,
+    local: Option<&'a LocalFile>,
+    remote: Option<&'a RemoteFile>,
+    record: Option<&'a FileRecord>,
+}
+
+/// One folded name: checks for clashes, picks the files and the record. `Err` is the
+/// `NameClash` to report.
+fn resolve<'a>(
+    locals: &[&'a LocalFile],
+    remotes: &[&'a RemoteFile],
+    state: &'a SyncState,
+) -> Result<Resolved<'a>, Action> {
     let clash = || {
         let names: BTreeSet<String> = locals
             .iter()
             .map(|f| f.name.clone())
             .chain(remotes.iter().map(|f| f.name.clone()))
             .collect();
-        Some(Action::NameClash {
+        Action::NameClash {
             names: names.into_iter().collect(),
-        })
+        }
     };
     if locals.len() > 1 {
-        return clash();
+        return Err(clash());
     }
     let local = locals.first().copied();
     let remote_names: BTreeSet<&str> = remotes.iter().map(|f| f.name.as_str()).collect();
     if remote_names.len() > 1 {
-        return clash();
+        return Err(clash());
     }
     if let (Some(l), Some(name)) = (local, remote_names.first())
         && l.name != *name
     {
-        return clash();
+        return Err(clash());
     }
     let name = local
         .map(|l| l.name.as_str())
-        .or(remote_names.first().copied())?;
+        .or(remote_names.first().copied())
+        .ok_or_else(clash)?;
     let record = state.files.get(name);
     let remote = match remotes {
         [] => None,
         [r] => Some(*r),
         // The same name more than once: only the record can say which one is ours.
-        many => match record {
-            Some(rec) => match many.iter().find(|r| r.id == rec.remote_id) {
-                Some(r) => Some(*r),
-                None => return clash(),
-            },
-            None => return clash(),
+        many => match record.and_then(|rec| many.iter().find(|r| r.id == rec.remote_id)) {
+            Some(r) => Some(*r),
+            None => return Err(clash()),
         },
     };
-    decide(name, local, remote, record, protected)
+    Ok(Resolved {
+        name,
+        local,
+        remote,
+        record,
+    })
 }
 
 fn decide(
@@ -315,6 +366,16 @@ mod tests {
     use super::state::BackendKind;
     use super::*;
     use std::path::Path;
+
+    /// `super::plan` in the normal mode (shadows the glob import).
+    fn plan(
+        local: &[LocalFile],
+        remote: &[RemoteFile],
+        state: &SyncState,
+        skip: &BTreeSet<String>,
+    ) -> Vec<Action> {
+        super::plan(local, remote, state, skip, PlanMode::Normal)
+    }
 
     fn dt(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").unwrap()
@@ -668,15 +729,9 @@ mod tests {
         let mut st = synced();
         st.files.remove("z.xlsx");
         let r = [rf("id", NAME, "v0", T0), rf("idn", "new.xlsx", "v", T0)];
-        // The local side looks wiped: downloads stay, nothing is archived.
+        // The local side looks wiped: only the report, not even the download.
         let got = plan(&[], &r, &st, &BTreeSet::new());
-        assert_eq!(
-            got,
-            vec![
-                Action::Suspect { side: Side::Local },
-                Action::Download("new.xlsx".into())
-            ]
-        );
+        assert_eq!(got, one(Action::Suspect { side: Side::Local }));
         let l = [lf("y.xlsx", "hy", T0)];
         let got = plan(&l, &r[..1], &st, &BTreeSet::new());
         assert!(got.contains(&Action::ArchiveRemote(n())));
@@ -844,20 +899,32 @@ mod tests {
     }
 
     #[test]
-    fn local_wiped_still_downloads_but_never_writes_the_remote() {
+    fn local_wiped_stops_everything_round_after_round() {
+        // A download would make the local side list a file next round and disarm the guard.
+        let st = big_state();
         let l = [lf(COMMON, "new2", T1)];
         let mut r = everything_remote();
-        r[2].version = "v1".into(); // a.xlsx changed remotely
-        r.push(rf("n", "new.xlsx", "v", T0));
-        let got = plan(&l, &r, &big_state(), &BTreeSet::new());
+        for round in 0..3 {
+            r[2].version = format!("v{}", round + 1); // a.xlsx changes remotely each round
+            r.push(rf(
+                &format!("n{round}"),
+                &format!("new{round}.xlsx"),
+                "v",
+                T0,
+            ));
+            let got = plan(&l, &r, &st, &BTreeSet::new());
+            assert_eq!(got, one(Action::Suspect { side: Side::Local }));
+        }
+    }
+
+    #[test]
+    fn both_sides_wiped_report_both() {
+        let got = plan(&[], &[], &big_state(), &BTreeSet::new());
         assert_eq!(
             got,
             vec![
                 Action::Suspect { side: Side::Local },
-                Action::Download("a.xlsx".into()),
-                Action::Download("new.xlsx".into()),
-                // The protected inbox is missing locally: fetched again (b.xlsx is not archived).
-                Action::Download(INBOX_FILE.into()),
+                Action::Suspect { side: Side::Remote }
             ]
         );
     }
@@ -908,5 +975,113 @@ mod tests {
         st.files.insert(COMMON.into(), record(COMMON, "v0", "h0"));
         let got = plan(&[lf(COMMON, "h1", T0)], &[], &st, &BTreeSet::new());
         assert_eq!(got, one(Action::Upload(COMMON.into())));
+    }
+
+    fn mirror(mode: PlanMode, l: &[LocalFile], r: &[RemoteFile], st: &SyncState) -> Vec<Action> {
+        super::plan(l, r, st, &BTreeSet::new(), mode)
+    }
+
+    #[test]
+    fn mirror_remote_copies_the_remote_down_and_archives_local_only_files() {
+        // Local: the recreated defaults, a local-only file and a clash; the records are ignored.
+        let l = [
+            lf(INBOX_FILE, "default", T1),
+            lf(COMMON, "default", T1),
+            lf("local-only.xlsx", "h", T1),
+            lf("a.xlsx", "h0", T0),
+            lf("clash.xlsx", "h", T0),
+        ];
+        let r = [
+            rf("1", INBOX_FILE, "v0", T0),
+            rf("2", COMMON, "v0", T0),
+            rf("3", "a.xlsx", "v0", T0),
+            rf("4", "b.xlsx", "v0", T0),
+            rf("5", "CLASH.xlsx", "v0", T0),
+        ];
+        let got = mirror(PlanMode::MirrorRemote, &l, &r, &big_state());
+        assert_eq!(
+            got,
+            vec![
+                Action::Download(COMMON.into()),
+                Action::Download("a.xlsx".into()),
+                Action::Download("b.xlsx".into()),
+                Action::NameClash {
+                    names: vec!["CLASH.xlsx".into(), "clash.xlsx".into()]
+                },
+                Action::ArchiveLocal("local-only.xlsx".into()),
+                Action::Download(INBOX_FILE.into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mirror_remote_keeps_a_protected_file_the_remote_lacks() {
+        let l = [lf(COMMON, "h", T0), lf(INBOX_FILE, "h", T0)];
+        let r = [rf("1", "a.xlsx", "v", T0)];
+        let got = mirror(PlanMode::MirrorRemote, &l, &r, &big_state());
+        assert_eq!(got, one(Action::Download("a.xlsx".into())));
+    }
+
+    #[test]
+    fn mirror_remote_works_when_the_remote_is_empty_or_the_local_wiped() {
+        // Nothing to download, local-only files go (the user chose the remote).
+        let l = [lf("x.xlsx", "h", T0)];
+        let got = mirror(PlanMode::MirrorRemote, &l, &[], &big_state());
+        assert_eq!(got, one(Action::ArchiveLocal("x.xlsx".into())));
+        // Empty local folder: everything is downloaded.
+        let got = mirror(
+            PlanMode::MirrorRemote,
+            &[],
+            &everything_remote(),
+            &big_state(),
+        );
+        assert_eq!(got.len(), 4);
+        assert!(got.iter().all(|a| matches!(a, Action::Download(_))));
+    }
+
+    #[test]
+    fn mirror_local_copies_the_folder_up_and_archives_remote_only_files() {
+        let l = [
+            lf(INBOX_FILE, "h", T1),
+            lf(COMMON, "h", T1),
+            lf("a.xlsx", "h0", T0),
+            lf("new.xlsx", "h", T0),
+            lf("clash.xlsx", "h", T0),
+        ];
+        let r = [
+            rf("1", "a.xlsx", "v0", T0),
+            rf("2", "remote-only.xlsx", "v0", T0),
+            rf("3", "CLASH.xlsx", "v0", T0),
+        ];
+        let got = mirror(PlanMode::MirrorLocal, &l, &r, &big_state());
+        assert_eq!(
+            got,
+            vec![
+                Action::Upload(COMMON.into()),
+                Action::Upload("a.xlsx".into()),
+                Action::NameClash {
+                    names: vec!["CLASH.xlsx".into(), "clash.xlsx".into()]
+                },
+                Action::Upload("new.xlsx".into()),
+                Action::ArchiveRemote("remote-only.xlsx".into()),
+                Action::Upload(INBOX_FILE.into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mirror_local_keeps_a_remote_only_protected_file() {
+        let l = [lf("a.xlsx", "h", T0)];
+        let r = [rf("1", COMMON, "v", T0), rf("2", INBOX_FILE, "v", T0)];
+        let got = mirror(PlanMode::MirrorLocal, &l, &r, &big_state());
+        assert_eq!(got, one(Action::Upload("a.xlsx".into())));
+    }
+
+    #[test]
+    fn mirror_modes_honour_skip_and_ignore_non_targets() {
+        let l = [lf("a.xlsx", "h", T0), lf("~$a.xlsx", "h", T0)];
+        let skip: BTreeSet<String> = ["a.xlsx".to_string()].into();
+        assert!(super::plan(&l, &[], &fresh(), &skip, PlanMode::MirrorLocal).is_empty());
+        assert!(super::plan(&l, &[], &fresh(), &skip, PlanMode::MirrorRemote).is_empty());
     }
 }
