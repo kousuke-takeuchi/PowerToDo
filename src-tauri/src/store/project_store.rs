@@ -224,10 +224,10 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// common workbook / other reserved names (`_`), and sync conflict copies (`CONFLICT_MARK` is
 /// not a valid project name: the copies stay in the folder for the user to open in Excel;
 /// listing them would put a project into the common workbook whose file never reaches the
-/// other PCs).
+/// other PCs). Only the exact extension `.xlsx` counts, as in `is_sync_target`.
 pub(crate) fn adoptable_stem(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
-    if !ext.eq_ignore_ascii_case("xlsx") {
+    if ext != "xlsx" {
         return None;
     }
     let stem = path.file_stem()?.to_str()?;
@@ -773,8 +773,9 @@ impl ProjectStore {
                 ..fresh.settings.clone()
             };
             return !self.common_dirty
-                && c.projects.len() == 1
-                && c.projects[0].name == INBOX
+                && c.projects == fresh.projects
+                && c.project_columns == fresh.project_columns
+                && c.label_columns == fresh.label_columns
                 && c.labels.is_empty()
                 && c.settings == settings
                 && c.holidays == fresh.holidays
@@ -789,6 +790,9 @@ impl ProjectStore {
         matches!(
             self.books.get(key),
             Some(LoadedProject::Ok(b)) if b.tasks.is_empty()
+                && (b.assignees.is_empty()
+                    || b.assignees == [self.common.settings.display_name.clone()])
+                && b.unknown_columns.is_empty()
                 && b.sections.is_empty()
                 && b.invalid_rows.is_empty()
                 && b.invalid_cells.is_empty()
@@ -3075,5 +3079,57 @@ mod tests {
         f.store.create_project("仕事", DEFAULT_COLOR).unwrap();
         assert!(!f.store.is_pristine(COMMON_KEY));
         assert!(!f.store.is_pristine("仕事"));
+    }
+
+    #[test]
+    fn pristine_inbox_needs_default_assignees_and_no_unknown_columns() {
+        let mut e = env();
+        let name = e.store.settings().display_name;
+        let set = |e: &mut Env, f: &dyn Fn(&mut ProjectBook)| {
+            let Some(LoadedProject::Ok(b)) = e.store.books.get_mut(INBOX) else {
+                panic!("inbox not loaded");
+            };
+            f(b);
+        };
+        set(&mut e, &|b| b.assignees = vec![]);
+        assert!(e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec![name.clone()]);
+        assert!(e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec![name.clone(), "佐藤".into()]);
+        assert!(!e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec!["佐藤".into()]);
+        assert!(!e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec![name.clone()]);
+        set(&mut e, &|b| b.unknown_columns = vec!["予備".into()]);
+        assert!(!e.store.is_pristine(INBOX));
+    }
+
+    #[test]
+    fn pristine_common_needs_the_default_inbox_row_and_no_unknown_columns() {
+        let tweak = |f: &dyn Fn(&mut CommonBook)| {
+            let mut e = env();
+            assert!(e.store.is_pristine(COMMON_KEY));
+            f(&mut e.store.common);
+            e.store.is_pristine(COMMON_KEY)
+        };
+        assert!(!tweak(&|c| c.projects[0].color = "var(--color-red)".into()));
+        assert!(!tweak(&|c| c.projects[0].favorite = true));
+        assert!(!tweak(&|c| c.projects[0].order = 3));
+        assert!(!tweak(&|c| c.projects[0].inbox = false));
+        assert!(!tweak(&|c| c.project_columns = vec!["メモ".into()]));
+        assert!(!tweak(&|c| c.label_columns = vec!["メモ".into()]));
+        assert!(tweak(&|_| {}));
+    }
+
+    #[test]
+    fn only_a_lower_case_xlsx_extension_is_adopted() {
+        assert_eq!(
+            adoptable_stem(Path::new("仕事.xlsx")).as_deref(),
+            Some("仕事")
+        );
+        for name in ["仕事.XLSX", "仕事.Xlsx", "仕事.xlsm", "仕事"] {
+            assert_eq!(adoptable_stem(Path::new(name)), None, "{name}");
+        }
+        assert_eq!(file_key("仕事.XLSX"), None);
     }
 }

@@ -237,6 +237,8 @@ struct Inner {
     auth_rejected: bool,
     /// When the next run is wanted (`request`).
     due: Option<Instant>,
+    /// The wanted run was asked for by [`SyncReason::Retry`] alone (no other reason joined it).
+    due_retry: bool,
     status: SyncStatusView,
     /// Where status changes made outside a run go (set by `run_loop`).
     host: Option<Arc<dyn SyncHost>>,
@@ -323,6 +325,7 @@ impl SyncEngine {
                     generation: 0,
                     auth_rejected: false,
                     due: None,
+                    due_retry: false,
                     status: SyncStatusView::off(),
                     host: None,
                 }),
@@ -364,6 +367,7 @@ impl SyncEngine {
             inner.generation += 1;
             inner.auth_rejected = false;
             inner.due = None;
+            inner.due_retry = false;
         }
         self.publish(None, None, |s| {
             *s = SyncStatusView {
@@ -431,22 +435,30 @@ impl SyncEngine {
                 return false;
             }
             let at = Instant::now() + reason.delay();
+            inner.due_retry =
+                reason == SyncReason::Retry && (inner.due.is_none() || inner.due_retry);
             inner.due = Some(inner.due.map_or(at, |d| d.min(at)));
         }
         self.shared.wake.notify_one();
         true
     }
 
-    /// `true` (and the request is used up) when a requested run is due at `now`.
-    fn take_due(&self, now: Instant) -> bool {
+    /// `Some` (and the request is used up) when a requested run is due at `now`; the value is
+    /// `true` when that run is a retry after a precondition failure and nothing else.
+    fn take_due_run(&self, now: Instant) -> Option<bool> {
         let mut inner = self.lock();
         match inner.due {
             Some(d) if d <= now => {
                 inner.due = None;
-                true
+                Some(std::mem::take(&mut inner.due_retry))
             }
-            _ => false,
+            _ => None,
         }
+    }
+
+    #[cfg(test)]
+    fn take_due(&self, now: Instant) -> bool {
+        self.take_due_run(now).is_some()
     }
 
     fn next_due(&self) -> Option<Instant> {
@@ -465,8 +477,8 @@ impl SyncEngine {
                 self.request(SyncReason::Interval);
                 next_interval = now + INTERVAL;
             }
-            if self.take_due(now) {
-                self.run_once(host.as_ref()).await;
+            if let Some(is_retry) = self.take_due_run(now) {
+                self.run(host.as_ref(), PlanMode::Normal, is_retry).await;
                 continue;
             }
             let until = self
@@ -478,7 +490,7 @@ impl SyncEngine {
 
     /// One normal sync (spec section 3.4). Waits for a run in progress to end first.
     pub async fn run_once(&self, host: &dyn SyncHost) -> SyncReport {
-        self.run(host, PlanMode::Normal).await
+        self.run(host, PlanMode::Normal, false).await
     }
 
     /// The one-shot recovery after a [`Side`] looked wiped (the UI asks the user first):
@@ -488,7 +500,7 @@ impl SyncEngine {
     /// rebuilt from what the mirror copied (names it skipped or failed keep theirs), so the
     /// next normal run starts clean.
     pub async fn run_mirror(&self, host: &dyn SyncHost, mode: PlanMode) -> SyncReport {
-        self.run(host, mode).await
+        self.run(host, mode, false).await
     }
 
     /// Updates the status and sends it to `host`, or to the loop's host when there is none.
@@ -564,7 +576,10 @@ impl SyncEngine {
         }
     }
 
-    async fn run(&self, host: &dyn SyncHost, mode: PlanMode) -> SyncReport {
+    /// `is_retry`: this run was asked for by a precondition failure alone. It does not ask for
+    /// another retry, so a remote that keeps failing the precondition is retried once and then
+    /// left to the normal schedule.
+    async fn run(&self, host: &dyn SyncHost, mode: PlanMode, is_retry: bool) -> SyncReport {
         let _one_at_a_time = self.shared.running.lock().await;
         let mut report = SyncReport::default();
         let snapshot = {
@@ -732,7 +747,7 @@ impl SyncEngine {
             s.pending = pending;
             s.suspect = None;
         });
-        if report.rerun {
+        if report.rerun && !is_retry {
             self.request(SyncReason::Retry);
         }
         report
@@ -1801,6 +1816,81 @@ mod tests {
         fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
             self.inner.move_to_archive(file)
         }
+    }
+
+    /// Every upload meets a concurrent change: `Precondition`, counted.
+    struct AlwaysStale {
+        inner: Arc<MemoryBackend>,
+        uploads: std::sync::atomic::AtomicUsize,
+    }
+
+    impl StorageBackend for AlwaysStale {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.inner.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            _name: &'a str,
+            _existing: Option<&'a RemoteFile>,
+            _bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.uploads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async { Err(BackendError::Precondition) })
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failing_precondition_is_retried_once_then_left_to_the_schedule() {
+        let remote = backend();
+        let stale = Arc::new(AlwaysStale {
+            inner: remote.clone(),
+            uploads: Default::default(),
+        });
+        let a = Pc::with_backend(stale.clone(), None);
+        let host: Arc<dyn SyncHost> = a.host.clone();
+        let task = tokio::spawn(a.engine.clone().run_loop(host));
+        // The start-up run uploads (and fails), then exactly one immediate retry.
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let count = |s: &AlwaysStale| s.uploads.load(std::sync::atomic::Ordering::SeqCst);
+        let after_retry = count(&stale);
+        assert!(after_retry >= 2, "the retry did not happen");
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(count(&stale), after_retry, "the retry chain did not stop");
+        // The interval run is a normal run again: it tries (and then retries once) once more.
+        tokio::time::sleep(INTERVAL).await;
+        assert_eq!(count(&stale), after_retry * 2);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_retry_run_does_not_ask_for_another_retry() {
+        let remote = backend();
+        let a = Pc::with_backend(
+            Arc::new(AlwaysStale {
+                inner: remote.clone(),
+                uploads: Default::default(),
+            }),
+            None,
+        );
+        a.engine.take_due(Instant::now());
+        let r = a.sync().await;
+        assert!(r.rerun);
+        // The run asked for a retry, alone.
+        assert_eq!(a.engine.take_due_run(Instant::now()), Some(true));
+        let r = a.engine.run(a.host.as_ref(), PlanMode::Normal, true).await;
+        assert!(r.rerun);
+        assert_eq!(a.engine.take_due_run(Instant::now()), None);
+        // A retry joined by another reason is a normal run.
+        a.engine.request(SyncReason::Retry);
+        a.engine.request(SyncReason::SyncNow);
+        assert_eq!(a.engine.take_due_run(Instant::now()), Some(false));
     }
 
     #[tokio::test]
