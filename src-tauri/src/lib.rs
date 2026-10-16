@@ -146,6 +146,17 @@ pub fn run() {
             commands::notification_permission,
             commands::request_notification_permission,
             commands::show_main_window,
+            commands::sync::sync_settings,
+            commands::sync::set_sync_backend,
+            commands::sync::tailnet_status,
+            commands::sync::tailnet_login,
+            commands::sync::tailnet_logout,
+            commands::sync::tailnet_reset,
+            commands::sync::nas_check,
+            commands::sync::nas_disconnect,
+            commands::sync::sync_now,
+            commands::sync::sync_status,
+            commands::sync::sync_recover,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -188,6 +199,8 @@ pub fn run() {
             if let Some(state) = handle.try_state::<AppState>() {
                 state.flush_all();
             }
+            // The Tailscale sidecar ends with our end of its stdin anyway; this is quicker.
+            commands::sync::shutdown(handle);
         }
         _ => {}
     });

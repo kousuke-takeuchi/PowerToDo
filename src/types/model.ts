@@ -107,3 +107,54 @@ export type ChangeReason = "bulk" | "external" | "move" | "sync";
 export interface ProjectsChanged {
   commonReloaded: boolean;
 }
+
+// ---- Phase 4: sync (src-tauri: commands/sync.rs, sync/engine.rs, sync/tailnet.rs) ----
+
+/** 同期先。端末ごとの設定 (settings.json)。 */
+export type SyncBackend = "none" | "nas" | "gdrive";
+export interface SyncSettingsDto {
+  backend: SyncBackend;
+  /** 入力された NAS のフォルダ (`http://nas:5005/powertodo/`)。資格情報は含まない。 */
+  nasUrl?: string;
+  nasUser?: string;
+  /** パスワードが OS のキーチェーン (または今回の起動中のメモリ) にある。値は返さない。 */
+  nasPasswordSet: boolean;
+  /** false のとき、パスワードはキーチェーンに保存できず再起動まで有効: 「パスワードを保存できません (再起動するまで有効)」。`nasPasswordSet` と合わせて判断する。 */
+  passwordPersistent: boolean;
+  googleEmail?: string;
+  /** このビルドに Google の OAuth クライアントが入っている。 */
+  googleAvailable: boolean;
+}
+/** `sync-status` event / `sync_status` / `sync_now`. `lastSynced` is local time "YYYY-MM-DDTHH:MM:SS". */
+export interface SyncStatusDto {
+  state: SyncState;
+  lastSynced?: string;
+  /** 例外の文言 (offline / error)。日本語でそのまま表示してよい。 */
+  message?: string;
+  /** 前回の同期で次回に回したファイル数 (未保存・保留・失敗・名前の重なりなど)。 */
+  pending: number;
+  /** 空に見えた側。同期は止まり、`syncRecover` で選ぶまで再開しない。 */
+  suspect?: "local" | "remote";
+}
+/** `sync-conflict` event: both sides changed `file`; the loser was saved as `conflictFile` (locally and on the target). */
+export interface SyncConflict { file: string; conflictFile: string; }
+/** `mirrorRemote`: このフォルダを同期先と同じにする。`mirrorLocal`: 同期先をこのフォルダと同じにする。 */
+export type SyncRecoverMode = "mirrorRemote" | "mirrorLocal";
+export type SyncRecoverOutcome = "done" | "suspect" | "offline" | "failed" | "interrupted" | "notRun";
+export interface SyncRecoverDto { outcome: SyncRecoverOutcome; uploaded: number; downloaded: number; archived: number; failed: number; }
+
+/**
+ * Tailscale (サイドカー) の状態。`tailnet-status` event / `tailnet_status`.
+ * `needs_login` の `loginUrl` はブラウザで開く (tauri-plugin-opener)。`starting` が 30 秒を超えたら「再試行」「状態を消す」を出す。
+ */
+export type TailnetStateName = "stopped" | "needs_login" | "needs_approval" | "starting" | "running" | "failed";
+export interface TailnetStatus {
+  state: TailnetStateName;
+  name?: string;
+  ip?: string;
+  loginUrl?: string;
+  error?: string;
+  /** `starting` に入ってからの秒数。 */
+  startedSecs?: number;
+}
+

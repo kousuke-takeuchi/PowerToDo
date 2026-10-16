@@ -20,6 +20,12 @@ import type {
   RecurrenceLabelDto,
   SearchDto,
   SettingsDto,
+  SyncBackend,
+  SyncRecoverDto,
+  SyncRecoverMode,
+  SyncSettingsDto,
+  SyncStatusDto,
+  TailnetStatus,
   TaskInput,
   TaskPatch,
   TodayViewDto,
@@ -99,6 +105,25 @@ export const api = {
   notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
   requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),
   showMainWindow: () => invoke<null>("show_main_window"),
+
+  // ---- Phase 4: sync ----
+  syncSettings: () => invoke<SyncSettingsDto>("sync_settings"),
+  /** Switching sends every file again at the next sync. A switch away from the NAS ends the Tailscale sidecar. Ask the user first. */
+  setSyncBackend: (backend: SyncBackend) => invoke<SyncSettingsDto>("set_sync_backend", { backend }),
+  tailnetStatus: () => invoke<TailnetStatus>("tailnet_status"),
+  /** Starts the sidecar if needed and the interactive login; the URL arrives as a `tailnet-status` event (`needs_login`, `loginUrl`). Needs backend "nas". */
+  tailnetLogin: () => invoke<null>("tailnet_login"),
+  tailnetLogout: () => invoke<null>("tailnet_logout"),
+  /** Deletes the Tailscale state and starts over (the node needs a login again). */
+  tailnetReset: () => invoke<null>("tailnet_reset"),
+  /** 「確かめる」: finds the NAS in the tailnet, writes a file and reads it back. On success the details are saved and the sync starts. Rejects with a Japanese message. */
+  nasCheck: (url: string, user: string, password: string) => invoke<null>("nas_check", { url, user, password }),
+  /** Detaches the NAS and forgets the password (the address and user stay). */
+  nasDisconnect: () => invoke<null>("nas_disconnect"),
+  syncNow: () => invoke<SyncStatusDto>("sync_now"),
+  syncStatus: () => invoke<SyncStatusDto>("sync_status"),
+  /** After a `suspect` status: the user's choice, confirmed in a dialog first. */
+  syncRecover: (mode: SyncRecoverMode) => invoke<SyncRecoverDto>("sync_recover", { mode }),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];

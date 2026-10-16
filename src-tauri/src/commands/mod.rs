@@ -3,6 +3,7 @@
 //! (start-up, quick add) live in plain functions so they can be tested without Tauri.
 
 pub mod saver;
+pub mod sync;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -58,6 +59,8 @@ pub struct AppState {
     pub fired: Mutex<Fired>,
     /// The sync with the NAS / Google Drive (Phase 4). Off until a target is set.
     pub sync: SyncEngine,
+    /// The NAS side of the sync: the Tailscale sidecar, the keychain, the connection details.
+    pub sync_rt: sync::SyncRuntime,
     app_data_dir: PathBuf,
 }
 
@@ -91,6 +94,7 @@ impl AppState {
             tray_error: Mutex::new(None),
             fired: Mutex::new(Fired::load(&app_data_dir)),
             sync: SyncEngine::new(app_data_dir.clone()),
+            sync_rt: sync::SyncRuntime::new(),
             app_data_dir,
         }
     }
@@ -665,6 +669,8 @@ pub fn start_sync(app: &AppHandle) {
     let engine = app.state::<AppState>().sync.clone();
     let host = Arc::new(TauriSyncHost { app: app.clone() });
     tauri::async_runtime::spawn(engine.run_loop(host));
+    // The NAS: load the sync settings and bring the Tailscale sidecar up if it was in use.
+    sync::start(app);
 }
 
 // ---- helpers ----
@@ -802,8 +808,10 @@ pub fn switch_data_dir(state: &AppState, path: &str) -> AppResult<AppStateDto> {
         }
     }
     let opened = ProjectStore::open(Paths::new(dir.clone()), now, true)?;
+    // Only the data folder changes; the sync settings stay.
     let settings = AppSettings {
         data_dir: Some(dir),
+        ..state.lock_settings().clone()
     };
     settings.save(&state.app_data_dir)?;
     *state.lock_settings() = settings;
@@ -2170,6 +2178,7 @@ mod tests {
         let gone = data.path().join("gone");
         AppSettings {
             data_dir: Some(gone),
+            ..AppSettings::default()
         }
         .save(app_dir.path())
         .unwrap();
@@ -2195,12 +2204,39 @@ mod tests {
     }
 
     #[test]
+    fn choosing_another_data_folder_keeps_the_sync_settings() {
+        use crate::store::paths::{SyncBackend, SyncSettings};
+        let app_dir = tempfile::tempdir().unwrap();
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        AppSettings {
+            data_dir: Some(a.path().to_path_buf()),
+            sync: SyncSettings {
+                backend: SyncBackend::Nas,
+                nas_url: Some("http://nas:5005/powertodo/".into()),
+                nas_user: Some("たろう".into()),
+                google_email: None,
+            },
+        }
+        .save(app_dir.path())
+        .unwrap();
+        let state = AppState::new(app_dir.path().to_path_buf());
+        startup(&state).unwrap();
+        switch_data_dir(&state, b.path().to_str().unwrap()).unwrap();
+        let saved = AppSettings::load(app_dir.path()).unwrap();
+        assert_eq!(saved.data_dir.as_deref(), Some(b.path()));
+        assert_eq!(saved.sync.backend, SyncBackend::Nas);
+        assert_eq!(saved.sync.nas_user.as_deref(), Some("たろう"));
+    }
+
+    #[test]
     fn startup_surfaces_a_corrupt_common_workbook() {
         let app_dir = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();
         std::fs::write(data.path().join("_PowerToDo.xlsx"), "not a workbook").unwrap();
         AppSettings {
             data_dir: Some(data.path().to_path_buf()),
+            ..AppSettings::default()
         }
         .save(app_dir.path())
         .unwrap();
