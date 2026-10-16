@@ -204,6 +204,18 @@ impl Fired {
         self.pending.retain(|i| !key.is_item(i));
     }
 
+    /// The fire time a snooze may be bound to: the task's current fire time, but only once it
+    /// has come. A stale banner row or an old notification can be snoozed after the task's due
+    /// date already moved to the future; binding the snooze to that future time would mark it
+    /// as fired and the next occurrence's reminder would never ring. Unbound, the snooze is
+    /// ignored and the reminder fires at its own time.
+    pub fn snooze_binding(
+        fire_at: Option<NaiveDateTime>,
+        now: NaiveDateTime,
+    ) -> Option<NaiveDateTime> {
+        fire_at.filter(|at| *at <= now)
+    }
+
     /// Forgets everything about one task, so its reminders can fire again (its due date, time
     /// or reminders changed, or it was completed / deleted).
     pub fn forget_task(&mut self, project: &str, no: u32) {

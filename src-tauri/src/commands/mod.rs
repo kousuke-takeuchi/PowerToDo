@@ -150,6 +150,7 @@ impl AppState {
                 .find(|t| t.project == key.project && t.no == key.no)?;
             reminders::fire_time(&key.code, task.due, task.due_time, s.settings().notify_time)
         });
+        let fire_at = Fired::snooze_binding(fire_at, now());
         self.update_fired(|f| f.snooze(key, fire_at, until));
     }
 

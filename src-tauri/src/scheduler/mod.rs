@@ -638,6 +638,47 @@ mod tests {
     }
 
     #[test]
+    fn snoozing_a_stale_reminder_does_not_swallow_the_next_one() {
+        // The 10/13 15:00 reminder fired; the due date then moved to 10/14 15:00 (Excel, or the
+        // task was completed and advanced) and an old banner row / notification is snoozed at
+        // 10/13 16:00. The snooze must not bind to the future 10/14 15:00 fire time.
+        let mut fired = Fired::default();
+        let key = ReminderKey {
+            project: "p".into(),
+            no: 1,
+            code: "-0m".into(),
+        };
+        fired.mark(&key, dt("2026-10-13T15:00"));
+        let moved = task(1, "2026-10-14", Some((15, 0)), &["-0m"], 0);
+        let now = dt("2026-10-13T16:00");
+        let bound = Fired::snooze_binding(Some(dt("2026-10-14T15:00")), now);
+        assert_eq!(bound, None);
+        fired.snooze(&key, bound, dt("2026-10-13T16:10"));
+        // The snooze time passes without a firing for the moved task...
+        let d = due_reminders(
+            std::slice::from_ref(&moved),
+            &fired,
+            dt("2026-10-13T16:10"),
+            &settings(),
+        );
+        assert!(d.fire.is_empty());
+        // ...and the new due time still rings.
+        let d = due_reminders(
+            std::slice::from_ref(&moved),
+            &fired,
+            dt("2026-10-14T15:00"),
+            &settings(),
+        );
+        assert_eq!(d.fire.len(), 1);
+        assert_eq!(d.fire[0].at, dt("2026-10-14T15:00"));
+        // A fire time that has come is still bound.
+        assert_eq!(
+            Fired::snooze_binding(Some(dt("2026-10-13T15:00")), now),
+            Some(dt("2026-10-13T15:00"))
+        );
+    }
+
+    #[test]
     fn recurring_completion_clears_fired() {
         // The command layer calls `forget_task` after every `complete_task`; a recurring task
         // then fires again on its next due date.
