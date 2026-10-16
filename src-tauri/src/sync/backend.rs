@@ -37,6 +37,10 @@ pub enum BackendError {
     Forbidden,
     #[error("接続できません: {0}")]
     Offline(String),
+    /// An upload's precondition failed: the remote file changed (or appeared) since it was
+    /// listed. Nothing was written.
+    #[error("同期先が先に更新されました")]
+    Precondition,
     #[error("{0}")]
     Other(String),
 }
@@ -52,6 +56,12 @@ pub trait StorageBackend: Send + Sync {
     fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>>;
     /// Writes `bytes` as `name`: over `existing` when given, else as a new file. Returns the
     /// file as the backend now sees it.
+    ///
+    /// Conditional, so a concurrent upload from another PC is never overwritten: with
+    /// `existing`, only while the remote file still has `existing.version` (WebDAV `If-Match`;
+    /// Drive checks the version right before the update); without it, only when no file of
+    /// that name exists (`If-None-Match: *`). Otherwise [`BackendError::Precondition`] and
+    /// nothing is written.
     fn upload<'a>(
         &'a self,
         name: &'a str,
@@ -96,6 +106,9 @@ struct Inner {
     failures: BTreeMap<String, Failure>,
     /// `list` fails.
     list_failure: Option<Failure>,
+    /// By name: the next `upload` of that name first finds these bytes written by "another
+    /// PC" (see `race_upload`).
+    races: BTreeMap<String, Vec<u8>>,
     /// By id.
     files: BTreeMap<String, Entry>,
     /// `(name, bytes)` of what was moved to `archive/`, oldest first.
@@ -135,6 +148,12 @@ impl MemoryBackend {
     /// `list` returns `failure` from now on.
     pub fn fail_list(&self, failure: Failure) {
         self.lock().list_failure = Some(failure);
+    }
+
+    /// The next `upload` of `name` meets a concurrent upload: right before it, `bytes` land on
+    /// the remote as if another PC had written them, so the precondition fails.
+    pub fn race_upload(&self, name: &str, bytes: &[u8]) {
+        self.lock().races.insert(name.to_string(), bytes.to_vec());
     }
 
     /// Ends every injected failure.
@@ -272,6 +291,23 @@ impl StorageBackend for MemoryBackend {
         Box::pin(async move {
             self.check(name)?;
             let at = (self.clock)();
+            let race = self.lock().races.remove(name);
+            if let Some(theirs) = race {
+                self.put_entry(name, None, theirs, at);
+            }
+            {
+                let inner = self.lock();
+                let unchanged = match existing {
+                    Some(f) => inner
+                        .files
+                        .get(&f.id)
+                        .is_some_and(|e| e.version == f.version && e.name == f.name),
+                    None => !inner.files.values().any(|e| e.name == name),
+                };
+                if !unchanged {
+                    return Err(BackendError::Precondition);
+                }
+            }
             self.put_entry(name, existing.map(|f| f.id.as_str()), bytes, at);
             let inner = self.lock();
             inner
@@ -365,6 +401,37 @@ mod tests {
             Err(BackendError::Other(_))
         ));
         assert!(matches!(b.download(&f).await, Err(BackendError::Other(_))));
+    }
+
+    #[tokio::test]
+    async fn upload_is_conditional() {
+        let b = backend();
+        let first = b.upload("a.xlsx", None, b"one".to_vec()).await.unwrap();
+        // Creating over an existing file is refused.
+        assert!(matches!(
+            b.upload("a.xlsx", None, b"x".to_vec()).await,
+            Err(BackendError::Precondition)
+        ));
+        // Another PC wrote since `first` was seen: refused, their bytes stay.
+        b.put("a.xlsx", b"theirs");
+        assert!(matches!(
+            b.upload("a.xlsx", Some(&first), b"mine".to_vec()).await,
+            Err(BackendError::Precondition)
+        ));
+        assert_eq!(b.get("a.xlsx").unwrap(), b"theirs");
+        // A raced upload fails the same way.
+        let now = b.list().await.unwrap().remove(0);
+        b.race_upload("a.xlsx", b"raced");
+        assert!(matches!(
+            b.upload("a.xlsx", Some(&now), b"mine".to_vec()).await,
+            Err(BackendError::Precondition)
+        ));
+        assert_eq!(b.get("a.xlsx").unwrap(), b"raced");
+        let now = b.list().await.unwrap().remove(0);
+        b.upload("a.xlsx", Some(&now), b"mine".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(b.get("a.xlsx").unwrap(), b"mine");
     }
 
     #[tokio::test]

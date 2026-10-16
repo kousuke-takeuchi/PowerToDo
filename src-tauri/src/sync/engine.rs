@@ -26,8 +26,9 @@ use super::state::{BackendKind, FileRecord, SyncState};
 use super::{
     Action, LocalFile, PlanMode, Side, conflict_name, fold, is_sync_target, plan, sha256_hex,
 };
+use crate::error::AppError;
 use crate::store::common_book::COMMON_FILE;
-use crate::store::project_store::{ProjectStore, file_key};
+use crate::store::project_store::{ProjectStore, StagedDownload, file_key, stage_download};
 
 /// Key of the common workbook in the store and the saver.
 const COMMON_KEY: &str = "_common";
@@ -50,6 +51,8 @@ pub enum SyncReason {
     Settings,
     /// The connection to the target came up (Tailscale reached running).
     Connected,
+    /// An upload met a concurrent change on the remote; plan again at once.
+    Retry,
 }
 
 impl SyncReason {
@@ -157,10 +160,12 @@ pub struct SyncReport {
     pub skipped: Vec<String>,
     /// Changed (or got unsaved edits) while the run was going; tried again next time.
     pub deferred: Vec<String>,
-    /// `(file, message)`.
+    /// `(file, message for the user)`.
     pub failed: Vec<(String, String)>,
     /// Names that differ only in letter case or Unicode normalization.
     pub clashes: Vec<Vec<String>>,
+    /// An upload met a concurrent change (`Precondition`): another run was requested.
+    pub rerun: bool,
 }
 
 impl SyncReport {
@@ -182,14 +187,23 @@ impl SyncReport {
                 names.join("、")
             ));
         }
-        if let Some((name, message)) = self.failed.first() {
+        if let Some((_, message)) = self.failed.first() {
             let more = match self.failed.len() {
                 1 => String::new(),
                 n => format!(" (ほか {} 件)", n - 1),
             };
-            parts.push(format!("「{name}」を同期できませんでした: {message}{more}"));
+            parts.push(format!("{message}{more}"));
         }
         (!parts.is_empty()).then(|| parts.join(" / "))
+    }
+
+    /// Every name this run left for the next one.
+    fn left_over(&self) -> impl Iterator<Item = &String> {
+        self.skipped
+            .iter()
+            .chain(&self.deferred)
+            .chain(self.failed.iter().map(|(n, _)| n))
+            .chain(self.clashes.iter().flatten())
     }
 }
 
@@ -217,7 +231,7 @@ struct Target {
 struct Inner {
     target: Option<Target>,
     /// Bumped by every target change and records reset. A run that started under another value
-    /// saves nothing more.
+    /// saves nothing more and no longer changes the status.
     generation: u64,
     /// The target rejected the credentials: no run until `clear_auth_rejected` or a new target.
     auth_rejected: bool,
@@ -254,6 +268,7 @@ enum Stop {
 /// Why one file was not synced.
 enum FileError {
     Backend(BackendError),
+    /// The whole message for the user (names the file).
     Local(String),
     /// Busy or changed since the plan: the next run looks again.
     Deferred,
@@ -266,12 +281,27 @@ impl From<BackendError> for FileError {
     }
 }
 
-fn local_error(e: impl std::fmt::Display) -> FileError {
-    FileError::Local(e.to_string())
+/// 「「name」を同期できませんでした: …」.
+fn failure_text(name: &str, e: impl std::fmt::Display) -> String {
+    format!("「{name}」を同期できませんでした: {e}")
+}
+
+fn failure(name: &str, e: impl std::fmt::Display) -> FileError {
+    FileError::Local(failure_text(name, e))
 }
 
 fn missing_remote(name: &str) -> FileError {
     FileError::Local(format!("同期先の「{name}」が見つかりません"))
+}
+
+/// Checks a download before it may replace anything (see [`stage_download`]).
+fn stage(data_dir: &Path, name: &str, bytes: &[u8]) -> Result<StagedDownload, FileError> {
+    stage_download(data_dir, name, bytes).map_err(|e| match e {
+        AppError::Corrupt { .. } => {
+            FileError::Local(format!("「{name}」を同期先から読み込めません"))
+        }
+        other => failure(name, other),
+    })
 }
 
 impl SyncEngine {
@@ -312,7 +342,8 @@ impl SyncEngine {
 
     /// Sets (or with `None` removes) the sync target. Clears `auth_rejected` (the settings
     /// changed) and asks for a run. `kind` and `remote_root` tie `sync.json` to the target: a
-    /// different one starts from fresh records (`SyncState::load`).
+    /// different one starts from fresh records (`SyncState::load`). The status shows the last
+    /// sync time saved for this target.
     pub fn set_backend(
         &self,
         backend: Option<Arc<dyn StorageBackend>>,
@@ -320,6 +351,9 @@ impl SyncEngine {
         remote_root: &str,
     ) {
         let on = backend.is_some();
+        let last = on
+            .then(|| SyncState::peek_last_sync(&self.shared.app_data_dir, kind, remote_root))
+            .flatten();
         {
             let mut inner = self.lock();
             inner.target = backend.map(|backend| Target {
@@ -331,13 +365,14 @@ impl SyncEngine {
             inner.auth_rejected = false;
             inner.due = None;
         }
-        self.publish(None, |s| {
+        self.publish(None, None, |s| {
             *s = SyncStatusView {
                 state: if on {
                     SyncPhase::Syncing
                 } else {
                     SyncPhase::Off
                 },
+                last_synced: last.map(stamp),
                 ..SyncStatusView::off()
             };
         });
@@ -346,16 +381,29 @@ impl SyncEngine {
         }
     }
 
-    /// Forgets every record (`sync.json` is removed): the next run treats both sides as new.
-    /// For an explicit switch of the sync target. A run in progress saves nothing more.
+    /// Forgets every record (`sync.json` is removed) and asks for a run, which treats both
+    /// sides as new. For an explicit switch of the sync target. A run in progress saves nothing
+    /// more.
     pub fn reset_records(&self) {
-        let mut inner = self.lock();
-        inner.generation += 1;
-        let path = self.shared.app_data_dir.join(SyncState::FILE);
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => eprintln!("could not remove {}: {e}", path.display()),
+        let on = {
+            let mut inner = self.lock();
+            inner.generation += 1;
+            let path = self.shared.app_data_dir.join(SyncState::FILE);
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => eprintln!("could not remove {}: {e}", path.display()),
+            }
+            inner.target.is_some()
+        };
+        if on {
+            self.publish(None, None, |s| {
+                *s = SyncStatusView {
+                    state: SyncPhase::Syncing,
+                    ..SyncStatusView::off()
+                };
+            });
+            self.request(SyncReason::Settings);
         }
     }
 
@@ -437,15 +485,26 @@ impl SyncEngine {
     /// `MirrorRemote` makes this folder equal to the target, `MirrorLocal` the other way. A
     /// file whose content would be replaced is kept first (the local one in `archive/` as
     /// `<name> (同期前 …).xlsx`, the remote one in the target's `archive/`). The records are
-    /// rebuilt from what the mirror copied, so the next normal run starts clean.
+    /// rebuilt from what the mirror copied (names it skipped or failed keep theirs), so the
+    /// next normal run starts clean.
     pub async fn run_mirror(&self, host: &dyn SyncHost, mode: PlanMode) -> SyncReport {
         self.run(host, mode).await
     }
 
     /// Updates the status and sends it to `host`, or to the loop's host when there is none.
-    fn publish(&self, host: Option<&dyn SyncHost>, f: impl FnOnce(&mut SyncStatusView)) {
+    /// With `generation`, only while the target is still that one (a run of an old target must
+    /// not overwrite the new target's status).
+    fn publish(
+        &self,
+        host: Option<&dyn SyncHost>,
+        generation: Option<u64>,
+        f: impl FnOnce(&mut SyncStatusView),
+    ) {
         let (view, stored) = {
             let mut inner = self.lock();
+            if generation.is_some_and(|g| g != inner.generation) {
+                return;
+            }
             f(&mut inner.status);
             (inner.status.clone(), inner.host.clone())
         };
@@ -471,9 +530,10 @@ impl SyncEngine {
 
     /// Reports a failure of the target that ends the run.
     fn backend_failed(&self, host: &dyn SyncHost, generation: u64, e: &BackendError) -> RunOutcome {
+        let g = Some(generation);
         match e {
             BackendError::Offline(_) => {
-                self.publish(Some(host), |s| {
+                self.publish(Some(host), g, |s| {
                     s.state = SyncPhase::Offline;
                     s.message = Some(e.to_string());
                 });
@@ -486,7 +546,7 @@ impl SyncEngine {
                         inner.auth_rejected = true;
                     }
                 }
-                self.publish(Some(host), |s| {
+                self.publish(Some(host), g, |s| {
                     s.state = SyncPhase::Error;
                     s.message = Some(
                         "同期先の認証に失敗しました。設定で接続を確かめるまで同期しません".into(),
@@ -495,7 +555,7 @@ impl SyncEngine {
                 RunOutcome::Failed
             }
             _ => {
-                self.publish(Some(host), |s| {
+                self.publish(Some(host), g, |s| {
                     s.state = SyncPhase::Error;
                     s.message = Some(e.to_string());
                 });
@@ -512,14 +572,15 @@ impl SyncEngine {
             (inner.target.clone(), inner.generation, inner.auth_rejected)
         };
         let (target, generation) = match snapshot {
-            (None, ..) => {
-                self.publish(Some(host), |s| *s = SyncStatusView::off());
+            (None, g, _) => {
+                self.publish(Some(host), Some(g), |s| *s = SyncStatusView::off());
                 return report;
             }
             // The status still says why.
             (Some(_), _, true) => return report,
             (Some(t), g, false) => (t, g),
         };
+        let g = Some(generation);
 
         // (1) What not to touch, under a short store lock.
         let opened = {
@@ -532,7 +593,7 @@ impl SyncEngine {
             })
         };
         let Some((data_dir, mut skip)) = opened else {
-            self.publish(Some(host), |s| {
+            self.publish(Some(host), g, |s| {
                 *s = SyncStatusView {
                     message: Some("データフォルダが開かれていません".into()),
                     ..SyncStatusView::off()
@@ -540,7 +601,7 @@ impl SyncEngine {
             });
             return report;
         };
-        self.publish(Some(host), |s| {
+        self.publish(Some(host), g, |s| {
             s.state = SyncPhase::Syncing;
             s.message = None;
             s.suspect = None;
@@ -551,7 +612,7 @@ impl SyncEngine {
             Ok(files) => files,
             Err(e) => {
                 report.outcome = RunOutcome::Failed;
-                self.publish(Some(host), |s| {
+                self.publish(Some(host), g, |s| {
                     s.state = SyncPhase::Error;
                     s.message = Some(format!("データフォルダを読めません: {e}"));
                 });
@@ -588,7 +649,7 @@ impl SyncEngine {
             _ => None,
         }) {
             report.outcome = RunOutcome::Suspect(side);
-            self.publish(Some(host), |s| {
+            self.publish(Some(host), g, |s| {
                 s.state = SyncPhase::Error;
                 s.message = Some(suspect_message(side));
                 s.pending = 0;
@@ -603,10 +664,6 @@ impl SyncEngine {
 
         report.skipped = skip.iter().filter(|n| is_sync_target(n)).cloned().collect();
         let records = state.files.clone();
-        if mode != PlanMode::Normal {
-            // Rebuilt from what the mirror copies.
-            state.files.clear();
-        }
         let mut run = Run {
             engine: self,
             host,
@@ -620,6 +677,7 @@ impl SyncEngine {
             state,
             report,
             taken: BTreeSet::new(),
+            done: BTreeSet::new(),
         };
 
         // (5), (6) Each action, saving the records after each file.
@@ -627,6 +685,7 @@ impl SyncEngine {
         let Run {
             mut state,
             mut report,
+            done,
             ..
         } = run;
         match stop {
@@ -643,6 +702,16 @@ impl SyncEngine {
         }
 
         // (7) Done.
+        if mode != PlanMode::Normal {
+            // Records are rebuilt from what the mirror copied; names it left for later keep
+            // theirs, the rest (stale, archived, junk) go.
+            let keep: BTreeSet<String> = done
+                .iter()
+                .chain(report.left_over())
+                .map(|n| fold(n))
+                .collect();
+            state.files.retain(|name, _| keep.contains(&fold(name)));
+        }
         let now = self.now();
         state.last_sync = Some(now);
         if !self.save_state(generation, &state) {
@@ -652,7 +721,7 @@ impl SyncEngine {
         report.outcome = RunOutcome::Done;
         let message = report.problems();
         let pending = report.pending();
-        self.publish(Some(host), |s| {
+        self.publish(Some(host), g, |s| {
             s.state = if message.is_some() {
                 SyncPhase::Error
             } else {
@@ -663,6 +732,9 @@ impl SyncEngine {
             s.pending = pending;
             s.suspect = None;
         });
+        if report.rerun {
+            self.request(SyncReason::Retry);
+        }
         report
     }
 }
@@ -843,12 +915,15 @@ struct Run<'a> {
     /// The local listing the plan saw, by exact name.
     local: BTreeMap<String, LocalFile>,
     remote: Vec<RemoteFile>,
-    /// The records the plan saw (a mirror rebuilds `state.files` from empty).
+    /// The records the plan saw.
     records: BTreeMap<String, FileRecord>,
     state: SyncState,
     report: SyncReport,
     /// Conflict copy names given out in this run.
     taken: BTreeSet<String>,
+    /// Names whose record this run wrote or removed (a mirror keeps only these and the ones it
+    /// left for later).
+    done: BTreeSet<String>,
 }
 
 impl Run<'_> {
@@ -889,11 +964,20 @@ impl Run<'_> {
             match result {
                 Ok(()) => {}
                 Err(FileError::Deferred) => self.report.deferred.push(name),
+                // Someone else wrote first: nothing was written, the record stays, and the
+                // next run (asked for at once) sees their version and plans a conflict.
+                Err(FileError::Backend(BackendError::Precondition)) => {
+                    self.report.deferred.push(name);
+                    self.report.rerun = true;
+                }
                 Err(FileError::Local(m)) => self.report.failed.push((name, m)),
                 Err(FileError::Backend(e @ (BackendError::Auth | BackendError::Offline(_)))) => {
                     return Err(Stop::Backend(e));
                 }
-                Err(FileError::Backend(e)) => self.report.failed.push((name, e.to_string())),
+                Err(FileError::Backend(e)) => {
+                    let m = failure_text(&name, &e);
+                    self.report.failed.push((name, m));
+                }
                 Err(FileError::Changed) => return Err(Stop::Changed),
             }
         }
@@ -932,11 +1016,13 @@ impl Run<'_> {
                 local_hash,
             },
         );
+        self.done.insert(name.to_string());
         self.save()
     }
 
     fn forget(&mut self, name: &str) -> Result<(), FileError> {
         self.state.files.remove(name);
+        self.done.insert(name.to_string());
         self.save()
     }
 
@@ -958,8 +1044,22 @@ impl Run<'_> {
         Ok(sha256_hex(&bytes) == hash)
     }
 
+    /// The store could not read this PC's copy of `key` (`LoadedProject::Failed`).
+    fn local_load_failed(&self, key: &str) -> bool {
+        self.host
+            .lock_store()
+            .as_ref()
+            .is_some_and(|s| s.load_failed(key))
+    }
+
     async fn upload(&mut self, name: &str) -> Result<(), FileError> {
         let planned = self.planned_hash(name).ok_or(FileError::Deferred)?;
+        // A workbook this PC cannot read is not sent (a download may still repair it).
+        if self.local_load_failed(&key_of(name)?) {
+            return Err(FileError::Local(format!(
+                "「{name}」はこのPCで読み込めていないため送りません"
+            )));
+        }
         // Read again: a save since the listing would make the hash wrong. Next round then.
         let bytes = std::fs::read(self.data_dir.join(name)).map_err(|_| FileError::Deferred)?;
         if sha256_hex(&bytes) != planned {
@@ -976,6 +1076,9 @@ impl Run<'_> {
             }
             // Keep what the remote held before the mirror replaces it.
             self.backend.move_to_archive(&old).await?;
+            // That record is void now (should the upload fail, the next run uploads anew).
+            self.state.files.remove(name);
+            self.save()?;
             existing = None;
         }
         let uploaded = self.backend.upload(name, existing.as_ref(), bytes).await?;
@@ -994,20 +1097,21 @@ impl Run<'_> {
             self.report.recorded.push(name.to_string());
             return Ok(());
         }
+        let staged = stage(&self.data_dir, name, &bytes)?;
         // A mirror keeps the local file it replaces.
         let keep_old = self.mode == PlanMode::MirrorRemote && planned.is_some();
-        self.write_local(name, &bytes, planned.as_deref(), keep_old)?;
+        self.write_local(name, staged, planned.as_deref(), keep_old)?;
         self.record(name, &remote, hash)?;
         self.report.downloaded.push(name.to_string());
         Ok(())
     }
 
-    /// Writes downloaded content over `<data>/<name>` through the store and loads it, then tells
-    /// the UI. `expected` is the content the plan saw (see [`check_local`]).
+    /// Puts a checked download ([`stage`]) over `<data>/<name>` through the store and loads it,
+    /// then tells the UI. `expected` is the content the plan saw (see [`check_local`]).
     fn write_local(
         &mut self,
         name: &str,
-        bytes: &[u8],
+        staged: StagedDownload,
         expected: Option<&str>,
         keep_old: bool,
     ) -> Result<(), FileError> {
@@ -1027,9 +1131,11 @@ impl Run<'_> {
             if keep_old {
                 store
                     .keep_copy_before_sync(name, self.engine.now())
-                    .map_err(local_error)?;
+                    .map_err(|e| failure(name, e))?;
             }
-            store.write_downloaded(name, bytes).map_err(local_error)?;
+            store
+                .install_download(staged)
+                .map_err(|e| failure(name, e))?;
             load_written(store, &key, name)
         };
         match loaded? {
@@ -1063,7 +1169,7 @@ impl Run<'_> {
                 name,
                 Some(&planned),
             )?;
-            store.archive_synced(name).map_err(local_error)?;
+            store.archive_synced(name).map_err(|e| failure(name, e))?;
         }
         host.project_list_changed(false);
         self.forget(name)?;
@@ -1103,10 +1209,13 @@ impl Run<'_> {
 
     /// Both sides changed (spec section 3.3). The loser's content is kept as a conflict copy
     /// locally and remotely, then the winner is put on both sides. When the two contents are the
-    /// same after all (an etag / md5 cannot tell), only the record is written.
+    /// same after all (an etag / md5 cannot tell), only the record is written. A fresh PC's
+    /// pristine inbox / common workbook is just replaced (nothing to keep). A local workbook
+    /// this PC cannot read never wins.
     async fn conflict(&mut self, name: &str, keep: Side) -> Result<(), FileError> {
         let remote = self.remote_for(name).ok_or_else(|| missing_remote(name))?;
         let planned = self.planned_hash(name).ok_or(FileError::Deferred)?;
+        let key = key_of(name)?;
         let remote_bytes = self.backend.download(&remote).await?;
         let remote_hash = sha256_hex(&remote_bytes);
         let local_bytes =
@@ -1119,37 +1228,59 @@ impl Run<'_> {
             self.report.recorded.push(name.to_string());
             return Ok(());
         }
-        if keep == Side::Remote {
-            // The local file will be replaced: make sure it can be before making copies, so a
-            // busy project does not get a new copy every round.
-            let key = key_of(name)?;
+        let first_sync = !self.records.contains_key(name);
+        let (keep, pristine) = {
             let guard = self.host.lock_store();
             let store = guard.as_ref().ok_or(FileError::Changed)?;
-            check_local(
-                store,
-                &self.host.saving_keys(),
-                &self.data_dir,
-                &key,
-                name,
-                Some(&planned),
-            )?;
+            let keep = if store.load_failed(&key) {
+                Side::Remote
+            } else {
+                keep
+            };
+            if keep == Side::Remote {
+                // The local file will be replaced: make sure it can be before making copies, so
+                // a busy project does not get a new copy every round.
+                check_local(
+                    store,
+                    &self.host.saving_keys(),
+                    &self.data_dir,
+                    &key,
+                    name,
+                    Some(&planned),
+                )?;
+            }
+            (
+                keep,
+                first_sync && keep == Side::Remote && store.is_pristine(&key),
+            )
+        };
+        // A remote winner must be readable before anything is copied or replaced.
+        let staged = match keep {
+            Side::Remote => Some(stage(&self.data_dir, name, &remote_bytes)?),
+            Side::Local => None,
+        };
+        if pristine && let Some(staged) = staged {
+            self.write_local(name, staged, Some(&planned), false)?;
+            self.record(name, &remote, remote_hash)?;
+            self.report.downloaded.push(name.to_string());
+            return Ok(());
         }
         let copy = self.free_conflict_name(name);
         let loser = match keep {
             Side::Remote => local_bytes.clone(),
             Side::Local => remote_bytes.clone(),
         };
-        write_new_file(&self.data_dir.join(&copy), &loser).map_err(local_error)?;
+        write_new_file(&self.data_dir.join(&copy), &loser).map_err(|e| failure(name, e))?;
         self.taken.insert(copy.clone());
         self.backend.upload(&copy, None, loser).await?;
         self.report.conflicts.push((name.to_string(), copy.clone()));
         self.host.conflict(name, &copy);
-        match keep {
-            Side::Remote => {
-                self.write_local(name, &remote_bytes, Some(&planned), false)?;
+        match (keep, staged) {
+            (Side::Remote, Some(staged)) => {
+                self.write_local(name, staged, Some(&planned), false)?;
                 self.record(name, &remote, remote_hash)?;
             }
-            Side::Local => {
+            _ => {
                 let uploaded = self
                     .backend
                     .upload(name, Some(&remote), local_bytes)
@@ -1448,12 +1579,8 @@ mod tests {
         assert!(idle(&b.sync().await));
     }
 
-    #[tokio::test]
-    async fn first_sync_of_a_new_pc_keeps_its_own_files_as_conflict_copies() {
-        let remote = backend();
-        let (_a, b) = two_pcs(&remote).await;
-        // B's fresh inbox and common workbook differ from A's: the remote won (no records yet).
-        let copies: Vec<String> = b
+    fn conflict_events(pc: &Pc) -> Vec<String> {
+        let copies: Vec<String> = pc
             .events()
             .iter()
             .filter_map(|e| match e {
@@ -1461,8 +1588,40 @@ mod tests {
                 _ => None,
             })
             .collect();
+        sorted(copies)
+    }
+
+    #[tokio::test]
+    async fn first_sync_replaces_pristine_defaults_without_copies() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        // B's fresh inbox and common workbook held nothing: the remote's came down, no copy.
+        assert!(conflict_events(&b).is_empty());
+        assert!(
+            fs::read_dir(&b.data)
+                .unwrap()
+                .all(|e| { !e.unwrap().file_name().to_string_lossy().contains("競合") })
+        );
+        assert!(futures_names(&remote).iter().all(|n| !n.contains("競合")));
+        assert_eq!(b.file(INBOX_FILE), a.file(INBOX_FILE));
+        assert_eq!(b.file("_PowerToDo.xlsx"), a.file("_PowerToDo.xlsx"));
+    }
+
+    #[tokio::test]
+    async fn first_sync_keeps_a_used_inbox_and_common_as_conflict_copies() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.add(INBOX, "Aのタスク");
+        a.sync().await;
+        let b = Pc::new(&remote);
+        // B was used before joining: a task in the inbox, a project in the common workbook.
+        b.add(INBOX, "Bのタスク");
+        b.create("Bの仕事");
+        let r = b.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        let copies = conflict_events(&b);
         assert_eq!(
-            sorted(copies.clone()),
+            copies,
             names(&[
                 "_PowerToDo (競合 2026-10-16 0930).xlsx",
                 "受信トレイ (競合 2026-10-16 0930).xlsx"
@@ -1472,6 +1631,11 @@ mod tests {
             assert!(b.has(c));
             assert_eq!(remote.get(c).unwrap(), b.file(c));
         }
+        assert_eq!(
+            titles_in(&b.file("受信トレイ (競合 2026-10-16 0930).xlsx")),
+            ["Bのタスク"]
+        );
+        assert_eq!(b.titles(INBOX), ["Aのタスク"]);
         // Conflict copies are not projects.
         assert!(b.with(|s| s.summaries().iter().all(|p| !p.name.contains("競合"))));
     }
@@ -1484,11 +1648,19 @@ mod tests {
         a.add(INBOX, "Aの変更");
         b.add(INBOX, "Bの変更");
         assert_eq!(a.sync().await.uploaded, [INBOX_FILE]);
+        // A copy of that name is already there: the new one gets a number.
+        fs::write(
+            b.data.join("受信トレイ (競合 2026-10-16 0930).xlsx"),
+            b"older copy",
+        )
+        .unwrap();
         let r = b.sync().await;
-        // The first-sync copy took the plain name; this one gets a number.
         let copy = "受信トレイ (競合 2026-10-16 0930-2).xlsx".to_string();
         assert_eq!(r.conflicts, [(INBOX_FILE.to_string(), copy.clone())]);
-        assert!(b.has("受信トレイ (競合 2026-10-16 0930).xlsx"));
+        assert_eq!(
+            b.file("受信トレイ (競合 2026-10-16 0930).xlsx"),
+            b"older copy"
+        );
         assert!(
             b.events()
                 .contains(&Event::Conflict(INBOX_FILE.into(), copy.clone()))
@@ -1514,7 +1686,7 @@ mod tests {
         b.add(INBOX, "Bの変更");
         a.sync().await;
         let r = b.sync().await;
-        let copy = "受信トレイ (競合 2026-10-16 0930-2).xlsx".to_string();
+        let copy = "受信トレイ (競合 2026-10-16 0930).xlsx".to_string();
         assert_eq!(r.conflicts, [(INBOX_FILE.to_string(), copy.clone())]);
         // B's content stays and goes up; A's is the copy on both sides.
         assert_eq!(b.titles(INBOX), ["牛乳を買う", "Bの変更"]);
@@ -2121,8 +2293,13 @@ mod tests {
         a.create("p0");
         a.sync().await;
         assert!(!a.records().is_empty());
+        assert!(a.engine.take_due(Instant::now()));
         a.engine.reset_records();
         assert!(a.records().is_empty());
+        // It says so and asks for a run.
+        assert_eq!(a.engine.status().state, SyncPhase::Syncing);
+        assert_eq!(a.engine.status().last_synced, None);
+        assert!(a.engine.take_due(Instant::now()));
         // Same content on both sides: only records again.
         let r = a.sync().await;
         assert_eq!(r.recorded.len(), 3);
@@ -2228,5 +2405,158 @@ mod tests {
         assert!(a.has("p9.xlsx"));
         assert!(a.with(|s| s.summaries().iter().any(|p| p.name == "p9")));
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn corrupt_download_changes_nothing() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.create("p0");
+        a.add("p0", "大事");
+        a.sync().await;
+        let before = a.file("p0.xlsx");
+        let record = a.records()["p0.xlsx"].clone();
+        // Another PC (say, on a newer app version) sent something this one cannot read.
+        remote.put("p0.xlsx", b"not a workbook");
+        let r = a.sync().await;
+        assert_eq!(
+            r.failed,
+            [(
+                "p0.xlsx".to_string(),
+                "「p0.xlsx」を同期先から読み込めません".to_string()
+            )]
+        );
+        assert_eq!(a.file("p0.xlsx"), before);
+        assert_eq!(a.records()["p0.xlsx"], record);
+        assert_eq!(a.titles("p0"), ["大事"]);
+        assert!(!a.with(|s| s.changed_on_disk("p0")));
+        let status = a.engine.status();
+        assert_eq!(status.state, SyncPhase::Error);
+        assert_eq!(
+            status.message.as_deref(),
+            Some("「p0.xlsx」を同期先から読み込めません")
+        );
+        // No temp file is left behind.
+        assert!(fs::read_dir(&a.data).unwrap().all(|e| {
+            !e.unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".powertodo-")
+        }));
+        // The next run tries again (nothing was recorded).
+        assert_eq!(a.sync().await.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn corrupt_remote_winner_makes_no_conflict_copy() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let a = Pc::new(&remote);
+        a.create("p0");
+        a.sync().await;
+        a.add("p0", "ローカルの変更");
+        let before = a.file("p0.xlsx");
+        remote.put("p0.xlsx", b"not a workbook");
+        let r = a.sync().await;
+        assert!(r.conflicts.is_empty());
+        assert_eq!(r.failed.len(), 1);
+        assert_eq!(a.file("p0.xlsx"), before);
+        assert!(
+            fs::read_dir(&a.data)
+                .unwrap()
+                .all(|e| { !e.unwrap().file_name().to_string_lossy().contains("競合") })
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_upload_becomes_a_conflict() {
+        // The remote copy is the newer one.
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        b.add(INBOX, "Bの変更");
+        let theirs = b.file(INBOX_FILE);
+        a.add(INBOX, "Aの変更");
+        let record = a.records()[INBOX_FILE].clone();
+        a.engine.take_due(Instant::now());
+        // B's upload lands between A's listing and A's upload.
+        remote.race_upload(INBOX_FILE, &theirs);
+        let r = a.sync().await;
+        assert_eq!(r.deferred, [INBOX_FILE]);
+        assert!(r.uploaded.is_empty());
+        assert!(r.rerun);
+        assert_eq!(remote.get(INBOX_FILE).unwrap(), theirs);
+        assert_eq!(a.records()[INBOX_FILE], record);
+        // The rerun was asked for, and it plans a conflict: both contents survive.
+        assert!(a.engine.take_due(Instant::now()));
+        let r = a.sync().await;
+        let copy = "受信トレイ (競合 2026-10-16 0930).xlsx".to_string();
+        assert_eq!(r.conflicts, [(INBOX_FILE.to_string(), copy.clone())]);
+        assert_eq!(a.titles(INBOX), ["牛乳を買う", "Bの変更"]);
+        assert_eq!(titles_in(&a.file(&copy)), ["牛乳を買う", "Aの変更"]);
+        assert_eq!(remote.get(&copy).unwrap(), a.file(&copy));
+    }
+
+    #[tokio::test]
+    async fn a_mirror_keeps_the_records_of_files_it_left_alone() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.create("p0");
+        a.create("p1");
+        a.sync().await;
+        let record = a.records()["p1.xlsx"].clone();
+        a.with(|s| s.add_task("p1", input("未保存")).unwrap());
+        let r = a.mirror(PlanMode::MirrorLocal).await;
+        assert_eq!(r.skipped, ["p1.xlsx"]);
+        assert_eq!(a.records().get("p1.xlsx"), Some(&record));
+    }
+
+    #[tokio::test]
+    async fn an_old_targets_failure_keeps_the_new_targets_status() {
+        let old = backend();
+        old.fail_list(Failure::Offline);
+        let hooked = Hooked::new(&old);
+        let a = Pc::with_backend(hooked.clone(), None);
+        let engine = a.engine.clone();
+        let new = backend();
+        hooked.on_list(move || engine.set_backend(Some(new), BackendKind::Gdrive, "folder"));
+        assert_eq!(a.sync().await.outcome, RunOutcome::Offline);
+        assert_eq!(a.engine.status().state, SyncPhase::Syncing);
+        assert!(!a.engine.auth_rejected());
+    }
+
+    #[tokio::test]
+    async fn the_last_sync_time_is_shown_from_the_start() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.sync().await;
+        let again = SyncEngine::with_clock(a.app.clone(), || dt(NOW));
+        again.set_backend(Some(remote.clone()), BackendKind::Nas, ROOT);
+        assert_eq!(again.status().last_synced.as_deref(), Some(NOW));
+        let other = SyncEngine::with_clock(a.app.clone(), || dt(NOW));
+        other.set_backend(Some(remote.clone()), BackendKind::Nas, "http://other/");
+        assert_eq!(other.status().last_synced, None);
+    }
+
+    #[tokio::test]
+    async fn a_workbook_that_failed_to_load_is_not_uploaded_but_can_be_repaired() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let good = remote.get("仕事.xlsx").unwrap();
+        // A's copy breaks; the store keeps it as failed to load.
+        fs::write(a.data.join("仕事.xlsx"), b"broken").unwrap();
+        *a.host.store.lock().unwrap() = Some(open_store(&a.data));
+        assert!(a.with(|s| s.load_failed("仕事")));
+        let r = a.sync().await;
+        assert!(r.uploaded.is_empty());
+        assert_eq!(r.failed.len(), 1);
+        assert!(r.failed[0].1.contains("読み込めていない"), "{r:?}");
+        assert_eq!(remote.get("仕事.xlsx").unwrap(), good);
+        // B changes it; A takes B's version (its broken file is kept as a copy).
+        b.add("仕事", "Bの変更");
+        b.sync().await;
+        let r = a.sync().await;
+        assert_eq!(r.conflicts.len(), 1, "{r:?}");
+        assert!(!a.with(|s| s.load_failed("仕事")));
+        assert_eq!(a.titles("仕事"), ["資料を作る", "Bの変更"]);
+        assert_eq!(a.file(&r.conflicts[0].1), b"broken");
     }
 }

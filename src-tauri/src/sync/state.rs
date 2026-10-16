@@ -133,6 +133,20 @@ impl SyncState {
         }
     }
 
+    /// The `lastSync` of the saved state when it belongs to this backend and remote root (the
+    /// data folder is not known yet at start-up). For showing the last sync time early.
+    pub fn peek_last_sync(
+        app_data_dir: &Path,
+        backend: BackendKind,
+        remote_root: &str,
+    ) -> Option<NaiveDateTime> {
+        let text = std::fs::read_to_string(app_data_dir.join(Self::FILE)).ok()?;
+        let s: SyncState = serde_json::from_str(&text).ok()?;
+        (s.backend == backend && s.remote_root == remote_root)
+            .then_some(s.last_sync)
+            .flatten()
+    }
+
     pub fn save(&self, app_data_dir: &Path) -> AppResult<()> {
         std::fs::create_dir_all(app_data_dir)?;
         let json = serde_json::to_string_pretty(self).map_err(|e| AppError::Io {

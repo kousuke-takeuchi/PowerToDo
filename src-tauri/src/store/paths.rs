@@ -11,6 +11,10 @@ use crate::error::{AppError, AppResult};
 /// Characters that cannot appear in a project name (it becomes a file name on every OS).
 const FORBIDDEN: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
+/// Marks a sync conflict copy: `<name> (競合 yyyy-mm-dd hhmm).xlsx` (see `sync::conflict_name`).
+/// Not allowed in project names, so a project never looks like a conflict copy.
+pub(crate) const CONFLICT_MARK: &str = "(競合 ";
+
 /// Layout of the data folder: `_PowerToDo.xlsx`, `<project>.xlsx` and `archive/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
@@ -61,6 +65,9 @@ pub fn validate_project_name(name: &str) -> AppResult<()> {
     }
     if name.eq_ignore_ascii_case(COMMON_FILE.trim_end_matches(".xlsx")) {
         return invalid("共通ファイルと同じ名前です");
+    }
+    if name.contains(CONFLICT_MARK) {
+        return invalid("「(競合 」は同期の競合コピーの印なので使えません");
     }
     Ok(())
 }

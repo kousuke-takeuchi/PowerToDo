@@ -89,9 +89,11 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// `true` for the files that sync: `<project>.xlsx` (the same rule as adopting a workbook into
 /// the project list) and the common workbook. Excel lock files, our temp files, conflict copies,
-/// other extensions and anything with a path separator are left alone.
+/// other extensions (also `.XLSX`: the store reads and writes `<project>.xlsx`, so another
+/// spelling of the extension would download into a file it never reads) and anything with a
+/// path separator are left alone.
 pub fn is_sync_target(name: &str) -> bool {
-    if name.contains(['/', '\\']) || name.contains(CONFLICT_MARK) {
+    if name.contains(['/', '\\']) || name.contains(CONFLICT_MARK) || !name.ends_with(".xlsx") {
         return false;
     }
     name == COMMON_FILE || adoptable_stem(Path::new(name)).is_some()
@@ -681,6 +683,8 @@ mod tests {
             ".powertodo-abc.tmp",
             ".hidden.xlsx",
             "a.txt",
+            "a.XLSX",
+            "a.Xlsx",
             "a.xlsx.tmp",
             "a",
             ".xlsx",
