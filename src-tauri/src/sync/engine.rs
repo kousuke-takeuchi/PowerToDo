@@ -424,6 +424,24 @@ impl SyncEngine {
         self.lock().status.clone()
     }
 
+    /// Whether a sync target is set (also while it rejects the credentials).
+    pub fn has_target(&self) -> bool {
+        self.lock().target.is_some()
+    }
+
+    /// Shows `offline` with `message` while the target cannot be built, e.g. the NAS is chosen
+    /// but the tailnet connection it needs is down. Keeps the last sync time and asks for no
+    /// run: with a target the runs themselves report `offline`, without one there is nothing
+    /// to run against.
+    pub fn set_offline(&self, message: &str) {
+        self.publish(None, None, |s| {
+            s.state = SyncPhase::Offline;
+            s.message = Some(message.to_string());
+            s.pending = 0;
+            s.suspect = None;
+        });
+    }
+
     /// Asks for a run: now, or [`AFTER_SAVE_DELAY`] later after a save. Requests made before the
     /// run starts (also those made while another run is going) join into one run. Ignored
     /// (`false`) without a target or while the target rejects the credentials: retrying would
@@ -2671,5 +2689,48 @@ mod tests {
         assert!(!a.with(|s| s.load_failed("仕事")));
         assert_eq!(a.titles("仕事"), ["資料を作る", "Bの変更"]);
         assert_eq!(a.file(&r.conflicts[0].1), b"broken");
+    }
+
+    #[test]
+    fn has_target_follows_set_backend() {
+        let tmp = tempfile::tempdir().unwrap();
+        let e = SyncEngine::with_clock(tmp.path().to_path_buf(), || dt(NOW));
+        assert!(!e.has_target());
+        e.set_backend(Some(backend()), BackendKind::Nas, ROOT);
+        assert!(e.has_target());
+        e.set_backend(None, BackendKind::Nas, ROOT);
+        assert!(!e.has_target());
+    }
+
+    #[test]
+    fn unreachable_target_shows_offline_without_a_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let e = SyncEngine::with_clock(tmp.path().to_path_buf(), || dt(NOW));
+        let host: Arc<Host> = Arc::new(Host::default());
+        e.lock().host = Some(host.clone());
+        e.set_offline("NAS が tailnet にありません");
+        let s = e.status();
+        assert_eq!(s.state, SyncPhase::Offline);
+        assert_eq!(s.message.as_deref(), Some("NAS が tailnet にありません"));
+        assert_eq!(s.pending, 0);
+        // Told to the UI, and no run is asked for (there is nothing to run against).
+        assert!(matches!(
+            host.events.lock().unwrap().last(),
+            Some(Event::Status(v)) if v.state == SyncPhase::Offline
+        ));
+        assert!(!e.request(SyncReason::SyncNow));
+        // Removing the target afterwards still reads as off.
+        e.set_backend(None, BackendKind::Nas, ROOT);
+        assert_eq!(e.status().state, SyncPhase::Off);
+    }
+
+    #[test]
+    fn unreachable_target_keeps_the_target_it_was_told_about() {
+        let tmp = tempfile::tempdir().unwrap();
+        let e = SyncEngine::with_clock(tmp.path().to_path_buf(), || dt(NOW));
+        e.set_backend(Some(backend()), BackendKind::Nas, ROOT);
+        e.set_offline("x");
+        // A target that is set stays (the runs themselves report offline).
+        assert!(e.has_target());
     }
 }
