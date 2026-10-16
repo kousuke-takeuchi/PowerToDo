@@ -10,6 +10,7 @@ pub mod engine;
 pub mod secrets;
 pub mod state;
 pub mod tailnet;
+pub mod tls;
 pub mod webdav;
 
 pub use engine::{

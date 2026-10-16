@@ -286,13 +286,24 @@ pub fn stage_download(data_dir: &Path, name: &str, bytes: &[u8]) -> AppResult<St
 
 /// `<dir>/<stem> (<tag>).xlsx`, or `<stem> (<tag>-2).xlsx`, `-3`, … when that name is taken.
 fn free_archive_path(dir: &Path, stem: &str, tag: &str) -> PathBuf {
-    let mut dest = dir.join(format!("{stem} ({tag}).xlsx"));
-    let mut n = 2;
-    while dest.exists() {
-        dest = dir.join(format!("{stem} ({tag}-{n}).xlsx"));
+    let mut n = 1;
+    loop {
+        let dest = dir.join(archive_file_name(stem, tag, n));
+        if !dest.exists() {
+            return dest;
+        }
         n += 1;
     }
-    dest
+}
+
+/// The `n`th candidate name in an archive folder (local or on the NAS): `<stem> (<tag>).xlsx`,
+/// then `<stem> (<tag>-2).xlsx`, `-3`, ….
+pub(crate) fn archive_file_name(stem: &str, tag: &str, n: u32) -> String {
+    if n <= 1 {
+        format!("{stem} ({tag}).xlsx")
+    } else {
+        format!("{stem} ({tag}-{n}).xlsx")
+    }
 }
 
 impl ProjectStore {

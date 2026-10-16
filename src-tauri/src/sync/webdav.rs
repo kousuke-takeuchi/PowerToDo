@@ -11,16 +11,24 @@ use std::time::Duration;
 
 use chrono::{DateTime, NaiveDateTime};
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
+use unicode_normalization::UnicodeNormalization;
 use url::{Host, Url};
 
 use super::backend::{BackendError, BoxFut, RemoteFile, StorageBackend};
 use super::tailnet::ResolveError;
+use super::tls::install_crypto_provider;
+use crate::store::project_store::archive_file_name;
 
 /// The port a NAS WebDAV (HTTP) server listens on when the URL has none (Synology's default).
 pub const DEFAULT_PORT: u16 = 5005;
 const ARCHIVE_DIR: &str = "archive";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// No byte for this long on a read (including waiting for the answer) ends the request.
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// The whole request, however slowly it keeps moving (an upload over a poor link).
+const TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
+/// How many names `archive/` is tried with before giving up.
+const MAX_ARCHIVE_NAMES: u32 = 50;
 const OCTET_STREAM: &str = "application/octet-stream";
 
 /// What `utf8_percent_encode` escapes in a path segment: everything but unreserved characters
@@ -123,6 +131,13 @@ pub fn resolve_nas_url(
 // ---------------------------------------------------------------------------------------------
 // Backend
 
+#[derive(Clone, Copy)]
+struct Timeouts {
+    connect: Duration,
+    read: Duration,
+    total: Duration,
+}
+
 pub struct WebDavBackend {
     http: reqwest::Client,
     /// Ends with `/`; no query or fragment.
@@ -155,8 +170,11 @@ impl WebDavBackend {
             user.into(),
             password.into(),
             proxy,
-            CONNECT_TIMEOUT,
-            REQUEST_TIMEOUT,
+            Timeouts {
+                connect: CONNECT_TIMEOUT,
+                read: READ_TIMEOUT,
+                total: TOTAL_TIMEOUT,
+            },
         )
     }
 
@@ -165,12 +183,18 @@ impl WebDavBackend {
         user: String,
         password: String,
         proxy: Option<String>,
-        connect: Duration,
-        request: Duration,
+        timeouts: Timeouts,
     ) -> Result<Self, BackendError> {
         if base.cannot_be_a_base() || !matches!(base.scheme(), "http" | "https") {
             return Err(BackendError::Other("NAS の URL が正しくありません".into()));
         }
+        // Credentials belong in their own fields (the URL ends up in settings and logs).
+        if !base.username().is_empty() || base.password().is_some() {
+            return Err(BackendError::Other(
+                "NAS の URL にユーザー名とパスワードは含められません".into(),
+            ));
+        }
+        install_crypto_provider();
         base.set_query(None);
         base.set_fragment(None);
         // Both spellings of the folder (with and without the last slash) are the same folder.
@@ -179,12 +203,15 @@ impl WebDavBackend {
         let mut builder = reqwest::Client::builder()
             // A redirect would resend the credentials somewhere we did not choose.
             .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(connect)
-            .timeout(request);
+            .connect_timeout(timeouts.connect)
+            .read_timeout(timeouts.read)
+            .timeout(timeouts.total);
         builder = match proxy {
-            Some(p) => builder.proxy(reqwest::Proxy::all(p.as_str()).map_err(|e| {
-                BackendError::Other(format!("プロキシの設定が正しくありません: {e}"))
-            })?),
+            // The error would quote the proxy URL, which may carry the proxy's credentials.
+            Some(p) => builder.proxy(
+                reqwest::Proxy::all(p.as_str())
+                    .map_err(|_| BackendError::Other("プロキシの設定が正しくありません".into()))?,
+            ),
             None => builder.no_proxy(),
         };
         let http = builder
@@ -269,36 +296,47 @@ impl WebDavBackend {
             .propfind(self.base.clone(), "1")
             .await?
             .ok_or_else(folder_missing)?;
-        let folder = percent_decode_str(self.base.path())
-            .decode_utf8()
-            .map_err(|_| unexpected_propfind())?
-            .trim_end_matches('/')
-            .to_string();
+        let folder = norm(
+            percent_decode_str(self.base.path())
+                .decode_utf8()
+                .map_err(|_| unexpected_propfind())?
+                .trim_end_matches('/'),
+        );
         let mut files = Vec::new();
         for e in entries {
             if e.is_collection {
                 continue;
             }
             let raw = href_path(&e.href).to_string();
+            // Only workbooks matter, and `is_sync_target` takes the exact lower-case `.xlsx`.
+            // Checked before decoding so an oddly encoded file of another kind cannot fail
+            // the whole listing.
+            if !raw.ends_with(".xlsx") {
+                continue;
+            }
             let path = percent_decode_str(&raw)
                 .decode_utf8()
                 .map_err(|_| BackendError::Other(format!("名前を読めません: {raw}")))?;
-            let trimmed = path.trim_end_matches('/');
-            // The folder itself (a server may leave out its resourcetype) or a collection
-            // spelled with a trailing slash.
-            if trimmed.eq_ignore_ascii_case(&folder) || path.ends_with('/') {
-                continue;
+            // The folder itself, in case the server left out its resourcetype.
+            let Some((parent, name)) = path.rsplit_once('/') else {
+                return Err(BackendError::Other(format!(
+                    "想定外の場所のファイルです: {raw}"
+                )));
+            };
+            // Compared in NFC (a server may keep names decomposed, macOS does) and without
+            // regard to ASCII case (Synology share names are case-insensitive). A file that
+            // is not in this folder at all means the listing cannot be trusted: fail instead
+            // of returning less. Files deeper down are not ours.
+            let parent = norm(parent);
+            if parent.eq_ignore_ascii_case(&folder) {
+                if safe_name(name) {
+                    files.push(remote_file(name, e)?);
+                }
+            } else if !strip_prefix_ci(&parent, &folder).is_some_and(|r| r.starts_with('/')) {
+                return Err(BackendError::Other(format!(
+                    "想定外の場所のファイルです: {raw}"
+                )));
             }
-            // The part that comes from the base URL is case-insensitive (Synology share names
-            // are). A file that is not in this folder at all means the listing cannot be
-            // trusted: fail instead of returning less.
-            let name = strip_prefix_ci(trimmed, &folder)
-                .and_then(|rest| rest.strip_prefix('/'))
-                .ok_or_else(|| BackendError::Other(format!("想定外の場所のファイルです: {raw}")))?;
-            if name.contains('/') || !safe_name(name) || !has_xlsx_extension(name) {
-                continue;
-            }
-            files.push(remote_file(name, e)?);
         }
         Ok(files)
     }
@@ -328,9 +366,26 @@ impl WebDavBackend {
             Some(e) => headers.push(("If-Match", &e.version)),
             None => headers.push(("If-None-Match", "*")),
         }
-        let resp = self.send("PUT", url, &headers, Some(bytes)).await?;
+        let mut resp = self
+            .send("PUT", url.clone(), &headers, Some(bytes.clone()))
+            .await?;
         if resp.status().as_u16() == 412 {
-            return Err(BackendError::Precondition);
+            let Some(e) = existing.filter(|e| !is_synthesized(&e.version)) else {
+                return Err(BackendError::Precondition);
+            };
+            // Either the file changed, or the server compares etags strongly and only has weak
+            // ones (`If-Match` then never matches). Look once: the same tag means the latter,
+            // and the write goes out without the condition (the same small window as for a
+            // server without etags).
+            let now = self.stat(name).await?.and_then(|n| n.etag);
+            if now.as_deref().map(normalize_etag) != Some(e.version.as_str()) {
+                return Err(BackendError::Precondition);
+            }
+            let plain = [("Content-Type", OCTET_STREAM)];
+            resp = self.send("PUT", url, &plain, Some(bytes)).await?;
+            if resp.status().as_u16() == 412 {
+                return Err(BackendError::Precondition);
+            }
         }
         check_status(resp)?;
         let entry = self
@@ -348,20 +403,32 @@ impl WebDavBackend {
         if made.status().as_u16() != 405 {
             check_status(made)?;
         }
-        let dest = format!("{dir}{}", encode_segment(&file.name));
-        let moved = self
-            .send(
-                "MOVE",
-                src,
-                &[("Destination", &dest), ("Overwrite", "T")],
-                None,
-            )
-            .await?;
-        // Gone already (another PC archived it): the file is no longer in the folder.
-        if moved.status().as_u16() == 404 {
-            return Ok(());
+        // Never overwrite an earlier archived copy: `<stem> (<modified>).xlsx`, then `-2`, `-3`,
+        // ... like the local `archive/`.
+        let stem = file.name.strip_suffix(".xlsx").unwrap_or(&file.name);
+        let tag = file.modified.format("%Y-%m-%d %H%M").to_string();
+        for n in 1..=MAX_ARCHIVE_NAMES {
+            let dest = format!("{dir}{}", encode_segment(&archive_file_name(stem, &tag, n)));
+            let moved = self
+                .send(
+                    "MOVE",
+                    src.clone(),
+                    &[("Destination", &dest), ("Overwrite", "F")],
+                    None,
+                )
+                .await?;
+            match moved.status().as_u16() {
+                // Gone already (another PC archived it): the file is no longer in the folder.
+                404 => return Ok(()),
+                // The destination exists.
+                412 => continue,
+                _ => return check_status(moved).map(|_| ()),
+            }
         }
-        check_status(moved).map(|_| ())
+        Err(BackendError::Other(format!(
+            "同期先の archive に「{}」の控えが多すぎて移せません",
+            file.name
+        )))
     }
 
     /// 「確かめる」: writes a small file, reads it back and deletes it. Fails with what the
@@ -442,10 +509,14 @@ fn safe_name(name: &str) -> bool {
         || name.chars().any(char::is_control))
 }
 
-fn has_xlsx_extension(name: &str) -> bool {
-    name.len() > 5
-        && name.is_char_boundary(name.len() - 5)
-        && name[name.len() - 5..].eq_ignore_ascii_case(".xlsx")
+fn norm(s: &str) -> String {
+    s.nfc().collect()
+}
+
+/// `W/"x"` and `"x"` are one version: a server may call a tag weak at one time and strong at
+/// another, and that is not a change of the file. The stored (and sent) form is the strong one.
+fn normalize_etag(etag: &str) -> &str {
+    etag.strip_prefix("W/").unwrap_or(etag)
 }
 
 fn folder_missing() -> BackendError {
@@ -457,12 +528,16 @@ fn unexpected_propfind() -> BackendError {
 }
 
 fn transport(e: reqwest::Error) -> BackendError {
-    let e = e.without_url();
+    // The texts never quote the URL (the proxy's may hold credentials).
     if e.is_builder() {
-        BackendError::Other(e.to_string())
+        BackendError::Other("リクエストを作れません".into())
+    } else if e.is_timeout() {
+        BackendError::Offline("NAS への接続がタイムアウトしました".into())
+    } else if e.is_connect() {
+        BackendError::Offline("NAS に接続できません".into())
     } else {
-        // Connecting, timing out, a connection cut short: all "try again later".
-        BackendError::Offline(e.to_string())
+        // A connection cut short and the like: also "try again later".
+        BackendError::Offline("NAS との通信が途中で切れました".into())
     }
 }
 
@@ -522,7 +597,7 @@ fn remote_file(name: &str, e: Entry) -> Result<RemoteFile, BackendError> {
         .with_timezone(&chrono::Local)
         .naive_local();
     let version = match e.etag.filter(|t| !t.is_empty()) {
-        Some(etag) => etag,
+        Some(etag) => normalize_etag(&etag).to_string(),
         None => synthesize(&raw, e.length),
     };
     Ok(RemoteFile {
@@ -798,6 +873,8 @@ mod tests {
                 7,
             ),
             file_response("/powertodo/notes.txt", None, LM, 1),
+            file_response("/powertodo/%FF%FE.dat", None, LM, 1),
+            file_response("/powertodo/Upper.XLSX", None, LM, 1),
             file_response("/powertodo/~$p0.xlsx", None, LM, 1),
         ])
     }
@@ -815,7 +892,7 @@ mod tests {
             .mount(&s)
             .await;
         let files = backend(&s).list().await.unwrap();
-        // The folder, `archive/` and the non-workbook (`notes.txt`) are left out; the Excel
+        // The folder, `archive/` and the non-workbooks (`notes.txt`, `.XLSX`) are left out; the Excel
         // lock file is a workbook name as far as the backend is concerned (the plan drops it).
         assert_eq!(
             files,
@@ -830,7 +907,7 @@ mod tests {
                 RemoteFile {
                     id: "仕事 #1?%.xlsx".into(),
                     name: "仕事 #1?%.xlsx".into(),
-                    version: "W/\"weak\"".into(),
+                    version: "\"weak\"".into(),
                     modified: local("Tue, 13 Oct 2026 23:59:59 GMT"),
                     size: 10,
                 },
@@ -853,6 +930,7 @@ mod tests {
         assert!(is_synthesized(&files[2].version));
         assert!(!is_synthesized(&files[0].version));
         assert!(!is_synthesized(&files[1].version));
+        // `Upper.XLSX` and the badly encoded `.dat` are skipped, not fatal.
     }
 
     #[tokio::test]
@@ -995,7 +1073,9 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(matches!(b.list().await, Err(BackendError::Offline(_))));
+        let err = b.list().await.unwrap_err();
+        assert!(matches!(&err, BackendError::Offline(m) if m == "NAS に接続できません"));
+        assert!(!err.to_string().contains("127.0.0.1"));
 
         let s = MockServer::start().await;
         Mock::given(method("PROPFIND"))
@@ -1011,11 +1091,36 @@ mod tests {
             "u".into(),
             "p".into(),
             None,
-            Duration::from_secs(5),
-            Duration::from_millis(200),
+            Timeouts {
+                connect: Duration::from_secs(5),
+                read: Duration::from_millis(200),
+                total: Duration::from_secs(600),
+            },
         )
         .unwrap();
-        assert!(matches!(slow.list().await, Err(BackendError::Offline(_))));
+        let err = slow.list().await.unwrap_err();
+        assert!(
+            matches!(&err, BackendError::Offline(m) if m == "NAS への接続がタイムアウトしました"),
+            "{err:?}"
+        );
+
+        // The total limit stops a transfer that keeps trickling.
+        let total = WebDavBackend::with_timeouts(
+            Url::parse(&format!("{}{FOLDER}", s.uri())).unwrap(),
+            "u".into(),
+            "p".into(),
+            None,
+            Timeouts {
+                connect: Duration::from_secs(5),
+                read: Duration::from_secs(60),
+                total: Duration::from_millis(200),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            total.list().await.unwrap_err(),
+            BackendError::Offline(m) if m == "NAS への接続がタイムアウトしました"
+        ));
     }
 
     #[test]
@@ -1038,6 +1143,28 @@ mod tests {
         assert!(WebDavBackend::new(url, "u", "p", Some("socks5h://127.0.0.1:1080".into())).is_ok());
         let mailto = Url::parse("mailto:a@example.com").unwrap();
         assert!(WebDavBackend::new(mailto, "u", "p", None).is_err());
+    }
+
+    #[test]
+    fn credentials_in_the_nas_url_are_refused() {
+        for url in [
+            "http://u:p@100.64.0.1:5005/x/",
+            "http://u@100.64.0.1:5005/x/",
+        ] {
+            let err = WebDavBackend::new(Url::parse(url).unwrap(), "u", "p", None).unwrap_err();
+            assert!(matches!(err, BackendError::Other(_)), "{url}");
+            assert!(!err.to_string().contains("p@"), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_proxy_error_does_not_quote_the_proxy_url() {
+        let url = Url::parse("http://100.64.0.1:5005/x/").unwrap();
+        let bad = "socks5h://user:hunter2@127.0.0.1:notaport";
+        let err = WebDavBackend::new(url, "u", "p", Some(bad.into())).unwrap_err();
+        let text = err.to_string();
+        assert_eq!(text, "プロキシの設定が正しくありません");
+        assert!(!text.contains("hunter2") && !text.contains("127.0.0.1"));
     }
 
     // --- download / names ----------------------------------------------------------------
@@ -1155,8 +1282,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn overwriting_sends_the_etag_exactly_as_listed() {
-        for etag in ["\"abc\"", "W/\"weak\""] {
+    async fn overwriting_sends_the_listed_etag_as_the_condition() {
+        for etag in ["\"abc\"", "abc-unquoted"] {
             let s = MockServer::start().await;
             let file = format!("{FOLDER}a.xlsx");
             Mock::given(method("PUT"))
@@ -1268,18 +1395,24 @@ mod tests {
         let s = MockServer::start().await;
         mount(&s, "MKCOL", "/powertodo/archive/", 201, "").await;
         mount(&s, "MOVE", &format!("{FOLDER}{JA}"), 201, "").await;
-        backend(&s)
-            .move_to_archive(&remote("受信トレイ.xlsx", "v"))
-            .await
-            .unwrap();
+        let file = remote("受信トレイ.xlsx", "v");
+        backend(&s).move_to_archive(&file).await.unwrap();
         let reqs = requests(&s).await;
         let methods: Vec<&str> = reqs.iter().map(|r| r.method.as_str()).collect();
         assert_eq!(methods, ["MKCOL", "MOVE"]);
         assert_eq!(
             header_of(&reqs[1], "destination").unwrap(),
-            format!("{}/powertodo/archive/{JA}", s.uri())
+            format!(
+                "{}/powertodo/archive/{}",
+                s.uri(),
+                encode_segment(&format!(
+                    "受信トレイ ({}).xlsx",
+                    file.modified.format("%Y-%m-%d %H%M")
+                ))
+            )
         );
-        assert_eq!(header_of(&reqs[1], "overwrite").as_deref(), Some("T"));
+        // Never over an existing archived copy.
+        assert_eq!(header_of(&reqs[1], "overwrite").as_deref(), Some("F"));
     }
 
     #[tokio::test]
@@ -1323,6 +1456,184 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, BackendError::Full));
+    }
+
+    /// An `archive/` that remembers what was moved into it: MOVE onto an existing name is a 412
+    /// (`Overwrite: F`), the source disappears with the first move.
+    #[derive(Clone, Default)]
+    struct Archive {
+        taken: Arc<Mutex<Vec<String>>>,
+        refuse_all: bool,
+    }
+
+    impl Respond for Archive {
+        fn respond(&self, req: &Request) -> ResponseTemplate {
+            assert_eq!(header_of(req, "overwrite").as_deref(), Some("F"));
+            let dest = header_of(req, "destination").unwrap();
+            let mut taken = self.taken.lock().unwrap();
+            if self.refuse_all || taken.contains(&dest) {
+                return ResponseTemplate::new(412);
+            }
+            taken.push(dest);
+            ResponseTemplate::new(201)
+        }
+    }
+
+    #[tokio::test]
+    async fn archiving_the_same_name_twice_keeps_both_copies() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/archive/", 405, "").await;
+        let archive = Archive::default();
+        Mock::given(method("MOVE"))
+            .respond_with(archive.clone())
+            .mount(&s)
+            .await;
+        let file = remote("受信トレイ.xlsx", "v");
+        let b = backend(&s);
+        b.move_to_archive(&file).await.unwrap();
+        b.move_to_archive(&file).await.unwrap();
+        b.move_to_archive(&file).await.unwrap();
+        let tag = file.modified.format("%Y-%m-%d %H%M");
+        let want: Vec<String> = [
+            format!("受信トレイ ({tag}).xlsx"),
+            format!("受信トレイ ({tag}-2).xlsx"),
+            format!("受信トレイ ({tag}-3).xlsx"),
+        ]
+        .iter()
+        .map(|n| format!("{}/powertodo/archive/{}", s.uri(), encode_segment(n)))
+        .collect();
+        assert_eq!(*archive.taken.lock().unwrap(), want);
+    }
+
+    #[tokio::test]
+    async fn archiving_gives_up_after_fifty_names() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/archive/", 405, "").await;
+        Mock::given(method("MOVE"))
+            .respond_with(Archive {
+                refuse_all: true,
+                ..Archive::default()
+            })
+            .mount(&s)
+            .await;
+        let err = backend(&s)
+            .move_to_archive(&remote("a.xlsx", "v"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Other(_)));
+        let moves = requests(&s)
+            .await
+            .iter()
+            .filter(|r| r.method.as_str() == "MOVE")
+            .count();
+        assert_eq!(moves, 50);
+    }
+
+    // --- weak etags ----------------------------------------------------------------------
+
+    /// A server that only has weak etags: `If-Match` never matches (412), a write without it
+    /// works and changes the tag.
+    #[derive(Clone)]
+    struct WeakOnly {
+        etag: Arc<Mutex<String>>,
+    }
+
+    impl Respond for WeakOnly {
+        fn respond(&self, req: &Request) -> ResponseTemplate {
+            let mut etag = self.etag.lock().unwrap();
+            match req.method.as_str() {
+                "PUT" if req.headers.contains_key("if-match") => ResponseTemplate::new(412),
+                "PUT" => {
+                    *etag = "W/&quot;y&quot;".to_string();
+                    ResponseTemplate::new(201)
+                }
+                _ => ResponseTemplate::new(207).set_body_string(stat_response(
+                    Some(etag.as_str()),
+                    LM,
+                    3,
+                )),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_with_only_weak_etags_can_still_be_written_to() {
+        let s = MockServer::start().await;
+        let server = WeakOnly {
+            etag: Arc::new(Mutex::new("W/&quot;x&quot;".to_string())),
+        };
+        let file = format!("{FOLDER}a.xlsx");
+        for verb in ["PUT", "PROPFIND"] {
+            Mock::given(method(verb))
+                .and(path(file.as_str()))
+                .respond_with(server.clone())
+                .mount(&s)
+                .await;
+        }
+        let b = backend(&s);
+        let listed = remote("a.xlsx", "\"x\"");
+        let got = b
+            .upload("a.xlsx", Some(&listed), vec![1, 2, 3])
+            .await
+            .unwrap();
+        assert_eq!(got.version, "\"y\"");
+        let reqs = requests(&s).await;
+        let seen: Vec<(String, Option<String>)> = reqs
+            .iter()
+            .map(|r| (r.method.to_string(), header_of(r, "if-match")))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("PUT".to_string(), Some("\"x\"".to_string())),
+                ("PROPFIND".to_string(), None),
+                ("PUT".to_string(), None),
+                ("PROPFIND".to_string(), None),
+            ]
+        );
+        assert_eq!(reqs[2].body, [1, 2, 3]);
+
+        // The file really changed meanwhile: the tags differ, nothing is written.
+        let stale = remote("a.xlsx", "\"old\"");
+        let err = b.upload("a.xlsx", Some(&stale), vec![9]).await.unwrap_err();
+        assert!(matches!(err, BackendError::Precondition));
+        let puts = requests(&s)
+            .await
+            .iter()
+            .filter(|r| r.method.as_str() == "PUT")
+            .count();
+        assert_eq!(puts, 3, "only the stale attempt's If-Match PUT was added");
+    }
+
+    #[tokio::test]
+    async fn a_tag_that_turns_from_weak_to_strong_is_not_a_change() {
+        let s = MockServer::start().await;
+        let file = format!("{FOLDER}a.xlsx");
+        mount(&s, "PUT", &file, 201, "").await;
+        // Right after the PUT the tag is weak; the next listing has the same tag, strong.
+        Mock::given(method("PROPFIND"))
+            .and(path(file.as_str()))
+            .respond_with(ResponseTemplate::new(207).set_body_string(stat_response(
+                Some("W/&quot;x&quot;"),
+                LM,
+                3,
+            )))
+            .mount(&s)
+            .await;
+        Mock::given(method("PROPFIND"))
+            .and(path(FOLDER))
+            .respond_with(ResponseTemplate::new(207).set_body_string(multistatus(&[
+                collection_response(FOLDER),
+                file_response("/powertodo/a.xlsx", Some("&quot;x&quot;"), LM, 3),
+            ])))
+            .mount(&s)
+            .await;
+        let b = backend(&s);
+        let written = b.upload("a.xlsx", None, vec![1, 2, 3]).await.unwrap();
+        let listed = b.list().await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].version, written.version);
+        assert_eq!(written.version, "\"x\"");
     }
 
     // --- check ---------------------------------------------------------------------------
@@ -1544,9 +1855,13 @@ mod tests {
 
     // --- the proxy -----------------------------------------------------------------------
 
-    /// A SOCKS5 proxy that sends every connection to `target` and records where the client
-    /// asked to go.
-    async fn fake_socks5(target: SocketAddr) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
+    /// A SOCKS5 proxy that requires user/pass authentication (method 0x02, RFC 1929) with
+    /// `credentials`, sends every connection to `target` and records where the client asked to
+    /// go. A client that offers no password method, or the wrong password, is turned away.
+    async fn fake_socks5(
+        target: SocketAddr,
+        credentials: (&'static str, &'static str),
+    ) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1563,7 +1878,27 @@ mod tests {
                     client.read_exact(&mut head).await?;
                     let mut methods = vec![0u8; head[1] as usize];
                     client.read_exact(&mut methods).await?;
-                    client.write_all(&[5, 0]).await?;
+                    if !methods.contains(&2) {
+                        client.write_all(&[5, 0xff]).await?;
+                        return std::io::Result::Ok(());
+                    }
+                    client.write_all(&[5, 2]).await?;
+                    let mut ver = [0u8; 2];
+                    client.read_exact(&mut ver).await?;
+                    let mut user = vec![0u8; ver[1] as usize];
+                    client.read_exact(&mut user).await?;
+                    let mut plen = [0u8; 1];
+                    client.read_exact(&mut plen).await?;
+                    let mut pass = vec![0u8; plen[0] as usize];
+                    client.read_exact(&mut pass).await?;
+                    if ver[0] != 1
+                        || user != credentials.0.as_bytes()
+                        || pass != credentials.1.as_bytes()
+                    {
+                        client.write_all(&[1, 1]).await?;
+                        return Ok(());
+                    }
+                    client.write_all(&[1, 0]).await?;
                     let mut req = [0u8; 4];
                     client.read_exact(&mut req).await?;
                     let host = match req[3] {
@@ -1589,7 +1924,7 @@ mod tests {
                     let mut upstream = tokio::net::TcpStream::connect(target).await?;
                     client.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
                     tokio::io::copy_bidirectional(&mut client, &mut upstream).await?;
-                    std::io::Result::Ok(())
+                    Ok(())
                 });
             }
         });
@@ -1600,16 +1935,34 @@ mod tests {
     async fn requests_go_through_the_socks_proxy_to_the_tailnet_address() {
         let s = MockServer::start().await;
         mount(&s, "PROPFIND", FOLDER, 207, &listing()).await;
-        let (proxy, asked) = fake_socks5(*s.address()).await;
+        let (proxy, asked) = fake_socks5(*s.address(), ("ptd", "p@ss")).await;
         // 100.64.0.9 is not reachable from here: only the proxy can get there.
         let b = WebDavBackend::new(
             Url::parse("http://100.64.0.9:5005/powertodo/").unwrap(),
             "taro",
             "pw",
-            Some(format!("socks5h://{proxy}")),
+            Some(format!("socks5h://ptd:p%40ss@{proxy}")),
         )
         .unwrap();
         assert_eq!(b.list().await.unwrap().len(), 4);
         assert_eq!(*asked.lock().unwrap(), ["100.64.0.9:5005"]);
+
+        // Without the credentials (or with wrong ones) the proxy lets nothing through.
+        for url in [
+            format!("socks5h://{proxy}"),
+            format!("socks5h://ptd:nope@{proxy}"),
+        ] {
+            let b = WebDavBackend::new(
+                Url::parse("http://100.64.0.9:5005/powertodo/").unwrap(),
+                "taro",
+                "pw",
+                Some(url),
+            )
+            .unwrap();
+            let err = b.list().await.unwrap_err();
+            assert!(matches!(err, BackendError::Offline(_)), "{err:?}");
+            assert!(!err.to_string().contains("nope"));
+        }
+        assert_eq!(asked.lock().unwrap().len(), 1);
     }
 }

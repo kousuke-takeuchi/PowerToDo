@@ -67,6 +67,8 @@ fn app_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri:
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before any HTTP client of the sync is built (reqwest has no provider of its own).
+    sync::tls::install_crypto_provider();
     let builder = tauri::Builder::default();
     // One app per user (仕様 §9): with close-to-tray, launching the app again while it runs
     // hidden would start a second scheduler and a second saver on the same xlsx files. The

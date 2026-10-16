@@ -686,6 +686,7 @@ impl SyncEngine {
             data_dir,
             generation,
             mode,
+            is_retry,
             local: local.into_iter().map(|f| (f.name.clone(), f)).collect(),
             remote,
             records,
@@ -747,7 +748,7 @@ impl SyncEngine {
             s.pending = pending;
             s.suspect = None;
         });
-        if report.rerun && !is_retry {
+        if report.rerun {
             self.request(SyncReason::Retry);
         }
         report
@@ -927,6 +928,8 @@ struct Run<'a> {
     data_dir: PathBuf,
     generation: u64,
     mode: PlanMode,
+    /// This run is the one immediate retry after a failed precondition.
+    is_retry: bool,
     /// The local listing the plan saw, by exact name.
     local: BTreeMap<String, LocalFile>,
     remote: Vec<RemoteFile>,
@@ -981,9 +984,17 @@ impl Run<'_> {
                 Err(FileError::Deferred) => self.report.deferred.push(name),
                 // Someone else wrote first: nothing was written, the record stays, and the
                 // next run (asked for at once) sees their version and plans a conflict.
-                Err(FileError::Backend(BackendError::Precondition)) => {
+                Err(FileError::Backend(BackendError::Precondition)) if !self.is_retry => {
                     self.report.deferred.push(name);
                     self.report.rerun = true;
+                }
+                // The retry met it again: the file keeps changing on the remote (or the
+                // server never honours the condition). Say so instead of looking synced.
+                Err(FileError::Backend(BackendError::Precondition)) => {
+                    let m = format!(
+                        "「{name}」は同期先でも更新され続けているため同期できませんでした (次の同期でもう一度試します)"
+                    );
+                    self.report.failed.push((name, m));
                 }
                 Err(FileError::Local(m)) => self.report.failed.push((name, m)),
                 Err(FileError::Backend(e @ (BackendError::Auth | BackendError::Offline(_)))) => {
@@ -1885,8 +1896,20 @@ mod tests {
         // The run asked for a retry, alone.
         assert_eq!(a.engine.take_due_run(Instant::now()), Some(true));
         let r = a.engine.run(a.host.as_ref(), PlanMode::Normal, true).await;
-        assert!(r.rerun);
+        assert!(!r.rerun);
         assert_eq!(a.engine.take_due_run(Instant::now()), None);
+        // The failure is visible: the status is an error naming a file, not "synced".
+        assert!(r.deferred.is_empty());
+        assert_eq!(r.failed.len(), 2);
+        let status = a.engine.status();
+        assert_eq!(status.state, SyncPhase::Error);
+        let message = status.message.unwrap();
+        assert!(message.contains(&r.failed[0].0), "{message}");
+        assert!(
+            message.contains("同期先でも更新され続けている"),
+            "{message}"
+        );
+        assert_eq!(status.pending, 2);
         // A retry joined by another reason is a normal run.
         a.engine.request(SyncReason::Retry);
         a.engine.request(SyncReason::SyncNow);

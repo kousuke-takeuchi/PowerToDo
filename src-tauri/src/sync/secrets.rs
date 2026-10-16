@@ -28,6 +28,9 @@ pub trait SecretStore: Send + Sync {
 }
 
 /// The OS keychain, through `keyring::v1::Entry`.
+///
+/// The calls are synchronous and may block (the Linux Secret Service, an unlock prompt):
+/// callers on an async runtime must run them in `spawn_blocking`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringStore;
 

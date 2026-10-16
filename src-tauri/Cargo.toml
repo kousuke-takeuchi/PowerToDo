@@ -34,9 +34,11 @@ unicode-normalization = "0.1"
 notify = "8.2"
 rrule = "0.14"
 sha2 = "0.10"
-# `rustls` is reqwest's own default TLS (aws-lc-rs provider, the platform's certificate store);
-# `socks` is for the tailnet proxy. Google Drive (https) needs the TLS part.
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "socks"] }
+# reqwest ships its TLS without a crypto provider; `rustls` below supplies `ring` (installed by
+# `sync::tls::install_crypto_provider`). The default `rustls` feature would pull aws-lc-sys, a C
+# build that needs extra tooling on Windows. `socks` is for the tailnet proxy.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "socks"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 keyring = { version = "4.2", features = ["v1"] }
 quick-xml = "0.42"
 percent-encoding = "2.3"
