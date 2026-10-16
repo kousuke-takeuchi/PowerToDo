@@ -64,6 +64,13 @@ pub enum Action {
     NameClash {
         names: Vec<String>,
     },
+    /// The listing of `side` looks wiped: the state knows files other than the protected ones
+    /// but the side lists none (an empty or unmounted folder, a remote that was reset). `plan`
+    /// writes nothing that could spread the damage while this holds; the engine reports it
+    /// (「同期先が空に見えるため同期を止めました」) and does not sync.
+    Suspect {
+        side: Side,
+    },
 }
 
 /// Lower-case hex SHA-256 of `bytes`.
@@ -115,10 +122,20 @@ fn secs(t: NaiveDateTime) -> NaiveDateTime {
 /// Decides what to do with every file (spec section 3.2). `state` is what the last sync left.
 ///
 /// Both listings must be complete. A local file that could not be read (hashing failed, locked)
-/// must go into `skip`, not be left out of `local`: a missing file reads as a deletion. As a
-/// last guard, an empty `remote` while the state knows files plans no `ArchiveLocal`, and an
-/// empty `local` while the state knows files plans no `ArchiveRemote` (a wiped listing is far
-/// likelier than everything having been deleted); other actions are still planned.
+/// must go into `skip`, not be left out of `local`: a missing file reads as a deletion. Run
+/// `plan` only after the store has been opened: opening recreates the protected files in an
+/// empty folder, and the guard below is what keeps that from looking like a healthy folder.
+///
+/// Wiped-side guard: a side is wiped when `state` has records for files other than the
+/// protected ones (the inbox and the common workbook) while that side lists no such file. A
+/// wiped listing is far likelier than everything having been deleted. The guard puts one
+/// `Suspect { side }` at the front (local first) and keeps `plan` from writing anything the
+/// wiped side makes unsafe:
+/// - local wiped: no `ArchiveRemote`, no `Upload` (also not of protected files), no `Conflict`.
+///   `Download`, `Record` and `NameClash` stay.
+/// - remote wiped: no `ArchiveLocal`, no `Upload` (new local files too), no `ArchiveRemote`, no
+///   `Conflict`: nothing that writes the remote, whose listing is suspect.
+///   `Download`, `Record` and `NameClash` stay.
 ///
 /// Names are compared folded (NFC, lower case). Names that fold alike but are spelled
 /// differently, on one side or across sides, give a [`Action::NameClash`] and nothing else. The
@@ -150,23 +167,35 @@ pub fn plan(
     }
     // A record alone (no file on either side) needs no action, so keys come from the files.
     let keys: BTreeSet<&String> = locals.keys().chain(remotes.keys()).collect();
-    let no_remote = remote.is_empty() && !state.files.is_empty();
-    let no_local = local.is_empty() && !state.files.is_empty();
-    keys.into_iter()
-        .filter_map(|key| {
-            let action = decide_key(
-                locals.get(key).map(Vec::as_slice).unwrap_or(&[]),
-                remotes.get(key).map(Vec::as_slice).unwrap_or(&[]),
-                state,
-                is_protected(key),
-            )?;
-            match action {
-                Action::ArchiveLocal(_) if no_remote => None,
-                Action::ArchiveRemote(_) if no_local => None,
-                a => Some(a),
-            }
-        })
-        .collect()
+    let local_wiped = is_wiped(local.iter().map(|f| f.name.as_str()), state);
+    let remote_wiped = is_wiped(remote.iter().map(|f| f.name.as_str()), state);
+    let suspects = [(local_wiped, Side::Local), (remote_wiped, Side::Remote)]
+        .into_iter()
+        .filter(|(wiped, _)| *wiped)
+        .map(|(_, side)| Action::Suspect { side });
+    let actions = keys.into_iter().filter_map(|key| {
+        let action = decide_key(
+            locals.get(key).map(Vec::as_slice).unwrap_or(&[]),
+            remotes.get(key).map(Vec::as_slice).unwrap_or(&[]),
+            state,
+            is_protected(key),
+        )?;
+        let writes_remote = matches!(
+            action,
+            Action::Upload(_) | Action::ArchiveRemote(_) | Action::Conflict { .. }
+        );
+        let blocked = (local_wiped && writes_remote)
+            || (remote_wiped && (writes_remote || matches!(action, Action::ArchiveLocal(_))));
+        (!blocked).then_some(action)
+    });
+    suspects.chain(actions).collect()
+}
+
+/// `true` when the state has records for files other than the protected ones but `names` (one
+/// side's listing) holds no such sync target.
+fn is_wiped<'a>(names: impl Iterator<Item = &'a str>, state: &SyncState) -> bool {
+    let ordinary = |n: &str| is_sync_target(n) && !is_protected(&fold(n));
+    state.files.keys().any(|n| ordinary(n)) && !{ names }.any(ordinary)
 }
 
 /// One folded name: checks for clashes, picks the files and the record, then `decide`.
@@ -625,8 +654,9 @@ mod tests {
         let mut st = synced();
         st.files.remove("z.xlsx");
         let l = [lf(NAME, "h0", T0), lf("new.xlsx", "h", T0)];
+        // The remote looks wiped: nothing is written, not even the new file.
         let got = plan(&l, &[], &st, &BTreeSet::new());
-        assert_eq!(got, one(Action::Upload("new.xlsx".into())));
+        assert_eq!(got, one(Action::Suspect { side: Side::Remote }));
         // With a non-empty remote listing the same deletion is followed.
         let r = [rf("idy", "y.xlsx", "vy", T0)];
         let got = plan(&l[..1], &r, &st, &BTreeSet::new());
@@ -638,8 +668,15 @@ mod tests {
         let mut st = synced();
         st.files.remove("z.xlsx");
         let r = [rf("id", NAME, "v0", T0), rf("idn", "new.xlsx", "v", T0)];
+        // The local side looks wiped: downloads stay, nothing is archived.
         let got = plan(&[], &r, &st, &BTreeSet::new());
-        assert_eq!(got, one(Action::Download("new.xlsx".into())));
+        assert_eq!(
+            got,
+            vec![
+                Action::Suspect { side: Side::Local },
+                Action::Download("new.xlsx".into())
+            ]
+        );
         let l = [lf("y.xlsx", "hy", T0)];
         let got = plan(&l, &r[..1], &st, &BTreeSet::new());
         assert!(got.contains(&Action::ArchiveRemote(n())));
@@ -775,5 +812,101 @@ mod tests {
         let at = dt("2026-10-16T09:30:00");
         assert_eq!(conflict_name("A.XLSX", at), "A (競合 2026-10-16 0930).xlsx");
         assert_eq!(conflict_name("b", at), "b (競合 2026-10-16 0930).xlsx");
+    }
+
+    const INBOX_FILE: &str = "受信トレイ.xlsx";
+    const COMMON: &str = "_PowerToDo.xlsx";
+    const ALL: [&str; 4] = [INBOX_FILE, COMMON, "a.xlsx", "b.xlsx"];
+
+    /// Records for the two protected files and `a.xlsx`, `b.xlsx`, all in sync.
+    fn big_state() -> SyncState {
+        let mut st = fresh();
+        for name in ALL {
+            st.files.insert(name.into(), record(name, "v0", "h0"));
+        }
+        st
+    }
+
+    fn everything_remote() -> Vec<RemoteFile> {
+        ALL.into_iter().map(|n| rf(n, n, "v0", T0)).collect()
+    }
+
+    fn everything_local() -> Vec<LocalFile> {
+        ALL.into_iter().map(|n| lf(n, "h0", T0)).collect()
+    }
+
+    #[test]
+    fn local_with_only_recreated_protected_files_is_suspect() {
+        // The app recreated the inbox and the common workbook in an empty folder: new hashes.
+        let l = [lf(INBOX_FILE, "new1", T1), lf(COMMON, "new2", T1)];
+        let got = plan(&l, &everything_remote(), &big_state(), &BTreeSet::new());
+        assert_eq!(got, one(Action::Suspect { side: Side::Local }));
+    }
+
+    #[test]
+    fn local_wiped_still_downloads_but_never_writes_the_remote() {
+        let l = [lf(COMMON, "new2", T1)];
+        let mut r = everything_remote();
+        r[2].version = "v1".into(); // a.xlsx changed remotely
+        r.push(rf("n", "new.xlsx", "v", T0));
+        let got = plan(&l, &r, &big_state(), &BTreeSet::new());
+        assert_eq!(
+            got,
+            vec![
+                Action::Suspect { side: Side::Local },
+                Action::Download("a.xlsx".into()),
+                Action::Download("new.xlsx".into()),
+                // The protected inbox is missing locally: fetched again (b.xlsx is not archived).
+                Action::Download(INBOX_FILE.into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn remote_with_only_protected_files_is_suspect() {
+        let r = [rf("1", INBOX_FILE, "v0", T0), rf("2", COMMON, "v0", T0)];
+        let mut l = everything_local();
+        l[0].hash = "changed".into(); // the inbox changed locally
+        l.push(lf("new.xlsx", "h", T0));
+        let got = plan(&l, &r, &big_state(), &BTreeSet::new());
+        assert_eq!(got, one(Action::Suspect { side: Side::Remote }));
+    }
+
+    #[test]
+    fn remote_wiped_stays_guarded_round_after_round() {
+        // The remote lists nothing (or only a protected file). Nothing is written, so the next
+        // round sees the same listing and stays guarded; no protected restore is uploaded.
+        let st = big_state();
+        for _ in 0..3 {
+            let got = plan(&everything_local(), &[], &st, &BTreeSet::new());
+            assert_eq!(got, one(Action::Suspect { side: Side::Remote }));
+        }
+        let r = [rf("2", COMMON, "v0", T0)];
+        let got = plan(&everything_local(), &r, &st, &BTreeSet::new());
+        assert_eq!(got, one(Action::Suspect { side: Side::Remote }));
+    }
+
+    #[test]
+    fn healthy_listings_are_not_suspect() {
+        let got = plan(
+            &everything_local(),
+            &everything_remote(),
+            &big_state(),
+            &BTreeSet::new(),
+        );
+        assert!(got.is_empty());
+        // One ordinary file on each side is enough, and deletions are still followed.
+        let mut l = everything_local();
+        l.retain(|f| f.name != "b.xlsx");
+        let got = plan(&l, &everything_remote(), &big_state(), &BTreeSet::new());
+        assert_eq!(got, one(Action::ArchiveRemote("b.xlsx".into())));
+    }
+
+    #[test]
+    fn only_protected_records_never_make_a_side_suspect() {
+        let mut st = fresh();
+        st.files.insert(COMMON.into(), record(COMMON, "v0", "h0"));
+        let got = plan(&[lf(COMMON, "h1", T0)], &[], &st, &BTreeSet::new());
+        assert_eq!(got, one(Action::Upload(COMMON.into())));
     }
 }
