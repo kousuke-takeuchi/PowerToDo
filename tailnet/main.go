@@ -22,6 +22,8 @@ import (
 const (
 	pollInterval   = 2 * time.Second
 	requestTimeout = 10 * time.Second
+	logoutTimeout  = 90 * time.Second
+	closeTimeout   = 5 * time.Second
 	proxyUser      = "tsnet"
 )
 
@@ -76,7 +78,8 @@ func run(dir, hostname string, stdin *os.File, o *out) int {
 	if err := srv.Start(); err != nil {
 		return fail(o, "start: "+err.Error())
 	}
-	defer srv.Close()
+	// Close can block on a stuck network; never let shutdown hang.
+	defer closeBounded(srv)
 
 	addr, proxyCred, _, err := srv.Loopback()
 	if err != nil {
@@ -91,42 +94,57 @@ func run(dir, hostname string, stdin *os.File, o *out) int {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() {
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-		select {
-		case <-sig:
-			cancel()
-			// Unblock the stdin reader below.
-			stdin.Close()
-		case <-ctx.Done():
-		}
-	}()
 	go statusLoop(ctx, lc, o)
 
-	var wg sync.WaitGroup
-	sc := bufio.NewScanner(stdin)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
+	// Read commands in a goroutine: a blocked pipe read cannot be interrupted,
+	// so the main goroutine waits on EOF or a signal instead.
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		sc := bufio.NewScanner(stdin)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := sc.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var cmd Command
+			if err := json.Unmarshal(line, &cmd); err != nil {
+				fmt.Fprintln(os.Stderr, "powertodo-tailnet: bad command:", err)
+				// Best effort: a partly decoded command may still carry its id.
+				if cmd.ID != nil {
+					o.send(DoneMsg{Type: "done", ID: cmd.ID, Error: "unknown_command"})
+				}
+				continue
+			}
+			go handle(ctx, lc, o, cmd)
 		}
-		var cmd Command
-		if err := json.Unmarshal(line, &cmd); err != nil {
-			fmt.Fprintln(os.Stderr, "powertodo-tailnet: bad command:", err)
-			continue
+		if err := sc.Err(); err != nil {
+			fmt.Fprintln(os.Stderr, "powertodo-tailnet: stdin:", err)
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			handle(ctx, lc, o, cmd)
-		}()
+	}()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	select {
+	case <-scanDone: // stdin closed: the parent is gone
+	case <-sig:
 	}
-	// stdin is closed (or the signal handler closed it): shut down.
 	cancel()
-	wg.Wait()
 	return 0
+}
+
+func closeBounded(srv *tsnet.Server) {
+	done := make(chan struct{})
+	go func() {
+		srv.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(closeTimeout):
+		fmt.Fprintln(os.Stderr, "powertodo-tailnet: close timed out")
+	}
 }
 
 func fail(o *out, msg string) int {
@@ -167,7 +185,11 @@ func statusLoop(ctx context.Context, lc *local.Client, o *out) {
 }
 
 func handle(ctx context.Context, lc *local.Client, o *out, cmd Command) {
-	c, cancel := context.WithTimeout(ctx, requestTimeout)
+	timeout := requestTimeout
+	if cmd.Cmd == "logout" {
+		timeout = logoutTimeout
+	}
+	c, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	switch cmd.Cmd {
 	case "login":
@@ -180,13 +202,12 @@ func handle(ctx context.Context, lc *local.Client, o *out, cmd Command) {
 			o.send(ResolvedMsg{Type: "resolved", ID: cmd.ID, Error: err.Error()})
 			return
 		}
-		if ip, ok := matchPeer(peersOf(st), cmd.Host); ok {
-			o.send(ResolvedMsg{Type: "resolved", ID: cmd.ID, IP: ip})
-		} else {
-			o.send(ResolvedMsg{Type: "resolved", ID: cmd.ID, Error: "not_in_tailnet"})
-		}
+		o.send(resolveMsg(cmd.ID, st, cmd.Host))
 	default:
 		fmt.Fprintln(os.Stderr, "powertodo-tailnet: unknown command:", cmd.Cmd)
+		if cmd.ID != nil {
+			o.send(DoneMsg{Type: "done", ID: cmd.ID, Error: "unknown_command"})
+		}
 	}
 }
 

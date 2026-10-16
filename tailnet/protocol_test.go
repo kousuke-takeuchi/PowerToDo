@@ -163,3 +163,27 @@ func TestJSONShape(t *testing.T) {
 		t.Errorf("bad command parse: %+v %v", cmd, err)
 	}
 }
+
+func TestResolveMsg(t *testing.T) {
+	id := int64(4)
+	peer := map[key.NodePublic]*ipnstate.PeerStatus{
+		key.NewNode().Public(): {DNSName: "nas.t.ts.net.", TailscaleIPs: ips("100.64.0.5")},
+	}
+	cases := []struct {
+		name string
+		st   *ipnstate.Status
+		host string
+		want ResolvedMsg
+	}{
+		{"found", &ipnstate.Status{BackendState: "Running", Peer: peer}, "nas", ResolvedMsg{Type: "resolved", ID: &id, IP: "100.64.0.5"}},
+		{"missing", &ipnstate.Status{BackendState: "Running", Peer: peer}, "other", ResolvedMsg{Type: "resolved", ID: &id, Error: "not_in_tailnet"}},
+		{"needs login", &ipnstate.Status{BackendState: "NeedsLogin", Peer: peer}, "nas", ResolvedMsg{Type: "resolved", ID: &id, Error: "not_running"}},
+		{"starting", &ipnstate.Status{BackendState: "Starting"}, "nas", ResolvedMsg{Type: "resolved", ID: &id, Error: "not_running"}},
+		{"nil", nil, "nas", ResolvedMsg{Type: "resolved", ID: &id, Error: "not_running"}},
+	}
+	for _, c := range cases {
+		if got := resolveMsg(&id, c.st, c.host); got != c.want {
+			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}

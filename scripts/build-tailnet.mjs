@@ -3,6 +3,9 @@
 //
 //   node scripts/build-tailnet.mjs [--target <rust target triple>]
 //
+// Target precedence: --target, then $TAURI_ENV_TARGET_TRIPLE (set by `tauri build --target`),
+// then the host triple from `rustc -vV`.
+//
 // Go is looked up in this order: $GO, /opt/homebrew/bin/go, then `go` on PATH.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -54,8 +57,14 @@ if (t >= 0) {
   target = args[t + 1];
   if (!target) die("--target needs a value");
 }
-target ??= hostTriple();
+target ??= process.env.TAURI_ENV_TARGET_TRIPLE || hostTriple();
 
+if (target === "universal-apple-darwin") {
+  die(
+    "universal-apple-darwin is not supported: Tauri expects one sidecar per architecture. " +
+      "Run this script with --target aarch64-apple-darwin and --target x86_64-apple-darwin, then lipo them if needed.",
+  );
+}
 const pair = TARGETS[target];
 if (!pair) die(`unsupported target ${target} (supported: ${Object.keys(TARGETS).join(", ")})`);
 const [goos, goarch] = pair;

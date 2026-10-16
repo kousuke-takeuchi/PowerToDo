@@ -49,10 +49,10 @@ jobs:
           cache-dependency-path: tailnet/go.sum
       - run: go test ./...
         working-directory: tailnet
-      # tauri-build checks that bundle.externalBin exists, so build the sidecar first.
-      - run: npm run build:tailnet
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
+      # tauri-build checks that bundle.externalBin exists, so build the sidecar first (needs rustc for the host triple).
+      - run: npm run build:tailnet
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri

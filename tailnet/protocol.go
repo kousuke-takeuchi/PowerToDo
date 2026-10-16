@@ -192,3 +192,19 @@ func statusMsg(st *ipnstate.Status, err error) StatusMsg {
 	}
 	return msg
 }
+
+// resolveMsg answers a resolve command from a LocalAPI status. Peers are only
+// reliable while the node is running, so any other state answers not_running.
+func resolveMsg(id *int64, st *ipnstate.Status, host string) ResolvedMsg {
+	msg := ResolvedMsg{Type: "resolved", ID: id}
+	if st == nil || st.BackendState != "Running" {
+		msg.Error = "not_running"
+		return msg
+	}
+	if ip, ok := matchPeer(peersOf(st), host); ok {
+		msg.IP = ip
+	} else {
+		msg.Error = "not_in_tailnet"
+	}
+	return msg
+}
