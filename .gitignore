@@ -41,3 +41,6 @@ dist-ssr
 storybook-static/
 
 *storybook.log
+
+# Google OAuth client (Desktop app). Never commit; see src-tauri/google-oauth.example.json
+src-tauri/google-oauth.json
