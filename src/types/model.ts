@@ -139,6 +139,8 @@ export interface SyncStatusDto {
   pending: number;
   /** 空に見えた側。同期は止まり、`syncRecover` で選ぶまで再開しない。 */
   suspect?: "local" | "remote";
+  /** 同期先が認証を断った (Google なら、ログインが切れた)。このときだけ「ログインし直す」で直る。設定が変わる (ログインし直す、「確かめる」) と消える。 */
+  authRejected?: true;
 }
 /** `sync-conflict` event: both sides changed `file`; the loser was saved as `conflictFile` (locally and on the target). */
 export interface SyncConflict { file: string; conflictFile: string; }
@@ -150,8 +152,8 @@ export interface SyncRecoverDto { outcome: SyncRecoverOutcome; uploaded: number;
 /** `done`: ログインした。`cancelled`: 「キャンセル」を押した。`denied`: Google の画面で許可しなかった。後ろの二つは失敗ではない。 */
 export type GoogleLoginOutcome = "done" | "cancelled" | "denied";
 export interface GoogleLoginDto { outcome: GoogleLoginOutcome; }
-/** `revoked`: false のとき Google 側の取り消しはできなかった (この PC では、ログアウトは済んでいる)。 */
-export interface GoogleLogoutDto { revoked: boolean; }
+/** `revoked`: false のとき Google 側の取り消しはできなかった (この PC では、ログアウトは済んでいる)。`keychainFailed`: キーチェーンからトークンを消せなかった (Google 側で取り消し済みなので使えない)。 */
+export interface GoogleLogoutDto { revoked: boolean; keychainFailed: boolean; }
 
 /**
  * Tailscale (サイドカー) の状態。`tailnet-status` event / `tailnet_status`.

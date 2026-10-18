@@ -50,6 +50,8 @@ export function useSync({ active, onNotice }: Options) {
     alive.current = true;
     return () => {
       alive.current = false;
+      // 画面ごと閉じたとき、ブラウザを待っているログインを残さない (残ると次のログインが断られる)
+      if (busyRef.current === "googleLogin") void api.googleLoginCancel().catch(() => undefined);
     };
   }, []);
 
@@ -345,7 +347,7 @@ export function useSync({ active, onNotice }: Options) {
           const r = await api.googleLogout();
           await reloadSettings();
           await refreshStatus().catch(() => undefined);
-          if (alive.current) setGoogleNote(googleLogoutNote(r.revoked));
+          if (alive.current) setGoogleNote(googleLogoutNote(r));
         },
         setError,
         () =>

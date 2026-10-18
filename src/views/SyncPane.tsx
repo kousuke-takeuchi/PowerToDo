@@ -15,6 +15,22 @@ export type SyncBusy = "backend" | "login" | "retry" | "reset" | "logout" | "che
 /** Tailscale が起動中のままこの秒数を超えたら、「再試行」「状態を消してログインし直す」を出す (仕様 §4.1)。 */
 export const TAILNET_SLOW_SECS = 30;
 
+const srOnly: React.CSSProperties = { position: "absolute", width: 1, height: 1, margin: -1, padding: 0, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
+
+/**
+ * 読み上げ用の領域。常に表示に置いたまま、文言だけを変える (出たり消えたりする要素は、出た時に読まれないことがある)。
+ * 見える側の同じ文言は `aria-hidden` にして、二重に読ませない。見えない (レイアウトに加わらない) ので、空のときも余白を作らない。
+ */
+function LiveText({ text }: { text: string }) {
+  return (
+    <span role="status" aria-live="polite" style={srOnly}>
+      {text}
+    </span>
+  );
+}
+
+const GOOGLE_WAITING = "ブラウザでログインしてください…";
+
 const dangerStyle: React.CSSProperties = { ...hintStyle, color: "var(--color-danger)" };
 
 export type TailnetActions = {
@@ -370,12 +386,11 @@ export function GoogleSetup({ busy, error, googleNote, onGoogleLogin, onGoogleCa
   return (
     <Section label="接続状態">
       <Desc>Google アカウントでログインすると、タスクのファイルが Google Drive の PowerToDo フォルダに同期されます。</Desc>
+      <LiveText text={waiting ? GOOGLE_WAITING : (googleNote ?? "")} />
       {waiting && (
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+        <div aria-hidden style={{ display: "flex", gap: "var(--space-2)" }}>
           <Dot color="var(--color-text-muted)" />
-          <span aria-live="polite" style={bodyText}>
-            ブラウザでログインしてください…
-          </span>
+          <span style={bodyText}>{GOOGLE_WAITING}</span>
         </div>
       )}
       <Row>
@@ -395,7 +410,7 @@ export function GoogleSetup({ busy, error, googleNote, onGoogleLogin, onGoogleCa
         </div>
       )}
       {googleNote && (
-        <div role="status" style={hintStyle}>
+        <div aria-hidden style={hintStyle}>
           {googleNote}
         </div>
       )}
@@ -418,8 +433,8 @@ function GoogleConnected({
   const state = status?.state ?? "off";
   const ok = state === "synced" || state === "syncing";
   const waiting = busy === "googleLogin";
-  // エラーの理由は同期の状態の文言にある (ログインが無効になった、名前の重なり、容量不足など)。ログインし直しで直るものを見分けられないので、エラーの間はいつでも出す。
-  const relogin = state === "error" && !status?.suspect;
+  // ログインし直しで直るのは、同期先が認証を断ったときだけ (名前の重なり、容量不足などは直らない)。
+  const relogin = state === "error" && !!status?.authRejected && !status?.suspect;
   return (
     <>
       <Section label="接続状態">
@@ -431,8 +446,9 @@ function GoogleConnected({
           </Button>
         </div>
         {!settings.googleTokenPersistent && <div style={dangerStyle}>{TOKEN_NOT_SAVED}</div>}
+        <LiveText text={waiting ? GOOGLE_WAITING : (googleNote ?? "")} />
         {googleNote && (
-          <div role="status" style={hintStyle}>
+          <div aria-hidden style={hintStyle}>
             {googleNote}
           </div>
         )}
@@ -446,8 +462,8 @@ function GoogleConnected({
           <>
             <Desc>Drive 上のフォルダ: PowerToDo/</Desc>
             {waiting && (
-              <span aria-live="polite" style={hintStyle}>
-                ブラウザでログインしてください…
+              <span aria-hidden style={hintStyle}>
+                {GOOGLE_WAITING}
               </span>
             )}
           </>
@@ -549,6 +565,11 @@ export function SyncPane(props: SyncPaneProps) {
       body = (
         <Section label="Google Drive">
           <Desc>{GOOGLE_UNAVAILABLE}</Desc>
+          {error && (
+            <div role="alert" style={dangerStyle}>
+              {error}
+            </div>
+          )}
         </Section>
       );
     } else if (isGoogleLoggedIn(settings)) {

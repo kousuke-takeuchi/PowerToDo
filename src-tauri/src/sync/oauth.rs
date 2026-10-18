@@ -33,6 +33,10 @@ mod build_oauth;
 /// e-mail address for the settings screen.
 pub const SCOPE: &str = "https://www.googleapis.com/auth/drive.file openid email";
 
+/// The one scope the sync cannot work without. The consent screen lets the user untick scopes
+/// (Google's "granular permissions"), so a login can succeed without it.
+pub const DRIVE_FILE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
+
 /// How long the login waits for the browser (spec section 5).
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// A token this close to its end is already renewed.
@@ -126,6 +130,18 @@ pub struct Tokens {
     pub refresh_token: String,
     /// From the id_token, for display only (the signature is not checked).
     pub email: Option<String>,
+    /// The `scope` of the token response: the scopes the user actually granted, one string
+    /// separated by spaces (Google's native-app guide: "always returned"). `None` when absent.
+    pub scope: Option<String>,
+}
+
+impl Tokens {
+    /// The user let the app use Drive files (`drive.file`).
+    pub fn grants_drive(&self) -> bool {
+        self.scope
+            .as_deref()
+            .is_some_and(|s| s.split_whitespace().any(|g| g == DRIVE_FILE_SCOPE))
+    }
 }
 
 impl std::fmt::Debug for Tokens {
@@ -306,11 +322,16 @@ impl GoogleOAuth {
             .get("id_token")
             .and_then(serde_json::Value::as_str)
             .and_then(email_from_id_token);
+        let scope = json
+            .get("scope")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
         Ok(Tokens {
             access_token,
             expires_in: expires_in(&json),
             refresh_token,
             email,
+            scope,
         })
     }
 
@@ -865,6 +886,30 @@ mod tests {
     }
 
     #[test]
+    fn the_granted_scopes_decide_whether_drive_may_be_used() {
+        let with = |scope: Option<&str>| Tokens {
+            access_token: String::new(),
+            expires_in: Duration::from_secs(1),
+            refresh_token: String::new(),
+            email: None,
+            scope: scope.map(str::to_string),
+        };
+        assert!(
+            with(Some(
+                "openid https://www.googleapis.com/auth/drive.file email"
+            ))
+            .grants_drive()
+        );
+        assert!(with(Some("https://www.googleapis.com/auth/drive.file")).grants_drive());
+        // Unticked on the consent screen, or not reported at all.
+        assert!(!with(Some("openid email")).grants_drive());
+        assert!(!with(None).grants_drive());
+        // A scope that merely starts like it is not it.
+        assert!(!with(Some("https://www.googleapis.com/auth/drive.file.other")).grants_drive());
+        assert!(!with(Some("https://www.googleapis.com/auth/drive")).grants_drive());
+    }
+
+    #[test]
     fn the_email_comes_from_the_id_token_payload() {
         assert_eq!(
             email_from_id_token(&id_token("user@example.com")).as_deref(),
@@ -910,6 +955,7 @@ mod tests {
             expires_in: Duration::from_secs(5),
             refresh_token: "RT-secret".into(),
             email: Some("user@example.com".into()),
+            scope: None,
         };
         let a = AccessToken {
             access_token: "AT-secret".into(),

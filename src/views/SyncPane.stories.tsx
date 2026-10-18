@@ -89,7 +89,9 @@ const googleIn: Partial<SyncPaneProps> = { settings: googleLoggedIn, status: syn
 export const Google_ログイン済み: Story = pane(googleIn);
 export const Google_ログイン済み_同期中: Story = pane({ ...googleIn, status: syncStatuses.syncing });
 export const Google_ログイン済み_オフライン: Story = pane({ ...googleIn, status: { ...syncStatuses.offline, message: "接続できません: Google に接続できません" } });
+// 名前の重なりや容量不足は、ログインし直しでは直らない: 「ログインし直す」を出さない
 export const Google_ログイン済み_名前の重なり: Story = pane({ ...googleIn, status: syncStatuses.nameClash });
+export const Google_ログイン済み_容量不足: Story = pane({ ...googleIn, status: syncStatuses.quotaFull });
 export const Google_ログインが無効になった: Story = pane({ ...googleIn, status: syncStatuses.googleAuthRejected });
 export const Google_ログインし直している: Story = pane({ ...googleIn, status: syncStatuses.googleAuthRejected, busy: "googleLogin" });
 export const Google_ログイン情報を保存できない: Story = pane({ ...googleIn, settings: { ...googleLoggedIn, googleTokenPersistent: false } });

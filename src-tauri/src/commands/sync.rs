@@ -996,30 +996,43 @@ async fn revoke_unused(oauth: &GoogleOAuth, refresh_token: &str) {
     }
 }
 
-/// Takes the tokens of a finished login in: a new `TokenSource` and a new backend (the old
-/// `TokenSource` may remember `InvalidGrant`), then [`commit_google`] under `connect_lock`.
+const DRIVE_NOT_GRANTED: &str = "Google Drive へのアクセスが許可されませんでした。もう一度ログインし、Drive へのアクセスにチェックを入れてください";
+
+/// Takes the tokens of a finished login in: refuses a login that did not grant Drive (the user
+/// may untick it on the consent screen; the token would only fail at the first sync), builds a
+/// new `TokenSource` and a new backend (the old `TokenSource` may remember `InvalidGrant`), then
+/// runs [`commit_google`] under `connect_lock`. The lock is held for the state changes only,
+/// never across the revoke of a token that is not kept (a request on the network).
 async fn finish_login<C: Ctx>(
     ctx: &C,
     oauth: &GoogleOAuth,
     tokens: Tokens,
     make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>>,
 ) -> AppResult<()> {
-    let _guard = ctx.app_state().sync_rt.connect_lock.lock().await;
+    if !tokens.grants_drive() {
+        revoke_unused(oauth, &tokens.refresh_token).await;
+        return Err(AppError::Invalid {
+            message: DRIVE_NOT_GRANTED.into(),
+        });
+    }
     let Tokens {
         refresh_token,
         email,
         ..
     } = tokens;
     let source = Arc::new(TokenSource::new(oauth.clone(), refresh_token.clone()));
-    let committed = match make_backend(source) {
-        Ok(backend) => {
-            let c = ctx.clone();
-            let (token, address) = (refresh_token.clone(), email);
-            blocking(move || commit_google(c.app_state(), address.as_deref(), &token, backend))
-                .await
-                .and_then(|r| r)
+    let committed = {
+        let _guard = ctx.app_state().sync_rt.connect_lock.lock().await;
+        match make_backend(source) {
+            Ok(backend) => {
+                let c = ctx.clone();
+                let (token, address) = (refresh_token.clone(), email);
+                blocking(move || commit_google(c.app_state(), address.as_deref(), &token, backend))
+                    .await
+                    .and_then(|r| r)
+            }
+            Err(e) => Err(e),
         }
-        Err(e) => Err(e),
     };
     if committed.is_err() {
         revoke_unused(oauth, &refresh_token).await;
@@ -1060,24 +1073,34 @@ pub struct GoogleLogoutDto {
     /// Google was told to forget the login. `false`: it could not be reached (the local logout
     /// still happened); the UI says so.
     pub revoked: bool,
+    /// The refresh token could not be removed from the keychain. Only possible once Google
+    /// forgot it (the stored token is dead); the logout still happened here.
+    pub keychain_failed: bool,
 }
 
 /// 「ログアウト」: tells Google to forget the refresh token (best effort), then removes it from
 /// the keychain, forgets the address and detaches the backend. The target stays Google Drive
-/// (spec section 6: the pane then shows the login again). Order as above: when the keychain
-/// refuses, nothing else changes. `oauth` is `None` in a build without Google credentials.
+/// (spec section 6: the pane then shows the login again).
+///
+/// The lock is held to read the login and again for the state changes, not across the revoke
+/// (a request on the network). When Google could not be reached and the keychain refuses to
+/// let go of the token, nothing changes (the login still works, the user can try again); once
+/// Google has forgotten it, a keychain that refuses does not stop the logout (the leftover is
+/// a dead token, and the address is cleared so the next start does not look for it).
+/// `oauth` is `None` in a build without Google credentials.
 async fn google_logout_flow<C: Ctx>(
     ctx: &C,
     oauth: Option<&GoogleOAuth>,
 ) -> AppResult<GoogleLogoutDto> {
     let state = ctx.app_state();
-    let _guard = state.sync_rt.connect_lock.lock().await;
-    let saved = state.lock_settings().sync.clone();
-    let account = google_account(saved.google_email.as_deref());
     let secrets = state.sync_rt.secrets();
-    let token = {
-        let (secrets, account) = (Arc::clone(&secrets), account.clone());
-        blocking(move || secrets.get_fresh(GOOGLE_SERVICE, &account)).await?
+    let (account, token) = {
+        let _guard = state.sync_rt.connect_lock.lock().await;
+        let saved = state.lock_settings().sync.clone();
+        let account = google_account(saved.google_email.as_deref());
+        let (secrets, a) = (Arc::clone(&secrets), account.clone());
+        let token = blocking(move || secrets.get_fresh(GOOGLE_SERVICE, &a)).await?;
+        (account, token)
     };
     // Nothing stored: nothing for Google to forget.
     let mut revoked = true;
@@ -1093,19 +1116,37 @@ async fn google_logout_flow<C: Ctx>(
             None => false,
         };
     }
-    let deleted = blocking(move || secrets.delete(GOOGLE_SERVICE, &account)).await?;
-    deleted.map_err(|_| AppError::Io {
-        message: "キーチェーンからログイン情報を削除できませんでした".into(),
-    })?;
+    let _guard = state.sync_rt.connect_lock.lock().await;
+    let current = state.lock_settings().sync.clone();
+    if google_account(current.google_email.as_deref()) != account {
+        // Another account logged in while Google was being asked: that login is not ours to end.
+        return Ok(GoogleLogoutDto {
+            revoked,
+            keychain_failed: false,
+        });
+    }
+    let deleted = {
+        let account = account.clone();
+        blocking(move || secrets.delete(GOOGLE_SERVICE, &account)).await?
+    };
+    let keychain_failed = deleted.is_err();
+    if keychain_failed && !revoked {
+        return Err(AppError::Io {
+            message: "キーチェーンからログイン情報を削除できませんでした".into(),
+        });
+    }
     let c = ctx.clone();
     blocking(move || update_sync_settings(c.app_state(), |s| s.google_email = None)).await??;
-    if saved.backend == SyncBackend::Gdrive {
+    if current.backend == SyncBackend::Gdrive {
         // A build in flight must not come back; the records are kept (the same account
         // logging in again finds them).
         state.sync_rt.invalidate();
         state.sync.set_backend(None, BackendKind::Gdrive, "");
     }
-    Ok(GoogleLogoutDto { revoked })
+    Ok(GoogleLogoutDto {
+        revoked,
+        keychain_failed,
+    })
 }
 
 /// Builds the backend from the stored refresh token and attaches it (through
@@ -2252,6 +2293,7 @@ mod tests {
             message: None,
             pending: 0,
             suspect,
+            auth_rejected: false,
         };
         let m = invalid_text(recover_precondition(
             false,
@@ -2343,17 +2385,23 @@ mod tests {
             .unwrap()
         }
 
-        /// Google answers the code with tokens for `email`.
-        async fn mount_token(server: &MockServer, email: &str) {
+        const GRANTED: &str = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file";
+
+        /// Google answers the code with tokens for `email`, granting `scope`.
+        async fn mount_token_scope(server: &MockServer, email: &str, scope: &str) {
             Mock::given(method("POST"))
                 .and(path("/token"))
                 .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                     "access_token": "access-1", "expires_in": 3600,
                     "refresh_token": REFRESH, "id_token": id_token(email),
-                    "token_type": "Bearer",
+                    "scope": scope, "token_type": "Bearer",
                 })))
                 .mount(server)
                 .await;
+        }
+
+        async fn mount_token(server: &MockServer, email: &str) {
+            mount_token_scope(server, email, GRANTED).await;
         }
 
         async fn mount_revoke(server: &MockServer, status: u16, times: u64) {
@@ -2697,6 +2745,88 @@ mod tests {
             assert!(String::from_utf8_lossy(&revoke.body).contains(REFRESH));
         }
 
+        #[tokio::test]
+        async fn a_login_without_drive_access_is_refused_and_given_back() {
+            let server = MockServer::start().await;
+            // The user unticked the Drive box on the consent screen.
+            mount_token_scope(
+                &server,
+                EMAIL,
+                "openid https://www.googleapis.com/auth/userinfo.email",
+            )
+            .await;
+            mount_revoke(&server, 200, 1).await;
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+
+            let m = invalid_text(
+                google_login_flow(
+                    &state,
+                    &oauth(&server),
+                    |u| answer(u, "code=the-code"),
+                    never(),
+                    make_memory,
+                )
+                .await,
+            );
+            assert_eq!(
+                m,
+                "Google Drive へのアクセスが許可されませんでした。もう一度ログインし、Drive へのアクセスにチェックを入れてください"
+            );
+            assert_eq!(stored(&state, EMAIL), None);
+            assert_eq!(state.lock_settings().sync.google_email, None);
+            assert!(!state.sync.has_target());
+            // The token was revoked (the mock expects exactly one call).
+            let reqs = server.received_requests().await.unwrap();
+            assert!(reqs.iter().any(|r| r.url.path() == "/revoke"));
+        }
+
+        #[tokio::test]
+        async fn the_lock_is_free_while_google_is_asked_to_forget_a_token() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/revoke"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_delay(std::time::Duration::from_millis(600)),
+                )
+                .mount(&server)
+                .await;
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            let o = oauth(&server);
+
+            // Logout: while the revoke is on the network, the target can be changed.
+            let (st, oo) = (Arc::clone(&state), o.clone());
+            let logout = tokio::spawn(async move { google_logout_flow(&st, Some(&oo)).await });
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            assert!(
+                state.sync_rt.connect_lock.try_lock().is_ok(),
+                "logout holds the lock across the revoke"
+            );
+            assert!(logout.await.unwrap().unwrap().revoked);
+
+            // A refused login gives its token back the same way.
+            switch_backend(&state, SyncBackend::Gdrive).ok();
+            let (st, oo) = (Arc::clone(&state), o.clone());
+            let refused = tokio::spawn(async move {
+                let tokens = Tokens {
+                    access_token: "a".into(),
+                    expires_in: std::time::Duration::from_secs(60),
+                    refresh_token: REFRESH.into(),
+                    email: Some(EMAIL.into()),
+                    scope: Some("openid".into()),
+                };
+                finish_login(&st, &oo, tokens, make_memory).await
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            assert!(
+                state.sync_rt.connect_lock.try_lock().is_ok(),
+                "finish_login holds the lock across the revoke"
+            );
+            assert!(refused.await.unwrap().is_err());
+        }
+
         // ---- logout ----
 
         async fn logged_in_state(dir: &Path) -> Arc<AppState> {
@@ -2760,7 +2890,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_keychain_that_refuses_keeps_the_login_as_it_was() {
+        async fn a_keychain_that_refuses_does_not_stop_a_logout_google_already_accepted() {
             let server = MockServer::start().await;
             mount_revoke(&server, 200, 1).await;
             let kc = Keychain::new();
@@ -2769,9 +2899,32 @@ mod tests {
             switch_backend(&state, SyncBackend::Gdrive).unwrap();
             commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).unwrap();
             kc.broken.store(true, Ordering::SeqCst);
-            let AppError::Io { message } = google_logout_flow(&state, Some(&oauth(&server)))
+            let dto = google_logout_flow(&state, Some(&oauth(&server)))
                 .await
-                .unwrap_err()
+                .unwrap();
+            // The token is dead at Google; here the address is gone and the sync detached.
+            assert!(dto.revoked && dto.keychain_failed);
+            assert_eq!(state.lock_settings().sync.google_email, None);
+            assert!(!state.sync.has_target());
+            assert_eq!(
+                AppSettings::load(app.path()).unwrap().sync.backend,
+                SyncBackend::Gdrive
+            );
+            // The pane reads the login under the (now empty) address: logged out.
+            kc.broken.store(false, Ordering::SeqCst);
+            assert_eq!(state.sync_rt.secrets().get(GOOGLE_SERVICE, "default"), None);
+        }
+
+        #[tokio::test]
+        async fn a_keychain_that_refuses_with_google_unreached_keeps_the_login_as_it_was() {
+            let kc = Keychain::new();
+            let app = tempfile::tempdir().unwrap();
+            let state = state_with(app.path(), Secrets::new(kc.clone()));
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).unwrap();
+            kc.broken.store(true, Ordering::SeqCst);
+            // No Google credentials in this build: the token cannot be revoked.
+            let AppError::Io { message } = google_logout_flow(&state, None).await.unwrap_err()
             else {
                 panic!("expected an io error");
             };

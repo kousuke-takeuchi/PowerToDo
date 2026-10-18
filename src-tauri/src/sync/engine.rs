@@ -91,6 +91,11 @@ pub struct SyncStatusView {
     /// [`SyncEngine::run_mirror`] with `MirrorRemote` (local wiped) or `MirrorLocal`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suspect: Option<Side>,
+    /// The target refused the credentials (`BackendError::Auth`): no run happens until the
+    /// settings change (a new login, 「確かめる」). Only this kind of error is fixed by logging
+    /// in again, so the UI offers that only while it is set.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auth_rejected: bool,
 }
 
 impl SyncStatusView {
@@ -101,6 +106,7 @@ impl SyncStatusView {
             message: None,
             pending: 0,
             suspect: None,
+            auth_rejected: false,
         }
     }
 }
@@ -220,9 +226,7 @@ fn suspect_message(side: Side) -> String {
 fn auth_failed_message(kind: BackendKind) -> &'static str {
     match kind {
         BackendKind::Nas => "同期先の認証に失敗しました。設定で接続を確かめるまで同期しません",
-        BackendKind::Gdrive => {
-            "Google のログインが無効になりました。設定の「同期」でもう一度ログインしてください"
-        }
+        BackendKind::Gdrive => "Google のログインが切れました。もう一度ログインしてください",
     }
 }
 
@@ -629,6 +633,7 @@ impl SyncEngine {
                 }
                 self.publish(Some(host), g, |s| {
                     s.state = SyncPhase::Error;
+                    s.auth_rejected = true;
                     s.message = Some(auth_failed_message(kind).into());
                 });
                 RunOutcome::Failed
@@ -697,6 +702,7 @@ impl SyncEngine {
             s.state = SyncPhase::Syncing;
             s.message = None;
             s.suspect = None;
+            s.auth_rejected = false;
         });
 
         // (2) The local listing, without the lock.
@@ -2086,6 +2092,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_status_says_when_the_credentials_were_refused_and_only_then() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        // A failure that logging in again would not fix (no space) is an error without the flag.
+        remote.fail(INBOX_FILE, Failure::Full);
+        a.sync().await;
+        let s = a.engine.status();
+        assert_eq!(s.state, SyncPhase::Error);
+        assert!(!s.auth_rejected, "{s:?}");
+        assert!(
+            serde_json::to_value(&s)
+                .unwrap()
+                .get("authRejected")
+                .is_none()
+        );
+        remote.clear_failures();
+
+        // A refusal sets it, and it goes out in the event's JSON.
+        remote.fail_list(Failure::Auth);
+        a.sync().await;
+        let s = a.engine.status();
+        assert!(s.auth_rejected && s.state == SyncPhase::Error);
+        assert_eq!(serde_json::to_value(&s).unwrap()["authRejected"], true);
+
+        // A new target (a new login) clears it, and so does the run that follows.
+        remote.clear_failures();
+        a.engine
+            .set_backend(Some(remote.clone()), BackendKind::Gdrive, "gdrive:default");
+        assert!(!a.engine.status().auth_rejected);
+        a.sync().await;
+        let s = a.engine.status();
+        assert_eq!(s.state, SyncPhase::Synced);
+        assert!(!s.auth_rejected);
+
+        // Removing the target clears it too.
+        remote.fail_list(Failure::Auth);
+        a.engine.clear_auth_rejected();
+        a.engine.request(SyncReason::SyncNow);
+        a.sync().await;
+        assert!(a.engine.status().auth_rejected);
+        a.engine.set_backend(None, BackendKind::Gdrive, "");
+        assert!(!a.engine.status().auth_rejected);
+    }
+
+    #[tokio::test]
     async fn a_new_target_clears_auth_rejected() {
         let remote = backend();
         let a = Pc::new(&remote);
@@ -2539,6 +2590,7 @@ mod tests {
             message: Some("m".into()),
             pending: 1,
             suspect: Some(Side::Remote),
+            auth_rejected: false,
         })
         .unwrap();
         assert_eq!(
