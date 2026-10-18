@@ -114,6 +114,8 @@ export const api = {
   /** Starts the sidecar if needed and the interactive login; the URL arrives as a `tailnet-status` event (`needs_login`, `loginUrl`). Needs backend "nas". */
   tailnetLogin: () => invoke<null>("tailnet_login"),
   tailnetLogout: () => invoke<null>("tailnet_logout"),
+  /** 「再試行」: restarts a stuck or failed sidecar and keeps its state folder (the login). Needs backend "nas". */
+  tailnetRetry: () => invoke<null>("tailnet_retry"),
   /** Deletes the Tailscale state and starts over (the node needs a login again). */
   tailnetReset: () => invoke<null>("tailnet_reset"),
   /** 「確かめる」: finds the NAS in the tailnet, writes a file and reads it back. On success the details are saved and the sync starts. Rejects with a Japanese message. */

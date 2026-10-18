@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -23,7 +23,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use super::{AppState, TauriSyncHost};
 use crate::error::{AppError, AppResult};
 use crate::store::paths::{AppSettings, SyncBackend, SyncSettings};
-use crate::sync::backend::BackendError;
+use crate::sync::backend::{BackendError, StorageBackend};
 use crate::sync::secrets::{KeyringStore, MemoryStore, NAS_SERVICE, SecretResult, SecretStore};
 use crate::sync::state::BackendKind;
 use crate::sync::tailnet::{
@@ -62,6 +62,8 @@ pub struct Secrets {
     /// The last `set` could not reach the keychain: the secret is in `memory` only.
     memory_only: AtomicBool,
     cache: Mutex<BTreeMap<(String, String), Option<String>>>,
+    /// Held while a missing entry is read from the keychain, so concurrent readers ask it once.
+    fill: Mutex<()>,
 }
 
 impl Secrets {
@@ -71,6 +73,7 @@ impl Secrets {
             memory: MemoryStore::new(),
             memory_only: AtomicBool::new(false),
             cache: Mutex::new(BTreeMap::new()),
+            fill: Mutex::new(()),
         }
     }
 
@@ -83,8 +86,16 @@ impl Secrets {
         self.memory.get(service, account).ok().flatten()
     }
 
+    /// The keychain is asked once per entry and process, whatever the answer (also a failure:
+    /// a locked keychain would otherwise prompt again every time the settings open). Saving a
+    /// password (`set`) is what makes it be tried again.
     pub fn get(&self, service: &str, account: &str) -> Option<String> {
         let key = (service.to_string(), account.to_string());
+        if let Some(hit) = lock(&self.cache).get(&key) {
+            return hit.clone();
+        }
+        // Single flight: whoever comes second finds the first one's answer.
+        let _fill = lock(&self.fill);
         if let Some(hit) = lock(&self.cache).get(&key) {
             return hit.clone();
         }
@@ -92,9 +103,8 @@ impl Secrets {
             Ok(Some(v)) => Some(v),
             Ok(None) => self.memory_get(service, account),
             Err(e) => {
-                // Not remembered: the keychain may be usable (unlocked) next time.
                 eprintln!("keychain read failed: {e}");
-                return self.memory_get(service, account);
+                self.memory_get(service, account)
             }
         };
         lock(&self.cache).insert(key, found.clone());
@@ -155,23 +165,50 @@ pub struct SyncRuntime {
     secrets: Arc<Secrets>,
     /// The sidecar's last state was `running`.
     running: AtomicBool,
-    /// Bumped by every sidecar state change and every stop. A backend built for an older value
-    /// is dropped.
+    /// A backend built for an older value is dropped. Bumped when the sidecar enters or leaves
+    /// `running`, when it is stopped, and when the target is switched or disconnected: the
+    /// moments that make a build in flight wrong. Not by a repeated `running` (a name or
+    /// address update), which would drop a good build.
     seq: AtomicU64,
-    /// Held while the engine's backend is built from the saved settings or replaced.
+    /// Held while the engine's backend is built from the saved settings or replaced, and while
+    /// the target is switched.
     connect_lock: tokio::sync::Mutex<()>,
+    /// Serializes writers of `settings.json`, so none of them holds the settings mutex across
+    /// the file write (readers on the async workers never wait for the disk).
+    settings_write: Mutex<()>,
 }
 
 impl SyncRuntime {
     pub fn new() -> Self {
+        Self::with_secrets(Secrets::new(Arc::new(KeyringStore)))
+    }
+
+    fn with_secrets(secrets: Secrets) -> Self {
         SyncRuntime {
             tailnet: Mutex::new(None),
             start_error: Mutex::new(None),
-            secrets: Arc::new(Secrets::new(Arc::new(KeyringStore))),
+            secrets: Arc::new(secrets),
             running: AtomicBool::new(false),
             seq: AtomicU64::new(0),
             connect_lock: tokio::sync::Mutex::new(()),
+            settings_write: Mutex::new(()),
         }
+    }
+
+    /// Serializes writes of `settings.json` (also `switch_data_dir`'s).
+    pub(super) fn lock_settings_write(&self) -> MutexGuard<'_, ()> {
+        lock(&self.settings_write)
+    }
+
+    /// Makes every backend build that started before now stale.
+    fn invalidate(&self) {
+        self.seq.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// A build started for `seq` (`None`: started by the user, not by a sidecar event) may
+    /// still be attached.
+    fn is_current(&self, seq: Option<u64>) -> bool {
+        seq.is_none_or(|s| self.seq.load(Ordering::SeqCst) == s)
     }
 
     fn current_tailnet(&self) -> Option<Arc<Tailnet>> {
@@ -182,14 +219,16 @@ impl SyncRuntime {
         Arc::clone(&self.secrets)
     }
 
-    /// Records a state change of the sidecar. Returns the new sequence number and whether the
-    /// sidecar just came up (`running` after something else): then the backend is rebuilt, which
-    /// also covers a restart with a new proxy port and credential (a restart always passes
-    /// through `starting`).
+    /// Records a state change of the sidecar. Returns the current sequence number and whether
+    /// the sidecar just came up (`running` after something else): then the backend is rebuilt,
+    /// which also covers a restart with a new proxy port and credential (a restart always
+    /// passes through `starting`). The number changes only when `running` is entered or left.
     fn note_tailnet_state(&self, running: bool) -> (u64, bool) {
         let was = self.running.swap(running, Ordering::SeqCst);
-        let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
-        (seq, running && !was)
+        if was != running {
+            self.invalidate();
+        }
+        (self.seq.load(Ordering::SeqCst), running && !was)
     }
 }
 
@@ -284,32 +323,45 @@ fn backend_error(e: BackendError) -> AppError {
     }
 }
 
+/// Japanese text only: what the sidecar or the OS said (English, an io error) is logged, not
+/// shown. None of it carries the proxy credential or the password.
 fn tailnet_error(e: TailnetError) -> AppError {
+    eprintln!("tailscale sidecar: {e}");
     let message = match e {
-        TailnetError::Spawn(_) => "Tailscale を起動できません".to_string(),
-        TailnetError::NotRunning => "Tailscale が動いていません".to_string(),
-        TailnetError::Timeout => "Tailscale からの応答がありません".to_string(),
-        TailnetError::Failed(m) => format!("Tailscale の操作に失敗しました: {m}"),
+        TailnetError::Spawn(_) => "Tailscale を起動できません",
+        TailnetError::NotRunning => "Tailscale が動いていません",
+        TailnetError::Timeout => "Tailscale からの応答がありません",
+        TailnetError::Failed(_) => {
+            "Tailscale の操作に失敗しました。少し待ってからもう一度お試しください"
+        }
     };
-    AppError::Io { message }
+    AppError::Io {
+        message: message.to_string(),
+    }
 }
 
 /// Checks the typed address without touching the network: http only, a host name, no
 /// credentials in it. The resolver is a stand-in; the real one asks the sidecar.
 fn parse_nas_url(input: &str) -> AppResult<NasTarget> {
     let host = RefCell::new(String::new());
-    let mut url = resolve_nas_url(input, |h| {
+    let url = resolve_nas_url(input, |h| {
         *host.borrow_mut() = h.to_string();
         Ok(IpAddr::V4(Ipv4Addr::LOCALHOST))
     })
     .map_err(nas_url_error)?;
     let host = host.into_inner();
-    // The address is stored with the name the user typed, not the tailnet IP the sync talks to.
-    url.set_host(Some(&host)).map_err(|_| AppError::Invalid {
-        message: "NAS の名前を読めません".into(),
-    })?;
+    // Written out by hand, not with `Url::to_string`: that drops `:80` (the scheme's default),
+    // and the next start would read the address without a port as 5005. `resolve_nas_url`
+    // always sets a port, so none left on the URL means the typed `:80`. An IPv6 address needs
+    // its brackets. The name is the one the user typed, not the tailnet IP the sync talks to.
+    let port = url.port().unwrap_or(80);
+    let shown_host = if host.parse::<Ipv6Addr>().is_ok() {
+        format!("[{host}]")
+    } else {
+        host.clone()
+    };
     Ok(NasTarget {
-        root: url.to_string(),
+        root: format!("http://{shown_host}:{port}{}", url.path()),
         host,
     })
 }
@@ -345,31 +397,35 @@ fn stored_account(s: &SyncSettings) -> Option<String> {
 // ---- settings ----
 
 /// Applies `f` to the sync part of the settings and writes `settings.json`. In memory it only
-/// changes when the file was written.
+/// changes when the file was written. Does file I/O: call from `spawn_blocking`. The settings
+/// mutex is not held across the write.
 fn update_sync_settings(
     state: &AppState,
     f: impl FnOnce(&mut SyncSettings),
 ) -> AppResult<SyncSettings> {
-    let mut guard = state.lock_settings();
-    let mut next = guard.clone();
+    let _writer = state.sync_rt.lock_settings_write();
+    let current = state.lock_settings().clone();
+    let mut next = current.clone();
     f(&mut next.sync);
-    if next == *guard {
+    if next == current {
         return Ok(next.sync);
     }
     next.save(state.app_data_dir())?;
-    *guard = next;
-    Ok(guard.sync.clone())
+    *state.lock_settings() = next.clone();
+    Ok(next.sync)
 }
 
 /// Moves the sync to another target: the old target is detached first (the records are about to
 /// go, and a run against it would start from nothing), then `sync.json` is removed so the new
 /// target starts from fresh records (every file is sent again). Returns whether anything
-/// changed. The sidecar is the caller's business.
+/// changed. A backend build in flight is made stale. The caller holds `connect_lock` (so no
+/// build or check is attaching meanwhile) and deals with the sidecar. Does file I/O.
 fn switch_backend(state: &AppState, new: SyncBackend) -> AppResult<bool> {
     if state.lock_settings().sync.backend == new {
         return Ok(false);
     }
     update_sync_settings(state, |s| s.backend = new)?;
+    state.sync_rt.invalidate();
     state.sync.set_backend(None, BackendKind::Nas, "");
     state.sync.reset_records();
     Ok(true)
@@ -388,6 +444,11 @@ fn should_start_sidecar(s: &SyncSettings, app_data_dir: &Path) -> bool {
     s.backend == SyncBackend::Nas && has_tailnet_login(app_data_dir)
 }
 
+/// A handle in this state will not come back by itself.
+fn needs_restart(state: &TailnetState) -> bool {
+    matches!(state, TailnetState::Failed { .. })
+}
+
 fn tailnet_view(state: Option<TailnetState>, start_error: Option<String>) -> TailnetStatusView {
     match (state, start_error) {
         (Some(s), _) => s.view(),
@@ -403,8 +464,12 @@ fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     let mut slot = lock(&rt.tailnet);
+    // A sidecar that gave up (`failed`) is replaced, so asking again is a retry (spec 4.1).
     if let Some(t) = slot.as_ref() {
-        return Ok(Arc::clone(t));
+        if !needs_restart(&t.state()) {
+            return Ok(Arc::clone(t));
+        }
+        drop(slot.take());
     }
     let cb_app = app.clone();
     let started = Tailnet::start(
@@ -440,10 +505,22 @@ fn stop_sidecar(app: &AppHandle) {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     rt.note_tailnet_state(false);
+    rt.invalidate();
     *lock(&rt.start_error) = None;
     let t = lock(&rt.tailnet).take();
     drop(t);
     let _ = app.emit("tailnet-status", TailnetState::Stopped.view());
+}
+
+/// 「再試行」: ends a stuck or failed sidecar and starts a new one. The state folder (the
+/// Tailscale login) is kept; `tailnet_reset` is the one that deletes it. Blocking.
+fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
+    let state = app.state::<AppState>();
+    let rt = &state.sync_rt;
+    rt.note_tailnet_state(false);
+    let old = lock(&rt.tailnet).take();
+    drop(old);
+    ensure_tailnet(app)
 }
 
 /// For the app's exit: the sidecar also ends by itself when our end of its stdin closes.
@@ -512,8 +589,7 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     let _guard = rt.connect_lock.lock().await;
-    let stale = || seq.is_some_and(|s| rt.seq.load(Ordering::SeqCst) != s);
-    if stale() {
+    if !rt.is_current(seq) {
         return;
     }
     let s = state.lock_settings().sync.clone();
@@ -543,16 +619,69 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
         }
     };
     match built {
+        // Still under `connect_lock`: nothing switched the target since the build began.
         Ok((backend, root)) => {
-            if stale() || state.lock_settings().sync.backend != SyncBackend::Nas {
-                return;
-            }
-            state
-                .sync
-                .set_backend(Some(Arc::new(backend)), BackendKind::Nas, &root);
+            attach_if_current(&state, seq, Arc::new(backend), &root);
         }
-        Err(e) => report_unreachable(app, &e.to_string()),
+        Err(e) if rt.is_current(seq) => report_unreachable(app, &e.to_string()),
+        Err(_) => {}
     }
+}
+
+/// Gives the engine `backend` unless it is out of date: built for an older sidecar state
+/// (`seq`), or the NAS is no longer the chosen target. The caller holds `connect_lock`, so the
+/// target cannot be switched between this check and the attach.
+fn attach_if_current(
+    state: &AppState,
+    seq: Option<u64>,
+    backend: Arc<dyn StorageBackend>,
+    root: &str,
+) -> bool {
+    if !state.sync_rt.is_current(seq) || state.lock_settings().sync.backend != SyncBackend::Nas {
+        return false;
+    }
+    state
+        .sync
+        .set_backend(Some(backend), BackendKind::Nas, root);
+    true
+}
+
+/// The end of 「確かめる」, once the NAS answered: keeps the details and attaches the backend.
+/// Refuses, saving nothing, when the target was switched while the check ran. The caller holds
+/// `connect_lock`. Order: the settings first (a failed write leaves everything as it was), then
+/// the password, and the old account's password only after both. Does file and keychain I/O.
+fn commit_nas(
+    state: &AppState,
+    target: &NasTarget,
+    user: &str,
+    password: &str,
+    backend: Arc<dyn StorageBackend>,
+) -> AppResult<()> {
+    let current = state.lock_settings().sync.clone();
+    if current.backend != SyncBackend::Nas {
+        return Err(AppError::Invalid {
+            message:
+                "同期先が変更されたため、接続の設定は保存しませんでした。もう一度やり直してください"
+                    .into(),
+        });
+    }
+    let previous = stored_account(&current);
+    let account = nas_account(user, &target.host);
+    update_sync_settings(state, |s| {
+        s.nas_url = Some(target.root.clone());
+        s.nas_user = Some(user.to_string());
+    })?;
+    let secrets = state.sync_rt.secrets();
+    secrets.set(NAS_SERVICE, &account, password);
+    // The details moved to another account: the old password has no use.
+    if let Some(old) = previous.filter(|p| *p != account) {
+        let _ = secrets.delete(NAS_SERVICE, &old);
+    }
+    // `set_backend` also lets the runs go again after an earlier rejection and asks for one.
+    state
+        .sync
+        .set_backend(Some(backend), BackendKind::Nas, &target.root);
+    Ok(())
 }
 
 // ---- start-up ----
@@ -586,12 +715,19 @@ pub async fn set_sync_backend(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<SyncSettingsDto> {
-    if switch_backend(state.inner(), backend)? {
+    {
+        // Nothing may attach a backend to the old target meanwhile (a build or a check in
+        // flight), and the sidecar changes are ordered with the switch.
+        let _guard = state.sync_rt.connect_lock.lock().await;
         let a = app.clone();
-        if backend == SyncBackend::Nas {
-            blocking(move || start_if_logged_in(&a)).await?;
-        } else {
-            blocking(move || stop_sidecar(&a)).await?;
+        let changed = blocking(move || switch_backend(&a.state::<AppState>(), backend)).await??;
+        if changed {
+            let a = app.clone();
+            if backend == SyncBackend::Nas {
+                blocking(move || start_if_logged_in(&a)).await?;
+            } else {
+                blocking(move || stop_sidecar(&a)).await?;
+            }
         }
     }
     current_dto(&app).await
@@ -630,6 +766,13 @@ pub async fn tailnet_logout(state: State<'_, AppState>) -> AppResult<()> {
         Some(tailnet) => blocking(move || tailnet.logout().map_err(tailnet_error)).await?,
         None => Ok(()),
     }
+}
+
+/// 「再試行」: restarts a stuck or failed sidecar, keeping its state folder (the login).
+#[tauri::command]
+pub async fn tailnet_retry(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    require_nas(state.inner())?;
+    blocking(move || restart_sidecar(&app).map(|_| ())).await?
 }
 
 /// Deletes the Tailscale state and starts over (the node needs a login again).
@@ -682,43 +825,22 @@ pub async fn nas_check(
     url: String,
     user: String,
     password: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     let (target, user, tailnet) = check_preconditions(state.inner(), &url, &user, &password)?;
     let (typed_url, typed_user, typed_password) = (url, user.clone(), password.clone());
-    let backend =
+    let backend = Arc::new(
         blocking(move || build_webdav(&tailnet, &typed_url, &typed_user, &typed_password))
-            .await??;
+            .await??,
+    );
     backend.check().await.map_err(backend_error)?;
 
-    let rt = &state.sync_rt;
-    let _guard = rt.connect_lock.lock().await;
-    // The details are right; keep them.
-    let previous = stored_account(&state.lock_settings().sync);
-    let account = nas_account(&user, &target.host);
-    let secrets = rt.secrets();
-    let (acc, pw, old) = (
-        account.clone(),
-        password,
-        previous.filter(|p| *p != account),
-    );
-    blocking(move || {
-        secrets.set(NAS_SERVICE, &acc, &pw);
-        // The details moved to another account: the old password has no use.
-        if let Some(old) = old {
-            let _ = secrets.delete(NAS_SERVICE, &old);
-        }
-    })
-    .await?;
-    update_sync_settings(state.inner(), |s| {
-        s.nas_url = Some(target.root.clone());
-        s.nas_user = Some(user);
-    })?;
-    // `set_backend` also lets the runs go again after an earlier rejection and asks for one.
-    state
-        .sync
-        .set_backend(Some(Arc::new(backend)), BackendKind::Nas, &target.root);
-    Ok(())
+    // The NAS answered. The target may have been switched while the check ran: commit under
+    // the lock and look again.
+    let _guard = state.sync_rt.connect_lock.lock().await;
+    blocking(move || commit_nas(&app.state::<AppState>(), &target, &user, &password, backend))
+        .await?
 }
 
 /// Takes the backend away and forgets the password; the URL and the user stay for the next
@@ -728,7 +850,7 @@ pub async fn nas_disconnect(state: State<'_, AppState>) -> AppResult<()> {
     let rt = &state.sync_rt;
     let _guard = rt.connect_lock.lock().await;
     // A backend being built for an older sidecar event must not come back.
-    rt.seq.fetch_add(1, Ordering::SeqCst);
+    rt.invalidate();
     state.sync.set_backend(None, BackendKind::Nas, "");
     let Some(account) = stored_account(&state.lock_settings().sync) else {
         return Ok(());
@@ -805,6 +927,22 @@ fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
+/// The recovery is for a stopped sync (`suspect`) with a target. Anything else is refused
+/// without running, so the status is not touched (a run without a target would publish `off`).
+fn recover_precondition(has_target: bool, status: &SyncStatusView) -> AppResult<()> {
+    if !has_target {
+        return Err(AppError::Invalid {
+            message: "同期先に接続していません".into(),
+        });
+    }
+    if status.suspect.is_none() {
+        return Err(AppError::Invalid {
+            message: "同期は止まっていないため、この操作は使えません".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Runs the one-shot recovery after a `suspect` status. The UI asks the user first.
 #[tauri::command]
 pub async fn sync_recover(
@@ -812,6 +950,7 @@ pub async fn sync_recover(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<SyncRecoverDto> {
+    recover_precondition(state.sync.has_target(), &state.sync.status())?;
     let host = TauriSyncHost { app };
     let report = state.sync.run_mirror(&host, mode.plan_mode()).await;
     Ok(SyncRecoverDto {
@@ -832,6 +971,7 @@ mod tests {
     use crate::sync::backend::MemoryBackend;
     use crate::sync::secrets::SecretError;
     use crate::sync::state::SyncState;
+    use crate::sync::tailnet::TailnetError;
     use chrono::NaiveDateTime;
 
     fn dt(s: &str) -> NaiveDateTime {
@@ -1074,11 +1214,26 @@ mod tests {
         assert!(up && s2 > s1);
         // A repeated `running` (name or address changed) is not a new connection.
         let (s3, up) = rt.note_tailnet_state(true);
-        assert!(!up && s3 > s2);
+        assert!(!up);
+        assert_eq!(
+            s3, s2,
+            "an update while running must not make a build stale"
+        );
+        assert!(rt.is_current(Some(s2)));
         // A restart goes through another state first, then comes up again.
-        rt.note_tailnet_state(false);
-        let (_, up) = rt.note_tailnet_state(true);
-        assert!(up);
+        let (s4, up) = rt.note_tailnet_state(false);
+        assert!(!up && s4 > s3);
+        assert!(
+            !rt.is_current(Some(s2)),
+            "leaving running makes a build stale"
+        );
+        // Other states before `running` again (starting, needs_login) change nothing.
+        let (s5, _) = rt.note_tailnet_state(false);
+        assert_eq!(s5, s4);
+        let (s6, up) = rt.note_tailnet_state(true);
+        assert!(up && s6 > s5);
+        // A build asked for by the user (no sidecar event behind it) is never stale by itself.
+        assert!(rt.is_current(None));
     }
 
     #[test]
@@ -1117,6 +1272,8 @@ mod tests {
     struct Keychain {
         inner: MemoryStore,
         broken: AtomicBool,
+        /// How many times `get` was called.
+        gets: std::sync::atomic::AtomicUsize,
     }
 
     impl Keychain {
@@ -1124,6 +1281,7 @@ mod tests {
             Arc::new(Keychain {
                 inner: MemoryStore::new(),
                 broken: AtomicBool::new(false),
+                gets: std::sync::atomic::AtomicUsize::new(0),
             })
         }
         fn check(&self) -> SecretResult<()> {
@@ -1137,6 +1295,9 @@ mod tests {
 
     impl SecretStore for Keychain {
         fn get(&self, service: &str, account: &str) -> SecretResult<Option<String>> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            // Long enough for a second reader to arrive (the real keychain may prompt).
+            std::thread::sleep(std::time::Duration::from_millis(50));
             self.check()?;
             self.inner.get(service, account)
         }
@@ -1182,7 +1343,7 @@ mod tests {
         let kc = Keychain::new();
         kc.broken.store(true, Ordering::SeqCst);
         let secrets = Secrets::new(kc.clone());
-        // A failed read is not "not set": the memory copy answers, nothing is cached as absent.
+        // The memory copy answers (nothing there yet).
         assert_eq!(secrets.get(NAS_SERVICE, "u@nas"), None);
         assert!(!secrets.set(NAS_SERVICE, "u@nas", "pw"));
         assert!(!secrets.persistent());
@@ -1210,5 +1371,305 @@ mod tests {
         // Still there: the next read asks the keychain again.
         kc.broken.store(false, Ordering::SeqCst);
         assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
+    }
+
+    // ---- keychain reads ----
+
+    #[test]
+    fn a_failed_keychain_read_is_remembered_for_the_process() {
+        let kc = Keychain::new();
+        kc.broken.store(true, Ordering::SeqCst);
+        let secrets = Secrets::new(kc.clone());
+        for _ in 0..3 {
+            assert_eq!(secrets.get(NAS_SERVICE, "u@nas"), None);
+        }
+        // Asked once, not on every settings read.
+        assert_eq!(kc.gets.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn concurrent_readers_ask_the_keychain_once() {
+        let kc = Keychain::new();
+        kc.inner.set(NAS_SERVICE, "u@nas", "pw").unwrap();
+        let secrets = Arc::new(Secrets::new(kc.clone()));
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                let s = Arc::clone(&secrets);
+                std::thread::spawn(move || s.get(NAS_SERVICE, "u@nas"))
+            })
+            .collect();
+        for r in readers {
+            assert_eq!(r.join().unwrap().as_deref(), Some("pw"));
+        }
+        assert_eq!(kc.gets.load(Ordering::SeqCst), 1);
+    }
+
+    // ---- stale builds, switching and committing ----
+
+    /// A state whose passwords go to memory, not the machine's keychain.
+    fn state_in(dir: &Path) -> AppState {
+        let mut state = AppState::new(dir.to_path_buf());
+        state.sync_rt = SyncRuntime::with_secrets(Secrets::new(Arc::new(MemoryStore::new())));
+        state
+    }
+
+    fn memory_backend() -> Arc<dyn StorageBackend> {
+        Arc::new(MemoryBackend::new(|| dt("2026-10-16T09:30:00")))
+    }
+
+    fn nas_target(url: &str) -> NasTarget {
+        parse_nas_url(url).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_build_in_flight_is_dropped_when_the_target_is_switched() {
+        let app = tempfile::tempdir().unwrap();
+        let state = state_in(app.path());
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        // A build starts for the sidecar's `running`.
+        let (seq, up) = state.sync_rt.note_tailnet_state(true);
+        assert!(up);
+        // The user switches away meanwhile.
+        assert!(switch_backend(&state, SyncBackend::None).unwrap());
+        assert!(!attach_if_current(
+            &state,
+            Some(seq),
+            memory_backend(),
+            "http://nas:5005/powertodo/"
+        ));
+        assert!(!state.sync.has_target());
+        // Even a build that no sidecar event stands behind needs the NAS to be the target.
+        assert!(!attach_if_current(
+            &state,
+            None,
+            memory_backend(),
+            "http://nas:5005/x/"
+        ));
+        assert!(!state.sync.has_target());
+        // Back on the NAS: a build for the new situation is attached, an old one is not.
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        assert!(!attach_if_current(
+            &state,
+            Some(seq),
+            memory_backend(),
+            "http://nas:5005/x/"
+        ));
+        let (now, _) = state.sync_rt.note_tailnet_state(true);
+        assert!(attach_if_current(
+            &state,
+            Some(now),
+            memory_backend(),
+            "http://nas:5005/x/"
+        ));
+        assert!(state.sync.has_target());
+    }
+
+    #[tokio::test]
+    async fn a_repeated_running_does_not_drop_a_build_in_flight() {
+        let app = tempfile::tempdir().unwrap();
+        let state = state_in(app.path());
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        let (seq, _) = state.sync_rt.note_tailnet_state(true);
+        // The sidecar reports `running` again (its name or address changed).
+        state.sync_rt.note_tailnet_state(true);
+        assert!(attach_if_current(
+            &state,
+            Some(seq),
+            memory_backend(),
+            "http://nas:5005/x/"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_check_that_finishes_after_a_switch_saves_nothing() {
+        let app = tempfile::tempdir().unwrap();
+        let state = state_in(app.path());
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        // The user switches away while the check is on the network.
+        switch_backend(&state, SyncBackend::None).unwrap();
+        let before = state.lock_settings().clone();
+        let m = invalid_text(commit_nas(
+            &state,
+            &nas_target("http://nas/powertodo/"),
+            "たろう",
+            "pw",
+            memory_backend(),
+        ));
+        assert!(m.contains("同期先が変更された"), "{m}");
+        assert_eq!(*state.lock_settings(), before);
+        assert_eq!(AppSettings::load(app.path()).unwrap(), before);
+        assert!(!state.sync.has_target());
+        assert_eq!(state.sync_rt.secrets.get(NAS_SERVICE, "たろう@nas"), None);
+    }
+
+    #[tokio::test]
+    async fn a_good_check_keeps_the_details_and_drops_the_old_account() {
+        let app = tempfile::tempdir().unwrap();
+        let state = state_in(app.path());
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        let t = nas_target("http://nas/powertodo/");
+        commit_nas(&state, &t, "たろう", "pw1", memory_backend()).unwrap();
+        assert!(state.sync.has_target());
+        let s = state.lock_settings().sync.clone();
+        assert_eq!(s.nas_url.as_deref(), Some("http://nas:5005/powertodo/"));
+        assert_eq!(s.nas_user.as_deref(), Some("たろう"));
+        assert_eq!(AppSettings::load(app.path()).unwrap().sync, s);
+        assert_eq!(
+            state
+                .sync_rt
+                .secrets
+                .get(NAS_SERVICE, "たろう@nas")
+                .as_deref(),
+            Some("pw1")
+        );
+        // Another user: the old password goes once the new details are in place.
+        commit_nas(&state, &t, "はなこ", "pw2", memory_backend()).unwrap();
+        assert_eq!(state.sync_rt.secrets.get(NAS_SERVICE, "たろう@nas"), None);
+        assert_eq!(
+            state
+                .sync_rt
+                .secrets
+                .get(NAS_SERVICE, "はなこ@nas")
+                .as_deref(),
+            Some("pw2")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_settings_write_keeps_the_old_password() {
+        let app = tempfile::tempdir().unwrap();
+        // The app data dir is a file: settings.json cannot be written under it.
+        let blocker = app.path().join("not-a-dir");
+        write_atomic(&blocker, b"x").unwrap();
+        let state = state_in(&blocker);
+        {
+            let mut guard = state.lock_settings();
+            guard.sync = SyncSettings {
+                backend: SyncBackend::Nas,
+                nas_url: Some("http://nas:5005/powertodo/".into()),
+                nas_user: Some("たろう".into()),
+                google_email: None,
+            };
+        }
+        state.sync_rt.secrets.set(NAS_SERVICE, "たろう@nas", "old");
+        let r = commit_nas(
+            &state,
+            &nas_target("http://nas/powertodo/"),
+            "はなこ",
+            "new",
+            memory_backend(),
+        );
+        assert!(r.is_err());
+        // Nothing moved: the old details and password stand, the new password was not stored.
+        assert_eq!(
+            state
+                .sync_rt
+                .secrets
+                .get(NAS_SERVICE, "たろう@nas")
+                .as_deref(),
+            Some("old")
+        );
+        assert_eq!(state.sync_rt.secrets.get(NAS_SERVICE, "はなこ@nas"), None);
+        assert_eq!(
+            state.lock_settings().sync.nas_user.as_deref(),
+            Some("たろう")
+        );
+        assert!(!state.sync.has_target());
+    }
+
+    // ---- the address as stored ----
+
+    #[test]
+    fn the_stored_address_keeps_port_80_and_ipv6_brackets() {
+        // Port 80 is the scheme's default, which `Url` would drop: the next start would read
+        // the address as port 5005.
+        let t = nas_target("http://nas:80/powertodo");
+        assert_eq!(t.root, "http://nas:80/powertodo/");
+        let again = nas_target(&t.root);
+        assert_eq!(again, t);
+        let resolved = resolve_nas_url(&t.root, |_| Ok(IpAddr::V4(Ipv4Addr::LOCALHOST))).unwrap();
+        assert_eq!(resolved.port_or_known_default(), Some(80));
+        // No port typed: 5005, and it stays 5005.
+        let t = nas_target("nas/powertodo");
+        assert_eq!(t.root, "http://nas:5005/powertodo/");
+        assert_eq!(nas_target(&t.root), t);
+        // IPv6 literals: bracketed in the address, bare in the host (the account, the resolver).
+        let t = nas_target("http://[fd7a:115c:a1e0::1]/powertodo");
+        assert_eq!(t.root, "http://[fd7a:115c:a1e0::1]:5005/powertodo/");
+        assert_eq!(t.host, "fd7a:115c:a1e0::1");
+        assert_eq!(nas_target(&t.root), t);
+        let t80 = nas_target("http://[fd7a:115c:a1e0::1]:80/powertodo/");
+        assert_eq!(t80.root, "http://[fd7a:115c:a1e0::1]:80/powertodo/");
+        assert_eq!(nas_target(&t80.root), t80);
+        // Saved in the settings and read back on the next start.
+        let mut s = SyncSettings::default();
+        for target in [&t, &t80] {
+            s.nas_url = Some(target.root.clone());
+            s.nas_user = Some("たろう".into());
+            let json = serde_json::to_string(&s).unwrap();
+            let back: SyncSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                stored_account(&back).as_deref(),
+                Some("たろう@fd7a:115c:a1e0::1")
+            );
+            assert_eq!(nas_target(back.nas_url.as_deref().unwrap()), *target);
+        }
+    }
+
+    // ---- recovery and sidecar retry ----
+
+    #[test]
+    fn recovery_needs_a_target_and_a_stopped_sync() {
+        let status = |suspect| SyncStatusView {
+            state: SyncPhase::Error,
+            last_synced: None,
+            message: None,
+            pending: 0,
+            suspect,
+        };
+        let m = invalid_text(recover_precondition(
+            false,
+            &status(Some(crate::sync::Side::Remote)),
+        ));
+        assert!(m.contains("同期先"), "{m}");
+        let m = invalid_text(recover_precondition(true, &status(None)));
+        assert!(m.contains("止まっていない"), "{m}");
+        recover_precondition(true, &status(Some(crate::sync::Side::Local))).unwrap();
+    }
+
+    #[test]
+    fn only_a_failed_sidecar_is_replaced_on_the_next_start() {
+        assert!(needs_restart(&TailnetState::Failed { reason: "x".into() }));
+        for s in [
+            TailnetState::Stopped,
+            TailnetState::NeedsLogin { url: None },
+            TailnetState::NeedsApproval,
+            TailnetState::Starting {
+                since: std::time::Instant::now(),
+            },
+            TailnetState::Running {
+                name: "n".into(),
+                ip: "100.64.0.2".into(),
+            },
+        ] {
+            assert!(!needs_restart(&s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn sidecar_errors_are_shown_in_japanese_without_the_detail() {
+        let e = tailnet_error(TailnetError::Failed("context deadline exceeded".into()));
+        let AppError::Io { message } = e else {
+            panic!("expected an io error");
+        };
+        assert!(message.contains("Tailscale"));
+        assert!(!message.contains("deadline"), "{message}");
+        let e = tailnet_error(TailnetError::Spawn(std::io::Error::other(
+            "No such file /x",
+        )));
+        let AppError::Io { message } = e else {
+            panic!("expected an io error");
+        };
+        assert!(!message.contains("/x"), "{message}");
     }
 }

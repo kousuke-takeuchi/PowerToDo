@@ -432,14 +432,23 @@ impl SyncEngine {
     /// Shows `offline` with `message` while the target cannot be built, e.g. the NAS is chosen
     /// but the tailnet connection it needs is down. Keeps the last sync time and asks for no
     /// run: with a target the runs themselves report `offline`, without one there is nothing
-    /// to run against.
+    /// to run against. Does nothing when a target is set by now (decided under the engine's
+    /// lock): a backend attached meanwhile owns the status.
     pub fn set_offline(&self, message: &str) {
-        self.publish(None, None, |s| {
-            s.state = SyncPhase::Offline;
-            s.message = Some(message.to_string());
-            s.pending = 0;
-            s.suspect = None;
-        });
+        let (view, host) = {
+            let mut inner = self.lock();
+            if inner.target.is_some() {
+                return;
+            }
+            inner.status.state = SyncPhase::Offline;
+            inner.status.message = Some(message.to_string());
+            inner.status.pending = 0;
+            inner.status.suspect = None;
+            (inner.status.clone(), inner.host.clone())
+        };
+        if let Some(h) = host {
+            h.status_changed(&view);
+        }
     }
 
     /// Asks for a run: now, or [`AFTER_SAVE_DELAY`] later after a save. Requests made before the
@@ -2725,12 +2734,18 @@ mod tests {
     }
 
     #[test]
-    fn unreachable_target_keeps_the_target_it_was_told_about() {
+    fn unreachable_target_does_not_overwrite_the_status_of_a_target() {
         let tmp = tempfile::tempdir().unwrap();
         let e = SyncEngine::with_clock(tmp.path().to_path_buf(), || dt(NOW));
+        let host: Arc<Host> = Arc::new(Host::default());
+        e.lock().host = Some(host.clone());
+        // A backend attached meanwhile (the status says syncing): a late "offline" is ignored.
         e.set_backend(Some(backend()), BackendKind::Nas, ROOT);
+        let before = e.status();
+        let events = host.events.lock().unwrap().len();
         e.set_offline("x");
-        // A target that is set stays (the runs themselves report offline).
         assert!(e.has_target());
+        assert_eq!(e.status(), before);
+        assert_eq!(host.events.lock().unwrap().len(), events);
     }
 }

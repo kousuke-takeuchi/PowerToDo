@@ -808,7 +808,9 @@ pub fn switch_data_dir(state: &AppState, path: &str) -> AppResult<AppStateDto> {
         }
     }
     let opened = ProjectStore::open(Paths::new(dir.clone()), now, true)?;
-    // Only the data folder changes; the sync settings stay.
+    // Only the data folder changes; the sync settings stay (taken under the writers' lock, so a
+    // sync settings write cannot slip in between and be undone).
+    let _writer = state.sync_rt.lock_settings_write();
     let settings = AppSettings {
         data_dir: Some(dir),
         ..state.lock_settings().clone()

@@ -151,6 +151,7 @@ pub fn run() {
             commands::sync::tailnet_status,
             commands::sync::tailnet_login,
             commands::sync::tailnet_logout,
+            commands::sync::tailnet_retry,
             commands::sync::tailnet_reset,
             commands::sync::nas_check,
             commands::sync::nas_disconnect,
