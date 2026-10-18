@@ -32,13 +32,13 @@ export function googleLogoutNote({ revoked, keychainFailed }: GoogleLogoutDto): 
 
 /**
  * サイドバーの同期エラーの文言。「今すぐ同期」で直りうるとき (`clickable`) は既定の「同期エラー · クリックで再試行」
- * (undefined)。片方が空に見えて止まっているとき、認証が断られたとき (ログインし直すか「確かめる」まで同期しない)、
+ * (undefined)。片方が空に見えて止まっているとき、認証が断られたとき (Google はログインし直す、NAS は「確かめる」まで同期しない。どちらにも合う「設定を確かめてください」)、
  * クリックできないときは、再試行を勧めない。
  */
 export function syncErrorText(status: SyncStatusDto | null, clickable: boolean): string | undefined {
   if (status?.state !== "error") return undefined;
   if (status.suspect) return "同期エラー · 同期を止めています";
-  if (status.authRejected) return "同期エラー · ログインし直してください";
+  if (status.authRejected) return "同期エラー · 設定を確かめてください";
   return clickable ? undefined : "同期エラー";
 }
 

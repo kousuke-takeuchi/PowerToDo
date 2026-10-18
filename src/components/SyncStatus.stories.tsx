@@ -33,7 +33,7 @@ export const ErrorTexts: Story = {
     <div style={{ width: 248, display: "flex", flexDirection: "column", gap: 4, padding: 24 }}>
       <SyncStatus state="error" onClick={() => undefined} />
       <SyncStatus state="error" errorText="同期エラー · 同期を止めています" />
-      <SyncStatus state="error" errorText="同期エラー · ログインし直してください" />
+      <SyncStatus state="error" errorText="同期エラー · 設定を確かめてください" />
       <SyncStatus state="error" errorText="同期エラー" />
     </div>
   ),

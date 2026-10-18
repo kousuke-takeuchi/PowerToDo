@@ -216,7 +216,7 @@ impl SyncReport {
             n => format!(" (ほか {} 件)", n - 1),
         };
         Some(format!(
-            "「{name}」が {app} で開かれているため、閉じてから同期します{more}"
+            "「{name}」が {app} で開かれているため、閉じてから同期します{more}。閉じても続くときは、データフォルダにある「~$」か「.~lock.」で始まるファイルを消してください"
         ))
     }
 
@@ -3255,7 +3255,7 @@ mod tests {
         assert_eq!(status.state, SyncPhase::Synced, "{status:?}");
         assert_eq!(
             status.message.as_deref(),
-            Some(format!("「{name}」が {app} で開かれているため、閉じてから同期します").as_str())
+            Some(format!("「{name}」が {app} で開かれているため、閉じてから同期します。閉じても続くときは、データフォルダにある「~$」か「.~lock.」で始まるファイルを消してください").as_str())
         );
         assert!(status.pending >= 1);
     }
