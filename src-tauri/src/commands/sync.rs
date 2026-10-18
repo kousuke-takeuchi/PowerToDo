@@ -116,7 +116,9 @@ impl Secrets {
             Ok(None) => self.memory_get(service, account),
             Err(e) => {
                 eprintln!("keychain read failed: {e}");
-                self.memory_get(service, account)
+                // A password we already hold stays usable; a failed read only means "unknown".
+                let held = lock(&self.cache).get(&key).cloned().flatten();
+                self.memory_get(service, account).or(held)
             }
         };
         lock(&self.cache).insert(key, found.clone());
@@ -523,7 +525,8 @@ fn stop_sidecar(app: &AppHandle) {
     *lock(&rt.start_error) = None;
     // `shutdown`, not just dropping our handle: a command waiting on a clone must not keep the
     // old child alive next to a new one on the same state folder.
-    if let Some(t) = lock(&rt.tailnet).take() {
+    let old = lock(&rt.tailnet).take();
+    if let Some(t) = old {
         t.shutdown();
     }
     let _ = app.emit("tailnet-status", TailnetState::Stopped.view());
@@ -536,7 +539,8 @@ fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
     let rt = &state.sync_rt;
     rt.note_tailnet_state(false);
     // The old child is gone before the new one starts (see `stop_sidecar`).
-    if let Some(old) = lock(&rt.tailnet).take() {
+    let old = lock(&rt.tailnet).take();
+    if let Some(old) = old {
         old.shutdown();
     }
     ensure_tailnet(app)
@@ -544,10 +548,11 @@ fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
 
 /// For the app's exit: the sidecar also ends by itself when our end of its stdin closes.
 pub fn shutdown(app: &AppHandle) {
-    if let Some(state) = app.try_state::<AppState>()
-        && let Some(t) = lock(&state.sync_rt.tailnet).take()
-    {
-        t.shutdown();
+    if let Some(state) = app.try_state::<AppState>() {
+        let old = lock(&state.sync_rt.tailnet).take();
+        if let Some(t) = old {
+            t.shutdown();
+        }
     }
 }
 
@@ -1439,6 +1444,21 @@ mod tests {
         // And the settings read now sees it, without asking again.
         assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
         assert_eq!(kc.gets.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_failed_fresh_read_keeps_a_cached_password() {
+        let kc = Keychain::new();
+        kc.inner.set(NAS_SERVICE, "u@nas", "pw").unwrap();
+        let secrets = Secrets::new(kc.clone());
+        assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
+        // The keychain locks; an explicit read fails but the password we hold stays.
+        kc.broken.store(true, Ordering::SeqCst);
+        assert_eq!(
+            secrets.get_fresh(NAS_SERVICE, "u@nas").as_deref(),
+            Some("pw")
+        );
+        assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
     }
 
     #[test]
