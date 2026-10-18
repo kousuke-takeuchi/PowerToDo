@@ -168,6 +168,8 @@ pub struct SyncReport {
     pub deferred: Vec<String>,
     /// `(file, message for the user)`.
     pub failed: Vec<(String, String)>,
+    /// `(file, app)`: deferred (also in `deferred`) because the app has the file open.
+    pub open: Vec<(String, &'static str)>,
     /// Names that differ only in letter case or Unicode normalization.
     pub clashes: Vec<Vec<String>>,
     /// An upload met a concurrent change (`Precondition`): another run was requested.
@@ -201,6 +203,19 @@ impl SyncReport {
             parts.push(format!("{message}{more}"));
         }
         (!parts.is_empty()).then(|| parts.join(" / "))
+    }
+
+    /// What the status says, besides any problem, about files that wait for the user: open in
+    /// an office app. Not an error.
+    fn notice(&self) -> Option<String> {
+        let (name, app) = self.open.first()?;
+        let more = match self.open.len() {
+            1 => String::new(),
+            n => format!(" (ほか {} 件)", n - 1),
+        };
+        Some(format!(
+            "「{name}」が {app} で開かれているため、閉じてから同期します{more}"
+        ))
     }
 
     /// Every name this run left for the next one.
@@ -289,6 +304,9 @@ enum FileError {
     Local(String),
     /// Busy or changed since the plan: the next run looks again.
     Deferred,
+    /// Open in an office app (its lock file is there): replacing the file would be undone by
+    /// the app's next save. The next run looks again.
+    Open(&'static str),
     Changed,
 }
 
@@ -818,10 +836,15 @@ impl SyncEngine {
             return report;
         }
         report.outcome = RunOutcome::Done;
-        let message = report.problems();
+        let problems = report.problems();
+        let failed = problems.is_some();
+        let message = match (problems, report.notice()) {
+            (Some(p), Some(n)) => Some(format!("{p} / {n}")),
+            (p, n) => p.or(n),
+        };
         let pending = report.pending();
         self.publish(Some(host), g, |s| {
-            s.state = if message.is_some() {
+            s.state = if failed {
                 SyncPhase::Error
             } else {
                 SyncPhase::Synced
@@ -993,9 +1016,27 @@ fn load_written(store: &mut ProjectStore, key: &str, name: &str) -> Result<Loade
     loaded.map_err(|e| FileError::Local(format!("「{name}」を読み込めませんでした: {e}")))
 }
 
+/// The office app that has `<dir>/<name>` open, judged by its lock file: Excel's owner file
+/// `~$<name>` (for a longer name Excel replaces the first two characters instead, so
+/// `~$<name without them>` counts too) or LibreOffice's `.~lock.<name>#`. Replacing or moving a
+/// workbook that is open there would be undone by the app's next save, which would also write
+/// over what came from the other PC without a conflict copy. Saving it later is an external
+/// change (Phase 2) and the next run makes a normal conflict of it.
+fn open_in_app(dir: &Path, name: &str) -> Option<&'static str> {
+    let rest: String = name.chars().skip(2).collect();
+    let excel = [format!("~${name}"), format!("~${rest}")];
+    if excel.iter().any(|lock| dir.join(lock).exists()) {
+        return Some("Excel");
+    }
+    if dir.join(format!(".~lock.{name}#")).exists() {
+        return Some("LibreOffice");
+    }
+    None
+}
+
 /// Under the store lock, right before a local write: the store still has the run's data folder,
-/// `key` has no unsaved, held or in-flight edits, and `name` still has the content the plan saw
-/// (`expected`; `None` = no file).
+/// `key` has no unsaved, held or in-flight edits, no office app has `name` open, and `name`
+/// still has the content the plan saw (`expected`; `None` = no file).
 fn check_local(
     store: &ProjectStore,
     saving: &BTreeSet<String>,
@@ -1009,6 +1050,9 @@ fn check_local(
     }
     if is_busy(store, saving, key) {
         return Err(FileError::Deferred);
+    }
+    if let Some(app) = open_in_app(data_dir, name) {
+        return Err(FileError::Open(app));
     }
     let current = match std::fs::read(data_dir.join(name)) {
         Ok(bytes) => Some(sha256_hex(&bytes)),
@@ -1087,6 +1131,10 @@ impl Run<'_> {
             match result {
                 Ok(()) => {}
                 Err(FileError::Deferred) => self.report.deferred.push(name),
+                Err(FileError::Open(app)) => {
+                    self.report.deferred.push(name.clone());
+                    self.report.open.push((name, app));
+                }
                 // Someone else wrote first: nothing was written, the record stays, and the
                 // next run (asked for at once) sees their version and plans a conflict.
                 Err(FileError::Backend(BackendError::Precondition)) if !self.is_retry => {
@@ -3091,5 +3139,133 @@ mod tests {
         assert!(idle(&r));
         assert!(a.has("p0.xlsx"));
         assert_eq!(saved_state(&a).files.len(), 3);
+    }
+
+    /// The lock files an office suite leaves next to an open `name`, with the app the status
+    /// names: Excel's owner file (the whole name, or with the first two characters replaced
+    /// for a longer name) and LibreOffice's.
+    fn lock_files(name: &str) -> Vec<(String, &'static str)> {
+        let rest: String = name.chars().skip(2).collect();
+        vec![
+            (format!("~${name}"), "Excel"),
+            (format!("~${rest}"), "Excel"),
+            (format!(".~lock.{name}#"), "LibreOffice"),
+        ]
+    }
+
+    fn open_in(pc: &Pc, lock: &str) {
+        fs::write(pc.data.join(lock), b"owner").unwrap();
+    }
+
+    fn assert_open_notice(pc: &Pc, name: &str, app: &str) {
+        let status = pc.engine.status();
+        // Not an error: the file waits for the app to close it.
+        assert_eq!(status.state, SyncPhase::Synced, "{status:?}");
+        assert_eq!(
+            status.message.as_deref(),
+            Some(format!("「{name}」が {app} で開かれているため、閉じてから同期します").as_str())
+        );
+        assert!(status.pending >= 1);
+    }
+
+    #[tokio::test]
+    async fn a_download_waits_while_the_workbook_is_open() {
+        const LONG: &str = "週次ミーティング資料";
+        let file = format!("{LONG}.xlsx");
+        for (lock, app) in lock_files(&file) {
+            let remote = backend();
+            let a = Pc::new(&remote);
+            a.create(LONG);
+            a.sync().await;
+            let b = Pc::new(&remote);
+            b.sync().await;
+            a.add(LONG, "Aの変更");
+            a.sync().await;
+            let before = b.file(&file);
+            open_in(&b, &lock);
+            let r = b.sync().await;
+            assert_eq!(r.deferred, [file.clone()], "{lock}: {r:?}");
+            assert!(r.downloaded.is_empty() && r.conflicts.is_empty(), "{lock}");
+            assert_eq!(b.file(&file), before, "{lock}");
+            assert_open_notice(&b, &file, app);
+            // Closed: the next run brings it down.
+            fs::remove_file(b.data.join(&lock)).unwrap();
+            assert_eq!(b.sync().await.downloaded, [file.clone()], "{lock}");
+            assert_eq!(b.titles(LONG), ["Aの変更"]);
+            assert_eq!(b.engine.status().message, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_archive_after_a_remote_delete_waits_while_the_workbook_is_open() {
+        for (lock, app) in lock_files("p1.xlsx") {
+            let remote = backend();
+            let a = Pc::new(&remote);
+            a.create("p0");
+            a.create("p1");
+            a.sync().await;
+            assert!(remote.remove("p1.xlsx"));
+            open_in(&a, &lock);
+            let r = a.sync().await;
+            assert_eq!(r.deferred, ["p1.xlsx"], "{lock}: {r:?}");
+            assert!(r.archived_local.is_empty(), "{lock}");
+            assert!(a.has("p1.xlsx"), "{lock}");
+            assert!(a.records().contains_key("p1.xlsx"), "{lock}");
+            assert_open_notice(&a, "p1.xlsx", app);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_conflict_that_replaces_the_local_side_waits_while_the_workbook_is_open() {
+        for (lock, app) in lock_files(INBOX_FILE) {
+            let remote = backend_at("2100-01-01T00:00:00");
+            let (a, b) = two_pcs(&remote).await;
+            a.add(INBOX, "Aの変更");
+            b.add(INBOX, "Bの変更");
+            a.sync().await;
+            open_in(&b, &lock);
+            let before = b.file(INBOX_FILE);
+            let r = b.sync().await;
+            assert_eq!(r.deferred, [INBOX_FILE], "{lock}: {r:?}");
+            assert!(r.conflicts.is_empty(), "{lock}");
+            assert_eq!(b.file(INBOX_FILE), before, "{lock}");
+            assert!(conflict_events(&b).is_empty(), "{lock}");
+            assert_open_notice(&b, INBOX_FILE, app);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_mirror_waits_for_an_open_workbook() {
+        for (lock, app) in lock_files(INBOX_FILE) {
+            let remote = backend();
+            let a = Pc::new(&remote);
+            a.add(INBOX, "受信のタスク");
+            a.create("p0");
+            a.sync().await;
+            wipe_local(&a);
+            assert_eq!(a.sync().await.outcome, RunOutcome::Suspect(Side::Local));
+            open_in(&a, &lock);
+            let fresh = a.file(INBOX_FILE);
+            let r = a.mirror(PlanMode::MirrorRemote).await;
+            assert_eq!(r.deferred, [INBOX_FILE], "{lock}: {r:?}");
+            assert_eq!(a.file(INBOX_FILE), fresh, "{lock}");
+            assert!(a.has("p0.xlsx"), "{lock}");
+            assert_open_notice(&a, INBOX_FILE, app);
+        }
+    }
+
+    #[tokio::test]
+    async fn another_workbooks_lock_file_does_not_hold_a_download_back() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        a.add("仕事", "追加");
+        a.sync().await;
+        // Open: an unrelated workbook, and a file whose name only ends like this one.
+        open_in(&b, "~$見積.xlsx");
+        open_in(&b, ".~lock.他の仕事.xlsx#");
+        let r = b.sync().await;
+        assert_eq!(r.downloaded, ["仕事.xlsx"], "{r:?}");
+        assert!(r.deferred.is_empty());
+        assert_eq!(b.engine.status().message, None);
     }
 }
