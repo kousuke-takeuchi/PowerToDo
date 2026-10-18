@@ -749,14 +749,16 @@ impl ProjectStore {
     /// changes nothing), then renamed over `<data>/<name>` and its fingerprint recorded as our
     /// own write, so the watcher does not take it for an external change. The caller loads it
     /// next (`reload_external`, `adopt_new_file` or `reload_common`). The caller must have
-    /// checked that the key has no unsaved, held or in-flight edits.
+    /// checked that the key has no unsaved, held or in-flight edits. The engine stages without
+    /// the store lock and calls [`ProjectStore::install_download`]; tests use this.
+    #[cfg(test)]
     pub fn write_downloaded(&mut self, name: &str, bytes: &[u8]) -> AppResult<()> {
         let staged = stage_download(&self.paths.data_dir, name, bytes)?;
         self.install_download(staged)
     }
 
-    /// The second half of [`ProjectStore::write_downloaded`], for a download staged without the
-    /// store lock.
+    /// Puts a download staged without the store lock ([`stage_download`]) over
+    /// `<data>/<name>` and records it as our own write (see `write_downloaded`).
     pub fn install_download(&mut self, staged: StagedDownload) -> AppResult<()> {
         let (key, path) = self.sync_file(&staged.name)?;
         staged

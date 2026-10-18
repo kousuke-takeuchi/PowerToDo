@@ -1,4 +1,4 @@
-//! Running a sync (spec sections 3.3 to 3.5). [`SyncEngine::run_once`] lists both sides, asks
+//! Running a sync (spec sections 3.3 to 3.5). Each run lists both sides, asks
 //! [`plan`] what to do and does it; everything that touches the data folder goes through the
 //! store, so the app's own view and its external-change detection stay right.
 //! [`SyncEngine::run_loop`] decides when: at start, every 5 minutes, 5 seconds after a save and
@@ -47,10 +47,9 @@ pub enum SyncReason {
     AfterSave,
     /// 「今すぐ同期」.
     SyncNow,
-    /// The sync target or the data folder changed.
+    /// The sync target or the data folder changed (also when the NAS backend is built again
+    /// after Tailscale reached running).
     Settings,
-    /// The connection to the target came up (Tailscale reached running).
-    Connected,
     /// An upload met a concurrent change on the remote; plan again at once.
     Retry,
 }
@@ -266,7 +265,7 @@ struct Inner {
     /// Bumped by every target change and records reset. A run that started under another value
     /// saves nothing more and no longer changes the status.
     generation: u64,
-    /// The target rejected the credentials: no run until `clear_auth_rejected` or a new target.
+    /// The target rejected the credentials: no run until a new target (`set_backend`).
     auth_rejected: bool,
     /// When the next run is wanted (`request`).
     due: Option<Instant>,
@@ -447,7 +446,9 @@ impl SyncEngine {
         }
     }
 
-    /// Lets runs happen again after the target rejected the credentials (「確かめる」 passed).
+    /// Lets runs happen again after the target rejected the credentials. The app attaches a new
+    /// backend instead (`set_backend` clears it); tests use this.
+    #[cfg(test)]
     pub fn clear_auth_rejected(&self) {
         self.lock().auth_rejected = false;
     }
@@ -571,7 +572,9 @@ impl SyncEngine {
         }
     }
 
-    /// One normal sync (spec section 3.4). Waits for a run in progress to end first.
+    /// One normal sync (spec section 3.4), now. Waits for a run in progress to end first. The
+    /// app runs syncs through [`SyncEngine::run_loop`]; tests call this.
+    #[cfg(test)]
     pub async fn run_once(&self, host: &dyn SyncHost) -> SyncReport {
         self.run(host, PlanMode::Normal, false, None).await
     }
@@ -2171,7 +2174,6 @@ mod tests {
             SyncReason::Interval,
             SyncReason::AfterSave,
             SyncReason::Startup,
-            SyncReason::Connected,
             SyncReason::SyncNow,
         ] {
             assert!(!a.engine.request(reason));
