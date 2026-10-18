@@ -15,7 +15,6 @@ import type { ExpandApi } from "../views/ProjectView";
 import { LabelDetailView } from "../views/LabelDetailView";
 import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
-import { targetName } from "../views/SyncPane";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
 import { TodayView } from "../views/TodayView";
@@ -34,7 +33,7 @@ import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
-import { formatSynced } from "./syncText";
+import { formatSynced, targetName } from "./syncText";
 import { useSync } from "./useSync";
 import { useSettingsPanes } from "./useSettingsPanes";
 
@@ -64,6 +63,8 @@ export function Main({ app }: { app: AppStateDto }) {
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
   const syncState = syncStatus?.state ?? "off";
+  // 片方が空に見えて止まっているあいだは「今すぐ同期」しても動かない (帯で戻す方向を選ぶ)
+  const syncClickable = syncState === "error" && !syncStatus?.suspect;
   // 同期のエラーの帯は閉じられる。エラーが続く間は同じ文言を出し直さず、直って別のエラーが起きたらまた出す。
   const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
   useEffect(() => {
@@ -341,7 +342,8 @@ export function Main({ app }: { app: AppStateDto }) {
       syncState={syncState}
       lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
       syncDetail={syncStatus?.message}
-      onSyncClick={syncState === "error" ? () => void sync.syncNow(true) : undefined}
+      syncOffText="同期オフ"
+      onSyncClick={syncClickable ? () => void sync.syncNow(true) : undefined}
       displayName={displayName}
       onNavigate={navigate}
       onAddTask={() => {
@@ -659,7 +661,8 @@ export function Main({ app }: { app: AppStateDto }) {
       rail={{
         lastSyncedAt: formatSynced(syncStatus?.lastSynced),
         syncDetail: syncStatus?.message,
-        onSyncClick: syncState === "error" ? () => void sync.syncNow(true) : undefined,
+        syncOffText: "同期オフ",
+        onSyncClick: syncClickable ? () => void sync.syncNow(true) : undefined,
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,
         onNavigate: (t) => {

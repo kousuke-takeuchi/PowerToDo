@@ -7,7 +7,8 @@ import { TextField } from "../components/TextField";
 import type { SyncTarget } from "./SettingsDialog";
 import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, hintStyle, labelStyle, syncTargetOptions } from "./SyncFields";
-import { NasSetup, isNasConnected } from "./SyncPane";
+import { isNasConnected } from "../app/syncText";
+import { NasSetup } from "./SyncPane";
 import type { SyncPaneProps } from "./SyncPane";
 
 export type OnboardingProps = {
@@ -150,9 +151,9 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
             value={backend}
             onChange={onChangeBackend}
             ariaLabel="同期先"
-            disabled={!st || syncPane.busy === "backend"}
+            disabled={!st || !!syncPane.busy}
           />
-          <div style={hintStyle}>Google Drive はこのビルドでは準備中です。</div>
+          {backend !== "gdrive" && <div style={hintStyle}>Google Drive はこのビルドでは準備中です。</div>}
         </div>
         {backend === "none" && <div style={hintStyle}>同期しません。あとから設定の「同期」で選べます。</div>}
         {backend === "gdrive" && <div style={hintStyle}>Google Drive はこのビルドでは準備中です。</div>}

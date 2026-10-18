@@ -1,7 +1,7 @@
 import type React from "react";
 import { useState } from "react";
 import { isImeKey } from "../app/keys";
-import { formatSynced } from "../app/syncText";
+import { formatSynced, isNasConnected, targetName } from "../app/syncText";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import type { SyncState } from "../components/SyncStatus";
@@ -51,16 +51,6 @@ export type SyncPaneProps = TailnetActions & {
   onRecover?: (mode: SyncRecoverMode) => void;
   onOpenGuide?: () => void;
 };
-
-/** NAS が設定ずみ: 同期先が NAS で、アドレス・ユーザー・パスワードが揃っている。 */
-export function isNasConnected(s: SyncSettingsDto | null): boolean {
-  return !!s && s.backend === "nas" && !!s.nasUrl && !!s.nasUser && s.nasPasswordSet;
-}
-
-/** 同期先の名前 (確認ダイアログや「戻す」の文言用)。 */
-export function targetName(b: SyncBackend | undefined): string {
-  return b === "gdrive" ? "Google Drive" : "NAS";
-}
 
 const PASSWORD_NOT_SAVED = "パスワードを保存できません (再起動するまで有効)";
 
@@ -134,7 +124,7 @@ export function TailnetRow({
         : "承認待ちです。Tailscale の管理画面で、この PC を承認してください";
       break;
     case "starting":
-      text = `起動中… ${secs} 秒`;
+      text = "起動中…";
       break;
     case "running":
       color = "var(--color-success)";
@@ -154,7 +144,11 @@ export function TailnetRow({
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <Dot color={color} />
-        <span style={bodyText}>{text}</span>
+        {/* 状態が変わったときだけ読み上げる: 経過秒数は aria-hidden で、毎秒は読まれない */}
+        <span aria-live="polite" style={bodyText}>
+          {text}
+          {t?.state === "starting" && <span aria-hidden>{` ${secs} 秒`}</span>}
+        </span>
       </div>
       {(actions || stuck) && (
         <Row>
@@ -324,7 +318,7 @@ function NasConnected({
           </div>
         )}
         <Row>
-          <Button onClick={onSyncNow} disabled={!!busy || state === "syncing"}>
+          <Button onClick={onSyncNow} disabled={!!busy || state === "syncing" || !!status?.suspect}>
             {busy === "syncNow" ? "同期しています…" : "今すぐ同期"}
           </Button>
         </Row>
@@ -441,9 +435,9 @@ export function SyncPane(props: SyncPaneProps) {
           value={settings?.backend ?? "none"}
           onChange={onChangeBackend}
           ariaLabel="同期先"
-          disabled={!settings || busy === "backend"}
+          disabled={!settings || !!busy}
         />
-        {!googleReady && <Desc>Google Drive はこのビルドでは準備中です。</Desc>}
+        {!googleReady && settings?.backend !== "gdrive" && <Desc>Google Drive はこのビルドでは準備中です。</Desc>}
       </Section>
       {settings && status?.suspect && settings.backend !== "none" && (
         <SuspectPanel side={status.suspect} target={targetName(settings.backend)} busy={!!busy} error={recoverError} onRecover={onRecover} />

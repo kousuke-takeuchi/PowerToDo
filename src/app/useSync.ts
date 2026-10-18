@@ -4,9 +4,8 @@ import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
 import { onSyncConflict, onSyncStatus, onTailnetStatus } from "../api/events";
 import type { SyncBackend, SyncConflict, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
-import { isNasConnected, targetName } from "../views/SyncPane";
 import type { SyncBusy, SyncPaneProps } from "../views/SyncPane";
-import { recoverQuestion, recoverResult } from "./syncText";
+import { isNasConnected, recoverQuestion, recoverResult, targetName } from "./syncText";
 
 type Options = {
   /** 「同期」ペイン (設定ダイアログ / 初回起動) を見せている間 true。設定と Tailscale の状態は、このときだけ読む。 */
@@ -135,29 +134,49 @@ export function useSync({ active, onNotice }: Options) {
     };
   }, [wanted, reloadSettings, applyTailnet]);
 
-  // ペインを閉じたら、前回の失敗は消す
+  // ペインを閉じたら、前回の失敗と Tailscale の古い状態は消す (開き直したら読み直す)
   useEffect(() => {
     if (active) return;
     setError(null);
     setCheckError(null);
   }, [active]);
-
-  // `starting` の間は秒数を進める
   useEffect(() => {
-    if (tailnet?.state !== "starting") return;
+    if (wanted) return;
+    tailnetRef.current = null;
+    loginPending.current = false;
+    setTailnet(null);
+  }, [wanted]);
+  // 片方が空に見える状態が終わったら、戻せなかった理由も消す
+  const suspected = !!status?.suspect;
+  useEffect(() => {
+    if (!suspected) setRecoverError(null);
+  }, [suspected]);
+
+  // `starting` を見せている間だけ秒数を進める (ペインが閉じていれば止める: 1 秒ごとの再描画を避ける)
+  useEffect(() => {
+    if (!wanted || tailnet?.state !== "starting") return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [tailnet?.state]);
+  }, [wanted, tailnet?.state]);
   const tailnetSecs = tailnet?.state === "starting" ? (tailnet.startedSecs ?? 0) + Math.max(0, Math.floor((now - tailnetAt.current) / 1000)) : 0;
 
   // ---- 操作 ----
-  /** 一度に一つ。他の操作が走っている間は何もしない。成功なら true。 */
-  const run = useCallback(async (kind: SyncBusy, fn: () => Promise<void>, fail: (message: string) => void = setError): Promise<boolean> => {
+  /**
+   * 一度に一つ。他の操作が走っている間は何もしない (押すボタンは busy で無効になる)。成功なら true。
+   * `confirm` は確認ダイアログ: 操作の枠を取ってから出すので、続けて押しても二つ開かない。断られたら false。
+   */
+  const run = useCallback(async (
+    kind: SyncBusy,
+    fn: () => Promise<void>,
+    fail: (message: string) => void = setError,
+    confirm?: () => Promise<boolean>,
+  ): Promise<boolean> => {
     if (busyRef.current) return false;
     busyRef.current = kind;
     setBusy(kind);
     setError(null);
     try {
+      if (confirm && !(await confirm())) return false;
       await fn();
       return true;
     } catch (e) {
@@ -172,6 +191,7 @@ export function useSync({ active, onNotice }: Options) {
   const refreshStatus = useCallback(async () => {
     const s = await api.syncStatus();
     if (alive.current) setStatus(s);
+    return s;
   }, []);
 
   const refreshTailnet = useCallback(async () => {
@@ -186,20 +206,21 @@ export function useSync({ active, onNotice }: Options) {
       if (!cur) return false;
       if (backend === cur.backend) return true;
       if (backend === "gdrive" && !cur.googleAvailable) return false;
-      if (confirm) {
-        const message =
-          backend === "none"
-            ? "同期をやめます。この PC のファイルはそのまま残ります。あとで同期先を選ぶと、全ファイルを送り直します。"
-            : `同期先を「${BACKEND_NAMES[backend]}」に変えます。次の同期で全ファイルを送り直します。`;
-        const ok = await confirmAction(message, { title: "同期先の変更", okLabel: "変更する" }).catch(() => false);
-        if (!ok) return false;
-      }
-      return run("backend", async () => {
-        const next = await api.setSyncBackend(backend);
-        if (alive.current) setSettings(next);
-        await refreshStatus();
-        await refreshTailnet().catch(() => undefined);
-      });
+      const message =
+        backend === "none"
+          ? "同期をやめます。この PC のファイルはそのまま残ります。あとで同期先を選ぶと、全ファイルを送り直します。"
+          : `同期先を「${BACKEND_NAMES[backend]}」に変えます。次の同期で全ファイルを送り直します。`;
+      return run(
+        "backend",
+        async () => {
+          const next = await api.setSyncBackend(backend);
+          if (alive.current) setSettings(next);
+          await refreshStatus();
+          await refreshTailnet().catch(() => undefined);
+        },
+        setError,
+        confirm ? () => confirmAction(message, { title: "同期先の変更", okLabel: "変更する" }).catch(() => false) : undefined,
+      );
     },
     [run, refreshStatus, refreshTailnet],
   );
@@ -226,31 +247,43 @@ export function useSync({ active, onNotice }: Options) {
 
   const retry = useCallback(() => run("retry", () => api.tailnetRetry().then(() => undefined)), [run]);
 
-  const reset = useCallback(async () => {
-    const ok = await confirmAction("この PC の Tailscale のログイン情報を消して、最初からログインし直します。", {
-      title: "Tailscale の状態を消す",
-      okLabel: "消してログインし直す",
-    }).catch(() => false);
-    if (!ok) return false;
-    return run("reset", async () => {
-      loginPending.current = true; // 作り直した後に届くログイン URL は、押した結果として開く
-      try {
-        await api.tailnetReset();
-      } catch (e) {
-        loginPending.current = false;
-        throw e;
-      }
-    });
-  }, [run]);
+  const reset = useCallback(
+    () =>
+      run(
+        "reset",
+        async () => {
+          loginPending.current = true; // 作り直した後に届くログイン URL は、押した結果として開く
+          try {
+            await api.tailnetReset();
+          } catch (e) {
+            loginPending.current = false;
+            throw e;
+          }
+        },
+        setError,
+        () =>
+          confirmAction("この PC の Tailscale のログイン情報を消して、最初からログインし直します。", {
+            title: "Tailscale の状態を消す",
+            okLabel: "消してログインし直す",
+          }).catch(() => false),
+      ),
+    [run],
+  );
 
-  const logout = useCallback(async () => {
-    const ok = await confirmAction("この PC を Tailscale からログアウトします。NAS と同期するには、もう一度ログインが必要です。", {
-      title: "Tailscale からログアウト",
-      okLabel: "ログアウト",
-    }).catch(() => false);
-    if (!ok) return false;
-    return run("logout", () => api.tailnetLogout().then(() => undefined));
-  }, [run]);
+  const logout = useCallback(
+    () =>
+      run(
+        "logout",
+        () => api.tailnetLogout().then(() => undefined),
+        setError,
+        () =>
+          confirmAction("この PC を Tailscale からログアウトします。NAS と同期するには、もう一度ログインが必要です。", {
+            title: "Tailscale からログアウト",
+            okLabel: "ログアウト",
+          }).catch(() => false),
+      ),
+    [run],
+  );
 
   /** 「確かめる」。通ったら設定を読み直す (接続済みの画面になる)。 */
   const check = useCallback(
@@ -293,22 +326,32 @@ export function useSync({ active, onNotice }: Options) {
   );
 
   const recover = useCallback(
-    async (mode: SyncRecoverMode) => {
+    (mode: SyncRecoverMode) => {
       const q = recoverQuestion(mode, targetName(settingsRef.current?.backend));
-      const ok = await confirmAction(q.message, { title: "同期先との食い違いを直す", okLabel: q.okLabel }).catch(() => false);
-      if (!ok) return false;
-      setRecoverError(null);
+      /** 失敗は、まだ止まっている間は帯 (とペイン) にだけ出す。止まりが解けていたら、帯が消えるので通知に出す。 */
+      const failed = (text: string) => {
+        setRecoverError(text);
+        void refreshStatus()
+          .then((s) => {
+            if (s.suspect) return;
+            setRecoverError(null);
+            noticeRef.current?.(text, "error");
+          })
+          .catch(() => undefined);
+      };
       return run(
         "recover",
         async () => {
+          setRecoverError(null);
           const r = await api.syncRecover(mode);
           const msg = recoverResult(r);
-          if (msg.tone === "error") setRecoverError(msg.text);
-          noticeRef.current?.(msg.text, msg.tone);
-          await refreshStatus().catch(() => undefined);
+          const s = await refreshStatus().catch(() => null);
+          if (msg.tone === "error" && s?.suspect) setRecoverError(msg.text);
+          else noticeRef.current?.(msg.text, msg.tone);
         },
         // `Invalid` の日本語の理由はそのまま出す
-        setRecoverError,
+        failed,
+        () => confirmAction(q.message, { title: "同期先との食い違いを直す", okLabel: q.okLabel }).catch(() => false),
       );
     },
     [run, refreshStatus],

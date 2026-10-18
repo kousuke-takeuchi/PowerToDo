@@ -1,4 +1,14 @@
-import type { SyncRecoverDto, SyncRecoverMode } from "../types/model";
+import type { SyncBackend, SyncRecoverDto, SyncRecoverMode, SyncSettingsDto } from "../types/model";
+
+/** NAS が設定ずみ: 同期先が NAS で、アドレス・ユーザー・パスワードが揃っている。 */
+export function isNasConnected(s: SyncSettingsDto | null): boolean {
+  return !!s && s.backend === "nas" && !!s.nasUrl && !!s.nasUser && s.nasPasswordSet;
+}
+
+/** 同期先の名前 (確認ダイアログや「戻す」の文言用)。 */
+export function targetName(b: SyncBackend | undefined): string {
+  return b === "gdrive" ? "Google Drive" : "NAS";
+}
 
 const LOCAL_STAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
 

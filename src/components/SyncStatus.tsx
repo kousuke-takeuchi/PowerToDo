@@ -9,6 +9,8 @@ export type SyncStatusProps = {
   onClick?: () => void;
   /** 補足 (エラーの理由など)。ツールチップに出す。 */
   detail?: string;
+  /** 「同期オフ」の文言。既定は「同期オフ · 未ログイン」 (絵コンテ)。 */
+  offText?: string;
 };
 
 type Def = {
@@ -27,9 +29,9 @@ const defs: Record<SyncState, Def> = {
   off: { Icon: CloudOff, iconColor: "var(--color-text-muted)", textColor: "var(--color-text-secondary)", text: () => "同期オフ · 未ログイン" },
 };
 
-export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail }: SyncStatusProps) {
+export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail, offText }: SyncStatusProps) {
   const d = defs[state];
-  const text = d.text(lastSyncedAt);
+  const text = state === "off" && offText ? offText : d.text(lastSyncedAt);
   const icon = (
     <span
       style={{
@@ -76,7 +78,7 @@ export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail }: Sy
       }
     >
       {icon}
-      {!compact && <span style={{ fontSize: 12, lineHeight: "17px", color: d.textColor }}>{text}</span>}
+      {!compact && <span aria-live="polite" style={{ fontSize: 12, lineHeight: "17px", color: d.textColor }}>{text}</span>}
     </button>
   );
 }

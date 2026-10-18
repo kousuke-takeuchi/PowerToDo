@@ -209,7 +209,7 @@ impl SyncReport {
 
 fn suspect_message(side: Side) -> String {
     match side {
-        Side::Local => "このPCのデータフォルダが空に見えるため同期を止めました",
+        Side::Local => "この PCのデータフォルダが空に見えるため同期を止めました",
         Side::Remote => "同期先が空に見えるため同期を止めました",
     }
     .to_string()
@@ -1145,7 +1145,7 @@ impl Run<'_> {
         // A workbook this PC cannot read is not sent (a download may still repair it).
         if self.local_load_failed(&key_of(name)?) {
             return Err(FileError::Local(format!(
-                "「{name}」はこのPCで読み込めていないため送りません"
+                "「{name}」はこの PCで読み込めていないため送りません"
             )));
         }
         // Read again: a save since the listing would make the hash wrong. Next round then.
@@ -2281,7 +2281,7 @@ mod tests {
         assert_eq!(status.state, SyncPhase::Error);
         assert_eq!(
             status.message.as_deref(),
-            Some("このPCのデータフォルダが空に見えるため同期を止めました")
+            Some("この PCのデータフォルダが空に見えるため同期を止めました")
         );
         assert_eq!(status.suspect, Some(Side::Local));
         // Neither side was touched; the next run stops the same way.

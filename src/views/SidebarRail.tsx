@@ -8,6 +8,7 @@ export type SidebarRailProps = {
   syncState: SyncState;
   lastSyncedAt?: string;
   syncDetail?: string;
+  syncOffText?: string;
   onSyncClick?: () => void;
   onExpand?: () => void;
   onAddTask?: () => void;
@@ -19,7 +20,7 @@ function AccentCirclePlus(p: { size?: number }) {
 }
 
 /** 幅 960 のサイドバー。アイコンだけ (プロジェクト一覧へは先頭の「一覧」アイコンで展開)。 */
-export function SidebarRail({ syncState, lastSyncedAt, syncDetail, onSyncClick, onExpand, onAddTask, onNavigate }: SidebarRailProps) {
+export function SidebarRail({ syncState, lastSyncedAt, syncDetail, syncOffText, onSyncClick, onExpand, onAddTask, onNavigate }: SidebarRailProps) {
   const items: { icon: React.ComponentType<{ size?: number }>; label: string; target: Parameters<NonNullable<SidebarRailProps["onNavigate"]>>[0] }[] = [
     { icon: Search, label: "検索", target: "search" },
     { icon: Inbox, label: "受信トレイ", target: "inbox" },
@@ -49,7 +50,7 @@ export function SidebarRail({ syncState, lastSyncedAt, syncDetail, onSyncClick, 
         <Button key={i.target} variant="icon" icon={i.icon} ariaLabel={i.label} onClick={() => onNavigate?.(i.target)} />
       ))}
       <div style={{ flex: 1 }} />
-      <SyncStatus state={syncState} lastSyncedAt={lastSyncedAt} detail={syncDetail} onClick={onSyncClick} compact />
+      <SyncStatus state={syncState} lastSyncedAt={lastSyncedAt} detail={syncDetail} offText={syncOffText} onClick={onSyncClick} compact />
     </nav>
   );
 }

@@ -43,7 +43,7 @@ export function NasFields({ values, onChange, placeholders, passwordNote }: NasF
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <Field label="サーバー URL">
-        <TextField type="url" value={v.url} onChange={(url) => set({ url })} placeholder={placeholders ? "http://nas:5005/PowerToDo/" : undefined} />
+        <TextField type="url" value={v.url} onChange={(url) => set({ url })} placeholder={placeholders ? "http://nas:5005/powertodo/" : undefined} />
       </Field>
       <Field label="ユーザー名">
         <TextField value={v.user} onChange={(user) => set({ user })} placeholder={placeholders ? "たろう" : undefined} />

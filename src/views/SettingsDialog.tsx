@@ -10,7 +10,8 @@ import { AccountPane, DataPane, DateTimePane, Desc, KeyboardPane, LaterPane, Not
 import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "./SettingsPanes";
 import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, syncTargetOptions } from "./SyncFields";
-import { SyncPane, isNasConnected } from "./SyncPane";
+import { isNasConnected } from "../app/syncText";
+import { SyncPane } from "./SyncPane";
 import type { SyncPaneProps } from "./SyncPane";
 
 export type SyncTarget = "google" | "nas" | "none";

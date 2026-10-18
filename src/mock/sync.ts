@@ -29,7 +29,7 @@ export const syncStatuses = {
     pending: 2,
   },
   authRejected: { state: "error", message: "NAS のユーザー名かパスワードが違います。設定を直して「確かめる」を押してください", pending: 0 },
-  suspectLocal: { state: "error", message: "このPCのデータフォルダが空に見えるため同期を止めました", pending: 0, suspect: "local" },
+  suspectLocal: { state: "error", message: "この PC のデータフォルダが空に見えるため同期を止めました", pending: 0, suspect: "local" },
   suspectRemote: { state: "error", message: "同期先が空に見えるため同期を止めました", pending: 0, suspect: "remote" },
   off: { state: "off", pending: 0 },
 } satisfies Record<string, SyncStatusDto>;
