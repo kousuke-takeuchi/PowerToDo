@@ -11,6 +11,8 @@ export type SyncStatusProps = {
   detail?: string;
   /** 「同期オフ」の文言。既定は「同期オフ · 未ログイン」 (絵コンテ)。 */
   offText?: string;
+  /** `error` の文言。既定は「同期エラー · クリックで再試行」 (絵コンテ)。再試行では直らないときやクリックできないときに渡す。 */
+  errorText?: string;
 };
 
 type Def = {
@@ -29,9 +31,9 @@ const defs: Record<SyncState, Def> = {
   off: { Icon: CloudOff, iconColor: "var(--color-text-muted)", textColor: "var(--color-text-secondary)", text: () => "同期オフ · 未ログイン" },
 };
 
-export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail, offText }: SyncStatusProps) {
+export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail, offText, errorText }: SyncStatusProps) {
   const d = defs[state];
-  const text = state === "off" && offText ? offText : d.text(lastSyncedAt);
+  const text = state === "off" && offText ? offText : state === "error" && errorText ? errorText : d.text(lastSyncedAt);
   const icon = (
     <span
       style={{

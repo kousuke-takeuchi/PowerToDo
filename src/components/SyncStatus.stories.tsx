@@ -26,6 +26,19 @@ export const Variants: Story = {
   ),
 };
 
+/** 再試行では直らない同期エラー (Main が `errorText` で渡す): 止めている、ログインし直す、クリックできない。 */
+export const ErrorTexts: Story = {
+  args: { state: "error" },
+  render: () => (
+    <div style={{ width: 248, display: "flex", flexDirection: "column", gap: 4, padding: 24 }}>
+      <SyncStatus state="error" onClick={() => undefined} />
+      <SyncStatus state="error" errorText="同期エラー · 同期を止めています" />
+      <SyncStatus state="error" errorText="同期エラー · ログインし直してください" />
+      <SyncStatus state="error" errorText="同期エラー" />
+    </div>
+  ),
+};
+
 export const Playground: Story = {
   args: { state: "synced", lastSyncedAt: "09:41", compact: false },
   argTypes: { state: { control: "inline-radio", options: states } },

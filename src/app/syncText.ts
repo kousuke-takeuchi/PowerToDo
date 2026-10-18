@@ -1,4 +1,4 @@
-import type { GoogleLoginOutcome, GoogleLogoutDto, SyncBackend, SyncRecoverDto, SyncRecoverMode, SyncSettingsDto } from "../types/model";
+import type { GoogleLoginOutcome, GoogleLogoutDto, SyncBackend, SyncRecoverDto, SyncRecoverMode, SyncSettingsDto, SyncStatusDto } from "../types/model";
 
 /** NAS が設定ずみ: 同期先が NAS で、アドレス・ユーザー・パスワードが揃っている。 */
 export function isNasConnected(s: SyncSettingsDto | null): boolean {
@@ -28,6 +28,18 @@ export function googleLogoutNote({ revoked, keychainFailed }: GoogleLogoutDto): 
   if (!revoked) parts.push("ただし Google に接続できず、Google 側のログインは取り消せていません。つながるときに Google アカウントの設定で、PowerToDo のアクセスを取り消してください");
   if (keychainFailed) parts.push("この PC のキーチェーンからログイン情報を削除できませんでした (Google 側では取り消し済みで、使えません)");
   return parts.join("。");
+}
+
+/**
+ * サイドバーの同期エラーの文言。「今すぐ同期」で直りうるとき (`clickable`) は既定の「同期エラー · クリックで再試行」
+ * (undefined)。片方が空に見えて止まっているとき、認証が断られたとき (ログインし直すか「確かめる」まで同期しない)、
+ * クリックできないときは、再試行を勧めない。
+ */
+export function syncErrorText(status: SyncStatusDto | null, clickable: boolean): string | undefined {
+  if (status?.state !== "error") return undefined;
+  if (status.suspect) return "同期エラー · 同期を止めています";
+  if (status.authRejected) return "同期エラー · ログインし直してください";
+  return clickable ? undefined : "同期エラー";
 }
 
 /** 同期先の名前 (確認ダイアログや「戻す」の文言用)。 */

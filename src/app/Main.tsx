@@ -33,7 +33,7 @@ import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
-import { formatSynced, targetName } from "./syncText";
+import { formatSynced, syncErrorText, targetName } from "./syncText";
 import { useSync } from "./useSync";
 import { useSettingsPanes } from "./useSettingsPanes";
 
@@ -63,8 +63,10 @@ export function Main({ app }: { app: AppStateDto }) {
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
   const syncState = syncStatus?.state ?? "off";
-  // 片方が空に見えて止まっているあいだは「今すぐ同期」しても動かない (帯で戻す方向を選ぶ)
-  const syncClickable = syncState === "error" && !syncStatus?.suspect;
+  // 片方が空に見えて止まっているあいだ (帯で戻す方向を選ぶ) と、認証が断られたあいだ (ログインし直すか「確かめる」まで
+  // 同期しない) は、「今すぐ同期」しても動かない
+  const syncClickable = syncState === "error" && !syncStatus?.suspect && !syncStatus?.authRejected;
+  const syncError = syncErrorText(syncStatus, syncClickable);
   // 同期のエラーの帯は閉じられる。エラーが続く間は同じ文言を出し直さず、直って別のエラーが起きたらまた出す。
   const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
   useEffect(() => {
@@ -343,6 +345,7 @@ export function Main({ app }: { app: AppStateDto }) {
       lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
       syncDetail={syncStatus?.message}
       syncOffText="同期オフ"
+      syncErrorText={syncError}
       onSyncClick={syncClickable ? () => void sync.syncNow(true) : undefined}
       displayName={displayName}
       onNavigate={navigate}
@@ -662,6 +665,7 @@ export function Main({ app }: { app: AppStateDto }) {
         lastSyncedAt: formatSynced(syncStatus?.lastSynced),
         syncDetail: syncStatus?.message,
         syncOffText: "同期オフ",
+        syncErrorText: syncError,
         onSyncClick: syncClickable ? () => void sync.syncNow(true) : undefined,
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,
