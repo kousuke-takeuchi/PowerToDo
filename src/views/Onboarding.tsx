@@ -181,7 +181,7 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
     );
     footer = (
       <>
-        <button type="button" onClick={onSkip} style={skipStyle}>
+        <button type="button" onClick={onSkip} style={skipStyle} disabled={!!syncPane.busy}>
           スキップ
         </button>
         {!nasUnconnected && (
