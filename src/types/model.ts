@@ -122,6 +122,10 @@ export interface SyncSettingsDto {
   /** false のとき、パスワードはキーチェーンに保存できず再起動まで有効: 「パスワードを保存できません (再起動するまで有効)」。`nasPasswordSet` と合わせて判断する。 */
   passwordPersistent: boolean;
   googleEmail?: string;
+  /** Google のリフレッシュトークンが保存されている (同期先が Google Drive のときだけ調べる)。 */
+  googleLoggedIn: boolean;
+  /** false のとき、ログイン情報はキーチェーンに保存できず再起動まで有効: 「ログイン情報を保存できません (再起動するまで有効)」。`googleLoggedIn` と合わせて判断する。 */
+  googleTokenPersistent: boolean;
   /** このビルドに Google の OAuth クライアントが入っている。 */
   googleAvailable: boolean;
 }
@@ -142,6 +146,12 @@ export interface SyncConflict { file: string; conflictFile: string; }
 export type SyncRecoverMode = "mirrorRemote" | "mirrorLocal";
 export type SyncRecoverOutcome = "done" | "suspect" | "offline" | "failed" | "interrupted" | "notRun";
 export interface SyncRecoverDto { outcome: SyncRecoverOutcome; uploaded: number; downloaded: number; archived: number; failed: number; }
+
+/** `done`: ログインした。`cancelled`: 「キャンセル」を押した。`denied`: Google の画面で許可しなかった。後ろの二つは失敗ではない。 */
+export type GoogleLoginOutcome = "done" | "cancelled" | "denied";
+export interface GoogleLoginDto { outcome: GoogleLoginOutcome; }
+/** `revoked`: false のとき Google 側の取り消しはできなかった (この PC では、ログアウトは済んでいる)。 */
+export interface GoogleLogoutDto { revoked: boolean; }
 
 /**
  * Tailscale (サイドカー) の状態。`tailnet-status` event / `tailnet_status`.

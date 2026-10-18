@@ -1,8 +1,32 @@
-import type { SyncBackend, SyncRecoverDto, SyncRecoverMode, SyncSettingsDto } from "../types/model";
+import type { GoogleLoginOutcome, SyncBackend, SyncRecoverDto, SyncRecoverMode, SyncSettingsDto } from "../types/model";
 
 /** NAS が設定ずみ: 同期先が NAS で、アドレス・ユーザー・パスワードが揃っている。 */
 export function isNasConnected(s: SyncSettingsDto | null): boolean {
   return !!s && s.backend === "nas" && !!s.nasUrl && !!s.nasUser && s.nasPasswordSet;
+}
+
+/** Google Drive にログイン中: 同期先が Google Drive で、リフレッシュトークンが保存されている。 */
+export function isGoogleLoggedIn(s: SyncSettingsDto | null): boolean {
+  return !!s && s.backend === "gdrive" && s.googleLoggedIn;
+}
+
+/** Google のログインが失敗ではない形で終わったときに、ペインへ出す案内 (`done` は何も出さない)。 */
+export function googleLoginNote(outcome: GoogleLoginOutcome): string | null {
+  switch (outcome) {
+    case "cancelled":
+      return "ログインをキャンセルしました";
+    case "denied":
+      return "Google でのログインが許可されなかったため、ログインしませんでした";
+    case "done":
+      return null;
+  }
+}
+
+/** ログアウトの後の案内。`revoked: false` は Google 側の取り消しができなかったとき。 */
+export function googleLogoutNote(revoked: boolean): string {
+  return revoked
+    ? "ログアウトしました"
+    : "ログアウトしました。ただし Google に接続できず、Google 側のログインは取り消せていません。つながるときに Google アカウントの設定で、PowerToDo のアクセスを取り消してください";
 }
 
 /** 同期先の名前 (確認ダイアログや「戻す」の文言用)。 */

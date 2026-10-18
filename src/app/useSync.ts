@@ -5,7 +5,7 @@ import { confirmAction } from "../api/dialogs";
 import { onSyncConflict, onSyncStatus, onTailnetStatus } from "../api/events";
 import type { SyncBackend, SyncConflict, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
 import type { SyncBusy, SyncPaneProps } from "../views/SyncPane";
-import { isNasConnected, recoverQuestion, recoverResult, targetName } from "./syncText";
+import { googleLoginNote, googleLogoutNote, isNasConnected, recoverQuestion, recoverResult, targetName } from "./syncText";
 
 type Options = {
   /** 「同期」ペイン (設定ダイアログ / 初回起動) を見せている間 true。設定と Tailscale の状態は、このときだけ読む。 */
@@ -31,6 +31,8 @@ export function useSync({ active, onNotice }: Options) {
   const [error, setError] = useState<string | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [recoverError, setRecoverError] = useState<string | null>(null);
+  /** Google のログインやログアウトが、失敗ではない形で終わったときの案内 (キャンセル、許可しなかった、Google 側を取り消せなかった)。 */
+  const [googleNote, setGoogleNote] = useState<string | null>(null);
   /** `starting` の秒数を進めるための現在時刻と、その状態を受け取った時刻。 */
   const [now, setNow] = useState(() => Date.now());
   const tailnetAt = useRef(Date.now());
@@ -139,6 +141,7 @@ export function useSync({ active, onNotice }: Options) {
     if (active) return;
     setError(null);
     setCheckError(null);
+    setGoogleNote(null);
   }, [active]);
   useEffect(() => {
     if (wanted) return;
@@ -175,6 +178,7 @@ export function useSync({ active, onNotice }: Options) {
     busyRef.current = kind;
     setBusy(kind);
     setError(null);
+    setGoogleNote(null);
     try {
       if (confirm && !(await confirm())) return false;
       await fn();
@@ -311,6 +315,48 @@ export function useSync({ active, onNotice }: Options) {
     [run, reloadSettings, refreshStatus],
   );
 
+  /**
+   * 「Google でログイン」。ブラウザが開き、Google から戻るまで (最長 5 分) 待つ。ログインできたら true。
+   * キャンセルと「許可しない」は失敗ではない (案内だけ出す)。
+   */
+  const googleLogin = useCallback(async (): Promise<boolean> => {
+    let done = false;
+    await run("googleLogin", async () => {
+      const r = await api.googleLogin();
+      await reloadSettings();
+      await refreshStatus().catch(() => undefined);
+      if (!alive.current) return;
+      setGoogleNote(googleLoginNote(r.outcome));
+      done = r.outcome === "done";
+    });
+    return done;
+  }, [run, reloadSettings, refreshStatus]);
+
+  /** 「キャンセル」: 待っているログインを終わらせる (その結果は `googleLogin` が受け取る)。操作の枠は使わない。 */
+  const googleCancel = useCallback(() => {
+    void api.googleLoginCancel().catch(() => undefined);
+  }, []);
+
+  const googleLogout = useCallback(
+    () =>
+      run(
+        "googleLogout",
+        async () => {
+          const r = await api.googleLogout();
+          await reloadSettings();
+          await refreshStatus().catch(() => undefined);
+          if (alive.current) setGoogleNote(googleLogoutNote(r.revoked));
+        },
+        setError,
+        () =>
+          confirmAction("Google Drive からログアウトします。同期は止まります。この PC のファイルも Google Drive 上のファイルも、そのまま残ります。", {
+            title: "Google からログアウト",
+            okLabel: "ログアウト",
+          }).catch(() => false),
+      ),
+    [run, reloadSettings, refreshStatus],
+  );
+
   /** 「今すぐ同期」。`quiet` (サイドバーから) は失敗を画面の通知に出し、ペインのエラー欄は使わない。 */
   const syncNow = useCallback(
     (quiet = false) =>
@@ -371,6 +417,7 @@ export function useSync({ active, onNotice }: Options) {
     error,
     checkError,
     recoverError,
+    googleNote,
     onChangeBackend: (b) => void setBackend(b),
     onLogin: () => void login(),
     onOpenLoginUrl: (url) => void openLoginUrl(url),
@@ -381,6 +428,9 @@ export function useSync({ active, onNotice }: Options) {
     onDisconnect: () => void disconnect(),
     onSyncNow: () => void syncNow(),
     onRecover: (m) => void recover(m),
+    onGoogleLogin: googleLogin,
+    onGoogleCancel: googleCancel,
+    onGoogleLogout: () => void googleLogout(),
   };
 
   return {

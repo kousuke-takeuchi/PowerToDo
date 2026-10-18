@@ -5,6 +5,8 @@ export const nasUnconnected: SyncSettingsDto = {
   backend: "nas",
   nasPasswordSet: false,
   passwordPersistent: true,
+  googleLoggedIn: false,
+  googleTokenPersistent: true,
   googleAvailable: false,
 };
 
@@ -14,8 +16,25 @@ export const nasConnected: SyncSettingsDto = {
   nasUser: "たろう",
   nasPasswordSet: true,
   passwordPersistent: true,
+  googleLoggedIn: false,
+  googleTokenPersistent: true,
   googleAvailable: false,
 };
+
+/** Google Drive を選んでいる。このビルドには OAuth クライアントがある。 */
+export const googleLoggedOut: SyncSettingsDto = {
+  backend: "gdrive",
+  nasPasswordSet: false,
+  passwordPersistent: true,
+  googleLoggedIn: false,
+  googleTokenPersistent: true,
+  googleAvailable: true,
+};
+
+export const googleLoggedIn: SyncSettingsDto = { ...googleLoggedOut, googleEmail: "user@example.com", googleLoggedIn: true };
+
+/** OAuth クライアントのないビルド (google-oauth.json なし)。 */
+export const googleUnavailable: SyncSettingsDto = { ...googleLoggedOut, googleAvailable: false };
 
 export const syncStatuses = {
   synced: { state: "synced", lastSynced: "2026-10-16T09:41:00", pending: 0 },
@@ -29,6 +48,12 @@ export const syncStatuses = {
     pending: 2,
   },
   authRejected: { state: "error", message: "NAS のユーザー名かパスワードが違います。設定を直して「確かめる」を押してください", pending: 0 },
+  googleAuthRejected: {
+    state: "error",
+    lastSynced: "2026-10-16T09:41:00",
+    message: "Google のログインが無効になりました。設定の「同期」でもう一度ログインしてください",
+    pending: 0,
+  },
   suspectLocal: { state: "error", message: "この PC のデータフォルダが空に見えるため同期を止めました", pending: 0, suspect: "local" },
   suspectRemote: { state: "error", message: "同期先が空に見えるため同期を止めました", pending: 0, suspect: "remote" },
   off: { state: "off", pending: 0 },

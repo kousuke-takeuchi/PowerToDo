@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { fn } from "storybook/test";
 import { counts, projects, sections, tasks } from "../mock/data";
-import { nasConnected, nasUnconnected, syncStatuses, tailnets } from "../mock/sync";
+import { googleLoggedIn, googleLoggedOut, googleUnavailable, nasConnected, nasUnconnected, syncStatuses, tailnets } from "../mock/sync";
 import { AppShell } from "./AppShell";
 import { ProjectView } from "./ProjectView";
 import { SettingsDialog } from "./SettingsDialog";
@@ -22,6 +22,9 @@ const handlers = {
   onSyncNow: fn(),
   onRecover: fn(),
   onOpenGuide: fn(),
+  onGoogleLogin: fn(async () => false),
+  onGoogleCancel: fn(),
+  onGoogleLogout: fn(),
 };
 
 const base: SyncPaneProps = { settings: nasUnconnected, status: syncStatuses.off, tailnet: tailnets.stopped, tailnetSecs: 0, ...handlers };
@@ -72,9 +75,32 @@ export const NAS_接続済み_同期に失敗: Story = pane({ ...connected, erro
 export const 食い違い_この_PC: Story = pane({ ...connected, status: syncStatuses.suspectLocal });
 export const 食い違い_NAS: Story = pane({ ...connected, status: syncStatuses.suspectRemote, recoverError: "同期の状態が変わったため、実行しませんでした。もう一度確かめてください" });
 
+// ---- Google Drive: 未ログイン (D-09) ----
+const google: Partial<SyncPaneProps> = { settings: googleLoggedOut, status: syncStatuses.off, tailnet: null };
+export const Google_未ログイン: Story = pane(google);
+export const Google_ブラウザの待ち: Story = pane({ ...google, busy: "googleLogin" });
+export const Google_ログインをキャンセルした: Story = pane({ ...google, googleNote: "ログインをキャンセルしました" });
+export const Google_許可しなかった: Story = pane({ ...google, googleNote: "Google でのログインが許可されなかったため、ログインしませんでした" });
+export const Google_ログインに失敗: Story = pane({ ...google, error: "ログインがタイムアウトしました。もう一度お試しください" });
+export const Google_このビルドでは使えない: Story = pane({ settings: googleUnavailable, status: syncStatuses.off, tailnet: null });
+
+// ---- Google Drive: ログイン済み (D-09c) ----
+const googleIn: Partial<SyncPaneProps> = { settings: googleLoggedIn, status: syncStatuses.synced, tailnet: null };
+export const Google_ログイン済み: Story = pane(googleIn);
+export const Google_ログイン済み_同期中: Story = pane({ ...googleIn, status: syncStatuses.syncing });
+export const Google_ログイン済み_オフライン: Story = pane({ ...googleIn, status: { ...syncStatuses.offline, message: "接続できません: Google に接続できません" } });
+export const Google_ログイン済み_名前の重なり: Story = pane({ ...googleIn, status: syncStatuses.nameClash });
+export const Google_ログインが無効になった: Story = pane({ ...googleIn, status: syncStatuses.googleAuthRejected });
+export const Google_ログインし直している: Story = pane({ ...googleIn, status: syncStatuses.googleAuthRejected, busy: "googleLogin" });
+export const Google_ログイン情報を保存できない: Story = pane({ ...googleIn, settings: { ...googleLoggedIn, googleTokenPersistent: false } });
+export const Google_ログアウトで取り消せなかった: Story = pane({
+  ...google,
+  googleNote: "ログアウトしました。ただし Google に接続できず、Google 側のログインは取り消せていません。つながるときに Google アカウントの設定で、PowerToDo のアクセスを取り消してください",
+});
+export const Google_食い違い_Drive: Story = pane({ ...googleIn, status: syncStatuses.suspectRemote });
+
 // ---- 他の同期先 ----
 export const 同期しない: Story = pane({ settings: { ...nasUnconnected, backend: "none" }, status: syncStatuses.off, tailnet: tailnets.stopped });
-export const GoogleDrive_準備中: Story = pane({ settings: { ...nasUnconnected, backend: "gdrive" }, status: syncStatuses.off });
 export const 読み込み中: Story = pane({ settings: null, status: null, tailnet: null });
 
 // ---- 設定ダイアログの中 (高さ・スクロールの確認用) ----
@@ -93,3 +119,5 @@ function InDialog(props: Partial<SyncPaneProps>) {
 export const ダイアログ内_NAS_ログイン前: Story = { render: () => <InDialog /> };
 export const ダイアログ内_NAS_起動中_30秒超: Story = { render: () => <InDialog tailnet={tailnets.starting} tailnetSecs={34} checkError="NAS が tailnet にありません" /> };
 export const ダイアログ内_NAS_接続済み: Story = { render: () => <InDialog {...connected} /> };
+export const ダイアログ内_Google_未ログイン: Story = { render: () => <InDialog {...google} /> };
+export const ダイアログ内_Google_ログイン済み: Story = { render: () => <InDialog {...googleIn} /> };

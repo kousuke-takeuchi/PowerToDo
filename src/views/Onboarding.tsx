@@ -7,8 +7,8 @@ import { TextField } from "../components/TextField";
 import type { SyncTarget } from "./SettingsDialog";
 import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, hintStyle, labelStyle, syncTargetOptions } from "./SyncFields";
-import { isNasConnected } from "../app/syncText";
-import { NasSetup } from "./SyncPane";
+import { isGoogleLoggedIn, isNasConnected } from "../app/syncText";
+import { GOOGLE_UNAVAILABLE, GoogleSetup, NasSetup } from "./SyncPane";
 import type { SyncPaneProps } from "./SyncPane";
 
 export type OnboardingProps = {
@@ -31,10 +31,11 @@ export type OnboardingProps = {
   fill?: boolean;
   /**
    * 実アプリ用 (Storybook では渡さない)。渡すと step 2 は実データで動く: 同期先のセグメントは `settings.backend` に従い、
-   * NAS は設定ペインと同じ部品 (Tailscale の状態、URL・ユーザー・パスワード、「確かめる」)。`onChangeBackend` は確認なしで切り替える関数を渡す。
+   * NAS は設定ペインと同じ部品 (Tailscale の状態、URL・ユーザー・パスワード、「確かめる」)、Google Drive も同じ部品 (「Google でログイン」、待っている間の「キャンセル」)。
+   * `onChangeBackend` は確認なしで切り替える関数を渡す。
    */
   syncPane?: SyncPaneProps;
-  /** step 2 を終えて先へ進むとき (NAS に接続できた / 「次へ」)。`syncPane` があるときに使う。「スキップ」は `onSkip`。 */
+  /** step 2 を終えて先へ進むとき (NAS に接続できた / Google にログインできた / 「次へ」)。`syncPane` があるときに使う。「スキップ」は `onSkip`。 */
   onSyncDone?: () => void;
 };
 
@@ -138,13 +139,15 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
     const backend = st?.backend ?? "none";
     const { onChangeBackend } = syncPane;
     const nasUnconnected = backend === "nas" && !!st && !isNasConnected(st);
+    const googleOk = !!st?.googleAvailable;
+    const googleUnconnected = backend === "gdrive" && !!st && googleOk && !isGoogleLoggedIn(st);
     body = (
       <>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
           <div style={labelStyle}>同期先</div>
           <Segmented
             options={[
-              { value: "gdrive" as const, label: "Google Drive", disabled: true },
+              { value: "gdrive" as const, label: "Google Drive", disabled: !googleOk },
               { value: "nas" as const, label: "Synology NAS (WebDAV)" },
               { value: "none" as const, label: "同期しない" },
             ]}
@@ -153,10 +156,23 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
             ariaLabel="同期先"
             disabled={!st || !!syncPane.busy}
           />
-          {backend !== "gdrive" && <div style={hintStyle}>Google Drive はこのビルドでは準備中です。</div>}
+          {!!st && !googleOk && <div style={hintStyle}>{GOOGLE_UNAVAILABLE}</div>}
         </div>
         {backend === "none" && <div style={hintStyle}>同期しません。あとから設定の「同期」で選べます。</div>}
-        {backend === "gdrive" && <div style={hintStyle}>Google Drive はこのビルドでは準備中です。</div>}
+        {googleUnconnected && (
+          <GoogleSetup
+            busy={syncPane.busy}
+            error={syncPane.error}
+            googleNote={syncPane.googleNote}
+            onGoogleLogin={syncPane.onGoogleLogin}
+            onGoogleCancel={syncPane.onGoogleCancel}
+            submitLabel="Google でログインして次へ"
+            onLoggedIn={onSyncDone}
+          />
+        )}
+        {backend === "gdrive" && st && isGoogleLoggedIn(st) && (
+          <div style={hintStyle}>{st.googleEmail ? `ログイン済みです: ${st.googleEmail}` : "ログイン済みです"}</div>
+        )}
         {nasUnconnected && st && (
           <NasSetup
             settings={st}
@@ -184,7 +200,7 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
         <button type="button" onClick={onSkip} style={skipStyle} disabled={!!syncPane.busy}>
           スキップ
         </button>
-        {!nasUnconnected && (
+        {!nasUnconnected && !googleUnconnected && (
           <Button onClick={onSyncDone} disabled={!st || !!syncPane.busy}>
             次へ
           </Button>

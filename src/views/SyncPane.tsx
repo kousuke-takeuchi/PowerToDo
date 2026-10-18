@@ -1,7 +1,7 @@
 import type React from "react";
 import { useState } from "react";
 import { isImeKey } from "../app/keys";
-import { formatSynced, isNasConnected, targetName } from "../app/syncText";
+import { formatSynced, isGoogleLoggedIn, isNasConnected, targetName } from "../app/syncText";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import type { SyncState } from "../components/SyncStatus";
@@ -10,13 +10,10 @@ import { Desc, Row, Section } from "./SettingsPanes";
 import { NasFields, hintStyle } from "./SyncFields";
 
 /** 実行中の操作 (一度に一つ)。 */
-export type SyncBusy = "backend" | "login" | "retry" | "reset" | "logout" | "check" | "disconnect" | "syncNow" | "recover";
+export type SyncBusy = "backend" | "login" | "retry" | "reset" | "logout" | "check" | "disconnect" | "syncNow" | "recover" | "googleLogin" | "googleLogout";
 
 /** Tailscale が起動中のままこの秒数を超えたら、「再試行」「状態を消してログインし直す」を出す (仕様 §4.1)。 */
 export const TAILNET_SLOW_SECS = 30;
-
-/** Google Drive の画面は Task 9。それまでは、ビルドに OAuth クライアントがあっても「準備中」にする。 */
-const GOOGLE_UI_READY = false;
 
 const dangerStyle: React.CSSProperties = { ...hintStyle, color: "var(--color-danger)" };
 
@@ -50,9 +47,18 @@ export type SyncPaneProps = TailnetActions & {
   onSyncNow?: () => void;
   onRecover?: (mode: SyncRecoverMode) => void;
   onOpenGuide?: () => void;
+  /** Google のログインやログアウトが失敗ではない形で終わったときの案内 (キャンセル、許可しなかった、Google 側を取り消せなかった)。 */
+  googleNote?: string | null;
+  /** 成功 (ログインできた) なら true。ブラウザで待つ間は `busy === "googleLogin"`。 */
+  onGoogleLogin?: () => Promise<boolean>;
+  /** 待っているログインのキャンセル。`busy` の間も押せる。 */
+  onGoogleCancel?: () => void;
+  onGoogleLogout?: () => void;
 };
 
 const PASSWORD_NOT_SAVED = "パスワードを保存できません (再起動するまで有効)";
+const TOKEN_NOT_SAVED = "ログイン情報を保存できません (再起動するまで有効)";
+export const GOOGLE_UNAVAILABLE = "このビルドでは Google Drive を使えません";
 
 function Dot({ color }: { color: string }) {
   return <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: color, flex: "0 0 auto", marginTop: 5 }} />;
@@ -275,6 +281,43 @@ const stateText: Record<SyncState, string> = {
   off: "同期は開始していません",
 };
 
+/** 同期の状態 (NAS と Google Drive で共通): 状態、メッセージ、最終同期、次回に回した数、失敗、「今すぐ同期」。`extra` は最終同期の下、`actions` は「今すぐ同期」の隣。 */
+function SyncStateSection({
+  status,
+  busy,
+  error,
+  onSyncNow,
+  extra,
+  actions,
+}: Pick<SyncPaneProps, "status" | "busy" | "error" | "onSyncNow"> & { extra?: React.ReactNode; actions?: React.ReactNode }) {
+  const synced = formatSynced(status?.lastSynced, { long: true });
+  const state = status?.state ?? "off";
+  return (
+    <Section label="同期">
+      <Desc>{`状態: ${stateText[state]}`}</Desc>
+      {status?.message && (
+        <div role={state === "error" ? "alert" : undefined} style={state === "error" ? dangerStyle : hintStyle}>
+          {status.message}
+        </div>
+      )}
+      <Desc>{synced ? `最終同期: ${synced}` : "最終同期: まだありません"}</Desc>
+      {!!status?.pending && <Desc>{`次の同期に回したファイル: ${status.pending} 件`}</Desc>}
+      {extra}
+      {error && (
+        <div role="alert" style={dangerStyle}>
+          {error}
+        </div>
+      )}
+      <Row>
+        <Button onClick={onSyncNow} disabled={!!busy || state === "syncing" || !!status?.suspect}>
+          {busy === "syncNow" ? "同期しています…" : "今すぐ同期"}
+        </Button>
+        {actions}
+      </Row>
+    </Section>
+  );
+}
+
 /** NAS の接続後 (D-09f): 接続先、状態、最終同期、「今すぐ同期」、「切断」。 */
 function NasConnected({
   settings,
@@ -287,7 +330,6 @@ function NasConnected({
   onDisconnect,
   ...tailnetActions
 }: TailnetActions & Pick<SyncPaneProps, "status" | "tailnet" | "tailnetSecs" | "busy" | "error" | "onSyncNow" | "onDisconnect"> & { settings: SyncSettingsDto }) {
-  const synced = formatSynced(status?.lastSynced, { long: true });
   const state = status?.state ?? "off";
   const ok = state === "synced" || state === "syncing";
   return (
@@ -303,26 +345,125 @@ function NasConnected({
         {!settings.passwordPersistent && <div style={dangerStyle}>{PASSWORD_NOT_SAVED}</div>}
         {tailnet?.state !== "running" && <TailnetRow tailnet={tailnet} secs={tailnetSecs} busy={busy} {...tailnetActions} />}
       </Section>
-      <Section label="同期">
-        <Desc>{`状態: ${stateText[state]}`}</Desc>
-        {status?.message && (
-          <div role={state === "error" ? "alert" : undefined} style={state === "error" ? dangerStyle : hintStyle}>
-            {status.message}
-          </div>
-        )}
-        <Desc>{synced ? `最終同期: ${synced}` : "最終同期: まだありません"}</Desc>
-        {!!status?.pending && <Desc>{`次の同期に回したファイル: ${status.pending} 件`}</Desc>}
-        {error && (
-          <div role="alert" style={dangerStyle}>
-            {error}
-          </div>
-        )}
-        <Row>
-          <Button onClick={onSyncNow} disabled={!!busy || state === "syncing" || !!status?.suspect}>
-            {busy === "syncNow" ? "同期しています…" : "今すぐ同期"}
+      <SyncStateSection status={status} busy={busy} error={error} onSyncNow={onSyncNow} />
+    </>
+  );
+}
+
+export type GoogleSetupProps = Pick<SyncPaneProps, "busy" | "error" | "googleNote" | "onGoogleLogin" | "onGoogleCancel"> & {
+  /** 「Google でログイン」ボタンの文言 (初回起動は「Google でログインして次へ」)。 */
+  submitLabel?: string;
+  /** ログインできたとき (設定ペインは設定の再読み込みでログイン済みの画面に変わる)。 */
+  onLoggedIn?: () => void;
+};
+
+/**
+ * Google の未ログイン (D-09): 「Google でログイン」。ブラウザで待つ間 (`busy === "googleLogin"`) は待っている旨と「キャンセル」。
+ * 設定ペインと初回起動で共通。ログインしてもしなくても、ブラウザは押したときにだけ開く。
+ */
+export function GoogleSetup({ busy, error, googleNote, onGoogleLogin, onGoogleCancel, submitLabel = "Google でログイン", onLoggedIn }: GoogleSetupProps) {
+  const waiting = busy === "googleLogin";
+  const login = async () => {
+    if (!onGoogleLogin || busy) return;
+    if (await onGoogleLogin()) onLoggedIn?.();
+  };
+  return (
+    <Section label="接続状態">
+      <Desc>Google アカウントでログインすると、タスクのファイルが Google Drive の PowerToDo フォルダに同期されます。</Desc>
+      {waiting && (
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <Dot color="var(--color-text-muted)" />
+          <span aria-live="polite" style={bodyText}>
+            ブラウザでログインしてください…
+          </span>
+        </div>
+      )}
+      <Row>
+        {waiting ? (
+          <Button variant="secondary" onClick={onGoogleCancel}>
+            キャンセル
           </Button>
-        </Row>
+        ) : (
+          <Button onClick={() => void login()} disabled={!!busy || !onGoogleLogin}>
+            {submitLabel}
+          </Button>
+        )}
+      </Row>
+      {error && (
+        <div role="alert" style={dangerStyle}>
+          {error}
+        </div>
+      )}
+      {googleNote && (
+        <div role="status" style={hintStyle}>
+          {googleNote}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/** Google のログイン後 (D-09c): アカウント、「ログアウト」、状態、最終同期、「今すぐ同期」。同期がエラーのときは「ログインし直す」も出す。 */
+function GoogleConnected({
+  settings,
+  status,
+  busy,
+  error,
+  googleNote,
+  onSyncNow,
+  onGoogleLogin,
+  onGoogleCancel,
+  onGoogleLogout,
+}: Pick<SyncPaneProps, "status" | "busy" | "error" | "googleNote" | "onSyncNow" | "onGoogleLogin" | "onGoogleCancel" | "onGoogleLogout"> & { settings: SyncSettingsDto }) {
+  const state = status?.state ?? "off";
+  const ok = state === "synced" || state === "syncing";
+  const waiting = busy === "googleLogin";
+  // エラーの理由は同期の状態の文言にある (ログインが無効になった、名前の重なり、容量不足など)。ログインし直しで直るものを見分けられないので、エラーの間はいつでも出す。
+  const relogin = state === "error" && !status?.suspect;
+  return (
+    <>
+      <Section label="接続状態">
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-2)" }}>
+          <Dot color={ok ? "var(--color-success)" : "var(--color-text-muted)"} />
+          <span style={bodyText}>{settings.googleEmail ? `ログイン中 · ${settings.googleEmail}` : "ログイン中"}</span>
+          <Button variant="secondary" onClick={onGoogleLogout} disabled={!!busy}>
+            ログアウト
+          </Button>
+        </div>
+        {!settings.googleTokenPersistent && <div style={dangerStyle}>{TOKEN_NOT_SAVED}</div>}
+        {googleNote && (
+          <div role="status" style={hintStyle}>
+            {googleNote}
+          </div>
+        )}
       </Section>
+      <SyncStateSection
+        status={status}
+        busy={busy}
+        error={error}
+        onSyncNow={onSyncNow}
+        extra={
+          <>
+            <Desc>Drive 上のフォルダ: PowerToDo/</Desc>
+            {waiting && (
+              <span aria-live="polite" style={hintStyle}>
+                ブラウザでログインしてください…
+              </span>
+            )}
+          </>
+        }
+        actions={
+          waiting ? (
+            <Button variant="secondary" onClick={onGoogleCancel}>
+              キャンセル
+            </Button>
+          ) : relogin ? (
+            <Button variant="secondary" onClick={() => void onGoogleLogin?.()} disabled={!!busy || !onGoogleLogin}>
+              Google にログインし直す
+            </Button>
+          ) : null
+        }
+      />
     </>
   );
 }
@@ -369,11 +510,31 @@ export function SuspectPanel({
 
 /**
  * 設定の「同期」ペインの中身 (同期先のセグメント + 同期先ごとの本文)。設定ダイアログと Storybook で使う。
- * Google Drive は Task 9 まで「このビルドでは準備中」で選べない。
+ * Google Drive は、ビルドに OAuth クライアントが入っているとき (`googleAvailable`) だけ選べる。
  */
 export function SyncPane(props: SyncPaneProps) {
-  const { settings, status, tailnet, tailnetSecs, busy, error, checkError, recoverError, onChangeBackend, onCheck, onDisconnect, onSyncNow, onRecover, onOpenGuide, ...tailnetActions } = props;
-  const googleReady = GOOGLE_UI_READY && !!settings?.googleAvailable;
+  const {
+    settings,
+    status,
+    tailnet,
+    tailnetSecs,
+    busy,
+    error,
+    checkError,
+    recoverError,
+    googleNote,
+    onChangeBackend,
+    onCheck,
+    onDisconnect,
+    onSyncNow,
+    onRecover,
+    onOpenGuide,
+    onGoogleLogin,
+    onGoogleCancel,
+    onGoogleLogout,
+    ...tailnetActions
+  } = props;
+  const googleReady = !!settings?.googleAvailable;
   const options = [
     { value: "gdrive" as const, label: "Google Drive", disabled: !googleReady },
     { value: "nas" as const, label: "Synology NAS (WebDAV)" },
@@ -384,11 +545,36 @@ export function SyncPane(props: SyncPaneProps) {
   if (!settings) {
     body = <Desc>読み込み中…</Desc>;
   } else if (settings.backend === "gdrive") {
-    body = (
-      <Section label="Google Drive">
-        <Desc>Google Drive はこのビルドでは準備中です。</Desc>
-      </Section>
-    );
+    if (!settings.googleAvailable) {
+      body = (
+        <Section label="Google Drive">
+          <Desc>{GOOGLE_UNAVAILABLE}</Desc>
+        </Section>
+      );
+    } else if (isGoogleLoggedIn(settings)) {
+      body = (
+        <GoogleConnected
+          settings={settings}
+          status={status}
+          busy={busy}
+          error={error}
+          googleNote={googleNote}
+          onSyncNow={onSyncNow}
+          onGoogleLogin={onGoogleLogin}
+          onGoogleCancel={onGoogleCancel}
+          onGoogleLogout={onGoogleLogout}
+        />
+      );
+    } else {
+      body = (
+        <>
+          <GoogleSetup busy={busy} error={error} googleNote={googleNote} onGoogleLogin={onGoogleLogin} onGoogleCancel={onGoogleCancel} />
+          <Section label="同期">
+            <Desc>ログインすると同期を開始できます。</Desc>
+          </Section>
+        </>
+      );
+    }
   } else if (settings.backend === "none") {
     body = (
       <Section label="同期">
@@ -437,13 +623,13 @@ export function SyncPane(props: SyncPaneProps) {
           ariaLabel="同期先"
           disabled={!settings || !!busy}
         />
-        {!googleReady && settings?.backend !== "gdrive" && <Desc>Google Drive はこのビルドでは準備中です。</Desc>}
+        {settings && !googleReady && settings.backend !== "gdrive" && <Desc>{GOOGLE_UNAVAILABLE}</Desc>}
       </Section>
       {settings && status?.suspect && settings.backend !== "none" && (
         <SuspectPanel side={status.suspect} target={targetName(settings.backend)} busy={!!busy} error={recoverError} onRecover={onRecover} />
       )}
       {body}
-      {error && settings?.backend !== "nas" && (
+      {error && settings?.backend !== "nas" && settings?.backend !== "gdrive" && (
         <div role="alert" style={dangerStyle}>
           {error}
         </div>

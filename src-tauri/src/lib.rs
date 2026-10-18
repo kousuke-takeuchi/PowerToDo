@@ -158,6 +158,9 @@ pub fn run() {
             commands::sync::sync_now,
             commands::sync::sync_status,
             commands::sync::sync_recover,
+            commands::sync::google_login,
+            commands::sync::google_login_cancel,
+            commands::sync::google_logout,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

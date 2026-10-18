@@ -1,5 +1,6 @@
-//! Commands of the sync with a NAS (Phase 4, spec sections 4 and 6): the choice of the target,
-//! the Tailscale sidecar's login, the connection check and the status the UI shows.
+//! Commands of the sync (Phase 4, spec sections 4, 5 and 6): the choice of the target, the
+//! Tailscale sidecar's login and the NAS connection check, the Google login and logout, and the
+//! status the UI shows.
 //!
 //! The engine itself (`crate::sync::SyncEngine`) is started by `super::start_sync`; this module
 //! decides when the engine gets a target. For the NAS that is the moment the sidecar reports
@@ -9,9 +10,17 @@
 //! Blocking calls (the keychain, `Tailnet::resolve`, starting and stopping the sidecar) run in
 //! `spawn_blocking`. The password, the sidecar's proxy URL and its credentials never go into an
 //! error text, an event or a DTO.
+//!
+//! Google Drive: the refresh token lives in the keychain (service `app.powertodo.google`, account
+//! = the e-mail address), the e-mail address in `settings.json`. Logging in builds a new
+//! `TokenSource` and a new `GoogleDriveBackend` (a `TokenSource` remembers `InvalidGrant` for its
+//! whole life). Every change of the target, a login, a logout and the start-up build take
+//! `connect_lock`, and attach only through [`attach_if_current`]. Tokens, the id_token and the
+//! authorization URL (`state`, `code_challenge`) never go into a log, an error or an event.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,12 +28,18 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
+use tokio::sync::Notify;
 
 use super::{AppState, TauriSyncHost};
 use crate::error::{AppError, AppResult};
 use crate::store::paths::{AppSettings, SyncBackend, SyncSettings};
 use crate::sync::backend::{BackendError, StorageBackend};
-use crate::sync::secrets::{KeyringStore, MemoryStore, NAS_SERVICE, SecretResult, SecretStore};
+use crate::sync::gdrive::GoogleDriveBackend;
+use crate::sync::oauth::{GoogleOAuth, OAuthError, TokenSource, Tokens};
+use crate::sync::secrets::{
+    GOOGLE_SERVICE, KeyringStore, MemoryStore, NAS_SERVICE, SecretResult, SecretStore,
+};
 use crate::sync::state::BackendKind;
 use crate::sync::tailnet::{
     self, RESOLVE_TIMEOUT, Tailnet, TailnetError, TailnetState, TailnetStatusView,
@@ -59,8 +74,9 @@ async fn blocking<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> 
 pub struct Secrets {
     primary: Arc<dyn SecretStore>,
     memory: MemoryStore,
-    /// The last `set` could not reach the keychain: the secret is in `memory` only.
-    memory_only: AtomicBool,
+    /// The services whose last `set` could not reach the keychain: the secret is in `memory`
+    /// only.
+    memory_only: Mutex<BTreeSet<String>>,
     cache: Mutex<BTreeMap<(String, String), Option<String>>>,
     /// Held while a missing entry is read from the keychain, so concurrent readers ask it once.
     fill: Mutex<()>,
@@ -71,15 +87,21 @@ impl Secrets {
         Secrets {
             primary,
             memory: MemoryStore::new(),
-            memory_only: AtomicBool::new(false),
+            memory_only: Mutex::new(BTreeSet::new()),
             cache: Mutex::new(BTreeMap::new()),
             fill: Mutex::new(()),
         }
     }
 
-    /// `false` when the password could only be kept in memory (it is gone after a restart).
+    /// `false` when a secret could only be kept in memory (it is gone after a restart).
     pub fn persistent(&self) -> bool {
-        !self.memory_only.load(Ordering::SeqCst)
+        lock(&self.memory_only).is_empty()
+    }
+
+    /// Like [`Secrets::persistent`] for the secrets of one service (the NAS password, the
+    /// Google refresh token).
+    pub fn persistent_for(&self, service: &str) -> bool {
+        !lock(&self.memory_only).contains(service)
     }
 
     fn memory_get(&self, service: &str, account: &str) -> Option<String> {
@@ -138,7 +160,14 @@ impl Secrets {
                 false
             }
         };
-        self.memory_only.store(!persistent, Ordering::SeqCst);
+        {
+            let mut memory_only = lock(&self.memory_only);
+            if persistent {
+                memory_only.remove(service);
+            } else {
+                memory_only.insert(service.to_string());
+            }
+        }
         lock(&self.cache).insert(
             (service.to_string(), account.to_string()),
             Some(secret.to_string()),
@@ -156,7 +185,7 @@ impl Secrets {
                 lock(&self.cache).insert(key, None);
                 Ok(())
             }
-            Err(_) if self.memory_only.load(Ordering::SeqCst) => {
+            Err(_) if !self.persistent_for(service) => {
                 lock(&self.cache).insert(key, None);
                 Ok(())
             }
@@ -190,6 +219,24 @@ pub struct SyncRuntime {
     /// Serializes writers of `settings.json`, so none of them holds the settings mutex across
     /// the file write (readers on the async workers never wait for the disk).
     settings_write: Mutex<()>,
+    /// The Google login waiting for the browser, if any: what `google_login_cancel` fires.
+    /// One at a time (see [`SyncRuntime::begin_login`]).
+    google_login: Mutex<Option<Arc<Notify>>>,
+}
+
+/// The place of the one Google login in flight. Dropping it frees the place.
+struct LoginSlot<'a> {
+    rt: &'a SyncRuntime,
+    cancel: Arc<Notify>,
+}
+
+impl Drop for LoginSlot<'_> {
+    fn drop(&mut self) {
+        let mut slot = lock(&self.rt.google_login);
+        if slot.as_ref().is_some_and(|n| Arc::ptr_eq(n, &self.cancel)) {
+            *slot = None;
+        }
+    }
 }
 
 impl SyncRuntime {
@@ -206,6 +253,32 @@ impl SyncRuntime {
             seq: AtomicU64::new(0),
             connect_lock: tokio::sync::Mutex::new(()),
             settings_write: Mutex::new(()),
+            google_login: Mutex::new(None),
+        }
+    }
+
+    /// Takes the place of the Google login. `None` when one is already waiting for the
+    /// browser: a second login is refused (the first has the browser window), not started
+    /// next to it.
+    fn begin_login(&self) -> Option<LoginSlot<'_>> {
+        let mut slot = lock(&self.google_login);
+        if slot.is_some() {
+            return None;
+        }
+        let cancel = Arc::new(Notify::new());
+        *slot = Some(Arc::clone(&cancel));
+        Some(LoginSlot { rt: self, cancel })
+    }
+
+    /// Ends the login in flight, if there is one (`true`). `Notify` keeps the permit, so a
+    /// cancel that comes before the login starts to wait is not lost.
+    fn cancel_login(&self) -> bool {
+        match lock(&self.google_login).as_ref() {
+            Some(n) => {
+                n.notify_one();
+                true
+            }
+            None => false,
         }
     }
 
@@ -268,28 +341,41 @@ pub struct SyncSettingsDto {
     pub password_persistent: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_email: Option<String>,
-    /// This build carries Google OAuth client credentials (Task 8 embeds them).
+    /// A Google refresh token is stored for the saved account. Only read while the target is
+    /// Google Drive (reading the keychain can prompt).
+    pub google_logged_in: bool,
+    /// `false` while the Google refresh token could not be put in the OS keychain and only
+    /// lives in memory (UI: 「ログイン情報を保存できません (再起動するまで有効)」).
+    pub google_token_persistent: bool,
+    /// This build carries Google OAuth client credentials (`build.rs` embeds them).
     pub google_available: bool,
+}
+
+/// What the DTO needs besides the saved settings.
+#[derive(Debug, Clone, Copy)]
+struct DtoFacts {
+    password_set: bool,
+    password_persistent: bool,
+    google_logged_in: bool,
+    google_token_persistent: bool,
+    google_available: bool,
 }
 
 fn google_available() -> bool {
     option_env!("POWERTODO_GOOGLE_CLIENT_ID").is_some()
 }
 
-fn settings_dto(
-    s: &SyncSettings,
-    password_set: bool,
-    password_persistent: bool,
-    google_available: bool,
-) -> SyncSettingsDto {
+fn settings_dto(s: &SyncSettings, facts: DtoFacts) -> SyncSettingsDto {
     SyncSettingsDto {
         backend: s.backend,
         nas_url: s.nas_url.clone(),
         nas_user: s.nas_user.clone(),
-        nas_password_set: password_set,
-        password_persistent,
+        nas_password_set: facts.password_set,
+        password_persistent: facts.password_persistent,
         google_email: s.google_email.clone(),
-        google_available,
+        google_logged_in: facts.google_logged_in,
+        google_token_persistent: facts.google_token_persistent,
+        google_available: facts.google_available,
     }
 }
 
@@ -302,12 +388,24 @@ async fn current_dto(app: &AppHandle) -> AppResult<SyncSettingsDto> {
         Some(account) => blocking(move || secrets.get(NAS_SERVICE, &account).is_some()).await?,
         None => false,
     };
-    let persistent = state.sync_rt.secrets.persistent();
+    let available = google_available();
+    let google_logged_in = if available && s.backend == SyncBackend::Gdrive {
+        let secrets = state.sync_rt.secrets();
+        let account = google_account(s.google_email.as_deref());
+        blocking(move || secrets.get(GOOGLE_SERVICE, &account).is_some()).await?
+    } else {
+        false
+    };
+    let secrets = &state.sync_rt.secrets;
     Ok(settings_dto(
         &s,
-        password_set,
-        persistent,
-        google_available(),
+        DtoFacts {
+            password_set,
+            password_persistent: secrets.persistent_for(NAS_SERVICE),
+            google_logged_in,
+            google_token_persistent: secrets.persistent_for(GOOGLE_SERVICE),
+            google_available: available,
+        },
     ))
 }
 
@@ -646,28 +744,39 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
     match built {
         // Still under `connect_lock`: nothing switched the target since the build began.
         Ok((backend, root)) => {
-            attach_if_current(&state, seq, Arc::new(backend), &root);
+            attach_if_current(&state, seq, SyncBackend::Nas, Arc::new(backend), &root);
         }
         Err(e) if rt.is_current(seq) => report_unreachable(app, &e.to_string()),
         Err(_) => {}
     }
 }
 
+/// The engine's name for a chosen target (`None` for no sync).
+fn backend_kind(target: SyncBackend) -> Option<BackendKind> {
+    match target {
+        SyncBackend::Nas => Some(BackendKind::Nas),
+        SyncBackend::Gdrive => Some(BackendKind::Gdrive),
+        SyncBackend::None => None,
+    }
+}
+
 /// Gives the engine `backend` unless it is out of date: built for an older sidecar state
-/// (`seq`), or the NAS is no longer the chosen target. The caller holds `connect_lock`, so the
+/// (`seq`), or `target` is no longer the chosen one. The caller holds `connect_lock`, so the
 /// target cannot be switched between this check and the attach.
 fn attach_if_current(
     state: &AppState,
     seq: Option<u64>,
+    target: SyncBackend,
     backend: Arc<dyn StorageBackend>,
     root: &str,
 ) -> bool {
-    if !state.sync_rt.is_current(seq) || state.lock_settings().sync.backend != SyncBackend::Nas {
+    let Some(kind) = backend_kind(target) else {
+        return false;
+    };
+    if !state.sync_rt.is_current(seq) || state.lock_settings().sync.backend != target {
         return false;
     }
-    state
-        .sync
-        .set_backend(Some(backend), BackendKind::Nas, root);
+    state.sync.set_backend(Some(backend), kind, root);
     true
 }
 
@@ -709,10 +818,353 @@ fn commit_nas(
     Ok(())
 }
 
+// ---- Google Drive ----
+
+/// The authorization URL is built here, but it is checked once more before a browser is
+/// pointed at it.
+const GOOGLE_AUTH_URL_PREFIX: &str = "https://accounts.google.com/";
+const GOOGLE_UNAVAILABLE: &str = "このビルドでは Google Drive を使えません";
+
+/// The app state, reachable from a closure that outlives the call (`spawn_blocking`): the
+/// `AppHandle`, or an `Arc<AppState>` in tests. Lets the flows below run without a window.
+trait Ctx: Clone + Send + Sync + 'static {
+    fn app_state(&self) -> &AppState;
+}
+
+impl Ctx for AppHandle {
+    fn app_state(&self) -> &AppState {
+        Manager::state::<AppState>(self).inner()
+    }
+}
+
+impl Ctx for Arc<AppState> {
+    fn app_state(&self) -> &AppState {
+        self
+    }
+}
+
+/// The keychain account of the refresh token: the e-mail address as Google reported it (lower
+/// case), `default` when it did not report one. The same string is used to find the token
+/// again at the next start (from `settings.json`) and to tell a login with another account.
+fn google_account(email: Option<&str>) -> String {
+    email
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map_or_else(|| "default".to_string(), str::to_lowercase)
+}
+
+/// What ties `sync.json` to the Drive account: records of another account start from nothing
+/// (spec section 3.1), so no file is read as deleted there.
+fn google_root(email: Option<&str>) -> String {
+    format!("gdrive:{}", google_account(email))
+}
+
+fn require_gdrive(state: &AppState) -> AppResult<()> {
+    if state.lock_settings().sync.backend == SyncBackend::Gdrive {
+        Ok(())
+    } else {
+        Err(AppError::Invalid {
+            message: "同期先が Google Drive ではありません".into(),
+        })
+    }
+}
+
+/// The embedded OAuth client against Google. Refused in a build made without
+/// `google-oauth.json`.
+fn production_oauth() -> AppResult<GoogleOAuth> {
+    match GoogleOAuth::production() {
+        None => Err(AppError::Invalid {
+            message: GOOGLE_UNAVAILABLE.into(),
+        }),
+        Some(Ok(oauth)) => Ok(oauth),
+        Some(Err(e)) => Err(oauth_error(e)),
+    }
+}
+
+/// The texts of [`OAuthError`] are Japanese and carry no URL, token or code.
+fn oauth_error(e: OAuthError) -> AppError {
+    match e {
+        OAuthError::Offline(message) => AppError::Io { message },
+        other => AppError::Invalid {
+            message: other.to_string(),
+        },
+    }
+}
+
+fn drive_backend(tokens: Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> {
+    let backend = GoogleDriveBackend::new(tokens).map_err(backend_error)?;
+    Ok(Arc::new(backend))
+}
+
+/// The `open_url` of the login. Opens the authorization URL only when it is Google's; when
+/// that fails (or the browser cannot be opened) the reason is kept in `failure` and the login
+/// is cancelled, so it does not wait five minutes for a page nobody sees. The URL itself is
+/// never kept or logged: it carries `state` and `code_challenge`.
+fn guarded_opener(
+    cancel: Arc<Notify>,
+    failure: Arc<Mutex<Option<String>>>,
+    open: impl Fn(&str) -> Result<(), String> + Send,
+) -> impl Fn(&str) + Send {
+    move |url| {
+        let result = if url.starts_with(GOOGLE_AUTH_URL_PREFIX) {
+            open(url)
+        } else {
+            Err(
+                "Google のログイン用のアドレスを確かめられないため、ブラウザを開きませんでした"
+                    .into(),
+            )
+        };
+        if let Err(message) = result {
+            *lock(&failure) = Some(message);
+            cancel.notify_one();
+        }
+    }
+}
+
+/// How a login that did not fail ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoginEnd {
+    Done,
+    /// The user pressed 「キャンセル」 (or the sync target was switched away).
+    Cancelled,
+    /// The user said no on Google's page.
+    Denied,
+}
+
+impl LoginEnd {
+    fn name(self) -> &'static str {
+        match self {
+            LoginEnd::Done => "done",
+            LoginEnd::Cancelled => "cancelled",
+            LoginEnd::Denied => "denied",
+        }
+    }
+}
+
+const TARGET_CHANGED_DURING_LOGIN: &str =
+    "ログイン中に同期先が変更されたため、ログインは保存しませんでした。もう一度やり直してください";
+
+/// The end of a login, once the browser round trip is over and `connect_lock` is held: keeps
+/// the token (keychain), then the e-mail address (settings), then attaches the backend. Refuses,
+/// saving nothing, when the chosen target is no longer Google Drive. A failed settings write
+/// takes the new token out again; the previous account's token goes only after the settings
+/// are written. Does file and keychain I/O.
+fn commit_google(
+    state: &AppState,
+    email: Option<&str>,
+    refresh_token: &str,
+    backend: Arc<dyn StorageBackend>,
+) -> AppResult<()> {
+    let current = state.lock_settings().sync.clone();
+    if current.backend != SyncBackend::Gdrive {
+        return Err(AppError::Invalid {
+            message: TARGET_CHANGED_DURING_LOGIN.into(),
+        });
+    }
+    let previous = google_account(current.google_email.as_deref());
+    let account = google_account(email);
+    let secrets = state.sync_rt.secrets();
+    secrets.set(GOOGLE_SERVICE, &account, refresh_token);
+    if let Err(e) = update_sync_settings(state, |s| s.google_email = email.map(str::to_string)) {
+        // Without the address saved the next start would look for the token under the old
+        // account: the new one is of no use there.
+        if account != previous {
+            let _ = secrets.delete(GOOGLE_SERVICE, &account);
+        }
+        return Err(e);
+    }
+    if account != previous {
+        let _ = secrets.delete(GOOGLE_SERVICE, &previous);
+    }
+    // Under `connect_lock` and checked above: this attaches. `set_backend` also lets the runs
+    // go again after an earlier rejection and asks for one.
+    attach_if_current(
+        state,
+        None,
+        SyncBackend::Gdrive,
+        backend,
+        &google_root(email),
+    );
+    Ok(())
+}
+
+/// A token Google gave but the app will not keep is given back (best effort: the user may be
+/// offline by now, and nothing more can be done about it).
+async fn revoke_unused(oauth: &GoogleOAuth, refresh_token: &str) {
+    if let Err(e) = oauth.revoke(refresh_token).await {
+        eprintln!("could not revoke a Google login that was not kept: {e}");
+    }
+}
+
+/// Takes the tokens of a finished login in: a new `TokenSource` and a new backend (the old
+/// `TokenSource` may remember `InvalidGrant`), then [`commit_google`] under `connect_lock`.
+async fn finish_login<C: Ctx>(
+    ctx: &C,
+    oauth: &GoogleOAuth,
+    tokens: Tokens,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>>,
+) -> AppResult<()> {
+    let _guard = ctx.app_state().sync_rt.connect_lock.lock().await;
+    let Tokens {
+        refresh_token,
+        email,
+        ..
+    } = tokens;
+    let source = Arc::new(TokenSource::new(oauth.clone(), refresh_token.clone()));
+    let committed = match make_backend(source) {
+        Ok(backend) => {
+            let c = ctx.clone();
+            let (token, address) = (refresh_token.clone(), email);
+            blocking(move || commit_google(c.app_state(), address.as_deref(), &token, backend))
+                .await
+                .and_then(|r| r)
+        }
+        Err(e) => Err(e),
+    };
+    if committed.is_err() {
+        revoke_unused(oauth, &refresh_token).await;
+    }
+    committed
+}
+
+/// The Google login: the browser round trip (no lock held: it takes minutes), then
+/// [`finish_login`]. `Denied` and a cancel are ends, not failures.
+async fn google_login_flow<C: Ctx>(
+    ctx: &C,
+    oauth: &GoogleOAuth,
+    open_url: impl Fn(&str) + Send,
+    cancel: impl Future<Output = ()> + Send,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
+) -> AppResult<LoginEnd> {
+    require_gdrive(ctx.app_state())?;
+    let tokens = match oauth.login(open_url, cancel).await {
+        Ok(tokens) => tokens,
+        Err(OAuthError::Cancelled) => return Ok(LoginEnd::Cancelled),
+        Err(OAuthError::Denied) => return Ok(LoginEnd::Denied),
+        Err(e) => return Err(oauth_error(e)),
+    };
+    finish_login(ctx, oauth, tokens, make_backend).await?;
+    Ok(LoginEnd::Done)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleLoginDto {
+    /// `done`, `cancelled` or `denied`. The last two are not failures.
+    pub outcome: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleLogoutDto {
+    /// Google was told to forget the login. `false`: it could not be reached (the local logout
+    /// still happened); the UI says so.
+    pub revoked: bool,
+}
+
+/// 「ログアウト」: tells Google to forget the refresh token (best effort), then removes it from
+/// the keychain, forgets the address and detaches the backend. The target stays Google Drive
+/// (spec section 6: the pane then shows the login again). Order as above: when the keychain
+/// refuses, nothing else changes. `oauth` is `None` in a build without Google credentials.
+async fn google_logout_flow<C: Ctx>(
+    ctx: &C,
+    oauth: Option<&GoogleOAuth>,
+) -> AppResult<GoogleLogoutDto> {
+    let state = ctx.app_state();
+    let _guard = state.sync_rt.connect_lock.lock().await;
+    let saved = state.lock_settings().sync.clone();
+    let account = google_account(saved.google_email.as_deref());
+    let secrets = state.sync_rt.secrets();
+    let token = {
+        let (secrets, account) = (Arc::clone(&secrets), account.clone());
+        blocking(move || secrets.get_fresh(GOOGLE_SERVICE, &account)).await?
+    };
+    // Nothing stored: nothing for Google to forget.
+    let mut revoked = true;
+    if let Some(token) = &token {
+        revoked = match oauth {
+            Some(oauth) => match oauth.revoke(token).await {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("could not revoke the Google login: {e}");
+                    false
+                }
+            },
+            None => false,
+        };
+    }
+    let deleted = blocking(move || secrets.delete(GOOGLE_SERVICE, &account)).await?;
+    deleted.map_err(|_| AppError::Io {
+        message: "キーチェーンからログイン情報を削除できませんでした".into(),
+    })?;
+    let c = ctx.clone();
+    blocking(move || update_sync_settings(c.app_state(), |s| s.google_email = None)).await??;
+    if saved.backend == SyncBackend::Gdrive {
+        // A build in flight must not come back; the records are kept (the same account
+        // logging in again finds them).
+        state.sync_rt.invalidate();
+        state.sync.set_backend(None, BackendKind::Gdrive, "");
+    }
+    Ok(GoogleLogoutDto { revoked })
+}
+
+/// Builds the backend from the stored refresh token and attaches it (through
+/// [`attach_if_current`]). `Ok(false)`: the target is not Google Drive, or no token is stored
+/// (then the sync stays off and the pane shows the login). The caller holds `connect_lock`.
+/// Never opens a browser.
+async fn attach_saved_google<C: Ctx>(
+    ctx: &C,
+    seq: Option<u64>,
+    oauth: &GoogleOAuth,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>>,
+) -> AppResult<bool> {
+    let state = ctx.app_state();
+    let saved = state.lock_settings().sync.clone();
+    if saved.backend != SyncBackend::Gdrive {
+        return Ok(false);
+    }
+    let account = google_account(saved.google_email.as_deref());
+    let secrets = state.sync_rt.secrets();
+    let token = blocking(move || secrets.get_fresh(GOOGLE_SERVICE, &account)).await?;
+    let Some(token) = token else {
+        return Ok(false);
+    };
+    let source = Arc::new(TokenSource::new(oauth.clone(), token));
+    let backend = make_backend(source)?;
+    Ok(attach_if_current(
+        state,
+        seq,
+        SyncBackend::Gdrive,
+        backend,
+        &google_root(saved.google_email.as_deref()),
+    ))
+}
+
+/// [`attach_saved_google`] with the real client; failures are logged (there is nobody to tell
+/// at start-up). The caller holds `connect_lock`.
+async fn connect_google_locked<C: Ctx>(ctx: &C, seq: Option<u64>) {
+    let Ok(oauth) = production_oauth() else {
+        return;
+    };
+    if let Err(e) = attach_saved_google(ctx, seq, &oauth, drive_backend).await {
+        eprintln!("connecting to Google Drive: {e}");
+    }
+}
+
+async fn connect_google(app: &AppHandle, seq: Option<u64>) {
+    if !google_available() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let _guard = state.sync_rt.connect_lock.lock().await;
+    connect_google_locked(app, seq).await;
+}
+
 // ---- start-up ----
 
 /// Loads the sync settings and, when the NAS was in use and a login exists, starts the sidecar
-/// (spec section 4.1). Never opens a login page. The engine gets its backend when the sidecar
+/// (spec section 4.1); when Google Drive was in use and a refresh token exists, builds its
+/// backend. Never opens a login page or a browser. The engine gets its backend when the sidecar
 /// reports `running`.
 pub fn start(app: &AppHandle) {
     let state = app.state::<AppState>();
@@ -721,8 +1173,16 @@ pub fn start(app: &AppHandle) {
         Ok(loaded) => *state.lock_settings() = loaded,
         Err(e) => eprintln!("settings.json ignored: {e}"),
     }
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || start_if_logged_in(&app));
+    // Google Drive: a stored login builds the backend (never a browser). The number says
+    // which target switches this build may still be attached after.
+    let google = state.lock_settings().sync.backend == SyncBackend::Gdrive;
+    let seq = state.sync_rt.seq.load(Ordering::SeqCst);
+    let a = app.clone();
+    tauri::async_runtime::spawn_blocking(move || start_if_logged_in(&a));
+    if google {
+        let a = app.clone();
+        tauri::async_runtime::spawn(async move { connect_google(&a, Some(seq)).await });
+    }
 }
 
 // ---- commands ----
@@ -747,11 +1207,19 @@ pub async fn set_sync_backend(
         let a = app.clone();
         let changed = blocking(move || switch_backend(&a.state::<AppState>(), backend)).await??;
         if changed {
+            // A Google login waiting for the browser belongs to the old choice.
+            if backend != SyncBackend::Gdrive {
+                state.sync_rt.cancel_login();
+            }
             let a = app.clone();
             if backend == SyncBackend::Nas {
                 blocking(move || start_if_logged_in(&a)).await?;
             } else {
                 blocking(move || stop_sidecar(&a)).await?;
+            }
+            // A login stored earlier (the target was switched away and back) is used again.
+            if backend == SyncBackend::Gdrive && google_available() {
+                connect_google_locked(&app, None).await;
             }
         }
     }
@@ -895,8 +1363,12 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> AppResult<S
         .sync_rt
         .current_tailnet()
         .is_some_and(|t| matches!(t.state(), TailnetState::Running { .. }));
-    if !state.sync.has_target() && tailnet_up {
-        connect_nas(&app, None).await;
+    if !state.sync.has_target() {
+        if state.lock_settings().sync.backend == SyncBackend::Gdrive {
+            connect_google(&app, None).await;
+        } else if tailnet_up {
+            connect_nas(&app, None).await;
+        }
     }
     state.sync.request(SyncReason::SyncNow);
     Ok(state.sync.status())
@@ -997,6 +1469,64 @@ pub async fn sync_recover(
         archived: count(report.archived_local.len() + report.archived_remote.len()),
         failed: count(report.failed.len()),
     })
+}
+
+// ---- Google commands ----
+
+/// 「Google でログイン」: opens the browser, waits for Google to come back (5 minutes at most),
+/// keeps the login and starts the sync. Needs Google Drive to be the chosen target. A second
+/// login while one waits is refused. Cancel (`google_login_cancel`) and a refusal on Google's
+/// page are normal ends (`outcome`), not errors.
+#[tauri::command]
+pub async fn google_login(app: AppHandle) -> AppResult<GoogleLoginDto> {
+    let oauth = production_oauth()?;
+    require_gdrive(app.state::<AppState>().inner())?;
+    let state = app.state::<AppState>();
+    let Some(slot) = state.sync_rt.begin_login() else {
+        return Err(AppError::Invalid {
+            message: "ログインの途中です。開いたブラウザで続けるか、「キャンセル」を押してください"
+                .into(),
+        });
+    };
+    let cancel = Arc::clone(&slot.cancel);
+    let failure = Arc::new(Mutex::new(None));
+    let opener_app = app.clone();
+    let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |url| {
+        opener_app
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|_| "ブラウザを開けませんでした".to_string())
+    });
+    let end = google_login_flow(
+        &app,
+        &oauth,
+        open,
+        async move { cancel.notified().await },
+        drive_backend,
+    )
+    .await;
+    drop(slot);
+    // The browser could not be opened: the cancel above ended the wait; say why.
+    if let Some(message) = lock(&failure).take() {
+        return Err(AppError::Io { message });
+    }
+    Ok(GoogleLoginDto {
+        outcome: end?.name(),
+    })
+}
+
+/// 「キャンセル」 while `google_login` waits for the browser. Nothing to do when none waits.
+#[tauri::command]
+pub async fn google_login_cancel(state: State<'_, AppState>) -> AppResult<()> {
+    state.sync_rt.cancel_login();
+    Ok(())
+}
+
+/// 「ログアウト」. See [`google_logout_flow`].
+#[tauri::command]
+pub async fn google_logout(app: AppHandle) -> AppResult<GoogleLogoutDto> {
+    let oauth = GoogleOAuth::production().and_then(Result::ok);
+    google_logout_flow(&app, oauth.as_ref()).await
 }
 
 #[cfg(test)]
@@ -1104,7 +1634,14 @@ mod tests {
             nas_user: Some("たろう".into()),
             google_email: None,
         };
-        let v = serde_json::to_value(settings_dto(&s, true, false, false)).unwrap();
+        let facts = DtoFacts {
+            password_set: true,
+            password_persistent: false,
+            google_logged_in: false,
+            google_token_persistent: true,
+            google_available: false,
+        };
+        let v = serde_json::to_value(settings_dto(&s, facts)).unwrap();
         assert_eq!(
             v,
             serde_json::json!({
@@ -1113,17 +1650,27 @@ mod tests {
                 "nasUser": "たろう",
                 "nasPasswordSet": true,
                 "passwordPersistent": false,
+                "googleLoggedIn": false,
+                "googleTokenPersistent": true,
                 "googleAvailable": false,
             })
         );
-        let v = serde_json::to_value(settings_dto(&SyncSettings::default(), false, true, true))
-            .unwrap();
+        let facts = DtoFacts {
+            password_set: false,
+            password_persistent: true,
+            google_logged_in: true,
+            google_token_persistent: false,
+            google_available: true,
+        };
+        let v = serde_json::to_value(settings_dto(&SyncSettings::default(), facts)).unwrap();
         assert_eq!(
             v,
             serde_json::json!({
                 "backend": "none",
                 "nasPasswordSet": false,
                 "passwordPersistent": true,
+                "googleLoggedIn": true,
+                "googleTokenPersistent": false,
                 "googleAvailable": true,
             })
         );
@@ -1508,6 +2055,7 @@ mod tests {
         assert!(!attach_if_current(
             &state,
             Some(seq),
+            SyncBackend::Nas,
             memory_backend(),
             "http://nas:5005/powertodo/"
         ));
@@ -1516,6 +2064,7 @@ mod tests {
         assert!(!attach_if_current(
             &state,
             None,
+            SyncBackend::Nas,
             memory_backend(),
             "http://nas:5005/x/"
         ));
@@ -1525,6 +2074,7 @@ mod tests {
         assert!(!attach_if_current(
             &state,
             Some(seq),
+            SyncBackend::Nas,
             memory_backend(),
             "http://nas:5005/x/"
         ));
@@ -1532,6 +2082,7 @@ mod tests {
         assert!(attach_if_current(
             &state,
             Some(now),
+            SyncBackend::Nas,
             memory_backend(),
             "http://nas:5005/x/"
         ));
@@ -1549,6 +2100,7 @@ mod tests {
         assert!(attach_if_current(
             &state,
             Some(seq),
+            SyncBackend::Nas,
             memory_backend(),
             "http://nas:5005/x/"
         ));
@@ -1745,5 +2297,591 @@ mod tests {
             panic!("expected an io error");
         };
         assert!(!message.contains("/x"), "{message}");
+    }
+
+    // ---- Google Drive ----
+
+    mod google {
+        use super::*;
+        use crate::sync::oauth::Endpoints;
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use serde_json::json;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        const REFRESH: &str = "refresh-token-abc";
+        const EMAIL: &str = "user@example.com";
+
+        fn state_with(dir: &Path, secrets: Secrets) -> Arc<AppState> {
+            let mut state = AppState::new(dir.to_path_buf());
+            state.sync_rt = SyncRuntime::with_secrets(secrets);
+            Arc::new(state)
+        }
+
+        fn memory_state(dir: &Path) -> Arc<AppState> {
+            state_with(dir, Secrets::new(Arc::new(MemoryStore::new())))
+        }
+
+        fn id_token(email: &str) -> String {
+            let payload = URL_SAFE_NO_PAD.encode(json!({"email": email, "sub": "1"}).to_string());
+            format!("header.{payload}.signature")
+        }
+
+        fn oauth(server: &MockServer) -> GoogleOAuth {
+            GoogleOAuth::new(
+                "client-id-123",
+                "client-secret-xyz",
+                Endpoints {
+                    auth_url: format!("{}/auth", server.uri()),
+                    token_url: format!("{}/token", server.uri()),
+                    revoke_url: format!("{}/revoke", server.uri()),
+                },
+            )
+            .unwrap()
+        }
+
+        /// Google answers the code with tokens for `email`.
+        async fn mount_token(server: &MockServer, email: &str) {
+            Mock::given(method("POST"))
+                .and(path("/token"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "access_token": "access-1", "expires_in": 3600,
+                    "refresh_token": REFRESH, "id_token": id_token(email),
+                    "token_type": "Bearer",
+                })))
+                .mount(server)
+                .await;
+        }
+
+        async fn mount_revoke(server: &MockServer, status: u16, times: u64) {
+            Mock::given(method("POST"))
+                .and(path("/revoke"))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(times)
+                .mount(server)
+                .await;
+        }
+
+        /// What the browser would do after the user's choice: the redirect to the loopback port
+        /// the authorization URL names, with `extra` (`code=...` or `error=...`) and the right
+        /// `state`.
+        fn answer(url: &str, extra: &'static str) {
+            let url = url::Url::parse(url).unwrap();
+            let q: BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+            let port = url::Url::parse(&q["redirect_uri"]).unwrap().port().unwrap();
+            let target = format!("/?state={}&{extra}", q["state"]);
+            tokio::spawn(async move {
+                let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+                s.write_all(
+                    format!(
+                        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+                let mut raw = Vec::new();
+                let _ = s.read_to_end(&mut raw).await;
+            });
+        }
+
+        fn make_memory(_: Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> {
+            Ok(memory_backend())
+        }
+
+        fn never() -> impl Future<Output = ()> + Send {
+            std::future::pending()
+        }
+
+        fn stored(state: &AppState, account: &str) -> Option<String> {
+            state.sync_rt.secrets().get(GOOGLE_SERVICE, account)
+        }
+
+        // ---- small pieces ----
+
+        #[test]
+        fn the_account_is_the_lower_case_address_or_a_fixed_name() {
+            assert_eq!(
+                google_account(Some(" User@Example.com ")),
+                "user@example.com"
+            );
+            assert_eq!(google_account(None), "default");
+            assert_eq!(google_account(Some("")), "default");
+            assert_eq!(google_root(Some(EMAIL)), "gdrive:user@example.com");
+        }
+
+        #[test]
+        fn secrets_know_per_service_whether_they_reached_the_keychain() {
+            let kc = Keychain::new();
+            let secrets = Secrets::new(kc.clone());
+            assert!(secrets.set(NAS_SERVICE, "u@nas", "pw"));
+            kc.broken.store(true, Ordering::SeqCst);
+            assert!(!secrets.set(GOOGLE_SERVICE, EMAIL, "token"));
+            // The NAS password is still in the keychain; only the token is in memory.
+            assert!(secrets.persistent_for(NAS_SERVICE));
+            assert!(!secrets.persistent_for(GOOGLE_SERVICE));
+            assert!(!secrets.persistent());
+            // The keychain comes back: the next token is saved there again.
+            kc.broken.store(false, Ordering::SeqCst);
+            assert!(secrets.set(GOOGLE_SERVICE, EMAIL, "token2"));
+            assert!(secrets.persistent_for(GOOGLE_SERVICE) && secrets.persistent());
+        }
+
+        #[tokio::test]
+        async fn only_google_s_own_address_is_opened_in_the_browser() {
+            let opened = Arc::new(Mutex::new(Vec::<String>::new()));
+            let failure = Arc::new(Mutex::new(None));
+            let cancel = Arc::new(Notify::new());
+            let o = Arc::clone(&opened);
+            let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |u| {
+                lock(&o).push(u.to_string());
+                Ok(())
+            });
+            open("https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+            assert_eq!(lock(&opened).len(), 1);
+            assert!(lock(&failure).is_none());
+            // Anything else is not opened; the login is cancelled with a reason.
+            for url in [
+                "http://accounts.google.com/o/oauth2/v2/auth",
+                "https://accounts.google.com.evil.example/",
+                "https://evil.example/https://accounts.google.com/",
+                "file:///etc/passwd",
+            ] {
+                open(url);
+            }
+            assert_eq!(lock(&opened).len(), 1);
+            let reason = lock(&failure).take().expect("a reason");
+            assert!(reason.contains("ブラウザを開きませんでした"), "{reason}");
+            assert!(!reason.contains("evil") && !reason.contains("passwd"));
+            // The cancel was fired (the permit is kept until the login waits for it).
+            tokio::time::timeout(std::time::Duration::from_secs(2), cancel.notified())
+                .await
+                .expect("the login was cancelled");
+        }
+
+        #[tokio::test]
+        async fn a_browser_that_cannot_be_opened_ends_the_login_with_a_reason() {
+            let failure = Arc::new(Mutex::new(None));
+            let cancel = Arc::new(Notify::new());
+            let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), |_| {
+                Err("ブラウザを開けませんでした".into())
+            });
+            open("https://accounts.google.com/o/oauth2/v2/auth");
+            assert_eq!(
+                lock(&failure).as_deref(),
+                Some("ブラウザを開けませんでした")
+            );
+            tokio::time::timeout(std::time::Duration::from_secs(2), cancel.notified())
+                .await
+                .expect("the login was cancelled");
+        }
+
+        #[tokio::test]
+        async fn one_login_at_a_time_and_a_cancel_is_never_lost() {
+            let rt = SyncRuntime::new();
+            assert!(!rt.cancel_login(), "nothing to cancel");
+            let first = rt.begin_login().expect("the first login");
+            assert!(rt.begin_login().is_none(), "a second one is refused");
+            // A cancel before the login waits for it is kept.
+            assert!(rt.cancel_login());
+            tokio::time::timeout(std::time::Duration::from_secs(2), first.cancel.notified())
+                .await
+                .expect("the permit was kept");
+            // The place is free again once the login is over.
+            drop(first);
+            assert!(!rt.cancel_login());
+            assert!(rt.begin_login().is_some());
+        }
+
+        // ---- the end of a login ----
+
+        #[tokio::test]
+        async fn a_login_keeps_the_token_then_the_address_then_attaches() {
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).unwrap();
+            assert_eq!(stored(&state, EMAIL).as_deref(), Some(REFRESH));
+            let saved = AppSettings::load(app.path()).unwrap();
+            assert_eq!(saved.sync.google_email.as_deref(), Some(EMAIL));
+            assert_eq!(saved.sync.backend, SyncBackend::Gdrive);
+            assert!(state.sync.has_target());
+            // No token or address in the settings file besides the address.
+            let text = std::fs::read_to_string(app.path().join("settings.json")).unwrap();
+            assert!(!text.contains(REFRESH), "{text}");
+        }
+
+        #[tokio::test]
+        async fn a_login_with_another_account_drops_the_old_token_only_after_the_settings() {
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            commit_google(
+                &state,
+                Some("old@example.com"),
+                "old-token",
+                memory_backend(),
+            )
+            .unwrap();
+            commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).unwrap();
+            assert_eq!(stored(&state, EMAIL).as_deref(), Some(REFRESH));
+            assert_eq!(stored(&state, "old@example.com"), None);
+            assert_eq!(
+                state.lock_settings().sync.google_email.as_deref(),
+                Some(EMAIL)
+            );
+        }
+
+        #[tokio::test]
+        async fn a_failed_settings_write_takes_the_new_token_out_again() {
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            commit_google(
+                &state,
+                Some("old@example.com"),
+                "old-token",
+                memory_backend(),
+            )
+            .unwrap();
+            // The settings file can no longer be written.
+            std::fs::remove_dir_all(app.path()).unwrap();
+            write_atomic(app.path(), b"x").unwrap();
+            assert!(commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).is_err());
+            assert_eq!(stored(&state, EMAIL), None, "the new token is of no use");
+            assert_eq!(
+                stored(&state, "old@example.com").as_deref(),
+                Some("old-token"),
+                "the old login is untouched"
+            );
+            assert_eq!(
+                state.lock_settings().sync.google_email.as_deref(),
+                Some("old@example.com")
+            );
+        }
+
+        #[tokio::test]
+        async fn a_login_that_ends_after_a_switch_saves_nothing() {
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            switch_backend(&state, SyncBackend::Nas).unwrap();
+            let before = state.lock_settings().clone();
+            let m = invalid_text(commit_google(
+                &state,
+                Some(EMAIL),
+                REFRESH,
+                memory_backend(),
+            ));
+            assert!(m.contains("同期先が変更された"), "{m}");
+            assert_eq!(*state.lock_settings(), before);
+            assert_eq!(stored(&state, EMAIL), None);
+            assert!(!state.sync.has_target());
+        }
+
+        // ---- the whole login, against a fake Google ----
+
+        #[tokio::test]
+        async fn a_login_trades_the_code_and_starts_the_sync() {
+            let server = MockServer::start().await;
+            mount_token(&server, EMAIL).await;
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+
+            let end = google_login_flow(
+                &state,
+                &oauth(&server),
+                |u| answer(u, "code=the-code"),
+                never(),
+                make_memory,
+            )
+            .await
+            .unwrap();
+            assert_eq!(end, LoginEnd::Done);
+            assert_eq!(stored(&state, EMAIL).as_deref(), Some(REFRESH));
+            assert_eq!(
+                state.lock_settings().sync.google_email.as_deref(),
+                Some(EMAIL)
+            );
+            assert!(state.sync.has_target());
+            // The code was traded with the verifier, not the other way round.
+            let reqs = server.received_requests().await.unwrap();
+            let body = String::from_utf8_lossy(&reqs[0].body).to_string();
+            assert!(
+                body.contains("code=the-code") && body.contains("code_verifier="),
+                "{body}"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_login_needs_google_drive_to_be_the_target() {
+            let server = MockServer::start().await;
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            let m = invalid_text(
+                google_login_flow(&state, &oauth(&server), |_| {}, never(), make_memory).await,
+            );
+            assert!(m.contains("Google Drive ではありません"), "{m}");
+            assert!(
+                server.received_requests().await.unwrap().is_empty(),
+                "no browser, no request"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_cancel_and_a_refusal_are_ends_not_errors() {
+            let server = MockServer::start().await;
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            // 「キャンセル」
+            let end = google_login_flow(&state, &oauth(&server), |_| {}, async {}, make_memory)
+                .await
+                .unwrap();
+            assert_eq!(end, LoginEnd::Cancelled);
+            // The user said no on Google's page.
+            let end = google_login_flow(
+                &state,
+                &oauth(&server),
+                |u| answer(u, "error=access_denied"),
+                never(),
+                make_memory,
+            )
+            .await
+            .unwrap();
+            assert_eq!(end, LoginEnd::Denied);
+            assert_eq!(LoginEnd::Denied.name(), "denied");
+            assert_eq!(LoginEnd::Cancelled.name(), "cancelled");
+            // Neither kept anything, neither asked Google for tokens.
+            assert_eq!(stored(&state, EMAIL), None);
+            assert_eq!(state.lock_settings().sync.google_email, None);
+            assert!(!state.sync.has_target());
+            assert!(server.received_requests().await.unwrap().is_empty());
+        }
+
+        #[tokio::test]
+        async fn a_login_that_outlives_the_choice_is_given_back_to_google() {
+            let server = MockServer::start().await;
+            mount_token(&server, EMAIL).await;
+            mount_revoke(&server, 200, 1).await;
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+
+            let s = Arc::clone(&state);
+            let m = invalid_text(
+                google_login_flow(
+                    &state,
+                    &oauth(&server),
+                    move |u| {
+                        // The user picks another target while the browser is open.
+                        switch_backend(&s, SyncBackend::None).unwrap();
+                        answer(u, "code=the-code");
+                    },
+                    never(),
+                    make_memory,
+                )
+                .await,
+            );
+            assert!(m.contains("同期先が変更された"), "{m}");
+            assert_eq!(stored(&state, EMAIL), None);
+            assert_eq!(state.lock_settings().sync.google_email, None);
+            assert!(!state.sync.has_target());
+            // The fresh token was revoked (the mock expects exactly one call).
+            let reqs = server.received_requests().await.unwrap();
+            let revoke = reqs.iter().find(|r| r.url.path() == "/revoke").unwrap();
+            assert!(String::from_utf8_lossy(&revoke.body).contains(REFRESH));
+        }
+
+        // ---- logout ----
+
+        async fn logged_in_state(dir: &Path) -> Arc<AppState> {
+            let state = memory_state(dir);
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).unwrap();
+            state
+        }
+
+        #[tokio::test]
+        async fn a_logout_revokes_forgets_and_detaches_but_stays_on_google_drive() {
+            let server = MockServer::start().await;
+            mount_revoke(&server, 200, 1).await;
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            assert!(state.sync.has_target());
+
+            let dto = google_logout_flow(&state, Some(&oauth(&server)))
+                .await
+                .unwrap();
+            assert!(dto.revoked);
+            assert_eq!(stored(&state, EMAIL), None);
+            let saved = AppSettings::load(app.path()).unwrap();
+            assert_eq!(saved.sync.google_email, None);
+            assert_eq!(
+                saved.sync.backend,
+                SyncBackend::Gdrive,
+                "spec 6: D-09 shows the login"
+            );
+            assert!(!state.sync.has_target());
+            assert_eq!(state.sync.status().state, crate::sync::SyncPhase::Off);
+        }
+
+        #[tokio::test]
+        async fn an_offline_revoke_still_logs_out_here_and_says_so() {
+            // Nothing listens on this port.
+            let dead = {
+                let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                l.local_addr().unwrap().port()
+            };
+            let oauth = GoogleOAuth::new(
+                "client-id-123",
+                "client-secret-xyz",
+                Endpoints {
+                    auth_url: format!("http://127.0.0.1:{dead}/auth"),
+                    token_url: format!("http://127.0.0.1:{dead}/token"),
+                    revoke_url: format!("http://127.0.0.1:{dead}/revoke"),
+                },
+            )
+            .unwrap();
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            let dto = google_logout_flow(&state, Some(&oauth)).await.unwrap();
+            assert!(!dto.revoked);
+            assert_eq!(stored(&state, EMAIL), None);
+            assert_eq!(state.lock_settings().sync.google_email, None);
+            assert!(!state.sync.has_target());
+            // A build without Google credentials cannot revoke either.
+            let state = logged_in_state(tempfile::tempdir().unwrap().path()).await;
+            assert!(!google_logout_flow(&state, None).await.unwrap().revoked);
+        }
+
+        #[tokio::test]
+        async fn a_keychain_that_refuses_keeps_the_login_as_it_was() {
+            let server = MockServer::start().await;
+            mount_revoke(&server, 200, 1).await;
+            let kc = Keychain::new();
+            let app = tempfile::tempdir().unwrap();
+            let state = state_with(app.path(), Secrets::new(kc.clone()));
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            commit_google(&state, Some(EMAIL), REFRESH, memory_backend()).unwrap();
+            kc.broken.store(true, Ordering::SeqCst);
+            let AppError::Io { message } = google_logout_flow(&state, Some(&oauth(&server)))
+                .await
+                .unwrap_err()
+            else {
+                panic!("expected an io error");
+            };
+            assert!(message.contains("キーチェーン"), "{message}");
+            // Nothing else changed: the address is still there, the sync still attached.
+            assert_eq!(
+                state.lock_settings().sync.google_email.as_deref(),
+                Some(EMAIL)
+            );
+            assert!(state.sync.has_target());
+        }
+
+        #[tokio::test]
+        async fn a_logout_does_not_detach_a_nas_that_was_chosen_since() {
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            // The NAS is chosen and connected; the Google login is a leftover.
+            switch_backend(&state, SyncBackend::Nas).unwrap();
+            state.sync.set_backend(
+                Some(memory_backend()),
+                BackendKind::Nas,
+                "http://nas:5005/powertodo/",
+            );
+            google_logout_flow(&state, None).await.unwrap();
+            assert!(state.sync.has_target());
+            assert_eq!(state.lock_settings().sync.google_email, None);
+            assert_eq!(stored(&state, EMAIL), None);
+        }
+
+        // ---- start-up ----
+
+        #[tokio::test]
+        async fn start_up_attaches_a_stored_login_and_never_a_browser() {
+            let server = MockServer::start().await;
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            state.sync.set_backend(None, BackendKind::Gdrive, "");
+            assert!(!state.sync.has_target());
+
+            let built = Arc::new(AtomicBool::new(false));
+            let b = Arc::clone(&built);
+            let attached = attach_saved_google(&state, None, &oauth(&server), move |_| {
+                b.store(true, Ordering::SeqCst);
+                Ok(memory_backend())
+            })
+            .await
+            .unwrap();
+            assert!(attached && built.load(Ordering::SeqCst));
+            assert!(state.sync.has_target());
+            assert!(
+                server.received_requests().await.unwrap().is_empty(),
+                "nothing is asked of Google until the first sync"
+            );
+        }
+
+        #[tokio::test]
+        async fn start_up_without_a_token_leaves_the_sync_off() {
+            let server = MockServer::start().await;
+            let app = tempfile::tempdir().unwrap();
+            let state = memory_state(app.path());
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            let attached = attach_saved_google(&state, None, &oauth(&server), make_memory)
+                .await
+                .unwrap();
+            assert!(!attached);
+            assert!(!state.sync.has_target());
+            assert_eq!(state.sync.status().state, crate::sync::SyncPhase::Off);
+        }
+
+        #[tokio::test]
+        async fn a_start_up_build_is_dropped_when_the_target_changed_meanwhile() {
+            let server = MockServer::start().await;
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            state.sync.set_backend(None, BackendKind::Gdrive, "");
+            let seq = state.sync_rt.seq.load(Ordering::SeqCst);
+            // The user switched to the NAS (a switch makes the number stale) and back.
+            switch_backend(&state, SyncBackend::Nas).unwrap();
+            switch_backend(&state, SyncBackend::Gdrive).unwrap();
+            let attached = attach_saved_google(&state, Some(seq), &oauth(&server), make_memory)
+                .await
+                .unwrap();
+            assert!(!attached);
+            assert!(!state.sync.has_target());
+            // And with the NAS chosen the Google login is not attached at all.
+            switch_backend(&state, SyncBackend::Nas).unwrap();
+            assert!(
+                !attach_saved_google(&state, None, &oauth(&server), make_memory)
+                    .await
+                    .unwrap()
+            );
+        }
+
+        #[tokio::test]
+        async fn switching_to_google_and_away_resets_the_records_like_the_nas() {
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            let mut records = SyncState::new(
+                &app.path().join("data"),
+                BackendKind::Gdrive,
+                &google_root(Some(EMAIL)),
+            );
+            records.last_sync = Some(dt("2026-10-16T09:30:00"));
+            records.save(app.path()).unwrap();
+            assert!(switch_backend(&state, SyncBackend::None).unwrap());
+            assert!(!app.path().join(SyncState::FILE).exists());
+            assert!(!state.sync.has_target());
+            records.save(app.path()).unwrap();
+            assert!(switch_backend(&state, SyncBackend::Gdrive).unwrap());
+            assert!(!app.path().join(SyncState::FILE).exists());
+        }
     }
 }

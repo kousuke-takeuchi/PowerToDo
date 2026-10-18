@@ -20,6 +20,8 @@ import type {
   RecurrenceLabelDto,
   SearchDto,
   SettingsDto,
+  GoogleLoginDto,
+  GoogleLogoutDto,
   SyncBackend,
   SyncRecoverDto,
   SyncRecoverMode,
@@ -126,6 +128,15 @@ export const api = {
   syncStatus: () => invoke<SyncStatusDto>("sync_status"),
   /** After a `suspect` status: the user's choice, confirmed in a dialog first. */
   syncRecover: (mode: SyncRecoverMode) => invoke<SyncRecoverDto>("sync_recover", { mode }),
+  /**
+   * 「Google でログイン」: opens the browser and resolves when Google has come back (5 minutes at most). Needs backend "gdrive".
+   * `cancelled` and `denied` are normal ends (resolved, not rejected). A second call while one waits rejects with a Japanese message.
+   */
+  googleLogin: () => invoke<GoogleLoginDto>("google_login"),
+  /** 「キャンセル」 while `googleLogin` waits. Does nothing when none waits. */
+  googleLoginCancel: () => invoke<null>("google_login_cancel"),
+  /** Revokes (best effort; `revoked: false` when Google could not be reached), forgets the login and detaches the sync. The target stays Google Drive. */
+  googleLogout: () => invoke<GoogleLogoutDto>("google_logout"),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];

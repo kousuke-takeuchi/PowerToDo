@@ -215,6 +215,17 @@ fn suspect_message(side: Side) -> String {
     .to_string()
 }
 
+/// What the status says once the target refused our credentials. The NAS has 「確かめる」; Google
+/// Drive needs a new login (its refresh token is dead).
+fn auth_failed_message(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Nas => "同期先の認証に失敗しました。設定で接続を確かめるまで同期しません",
+        BackendKind::Gdrive => {
+            "Google のログインが無効になりました。設定の「同期」でもう一度ログインしてください"
+        }
+    }
+}
+
 fn stamp(t: NaiveDateTime) -> String {
     t.format("%Y-%m-%dT%H:%M:%S").to_string()
 }
@@ -593,7 +604,13 @@ impl SyncEngine {
     }
 
     /// Reports a failure of the target that ends the run.
-    fn backend_failed(&self, host: &dyn SyncHost, generation: u64, e: &BackendError) -> RunOutcome {
+    fn backend_failed(
+        &self,
+        host: &dyn SyncHost,
+        generation: u64,
+        kind: BackendKind,
+        e: &BackendError,
+    ) -> RunOutcome {
         let g = Some(generation);
         match e {
             BackendError::Offline(_) => {
@@ -612,9 +629,7 @@ impl SyncEngine {
                 }
                 self.publish(Some(host), g, |s| {
                     s.state = SyncPhase::Error;
-                    s.message = Some(
-                        "同期先の認証に失敗しました。設定で接続を確かめるまで同期しません".into(),
-                    );
+                    s.message = Some(auth_failed_message(kind).into());
                 });
                 RunOutcome::Failed
             }
@@ -701,7 +716,7 @@ impl SyncEngine {
         let remote = match target.backend.list().await {
             Ok(files) => files,
             Err(e) => {
-                report.outcome = self.backend_failed(host, generation, &e);
+                report.outcome = self.backend_failed(host, generation, target.kind, &e);
                 return report;
             }
         };
@@ -769,7 +784,7 @@ impl SyncEngine {
         match stop {
             Ok(()) => {}
             Err(Stop::Backend(e)) => {
-                report.outcome = self.backend_failed(host, generation, &e);
+                report.outcome = self.backend_failed(host, generation, target.kind, &e);
                 return report;
             }
             Err(Stop::Changed) => {
@@ -2054,6 +2069,20 @@ mod tests {
         let r = a.sync().await;
         assert_eq!(r.outcome, RunOutcome::Done);
         assert!(r.uploaded.contains(&INBOX_FILE.to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_google_login_that_stopped_working_asks_for_a_new_login() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.engine
+            .set_backend(Some(remote.clone()), BackendKind::Gdrive, "gdrive:default");
+        remote.fail_list(Failure::Auth);
+        assert_eq!(a.sync().await.outcome, RunOutcome::Failed);
+        let m = a.engine.status().message.unwrap();
+        assert!(m.contains("ログイン") && !m.contains("確かめる"), "{m}");
+        // The NAS keeps its own wording.
+        assert!(auth_failed_message(BackendKind::Nas).contains("確かめる"));
     }
 
     #[tokio::test]
