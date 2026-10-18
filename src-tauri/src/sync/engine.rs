@@ -1349,6 +1349,18 @@ impl Run<'_> {
 
     async fn archive_remote(&mut self, name: &str) -> Result<(), FileError> {
         let remote = self.remote_for(name).ok_or_else(|| missing_remote(name))?;
+        {
+            // The plan saw no local file. One that is back by now (an app that saves by
+            // delete and rename, as Excel on Windows does) is not a deletion to follow.
+            let guard = self.host.lock_store();
+            let store = guard.as_ref().ok_or(FileError::Changed)?;
+            if store.paths().data_dir != self.data_dir {
+                return Err(FileError::Changed);
+            }
+            if std::fs::symlink_metadata(self.data_dir.join(name)).is_ok() {
+                return Err(FileError::Deferred);
+            }
+        }
         self.backend.move_to_archive(&remote).await?;
         self.forget(name)?;
         self.report.archived_remote.push(name.to_string());
@@ -2347,6 +2359,28 @@ mod tests {
         assert!(remote.get("p1.xlsx").is_none());
         assert_eq!(remote.archived(), [("p1.xlsx".to_string(), content)]);
         assert!(!a.records().contains_key("p1.xlsx"));
+    }
+
+    #[tokio::test]
+    async fn a_remote_archive_waits_when_the_local_file_came_back() {
+        let remote = backend();
+        let hooked = Hooked::new(&remote);
+        let a = Pc::with_backend(hooked.clone(), None);
+        a.create("p0");
+        a.create("p1");
+        a.sync().await;
+        let content = a.file("p1.xlsx");
+        a.with(|s| s.delete_project("p1").unwrap());
+        // After the local listing, the file is back (Excel on Windows saves by delete and
+        // rename, so it is briefly missing).
+        let path = a.data.join("p1.xlsx");
+        hooked.on_list(move || fs::write(&path, &content).unwrap());
+        let r = a.sync().await;
+        assert!(r.archived_remote.is_empty(), "{r:?}");
+        assert_eq!(r.deferred, ["p1.xlsx"]);
+        assert!(remote.get("p1.xlsx").is_some());
+        assert!(remote.archived().is_empty());
+        assert!(a.records().contains_key("p1.xlsx"));
     }
 
     #[tokio::test]
