@@ -222,6 +222,10 @@ pub struct SyncRuntime {
     /// The Google login waiting for the browser, if any: what `google_login_cancel` fires.
     /// One at a time (see [`SyncRuntime::begin_login`]).
     google_login: Mutex<Option<Arc<Notify>>>,
+    /// The NAS refused the saved password and the backend was detached since (the target was
+    /// switched away): the engine no longer knows, so this keeps the backend from being built
+    /// again until 「確かめる」 passes. For this run of the app.
+    nas_rejected: AtomicBool,
 }
 
 /// The place of the one Google login in flight. Dropping it frees the place.
@@ -254,6 +258,7 @@ impl SyncRuntime {
             connect_lock: tokio::sync::Mutex::new(()),
             settings_write: Mutex::new(()),
             google_login: Mutex::new(None),
+            nas_rejected: AtomicBool::new(false),
         }
     }
 
@@ -536,8 +541,13 @@ fn switch_backend(state: &AppState, new: SyncBackend) -> AppResult<bool> {
     if state.lock_settings().sync.backend == new {
         return Ok(false);
     }
+    let old = state.lock_settings().sync.backend;
     update_sync_settings(state, |s| s.backend = new)?;
     state.sync_rt.invalidate();
+    // Detaching forgets the refusal in the engine; keep it for the NAS.
+    if old == SyncBackend::Nas && state.sync.has_target() && state.sync.auth_rejected() {
+        state.sync_rt.nas_rejected.store(true, Ordering::SeqCst);
+    }
     state.sync.set_backend(None, BackendKind::Nas, "");
     state.sync.reset_records();
     Ok(true)
@@ -704,6 +714,19 @@ fn build_webdav(
     WebDavBackend::new(resolved, user, password, Some(proxy)).map_err(backend_error)
 }
 
+/// The NAS refused the saved password, and nothing changed since that would make it worth
+/// another try (「確かめる」 passing): with a backend attached the engine says so, without one
+/// (switched away and back) [`SyncRuntime::nas_rejected`] does. A reconnect of the sidecar, a
+/// switch back to the NAS or 「今すぐ同期」 then builds nothing: a NAS may lock the account
+/// after repeated failures.
+fn nas_connect_refused(state: &AppState) -> bool {
+    if state.sync.has_target() {
+        state.sync.auth_rejected()
+    } else {
+        state.sync_rt.nas_rejected.load(Ordering::SeqCst)
+    }
+}
+
 /// Gives the engine its backend from the saved URL, user and password. `seq` is the sidecar
 /// event this was started for: when a newer one arrived meanwhile the result is dropped. A
 /// proxy that went away needs no handling: the engine's runs fail offline until the sidecar is
@@ -719,6 +742,11 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
     let (SyncBackend::Nas, Some(url), Some(user)) = (s.backend, s.nas_url, s.nas_user) else {
         return;
     };
+    if nas_connect_refused(&state) {
+        // The status keeps saying why (without a target it has to be told again).
+        state.sync.show_rejected(BackendKind::Nas);
+        return;
+    }
     let Some(tailnet) = rt.current_tailnet() else {
         return;
     };
@@ -807,6 +835,7 @@ fn commit_nas(
     })?;
     let secrets = state.sync_rt.secrets();
     secrets.set(NAS_SERVICE, &account, password);
+    state.sync_rt.nas_rejected.store(false, Ordering::SeqCst);
     // The details moved to another account: the old password has no use.
     if let Some(old) = previous.filter(|p| *p != account) {
         let _ = secrets.delete(NAS_SERVICE, &old);
@@ -2158,6 +2187,101 @@ mod tests {
             memory_backend(),
             "http://nas:5005/x/"
         ));
+    }
+
+    /// A host with an open store and nobody listening.
+    struct QuietHost {
+        store: Mutex<Option<crate::store::project_store::ProjectStore>>,
+    }
+
+    impl QuietHost {
+        fn new(data: &Path) -> QuietHost {
+            let store = crate::store::project_store::ProjectStore::open(
+                crate::store::paths::Paths::new(data),
+                || dt("2026-10-16T09:00:00"),
+                true,
+            )
+            .unwrap();
+            QuietHost {
+                store: Mutex::new(Some(store)),
+            }
+        }
+    }
+
+    impl crate::sync::SyncHost for QuietHost {
+        fn lock_store(&self) -> MutexGuard<'_, Option<crate::store::project_store::ProjectStore>> {
+            lock(&self.store)
+        }
+        fn saving_keys(&self) -> std::collections::BTreeSet<String> {
+            Default::default()
+        }
+        fn status_changed(&self, _: &SyncStatusView) {}
+        fn conflict(&self, _: &str, _: &str) {}
+        fn projects_reloaded(&self, _: &[String]) {}
+        fn project_list_changed(&self, _: bool) {}
+    }
+
+    /// `target` is chosen and refused the saved credentials in a run.
+    async fn rejected(target: SyncBackend, app: &Path, data: &Path) -> AppState {
+        let state = state_in(app);
+        switch_backend(&state, target).unwrap();
+        let remote = Arc::new(MemoryBackend::new(|| dt("2026-10-16T09:30:00")));
+        remote.fail_list(crate::sync::backend::Failure::Auth);
+        let kind = backend_kind(target).unwrap();
+        state
+            .sync
+            .set_backend(Some(remote), kind, "http://nas:5005/powertodo/");
+        let host = QuietHost::new(data);
+        state.sync.run_once(&host).await;
+        assert!(state.sync.auth_rejected());
+        state
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_after_a_refused_password_does_not_try_it_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, data) = (tmp.path().join("app"), tmp.path().join("data"));
+        let state = rejected(SyncBackend::Nas, &app, &data).await;
+        // The sidecar comes up again: the saved password is not sent once more.
+        state.sync_rt.note_tailnet_state(false);
+        state.sync_rt.note_tailnet_state(true);
+        assert!(nas_connect_refused(&state));
+        // Not even after the target was switched away and back (which detached the backend).
+        switch_backend(&state, SyncBackend::None).unwrap();
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        assert!(!state.sync.has_target());
+        assert!(nas_connect_refused(&state));
+        // 「確かめる」 passes: the new details are used from then on.
+        commit_nas(
+            &state,
+            &nas_target("http://nas:5005/powertodo/"),
+            "たろう",
+            "new-pw",
+            memory_backend(),
+        )
+        .unwrap();
+        assert!(!nas_connect_refused(&state));
+        assert!(!state.sync.auth_rejected());
+    }
+
+    #[tokio::test]
+    async fn a_connect_without_a_refusal_of_the_nas_goes_ahead() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = state_in(tmp.path());
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        assert!(!nas_connect_refused(&state));
+        state.sync.set_backend(
+            Some(memory_backend()),
+            BackendKind::Nas,
+            "http://nas:5005/powertodo/",
+        );
+        assert!(!nas_connect_refused(&state));
+        // A refusal by Google Drive says nothing about the NAS.
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, data) = (tmp.path().join("app"), tmp.path().join("data"));
+        let state = rejected(SyncBackend::Gdrive, &app, &data).await;
+        switch_backend(&state, SyncBackend::Nas).unwrap();
+        assert!(!nas_connect_refused(&state));
     }
 
     #[tokio::test]

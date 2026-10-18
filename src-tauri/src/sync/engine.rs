@@ -468,15 +468,34 @@ impl SyncEngine {
     /// to run against. Does nothing when a target is set by now (decided under the engine's
     /// lock): a backend attached meanwhile owns the status.
     pub fn set_offline(&self, message: &str) {
+        self.show_without_target(|s| {
+            s.state = SyncPhase::Offline;
+            s.message = Some(message.to_string());
+        });
+    }
+
+    /// Shows that the target refuses the credentials while no backend is attached: the app
+    /// does not build one for credentials it knows are refused (a NAS may lock the account
+    /// after repeated failures). Like [`SyncEngine::set_offline`], nothing happens when a
+    /// target is set by now.
+    pub fn show_rejected(&self, kind: BackendKind) {
+        self.show_without_target(|s| {
+            s.state = SyncPhase::Error;
+            s.message = Some(auth_failed_message(kind).to_string());
+            s.auth_rejected = true;
+        });
+    }
+
+    fn show_without_target(&self, f: impl FnOnce(&mut SyncStatusView)) {
         let (view, host) = {
             let mut inner = self.lock();
             if inner.target.is_some() {
                 return;
             }
-            inner.status.state = SyncPhase::Offline;
-            inner.status.message = Some(message.to_string());
             inner.status.pending = 0;
             inner.status.suspect = None;
+            inner.status.auth_rejected = false;
+            f(&mut inner.status);
             (inner.status.clone(), inner.host.clone())
         };
         if let Some(h) = host {
@@ -2920,6 +2939,31 @@ mod tests {
         // Removing the target afterwards still reads as off.
         e.set_backend(None, BackendKind::Nas, ROOT);
         assert_eq!(e.status().state, SyncPhase::Off);
+    }
+
+    #[test]
+    fn a_known_refusal_is_shown_without_a_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let e = SyncEngine::with_clock(tmp.path().to_path_buf(), || dt(NOW));
+        let host: Arc<Host> = Arc::new(Host::default());
+        e.lock().host = Some(host.clone());
+        e.show_rejected(BackendKind::Nas);
+        let s = e.status();
+        assert_eq!(s.state, SyncPhase::Error);
+        assert!(s.auth_rejected);
+        assert_eq!(
+            s.message.as_deref(),
+            Some(auth_failed_message(BackendKind::Nas))
+        );
+        assert!(matches!(
+            host.events.lock().unwrap().last(),
+            Some(Event::Status(v)) if v.auth_rejected
+        ));
+        // A target attached meanwhile owns the status.
+        e.set_backend(Some(backend()), BackendKind::Nas, ROOT);
+        let before = e.status();
+        e.show_rejected(BackendKind::Nas);
+        assert_eq!(e.status(), before);
     }
 
     #[test]
