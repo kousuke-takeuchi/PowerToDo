@@ -6,7 +6,8 @@
 // Target precedence: --target, then $TAURI_ENV_TARGET_TRIPLE (set by `tauri build --target`),
 // then the host triple from `rustc -vV`.
 //
-// Go is looked up in this order: $GO, /opt/homebrew/bin/go, then `go` on PATH.
+// Go is looked up in this order: $GO, then `go` on PATH, then /opt/homebrew/bin/go (for a shell
+// where `go` is not on PATH, e.g. an app started from the Dock).
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -41,13 +42,15 @@ function hostTriple() {
 }
 
 function findGo() {
-  const candidates = [process.env.GO, "/opt/homebrew/bin/go"].filter(Boolean);
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
+  const env = process.env.GO;
+  if (env) {
+    if (existsSync(env)) return env;
+    die(`$GO is set to ${env}, which does not exist`);
   }
   const r = spawnSync("go", ["version"], { encoding: "utf8" });
   if (r.status === 0 && /^go version go/.test(r.stdout)) return "go";
-  return null;
+  const brew = "/opt/homebrew/bin/go";
+  return existsSync(brew) ? brew : null;
 }
 
 const args = process.argv.slice(2);
