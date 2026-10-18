@@ -20,6 +20,14 @@ import type {
   RecurrenceLabelDto,
   SearchDto,
   SettingsDto,
+  GoogleLoginDto,
+  GoogleLogoutDto,
+  SyncBackend,
+  SyncRecoverDto,
+  SyncRecoverMode,
+  SyncSettingsDto,
+  SyncStatusDto,
+  TailnetStatus,
   TaskInput,
   TaskPatch,
   TodayViewDto,
@@ -99,6 +107,36 @@ export const api = {
   notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
   requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),
   showMainWindow: () => invoke<null>("show_main_window"),
+
+  // ---- Phase 4: sync ----
+  syncSettings: () => invoke<SyncSettingsDto>("sync_settings"),
+  /** Switching sends every file again at the next sync. A switch away from the NAS ends the Tailscale sidecar. Ask the user first. */
+  setSyncBackend: (backend: SyncBackend) => invoke<SyncSettingsDto>("set_sync_backend", { backend }),
+  tailnetStatus: () => invoke<TailnetStatus>("tailnet_status"),
+  /** Starts the sidecar if needed and the interactive login; the URL arrives as a `tailnet-status` event (`needs_login`, `loginUrl`). Needs backend "nas". */
+  tailnetLogin: () => invoke<null>("tailnet_login"),
+  tailnetLogout: () => invoke<null>("tailnet_logout"),
+  /** 「再試行」: restarts a stuck or failed sidecar and keeps its state folder (the login). Needs backend "nas". */
+  tailnetRetry: () => invoke<null>("tailnet_retry"),
+  /** Deletes the Tailscale state and starts over (the node needs a login again). */
+  tailnetReset: () => invoke<null>("tailnet_reset"),
+  /** 「確かめる」: finds the NAS in the tailnet, writes a file and reads it back. On success the details are saved and the sync starts. Rejects with a Japanese message. */
+  nasCheck: (url: string, user: string, password: string) => invoke<null>("nas_check", { url, user, password }),
+  /** Detaches the NAS and forgets the password (the address and user stay). */
+  nasDisconnect: () => invoke<null>("nas_disconnect"),
+  syncNow: () => invoke<SyncStatusDto>("sync_now"),
+  syncStatus: () => invoke<SyncStatusDto>("sync_status"),
+  /** After a `suspect` status: the user's choice, confirmed in a dialog first. */
+  syncRecover: (mode: SyncRecoverMode) => invoke<SyncRecoverDto>("sync_recover", { mode }),
+  /**
+   * 「Google でログイン」: opens the browser and resolves when Google has come back (5 minutes at most). Needs backend "gdrive".
+   * `cancelled` and `denied` are normal ends (resolved, not rejected). A second call while one waits rejects with a Japanese message.
+   */
+  googleLogin: () => invoke<GoogleLoginDto>("google_login"),
+  /** 「キャンセル」 while `googleLogin` waits. Does nothing when none waits. */
+  googleLoginCancel: () => invoke<null>("google_login_cancel"),
+  /** Revokes (best effort; `revoked: false` when Google could not be reached), forgets the login and detaches the sync. The target stays Google Drive. */
+  googleLogout: () => invoke<GoogleLogoutDto>("google_logout"),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];

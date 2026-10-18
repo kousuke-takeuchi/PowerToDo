@@ -21,6 +21,7 @@ use serde::Serialize;
 
 use super::common_book::{COMMON_FILE, CommonBook, Settings, read_common_book, write_common_book};
 use super::external::{Fingerprint, Verdict, fingerprint, verdict};
+pub(crate) use super::paths::CONFLICT_MARK;
 use super::paths::{Paths, validate_project_name};
 use super::project_book::{
     ProjectBook, created_at_sentinel, read_project_book, write_project_book,
@@ -219,11 +220,14 @@ fn same_file(a: &Path, b: &Path) -> bool {
     matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
 }
 
-/// Files that are not project workbooks: Excel lock files (`~$`), our temp files (`.`), and
-/// the common workbook / other reserved names (`_`).
-pub(super) fn adoptable_stem(path: &Path) -> Option<String> {
+/// Files that are not project workbooks: Excel lock files (`~$`), our temp files (`.`), the
+/// common workbook / other reserved names (`_`), and sync conflict copies (`CONFLICT_MARK` is
+/// not a valid project name: the copies stay in the folder for the user to open in Excel;
+/// listing them would put a project into the common workbook whose file never reaches the
+/// other PCs). Only the exact extension `.xlsx` counts, as in `is_sync_target`.
+pub(crate) fn adoptable_stem(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
-    if !ext.eq_ignore_ascii_case("xlsx") {
+    if ext != "xlsx" {
         return None;
     }
     let stem = path.file_stem()?.to_str()?;
@@ -231,6 +235,75 @@ pub(super) fn adoptable_stem(path: &Path) -> Option<String> {
         return None;
     }
     Some(stem.to_string())
+}
+
+/// The key of a data-folder file name in `last_written` / `held` / the saver: the project name,
+/// or `"_common"` for the common workbook. `None` for any other file (not ours to load).
+pub fn file_key(name: &str) -> Option<String> {
+    if name.contains(['/', '\\']) {
+        return None;
+    }
+    if name == COMMON_FILE {
+        return Some(COMMON_KEY.to_string());
+    }
+    adoptable_stem(Path::new(name))
+}
+
+/// A downloaded workbook, written to a temp file next to its place and read back successfully.
+/// [`ProjectStore::install_download`] renames it into place; dropping it removes the temp file.
+pub struct StagedDownload {
+    name: String,
+    tmp: tempfile::NamedTempFile,
+}
+
+/// Writes `bytes` (the downloaded `name`) to a temp file in `data_dir` and reads it as a
+/// project workbook (or the common workbook) before anything is replaced. A file this version
+/// cannot read (another PC on a newer app version, a broken upload) is `Corrupt`
+/// 「「name」を同期先から読み込めません」, and the local file stays as it is.
+pub fn stage_download(data_dir: &Path, name: &str, bytes: &[u8]) -> AppResult<StagedDownload> {
+    use std::io::Write as _;
+    let mut tmp = tempfile::Builder::new()
+        .prefix(".powertodo-")
+        .suffix(".tmp")
+        .tempfile_in(data_dir)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    let read = if name == COMMON_FILE {
+        read_common_book(tmp.path()).map(|_| ())
+    } else {
+        read_project_book(tmp.path()).map(|_| ())
+    };
+    if let Err(e) = read {
+        return Err(AppError::Corrupt {
+            message: format!("「{name}」を同期先から読み込めません ({e})"),
+        });
+    }
+    Ok(StagedDownload {
+        name: name.to_string(),
+        tmp,
+    })
+}
+
+/// `<dir>/<stem> (<tag>).xlsx`, or `<stem> (<tag>-2).xlsx`, `-3`, … when that name is taken.
+fn free_archive_path(dir: &Path, stem: &str, tag: &str) -> PathBuf {
+    let mut n = 1;
+    loop {
+        let dest = dir.join(archive_file_name(stem, tag, n));
+        if !dest.exists() {
+            return dest;
+        }
+        n += 1;
+    }
+}
+
+/// The `n`th candidate name in an archive folder (local or on the NAS): `<stem> (<tag>).xlsx`,
+/// then `<stem> (<tag>-2).xlsx`, `-3`, ….
+pub(crate) fn archive_file_name(stem: &str, tag: &str, n: u32) -> String {
+    if n <= 1 {
+        format!("{stem} ({tag}).xlsx")
+    } else {
+        format!("{stem} ({tag}-{n}).xlsx")
+    }
 }
 
 impl ProjectStore {
@@ -630,16 +703,7 @@ impl ProjectStore {
         if let Ok(path) = self.paths.project(name)
             && path.exists()
         {
-            let dir = self.paths.archive_dir();
-            std::fs::create_dir_all(&dir)?;
-            let stamp = self.now().format("%Y%m%d-%H%M").to_string();
-            let mut dest = dir.join(format!("{name} ({stamp}).xlsx"));
-            let mut n = 2;
-            while dest.exists() {
-                dest = dir.join(format!("{name} ({stamp}-{n}).xlsx"));
-                n += 1;
-            }
-            std::fs::rename(&path, &dest)?;
+            self.move_to_archive(&path, name)?;
         }
         self.common.projects.retain(|p| p.name != name);
         self.common.project_extra.remove(name);
@@ -650,6 +714,138 @@ impl ProjectStore {
         self.held.remove(name);
         self.common_dirty = true;
         self.save_common_unless_held();
+        Ok(())
+    }
+
+    /// Moves `path` to `archive/<stem> (YYYYMMDD-HHMM).xlsx` (`-2`, `-3`, … when taken).
+    fn move_to_archive(&self, path: &Path, stem: &str) -> AppResult<PathBuf> {
+        let dir = self.paths.archive_dir();
+        std::fs::create_dir_all(&dir)?;
+        let stamp = self.now().format("%Y%m%d-%H%M").to_string();
+        let dest = free_archive_path(&dir, stem, &stamp);
+        std::fs::rename(path, &dest)?;
+        Ok(dest)
+    }
+
+    // ---- sync (Phase 4 仕様 §3.4) ----
+
+    /// The key and the path of a file the sync may write. `name` must be the exact file name the
+    /// store uses (`<project>.xlsx` or the common workbook), so the file read back is this one.
+    fn sync_file(&self, name: &str) -> AppResult<(String, PathBuf)> {
+        let not_ours = || invalid(format!("「{name}」は同期できるファイル名ではありません"));
+        let key = file_key(name).ok_or_else(not_ours)?;
+        let path = if key == COMMON_KEY {
+            self.paths.common()
+        } else {
+            self.paths.project(&key)?
+        };
+        if path.file_name().and_then(|n| n.to_str()) != Some(name) {
+            return Err(not_ours());
+        }
+        Ok((key, path))
+    }
+
+    /// Writes a file fetched by the sync: checked first ([`stage_download`]; an unreadable one
+    /// changes nothing), then renamed over `<data>/<name>` and its fingerprint recorded as our
+    /// own write, so the watcher does not take it for an external change. The caller loads it
+    /// next (`reload_external`, `adopt_new_file` or `reload_common`). The caller must have
+    /// checked that the key has no unsaved, held or in-flight edits. The engine stages without
+    /// the store lock and calls [`ProjectStore::install_download`]; tests use this.
+    #[cfg(test)]
+    pub fn write_downloaded(&mut self, name: &str, bytes: &[u8]) -> AppResult<()> {
+        let staged = stage_download(&self.paths.data_dir, name, bytes)?;
+        self.install_download(staged)
+    }
+
+    /// Puts a download staged without the store lock ([`stage_download`]) over
+    /// `<data>/<name>` and records it as our own write (see `write_downloaded`).
+    pub fn install_download(&mut self, staged: StagedDownload) -> AppResult<()> {
+        let (key, path) = self.sync_file(&staged.name)?;
+        staged
+            .tmp
+            .persist(&path)
+            .map_err(|e| AppError::from(e.error))?;
+        self.record_written(&key, &path);
+        Ok(())
+    }
+
+    /// `key` (a project name or `"_common"`) is still what a fresh data folder starts with, as
+    /// in memory and on disk: an inbox without tasks, sections or invalid rows; a common
+    /// workbook listing only the inbox, with no labels and default settings (the display name
+    /// aside). Unsaved, held or externally changed keys are never pristine. The first sync of a
+    /// new PC replaces such files without keeping a conflict copy.
+    pub fn is_pristine(&self, key: &str) -> bool {
+        if self.is_held(key) || self.changed_on_disk(key) {
+            return false;
+        }
+        if key == COMMON_KEY {
+            let c = &self.common;
+            let fresh = CommonBook::new_default();
+            let settings = Settings {
+                display_name: c.settings.display_name.clone(),
+                ..fresh.settings.clone()
+            };
+            return !self.common_dirty
+                && c.projects == fresh.projects
+                && c.project_columns == fresh.project_columns
+                && c.label_columns == fresh.label_columns
+                && c.labels.is_empty()
+                && c.settings == settings
+                && c.holidays == fresh.holidays
+                && c.unparsed_holidays.is_empty()
+                && c.extra_settings.is_empty()
+                && c.project_extra.is_empty()
+                && c.label_extra.is_empty();
+        }
+        if key != INBOX || self.dirty.contains(key) {
+            return false;
+        }
+        matches!(
+            self.books.get(key),
+            Some(LoadedProject::Ok(b)) if b.tasks.is_empty()
+                && (b.assignees.is_empty()
+                    || b.assignees == [self.common.settings.display_name.clone()])
+                && b.unknown_columns.is_empty()
+                && b.sections.is_empty()
+                && b.invalid_rows.is_empty()
+                && b.invalid_cells.is_empty()
+        )
+    }
+
+    /// The project's workbook failed to load (the store keeps it as `LoadedProject::Failed`).
+    pub fn load_failed(&self, name: &str) -> bool {
+        matches!(self.books.get(name), Some(LoadedProject::Failed(_)))
+    }
+
+    /// Copies `<data>/<name>` to `archive/<stem> (同期前 yyyy-mm-dd hhmm).xlsx` (`-2`, … when
+    /// taken) and returns the copy's path. Used before a one-shot mirror overwrites a local file
+    /// whose content differs. A copy (not a move) leaves the file in place if writing the new
+    /// content fails afterwards.
+    pub fn keep_copy_before_sync(&self, name: &str, now: NaiveDateTime) -> AppResult<PathBuf> {
+        let (_, path) = self.sync_file(name)?;
+        let stem = name.strip_suffix(".xlsx").unwrap_or(name);
+        let dir = self.paths.archive_dir();
+        std::fs::create_dir_all(&dir)?;
+        let tag = format!("同期前 {}", now.format("%Y-%m-%d %H%M"));
+        let dest = free_archive_path(&dir, stem, &tag);
+        std::fs::copy(&path, &dest)?;
+        Ok(dest)
+    }
+
+    /// The sync follows a deletion on the other side: `<data>/<name>` goes to `archive/` like
+    /// `delete_project` (a listed project is removed through it). A file the store does not
+    /// list is just moved. The inbox and the common workbook are refused.
+    pub fn archive_synced(&mut self, name: &str) -> AppResult<()> {
+        let (key, path) = self.sync_file(name)?;
+        if key == COMMON_KEY || key == INBOX {
+            return Err(invalid(format!("「{name}」は archive に移せません")));
+        }
+        if self.common.projects.iter().any(|p| p.name == key) {
+            return self.delete_project(&key);
+        }
+        if path.exists() {
+            self.move_to_archive(&path, &key)?;
+        }
         Ok(())
     }
 
@@ -1312,13 +1508,8 @@ impl ProjectStore {
         dir: &Path,
     ) -> AppResult<PathBuf> {
         std::fs::create_dir_all(dir)?;
-        let stamp = now.format("%Y%m%d-%H%M").to_string();
-        let mut dest = dir.join(format!("{stem} (未保存 {stamp}).xlsx"));
-        let mut n = 2;
-        while dest.exists() {
-            dest = dir.join(format!("{stem} (未保存 {stamp}-{n}).xlsx"));
-            n += 1;
-        }
+        let tag = format!("未保存 {}", now.format("%Y%m%d-%H%M"));
+        let dest = free_archive_path(dir, stem, &tag);
         // Both writers go through a temp file next to the copy and rename it into place.
         if key == COMMON_KEY {
             write_common_book(&dest, &self.common)?;
@@ -2752,5 +2943,206 @@ mod tests {
         let t = again.view(INBOX).unwrap().tasks.remove(0);
         assert_eq!(t.rrule.as_deref(), Some("FREQ=DAILY"));
         assert!(t.rrule_label.is_some()); // recomputed from rrule on view
+    }
+
+    // ---- sync helpers (Phase 4) ----
+
+    #[test]
+    fn conflict_copies_are_not_adopted() {
+        let e = env();
+        std::fs::copy(
+            e.data().join("受信トレイ.xlsx"),
+            e.data().join("受信トレイ (競合 2026-10-16 0930).xlsx"),
+        )
+        .unwrap();
+        let again = e.reopen();
+        assert_eq!(again.summaries().len(), 1);
+        assert_eq!(file_key("a (競合 2026-10-16 0930).xlsx"), None);
+    }
+
+    #[test]
+    fn file_key_maps_names_to_store_keys() {
+        assert_eq!(file_key("仕事.xlsx").as_deref(), Some("仕事"));
+        assert_eq!(file_key(COMMON_FILE).as_deref(), Some(COMMON_KEY));
+        for name in [
+            "~$a.xlsx",
+            ".powertodo-1.tmp",
+            "a.txt",
+            "sub/a.xlsx",
+            "a\\b.xlsx",
+        ] {
+            assert_eq!(file_key(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn write_downloaded_is_recorded_as_our_own_write() {
+        let mut e = env();
+        e.store.create_project("仕事", DEFAULT_COLOR).unwrap();
+        let other = env();
+        let bytes = std::fs::read(other.data().join("受信トレイ.xlsx")).unwrap();
+        e.store.write_downloaded("仕事.xlsx", &bytes).unwrap();
+        assert_eq!(std::fs::read(e.data().join("仕事.xlsx")).unwrap(), bytes);
+        assert!(!e.store.changed_on_disk("仕事"));
+        // Only the exact file name of a store file is written.
+        assert!(e.store.write_downloaded("仕事.XLSX", &bytes).is_err());
+        assert!(e.store.write_downloaded("a.txt", &bytes).is_err());
+        assert!(e.store.write_downloaded("../x.xlsx", &bytes).is_err());
+    }
+
+    #[test]
+    fn keep_copy_before_sync_copies_into_archive() {
+        let e = env();
+        let original = std::fs::read(e.data().join("受信トレイ.xlsx")).unwrap();
+        let at = dt("2026-10-16T09:30");
+        let first = e
+            .store
+            .keep_copy_before_sync("受信トレイ.xlsx", at)
+            .unwrap();
+        let second = e
+            .store
+            .keep_copy_before_sync("受信トレイ.xlsx", at)
+            .unwrap();
+        assert_eq!(
+            first,
+            e.data()
+                .join("archive/受信トレイ (同期前 2026-10-16 0930).xlsx")
+        );
+        assert_eq!(
+            second,
+            e.data()
+                .join("archive/受信トレイ (同期前 2026-10-16 0930-2).xlsx")
+        );
+        assert_eq!(std::fs::read(&first).unwrap(), original);
+        // The file itself stays.
+        assert!(e.data().join("受信トレイ.xlsx").exists());
+        let common = e.store.keep_copy_before_sync(COMMON_FILE, at).unwrap();
+        assert!(common.ends_with("archive/_PowerToDo (同期前 2026-10-16 0930).xlsx"));
+    }
+
+    #[test]
+    fn archive_synced_moves_listed_and_unlisted_files() {
+        let mut e = env();
+        e.store.create_project("仕事", DEFAULT_COLOR).unwrap();
+        e.store.archive_synced("仕事.xlsx").unwrap();
+        assert!(!e.data().join("仕事.xlsx").exists());
+        assert!(e.data().join("archive/仕事 (20261014-0930).xlsx").exists());
+        assert!(e.store.summaries().iter().all(|p| p.name != "仕事"));
+        // A file the store does not list (it appeared after opening) is just moved.
+        std::fs::copy(e.data().join("受信トレイ.xlsx"), e.data().join("外.xlsx")).unwrap();
+        e.store.archive_synced("外.xlsx").unwrap();
+        assert!(!e.data().join("外.xlsx").exists());
+        assert!(e.data().join("archive/外 (20261014-0930).xlsx").exists());
+        assert!(e.store.archive_synced("受信トレイ.xlsx").is_err());
+        assert!(e.store.archive_synced(COMMON_FILE).is_err());
+    }
+
+    #[test]
+    fn project_names_cannot_look_like_conflict_copies() {
+        let mut e = env();
+        assert!(
+            e.store
+                .create_project("a (競合 2026-10-16 0930)", DEFAULT_COLOR)
+                .is_err()
+        );
+        e.store.create_project("a", DEFAULT_COLOR).unwrap();
+        assert!(
+            e.store
+                .rename_project("a", "a (競合 2026-10-16 0930)")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_corrupt_download_is_not_written() {
+        let mut e = env();
+        let before = std::fs::read(e.data().join("受信トレイ.xlsx")).unwrap();
+        let err = e
+            .store
+            .write_downloaded("受信トレイ.xlsx", b"nope")
+            .unwrap_err();
+        assert!(matches!(err, AppError::Corrupt { .. }));
+        assert_eq!(
+            std::fs::read(e.data().join("受信トレイ.xlsx")).unwrap(),
+            before
+        );
+        assert!(e.store.write_downloaded(COMMON_FILE, b"nope").is_err());
+    }
+
+    #[test]
+    fn pristine_inbox_and_common() {
+        let mut e = env();
+        assert!(e.store.is_pristine(INBOX));
+        assert!(e.store.is_pristine(COMMON_KEY));
+        e.store.add_task(INBOX, input("a")).unwrap();
+        assert!(!e.store.is_pristine(INBOX));
+        e.store.save(INBOX).unwrap();
+        assert!(!e.store.is_pristine(INBOX));
+        // Another display name is still pristine; another setting is not.
+        let mut s = e.store.settings();
+        s.display_name = "たろう".into();
+        e.store.update_settings(s.clone()).unwrap();
+        e.store.save_common().unwrap();
+        assert!(e.store.is_pristine(COMMON_KEY));
+        s.week_start = "sun".into();
+        e.store.update_settings(s).unwrap();
+        e.store.save_common().unwrap();
+        assert!(!e.store.is_pristine(COMMON_KEY));
+        let mut f = env();
+        f.store.create_project("仕事", DEFAULT_COLOR).unwrap();
+        assert!(!f.store.is_pristine(COMMON_KEY));
+        assert!(!f.store.is_pristine("仕事"));
+    }
+
+    #[test]
+    fn pristine_inbox_needs_default_assignees_and_no_unknown_columns() {
+        let mut e = env();
+        let name = e.store.settings().display_name;
+        let set = |e: &mut Env, f: &dyn Fn(&mut ProjectBook)| {
+            let Some(LoadedProject::Ok(b)) = e.store.books.get_mut(INBOX) else {
+                panic!("inbox not loaded");
+            };
+            f(b);
+        };
+        set(&mut e, &|b| b.assignees = vec![]);
+        assert!(e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec![name.clone()]);
+        assert!(e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec![name.clone(), "佐藤".into()]);
+        assert!(!e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec!["佐藤".into()]);
+        assert!(!e.store.is_pristine(INBOX));
+        set(&mut e, &|b| b.assignees = vec![name.clone()]);
+        set(&mut e, &|b| b.unknown_columns = vec!["予備".into()]);
+        assert!(!e.store.is_pristine(INBOX));
+    }
+
+    #[test]
+    fn pristine_common_needs_the_default_inbox_row_and_no_unknown_columns() {
+        let tweak = |f: &dyn Fn(&mut CommonBook)| {
+            let mut e = env();
+            assert!(e.store.is_pristine(COMMON_KEY));
+            f(&mut e.store.common);
+            e.store.is_pristine(COMMON_KEY)
+        };
+        assert!(!tweak(&|c| c.projects[0].color = "var(--color-red)".into()));
+        assert!(!tweak(&|c| c.projects[0].favorite = true));
+        assert!(!tweak(&|c| c.projects[0].order = 3));
+        assert!(!tweak(&|c| c.projects[0].inbox = false));
+        assert!(!tweak(&|c| c.project_columns = vec!["メモ".into()]));
+        assert!(!tweak(&|c| c.label_columns = vec!["メモ".into()]));
+        assert!(tweak(&|_| {}));
+    }
+
+    #[test]
+    fn only_a_lower_case_xlsx_extension_is_adopted() {
+        assert_eq!(
+            adoptable_stem(Path::new("仕事.xlsx")).as_deref(),
+            Some("仕事")
+        );
+        for name in ["仕事.XLSX", "仕事.Xlsx", "仕事.xlsm", "仕事"] {
+            assert_eq!(adoptable_stem(Path::new(name)), None, "{name}");
+        }
+        assert_eq!(file_key("仕事.XLSX"), None);
     }
 }

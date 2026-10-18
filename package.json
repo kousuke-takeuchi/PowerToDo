@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "check:stories": "node scripts/check-stories.mjs"
+    "check:stories": "node scripts/check-stories.mjs",
+    "build:tailnet": "node scripts/build-tailnet.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

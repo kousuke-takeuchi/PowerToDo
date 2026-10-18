@@ -4,6 +4,7 @@ pub mod error;
 pub mod platform;
 pub mod scheduler;
 pub mod store;
+pub mod sync;
 pub mod tray;
 pub mod window;
 
@@ -66,6 +67,8 @@ fn app_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri:
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before any HTTP client of the sync is built (reqwest has no provider of its own).
+    sync::tls::install_crypto_provider();
     let builder = tauri::Builder::default();
     // One app per user (仕様 §9): with close-to-tray, launching the app again while it runs
     // hidden would start a second scheduler and a second saver on the same xlsx files. The
@@ -92,6 +95,7 @@ pub fn run() {
             // exists report no clicks.
             scheduler::register(app.handle());
             scheduler::start(app.handle().clone());
+            commands::start_sync(app.handle());
             tray::setup(app.handle());
             Ok(())
         })
@@ -142,6 +146,21 @@ pub fn run() {
             commands::notification_permission,
             commands::request_notification_permission,
             commands::show_main_window,
+            commands::sync::sync_settings,
+            commands::sync::set_sync_backend,
+            commands::sync::tailnet_status,
+            commands::sync::tailnet_login,
+            commands::sync::tailnet_logout,
+            commands::sync::tailnet_retry,
+            commands::sync::tailnet_reset,
+            commands::sync::nas_check,
+            commands::sync::nas_disconnect,
+            commands::sync::sync_now,
+            commands::sync::sync_status,
+            commands::sync::sync_recover,
+            commands::sync::google_login,
+            commands::sync::google_login_cancel,
+            commands::sync::google_logout,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -184,6 +203,8 @@ pub fn run() {
             if let Some(state) = handle.try_state::<AppState>() {
                 state.flush_all();
             }
+            // The Tailscale sidecar ends with our end of its stdin anyway; this is quicker.
+            commands::sync::shutdown(handle);
         }
         _ => {}
     });

@@ -4,6 +4,7 @@ dist/
 # Rust / Tauri
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/binaries/
 # OS
 .DS_Store
 Thumbs.db

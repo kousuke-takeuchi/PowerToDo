@@ -11,6 +11,10 @@ use crate::error::{AppError, AppResult};
 /// Characters that cannot appear in a project name (it becomes a file name on every OS).
 const FORBIDDEN: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
+/// Marks a sync conflict copy: `<name> (競合 yyyy-mm-dd hhmm).xlsx` (see `sync::conflict_name`).
+/// Not allowed in project names, so a project never looks like a conflict copy.
+pub(crate) const CONFLICT_MARK: &str = "(競合 ";
+
 /// Layout of the data folder: `_PowerToDo.xlsx`, `<project>.xlsx` and `archive/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
@@ -62,6 +66,9 @@ pub fn validate_project_name(name: &str) -> AppResult<()> {
     if name.eq_ignore_ascii_case(COMMON_FILE.trim_end_matches(".xlsx")) {
         return invalid("共通ファイルと同じ名前です");
     }
+    if name.contains(CONFLICT_MARK) {
+        return invalid("「(競合 」は同期の競合コピーの印なので使えません");
+    }
     Ok(())
 }
 
@@ -88,6 +95,52 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
 pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
+    /// Where the data folder is synced to (Phase 4). Per device, so it lives here and not in the
+    /// data folder. The NAS password is in the OS keychain, never in this file.
+    #[serde(default, skip_serializing_if = "SyncSettings::is_default")]
+    pub sync: SyncSettings,
+}
+
+/// Which sync target is chosen. An unknown value (a newer version's) reads as `None`: the sync
+/// stays off instead of the whole `settings.json` being rejected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncBackend {
+    #[default]
+    None,
+    Nas,
+    Gdrive,
+}
+
+/// The sync part of `settings.json`: the chosen target and the account details that are not
+/// secret.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSettings {
+    #[serde(default, deserialize_with = "lenient_backend")]
+    pub backend: SyncBackend,
+    /// The WebDAV folder as typed by the user (`http://nas:5005/powertodo/`), without credentials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nas_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nas_user: Option<String>,
+    /// Shown as 「ログイン中: …」 (Google Drive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub google_email: Option<String>,
+}
+
+fn lenient_backend<'de, D: serde::Deserializer<'de>>(d: D) -> Result<SyncBackend, D::Error> {
+    // Any value that is not a known target (also a wrong type) means no sync.
+    Ok(serde_json::Value::deserialize(d)
+        .ok()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default())
+}
+
+impl SyncSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl AppSettings {
@@ -166,6 +219,7 @@ mod tests {
         // Save creates the directory; JSON key is camelCase.
         let s = AppSettings {
             data_dir: Some(PathBuf::from("/x/y")),
+            ..AppSettings::default()
         };
         s.save(&missing).unwrap();
         let text = std::fs::read_to_string(missing.join("settings.json")).unwrap();
@@ -183,5 +237,63 @@ mod tests {
             AppSettings::load(&missing),
             Err(AppError::Corrupt { .. })
         ));
+    }
+
+    #[test]
+    fn sync_settings_default_to_no_sync_and_stay_out_of_the_file() {
+        // An old settings.json (no `sync` key) reads as no sync.
+        let old: AppSettings = serde_json::from_str(r#"{"dataDir":"/x"}"#).unwrap();
+        assert_eq!(old.sync, SyncSettings::default());
+        assert_eq!(old.sync.backend, SyncBackend::None);
+        // A default value is not written at all (the file stays as it was before Phase 4).
+        let text = serde_json::to_string(&AppSettings::default()).unwrap();
+        assert_eq!(text, "{}");
+    }
+
+    #[test]
+    fn sync_settings_round_trip_with_camel_case_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = AppSettings {
+            data_dir: Some(PathBuf::from("/x/y")),
+            sync: SyncSettings {
+                backend: SyncBackend::Nas,
+                nas_url: Some("http://nas:5005/powertodo/".into()),
+                nas_user: Some("たろう".into()),
+                google_email: Some("user@example.com".into()),
+            },
+        };
+        s.save(dir.path()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["sync"]["backend"], "nas");
+        assert_eq!(v["sync"]["nasUrl"], "http://nas:5005/powertodo/");
+        assert_eq!(v["sync"]["nasUser"], "たろう");
+        assert_eq!(v["sync"]["googleEmail"], "user@example.com");
+        assert_eq!(AppSettings::load(dir.path()).unwrap(), s);
+
+        // Each target is spelled in lower case.
+        for (b, text) in [
+            (SyncBackend::None, "none"),
+            (SyncBackend::Nas, "nas"),
+            (SyncBackend::Gdrive, "gdrive"),
+        ] {
+            assert_eq!(serde_json::to_string(&b).unwrap(), format!("\"{text}\""));
+        }
+    }
+
+    #[test]
+    fn an_unknown_sync_target_keeps_the_rest_of_the_settings() {
+        let s: AppSettings = serde_json::from_str(
+            r#"{"dataDir":"/x","sync":{"backend":"dropbox","nasUser":"たろう"}}"#,
+        )
+        .unwrap();
+        assert_eq!(s.data_dir.as_deref(), Some(Path::new("/x")));
+        assert_eq!(s.sync.backend, SyncBackend::None);
+        assert_eq!(s.sync.nas_user.as_deref(), Some("たろう"));
+        // A value of the wrong type is treated the same way.
+        let s: AppSettings = serde_json::from_str(r#"{"sync":{"backend":3}}"#).unwrap();
+        assert_eq!(s.sync.backend, SyncBackend::None);
     }
 }

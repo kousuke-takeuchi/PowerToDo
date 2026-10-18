@@ -18,7 +18,7 @@ export type AppShellProps = {
   /** 実アプリ用: ウィンドウいっぱいに広げる (width は 1440 / 960 のレイアウトの選択だけに使い、中央カラムはスクロールする)。 */
   fill?: boolean;
   /** 960 のとき SidebarRail に渡すハンドラ (Storybook は渡さない)。 */
-  rail?: Pick<SidebarRailProps, "onExpand" | "onAddTask" | "onNavigate">;
+  rail?: Pick<SidebarRailProps, "onExpand" | "onAddTask" | "onNavigate" | "lastSyncedAt" | "syncDetail" | "syncOffText" | "syncErrorText" | "onSyncClick">;
 };
 
 const HEIGHT = { 1440: 900, 960: 600, 390: 844 } as const;

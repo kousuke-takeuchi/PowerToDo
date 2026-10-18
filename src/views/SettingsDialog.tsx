@@ -8,7 +8,11 @@ import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import { AccountPane, DataPane, DateTimePane, Desc, KeyboardPane, LaterPane, NotificationsPane, Row, Section } from "./SettingsPanes";
 import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "./SettingsPanes";
+import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, syncTargetOptions } from "./SyncFields";
+import { isNasConnected } from "../app/syncText";
+import { SyncPane } from "./SyncPane";
+import type { SyncPaneProps } from "./SyncPane";
 
 export type SyncTarget = "google" | "nas" | "none";
 export type SettingsPane = "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard";
@@ -22,6 +26,8 @@ export type SettingsDialogProps = {
   initialPane?: SettingsPane;
   /** 「同期」ペインの先頭に「実装前で表示のみ」の注記を出す。 */
   syncPlaceholder?: boolean;
+  /** 「同期」ペインの実データ (src/app/useSync.ts)。渡すと絵コンテ用の内部状態の代わりにこれで動く。無ければ従来の見た目だけの挙動。 */
+  syncPane?: SyncPaneProps;
   /** 「データ」ペインに渡す値とハンドラ (src/app/useSettingsPanes.ts)。無ければ見た目だけ。 */
   dataPane?: DataPaneProps;
   /** 「アカウント」ペインに渡す値とハンドラ。無ければ見た目だけ。 */
@@ -72,6 +78,7 @@ export function SettingsDialog({
   onClose,
   initialPane = "sync",
   syncPlaceholder,
+  syncPane,
   dataPane,
   accountPane,
   notificationsPane,
@@ -80,6 +87,7 @@ export function SettingsDialog({
   const [pane, setPane] = useState<SettingsPane>(initialPane);
   const [target, setTarget] = useState<SyncTarget>(initialTarget);
   const [conn, setConn] = useState<Record<SyncTarget, boolean>>({ google: false, nas: false, none: false, [initialTarget]: connected });
+  const [guideOpen, setGuideOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -104,11 +112,14 @@ export function SettingsDialog({
     setPane(initialPane);
     setTarget(initialTarget);
     setConn({ google: false, nas: false, none: false, [initialTarget]: connected });
+    setGuideOpen(false);
   }, [open, initialPane, initialTarget, connected]);
 
   const set = (t: SyncTarget, v: boolean) => setConn((c) => ({ ...c, [t]: v }));
   const isConnected = conn[target];
-  const nasForm = pane === "sync" && target === "nas" && !isConnected;
+  const liveBackend = syncPane?.settings?.backend;
+  const nasForm = pane === "sync" && (syncPane ? liveBackend === "nas" && !isNasConnected(syncPane.settings) : target === "nas" && !isConnected);
+  const heading = syncPane ? titles[liveBackend === "gdrive" ? "google" : (liveBackend ?? "none")] : titles[target];
 
   const localCache = (
     <Section label="ローカルキャッシュ">
@@ -184,6 +195,7 @@ export function SettingsDialog({
 
   // 開閉: scrim は 150ms でフェード、ダイアログは 180ms で scale 0.96 / y -8 から。最初から開いている描画 (Storybook) では動かさない。
   return (
+    <>
     <AnimatePresence initial={false}>
       {open && (
         <motion.div
@@ -278,11 +290,23 @@ export function SettingsDialog({
                 );
               })}
             </nav>
-            <div style={{ boxSizing: "border-box", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "20px 24px" }}>
+            <div
+              style={{
+                boxSizing: "border-box",
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-4)",
+                padding: "20px 24px",
+                ...(syncPane ? { overflowY: "auto" } : {}),
+              }}
+            >
               <h2 style={{ margin: 0, fontSize: 18, lineHeight: "26px", fontWeight: 700, color: "var(--color-text-primary)" }}>
-                {pane === "sync" ? titles[target] : navItems.find((n) => n.pane === pane)?.label}
+                {pane === "sync" ? heading : navItems.find((n) => n.pane === pane)?.label}
               </h2>
-              {pane === "sync" && (
+              {pane === "sync" && syncPane && <SyncPane {...syncPane} onOpenGuide={() => setGuideOpen(true)} />}
+              {pane === "sync" && !syncPane && (
                 <>
                   {syncPlaceholder && <Desc>同期は Phase 4 で実装予定。この画面は表示のみ</Desc>}
                   <Section label="同期先">
@@ -303,5 +327,7 @@ export function SettingsDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    {syncPane && <NasGuideDialog open={open && guideOpen} onClose={() => setGuideOpen(false)} />}
+    </>
   );
 }

@@ -43,8 +43,18 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tailnet/go.mod
+          cache-dependency-path: tailnet/go.sum
+      - run: go test ./...
+        working-directory: tailnet
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
+      # tauri-build checks that bundle.externalBin exists, so build the sidecar first (needs rustc for the host triple).
+      - run: npm run build:tailnet
+      # CI has no Google OAuth json (no secret, on purpose): the build runs without Drive, and nothing here may
+      # use `-v` / `-vv`. If a job ever gets the json, do not cache or upload target/ from it.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri

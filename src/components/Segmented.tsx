@@ -1,5 +1,5 @@
 export type SegmentedProps<T extends string> = {
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; /** この選択肢だけ押せなくする。 */ disabled?: boolean }[];
   value: T;
   onChange?: (v: T) => void;
   /** スクリーンリーダー向けのグループ名。 */
@@ -26,14 +26,15 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
     >
       {options.map((o) => {
         const selected = o.value === value;
+        const off = disabled || o.disabled;
         return (
           <button
             key={o.value}
             type="button"
             role="radio"
             aria-checked={selected}
-            disabled={disabled}
-            tabIndex={disabled ? -1 : undefined}
+            disabled={off}
+            tabIndex={off ? -1 : undefined}
             onClick={() => onChange?.(o.value)}
             style={{
               flex: 1,
@@ -46,7 +47,8 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
               fontSize: 13,
               lineHeight: "19px",
               fontWeight: selected ? 600 : 400,
-              cursor: disabled ? "default" : "pointer",
+              cursor: off ? "default" : "pointer",
+              ...(o.disabled && !disabled ? { opacity: 0.5 } : {}),
             }}
           >
             {o.label}

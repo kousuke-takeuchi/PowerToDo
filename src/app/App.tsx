@@ -1,7 +1,9 @@
 import { Onboarding } from "../views/Onboarding";
 import { ErrorState } from "../views/ErrorState";
 import { Main } from "./Main";
+import { OnboardingSync } from "./OnboardingSync";
 import { useAppState } from "./useAppState";
+import { useSyncConflicts } from "./useSyncConflicts";
 
 const centered = {
   minHeight: "100vh",
@@ -12,7 +14,9 @@ const centered = {
 } as const;
 
 export default function App() {
-  const { state, retry, pickFolder, confirmDataDir, changeDataDir } = useAppState();
+  const { state, retry, pickFolder, confirmDataDir, changeDataDir, finishSyncStep } = useAppState();
+  // 初回起動の step 2 で起きた競合も、メイン画面の帯に出す
+  const syncConflicts = useSyncConflicts();
 
   switch (state.status) {
     case "loading":
@@ -36,7 +40,9 @@ export default function App() {
           onNext={() => void confirmDataDir(state.pickedDir)}
         />
       );
+    case "syncStep":
+      return <OnboardingSync onDone={finishSyncStep} />;
     case "ready":
-      return <Main app={state.app} />;
+      return <Main app={state.app} syncConflicts={syncConflicts} />;
   }
 }

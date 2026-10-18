@@ -5,7 +5,11 @@ import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import { TextField } from "../components/TextField";
 import type { SyncTarget } from "./SettingsDialog";
+import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, hintStyle, labelStyle, syncTargetOptions } from "./SyncFields";
+import { isGoogleLoggedIn, isNasConnected } from "../app/syncText";
+import { GOOGLE_UNAVAILABLE, GoogleSetup, NasSetup } from "./SyncPane";
+import type { SyncPaneProps } from "./SyncPane";
 
 export type OnboardingProps = {
   step: 1 | 2 | 3;
@@ -25,6 +29,14 @@ export type OnboardingProps = {
   warning?: string;
   /** true でウィンドウいっぱいに広げる (既定は絵コンテの 1440x900 固定)。 */
   fill?: boolean;
+  /**
+   * 実アプリ用 (Storybook では渡さない)。渡すと step 2 は実データで動く: 同期先のセグメントは `settings.backend` に従い、
+   * NAS は設定ペインと同じ部品 (Tailscale の状態、URL・ユーザー・パスワード、「確かめる」)、Google Drive も同じ部品 (「Google でログイン」、待っている間の「キャンセル」)。
+   * `onChangeBackend` は確認なしで切り替える関数を渡す。
+   */
+  syncPane?: SyncPaneProps;
+  /** step 2 を終えて先へ進むとき (NAS に接続できた / Google にログインできた / 「次へ」)。`syncPane` があるときに使う。「スキップ」は `onSkip`。 */
+  onSyncDone?: () => void;
 };
 
 const stepNames = ["保存先", "同期先", "受信トレイ"] as const;
@@ -94,12 +106,13 @@ const skipStyle: React.CSSProperties = {
  * step 1 保存先 / step 2 同期先 (セグメントで Google ログイン ⇔ NAS 入力) / step 3 受信トレイ。
  * step と同期先は props で初期値を受け、次へ / スキップ / ログイン / 接続 / セグメントは内部状態で動く (絵コンテの操作確認用で保存はしない)。
  */
-export function Onboarding({ step, target = "google", dataDir, onPickFolder, onNext, onSkip, busy, error, warning, fill }: OnboardingProps) {
+export function Onboarding({ step, target = "google", dataDir, onPickFolder, onNext, onSkip, busy, error, warning, fill, syncPane, onSyncDone }: OnboardingProps) {
   const [cur, setCur] = useState<1 | 2 | 3>(step);
   const [sync, setSync] = useState<SyncTarget>(target);
   const [localDir, setLocalDir] = useState("~/Library/Application Support/PowerToDo/data");
   const live = dataDir !== undefined;
   const [inbox, setInbox] = useState("受信トレイ.xlsx");
+  const [guideOpen, setGuideOpen] = useState(false);
 
   let body: React.ReactNode;
   let footer: React.ReactNode;
@@ -120,6 +133,79 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
       <Button onClick={onNext ?? (() => setCur(2))} disabled={busy}>
         次へ
       </Button>
+    );
+  } else if (cur === 2 && syncPane) {
+    const st = syncPane.settings;
+    const backend = st?.backend ?? "none";
+    const { onChangeBackend } = syncPane;
+    const nasUnconnected = backend === "nas" && !!st && !isNasConnected(st);
+    const googleOk = !!st?.googleAvailable;
+    const googleUnconnected = backend === "gdrive" && !!st && googleOk && !isGoogleLoggedIn(st);
+    body = (
+      <>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+          <div style={labelStyle}>同期先</div>
+          <Segmented
+            options={[
+              { value: "gdrive" as const, label: "Google Drive", disabled: !googleOk },
+              { value: "nas" as const, label: "Synology NAS (WebDAV)" },
+              { value: "none" as const, label: "同期しない" },
+            ]}
+            value={backend}
+            onChange={onChangeBackend}
+            ariaLabel="同期先"
+            disabled={!st || !!syncPane.busy}
+          />
+          {!!st && !googleOk && <div style={hintStyle}>{GOOGLE_UNAVAILABLE}</div>}
+        </div>
+        {backend === "none" && <div style={hintStyle}>同期しません。あとから設定の「同期」で選べます。</div>}
+        {googleUnconnected && (
+          <GoogleSetup
+            busy={syncPane.busy}
+            error={syncPane.error}
+            googleNote={syncPane.googleNote}
+            onGoogleLogin={syncPane.onGoogleLogin}
+            onGoogleCancel={syncPane.onGoogleCancel}
+            submitLabel="Google でログインして次へ"
+            onLoggedIn={onSyncDone}
+          />
+        )}
+        {backend === "gdrive" && st && isGoogleLoggedIn(st) && (
+          <div style={hintStyle}>{st.googleEmail ? `ログイン済みです: ${st.googleEmail}` : "ログイン済みです"}</div>
+        )}
+        {nasUnconnected && st && (
+          <NasSetup
+            settings={st}
+            tailnet={syncPane.tailnet}
+            tailnetSecs={syncPane.tailnetSecs}
+            busy={syncPane.busy}
+            error={syncPane.error}
+            checkError={syncPane.checkError}
+            onCheck={syncPane.onCheck}
+            onLogin={syncPane.onLogin}
+            onOpenLoginUrl={syncPane.onOpenLoginUrl}
+            onRetry={syncPane.onRetry}
+            onReset={syncPane.onReset}
+            onLogout={syncPane.onLogout}
+            submitLabel="確かめて次へ"
+            onConnected={onSyncDone}
+            onOpenGuide={() => setGuideOpen(true)}
+          />
+        )}
+        {backend === "nas" && st && isNasConnected(st) && <div style={hintStyle}>{`接続済みです: ${st.nasUrl}`}</div>}
+      </>
+    );
+    footer = (
+      <>
+        <button type="button" onClick={onSkip} style={skipStyle} disabled={!!syncPane.busy}>
+          スキップ
+        </button>
+        {!nasUnconnected && !googleUnconnected && (
+          <Button onClick={onSyncDone} disabled={!st || !!syncPane.busy}>
+            次へ
+          </Button>
+        )}
+      </>
     );
   } else if (cur === 2) {
     body = (
@@ -163,6 +249,7 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
   return (
     <div
       style={{
+        position: syncPane ? "relative" : undefined,
         width: fill ? "100%" : 1440,
         height: fill ? "100vh" : 900,
         display: "flex",
@@ -171,10 +258,13 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
         background: "var(--color-bg-sidebar)",
         fontFamily: "var(--font-body)",
         color: "var(--color-text-primary)",
+        // 実データの手順は縦に長くなる: 窓より高いときは外側をスクロールする (margin: auto で、収まるときは中央)
+        ...(syncPane ? { overflowY: "auto" } : {}),
       }}
     >
       <div
         style={{
+          margin: syncPane ? "auto" : undefined,
           boxSizing: "border-box",
           width: 560,
           display: "flex",
@@ -207,6 +297,7 @@ export function Onboarding({ step, target = "google", dataDir, onPickFolder, onN
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: cur === 2 ? "space-between" : "flex-end", minHeight: 36 }}>{footer}</div>
       </div>
+      {syncPane && <NasGuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />}
     </div>
   );
 }

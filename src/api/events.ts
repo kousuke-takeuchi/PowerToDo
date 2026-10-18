@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus } from "../types/model";
+import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus, SyncConflict, SyncStatusDto, TailnetStatus } from "../types/model";
 
 /**
  * `listen` is async; the returned function unsubscribes even if it is called before the
@@ -92,4 +92,22 @@ export function onWindowShown(cb: () => void): () => void {
 /** `open-quick-add`: the tray's 「タスクを追加…」; open the quick-add bar. */
 export function onOpenQuickAdd(cb: () => void): () => void {
   return subscribe<Record<string, never>>("open-quick-add", () => cb());
+}
+
+/**
+ * `sync-status`: the state of the sync (also sent for `off`). The same shape as the `sync_status` command.
+ * `onReady`: the subscription is in place; re-read `sync_status` there so an event sent before it is not lost.
+ */
+export function onSyncStatus(cb: (s: SyncStatusDto) => void, onReady?: () => void): () => void {
+  return subscribe<SyncStatusDto>("sync-status", cb, onReady);
+}
+
+/** `tailnet-status`: the Tailscale sidecar's state changed (login URL, approval, running, failed, ...). */
+export function onTailnetStatus(cb: (s: TailnetStatus) => void, onReady?: () => void): () => void {
+  return subscribe<TailnetStatus>("tailnet-status", cb, onReady);
+}
+
+/** `sync-conflict`: both sides changed a file; a conflict copy was saved. */
+export function onSyncConflict(cb: (c: SyncConflict) => void): () => void {
+  return subscribe<SyncConflict>("sync-conflict", cb);
 }

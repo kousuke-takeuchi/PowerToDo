@@ -18,6 +18,14 @@ export type SidebarProps = {
   projects: Project[];
   syncState: SyncState;
   lastSyncedAt?: string;
+  /** 同期状態の補足 (エラーの理由など。ツールチップに出す)。 */
+  syncDetail?: string;
+  /** 同期オフのときの文言 (既定は絵コンテの「同期オフ · 未ログイン」)。 */
+  syncOffText?: string;
+  /** 同期エラーの文言 (既定は絵コンテの「同期エラー · クリックで再試行」)。 */
+  syncErrorText?: string;
+  /** 同期状態をクリックしたとき (エラーのときの「今すぐ同期」)。 */
+  onSyncClick?: () => void;
   onNavigate?: (target: SidebarProps["active"]) => void;
   onAddTask?: () => void;
   /** 「検索」をクリックしたとき。 */
@@ -43,6 +51,10 @@ export function Sidebar({
   projects,
   syncState,
   lastSyncedAt,
+  syncDetail,
+  syncOffText,
+  syncErrorText,
+  onSyncClick,
   onNavigate,
   onAddTask,
   onSearch,
@@ -205,7 +217,7 @@ export function Sidebar({
       </section>
 
       <div style={{ flex: 1 }} />
-      <SyncStatus state={syncState} lastSyncedAt={lastSyncedAt} />
+      <SyncStatus state={syncState} lastSyncedAt={lastSyncedAt} detail={syncDetail} offText={syncOffText} errorText={syncErrorText} onClick={onSyncClick} />
     </div>
   );
 }

@@ -33,6 +33,9 @@ import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
+import { formatSynced, syncErrorText, targetName } from "./syncText";
+import { useSync } from "./useSync";
+import type { SyncConflicts } from "./useSyncConflicts";
 import { useSettingsPanes } from "./useSettingsPanes";
 
 type Nav = SidebarProps["active"];
@@ -43,7 +46,7 @@ const DEFAULT_LABEL_COLOR = "var(--color-text-muted)";
 const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 
 /** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
-export function Main({ app }: { app: AppStateDto }) {
+export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
   const today = useToday();
   const width = useShellWidth();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
@@ -57,6 +60,21 @@ export function Main({ app }: { app: AppStateDto }) {
   const [drawer, setDrawer] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
+  const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
+  const syncStatus = sync.status;
+  const syncState = syncStatus?.state ?? "off";
+  // 片方が空に見えて止まっているあいだ (帯で戻す方向を選ぶ) と、認証が断られたあいだ (ログインし直すか「確かめる」まで
+  // 同期しない) は、「今すぐ同期」しても動かない
+  const syncClickable = syncState === "error" && !syncStatus?.suspect && !syncStatus?.authRejected;
+  const syncError = syncErrorText(syncStatus, syncClickable);
+  // 同期のエラーの帯は閉じられる。エラーが続く間は同じ文言を出し直さず、直って別のエラーが起きたらまた出す。
+  const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
+  useEffect(() => {
+    if (syncState !== "error") setDismissedSyncError(null);
+  }, [syncState]);
+  const syncErrorMessage =
+    syncState === "error" && !syncStatus?.suspect && syncStatus?.message && syncStatus.message !== dismissedSyncError ? syncStatus.message : null;
   // キーボードのフォーカス行: 画面に出ている行のキー (表示順) は各ビューが知らせる。ナビゲーションで外れる。
   const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
   const reportKeys = useCallback(
@@ -324,7 +342,12 @@ export function Main({ app }: { app: AppStateDto }) {
       active={nav}
       counts={counts}
       projects={summaries}
-      syncState="off"
+      syncState={syncState}
+      lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
+      syncDetail={syncStatus?.message}
+      syncOffText="同期オフ"
+      syncErrorText={syncError}
+      onSyncClick={syncClickable ? () => void sync.syncNow(true) : undefined}
       displayName={displayName}
       onNavigate={navigate}
       onAddTask={() => {
@@ -535,6 +558,22 @@ export function Main({ app }: { app: AppStateDto }) {
       onClearNotice={p.clearNotice}
       flash={flash}
       onClearFlash={() => setFlash(null)}
+      sync={{
+        suspect: syncStatus?.suspect
+          ? {
+              side: syncStatus.suspect,
+              target: targetName(sync.settings?.backend),
+              busy: sync.busy === "recover",
+              error: sync.recoverError,
+              onRecover: (mode) => void sync.recover(mode),
+            }
+          : undefined,
+        errorMessage: syncErrorMessage,
+        onDismissError: () => setDismissedSyncError(syncStatus?.message ?? null),
+        conflicts: syncConflicts.conflicts,
+        onOpenConflict: reveal,
+        onDismissConflict: syncConflicts.dismissConflict,
+      }}
     />
   );
 
@@ -606,7 +645,7 @@ export function Main({ app }: { app: AppStateDto }) {
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
         open={settingsOpen}
-        syncPlaceholder
+        syncPane={sync.pane}
         initialPane="account"
         onClose={() => setSettingsOpen(false)}
         dataPane={settingsPanes.data}
@@ -621,9 +660,14 @@ export function Main({ app }: { app: AppStateDto }) {
     <AppShell
       width={width}
       fill
-      syncState="off"
+      syncState={syncState}
       sidebar={sidebar}
       rail={{
+        lastSyncedAt: formatSynced(syncStatus?.lastSynced),
+        syncDetail: syncStatus?.message,
+        syncOffText: "同期オフ",
+        syncErrorText: syncError,
+        onSyncClick: syncClickable ? () => void sync.syncNow(true) : undefined,
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,
         onNavigate: (t) => {

@@ -14,10 +14,12 @@ export type AppStatus =
   | { status: "loading" }
   | { status: "fatal"; message: string }
   | ({ status: "onboarding" } & OnboardingState)
+  /** 初回起動の step 2 (同期先)。データフォルダを決めた直後で、終えたら ready になる。 */
+  | { status: "syncStep"; app: AppStateDto }
   | { status: "ready"; app: AppStateDto };
 
 /**
- * Boot state machine: loading -> (fatal | onboarding | ready); onboarding -> ready once set_data_dir succeeds.
+ * Boot state machine: loading -> (fatal | onboarding | ready); onboarding -> syncStep once set_data_dir succeeds; syncStep -> ready.
  * The only Tauri access is through `api`.
  */
 export function useAppState() {
@@ -76,7 +78,7 @@ export function useAppState() {
           patchOnboarding({ pickedDir: dir });
         }
         const app = await api.setDataDir(dir);
-        if (alive.current) setState({ status: "ready", app });
+        if (alive.current) setState({ status: "syncStep", app });
       } catch (e) {
         if (alive.current) patchOnboarding({ busy: false, error: errorMessage(e) });
       }
@@ -96,5 +98,10 @@ export function useAppState() {
     }
   }, []);
 
-  return { state, retry: load, pickFolder, confirmDataDir, changeDataDir };
+  /** 初回起動の同期先 (step 2) を終えて、通常の画面へ。 */
+  const finishSyncStep = useCallback(() => {
+    setState((s) => (s.status === "syncStep" ? { status: "ready", app: s.app } : s));
+  }, []);
+
+  return { state, retry: load, pickFolder, confirmDataDir, changeDataDir, finishSyncStep };
 }

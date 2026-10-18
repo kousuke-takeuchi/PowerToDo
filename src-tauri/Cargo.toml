@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+serde_json = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
@@ -29,10 +30,22 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2.6"
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "net", "io-util", "macros"] }
 unicode-normalization = "0.1"
 notify = "8.2"
 rrule = "0.14"
+sha2 = "0.10"
+rand = "0.9"
+base64 = "0.22"
+# reqwest ships its TLS without a crypto provider; `rustls` below supplies `ring` (installed by
+# `sync::tls::install_crypto_provider`). The default `rustls` feature would pull aws-lc-sys, a C
+# build that needs extra tooling on Windows. `socks` is for the tailnet proxy.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "socks"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+keyring = { version = "4.2", features = ["v1"] }
+quick-xml = "0.42"
+percent-encoding = "2.3"
+url = "2.5"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -44,7 +57,8 @@ panic = "abort"
 strip = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "time", "test-util"] }
+tokio = { version = "1", features = ["macros", "rt", "time", "test-util", "net", "io-util"] }
+wiremock = "0.6"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
