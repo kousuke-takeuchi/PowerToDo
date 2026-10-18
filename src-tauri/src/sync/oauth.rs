@@ -661,7 +661,12 @@ impl TokenSource {
         {
             return Ok(c.token.clone());
         }
-        self.renew_locked(&mut state).await
+        let renewed = self.renew_locked(&mut state).await;
+        // A refresh that failed leaves no token Google has already refused in the cache.
+        if renewed.is_err() && state.token.as_ref().is_some_and(|c| c.token == rejected) {
+            state.token = None;
+        }
+        renewed
     }
 
     async fn renew_locked(&self, state: &mut SourceState) -> Result<String, OAuthError> {
@@ -1355,6 +1360,18 @@ mod tests {
         let mut started = start_login(oauth(&server), Duration::from_secs(30)).await;
         let port = started.port();
         let state = started.query("state");
+        let began = std::time::Instant::now();
+
+        // A head that never ends, on a connection that stays open throughout: the others
+        // are served while it hangs (each connection has its own task), so the whole test
+        // takes milliseconds and not the 10 s the receiver waits for a head.
+        let mut _hanging = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+            .await
+            .unwrap();
+        _hanging
+            .write_all(b"GET / HTTP/1.1\r\nHost: x")
+            .await
+            .unwrap();
 
         raw_send(port, b"\x00\x01\xff not http at all\r\n\r\n").await;
         raw_send(port, b"POST / HTTP/1.1\r\nHost: x\r\n\r\n").await;
@@ -1364,9 +1381,6 @@ mod tests {
         big.extend(std::iter::repeat_n(b'a', 20_000));
         big.extend_from_slice(b" HTTP/1.1\r\n\r\n");
         raw_send(port, &big).await;
-        // A head that never ends and a client that goes away.
-        raw_send(port, b"GET / HTTP/1.1\r\nHost: x").await;
-
         assert!(
             tokio::time::timeout(Duration::from_millis(100), &mut started.task)
                 .await
@@ -1377,6 +1391,7 @@ mod tests {
         let (status, _) = http_get(port, &format!("/?code=good&state={state}")).await;
         assert_eq!(status, 200);
         assert!(started.task.await.unwrap().is_ok());
+        assert!(began.elapsed() < Duration::from_secs(3));
     }
 
     async fn failing_source(server: &MockServer, delay: Duration) -> TokenSource {
@@ -1429,6 +1444,26 @@ mod tests {
             token_requests(&server.received_requests().await.unwrap()),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn a_failed_renewal_drops_the_token_google_rejected() {
+        let server = MockServer::start().await;
+        let source = TokenSource::new(oauth(&server), REFRESH);
+        let ok = Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"access_token": "at-1", "expires_in": 3600})),
+            )
+            .mount_as_scoped(&server)
+            .await;
+        assert_eq!(source.access_token().await.unwrap(), "at-1");
+        drop(ok);
+        mount_token(&server, 503, json!({})).await;
+        assert!(source.renew("at-1").await.is_err());
+        // at-1 was refused: it is not handed out again as if it were fine.
+        assert!(source.access_token().await.is_err());
     }
 
     #[tokio::test]

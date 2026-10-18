@@ -245,15 +245,21 @@ impl GoogleDriveBackend {
         );
         let mut files = Vec::new();
         for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
-            // Only sync targets matter; anything else (a stray text file, a lock file, a
-            // Google-native document) is skipped before its metadata is looked at, so it can
-            // never fail the listing.
-            if item
+            // Every `.xlsx` is returned, conflict copies included (the engine needs them to
+            // pick a free conflict name). An entry that cannot be read only fails the listing
+            // when it is a sync target: anything else (a lock file, a conflict copy, a
+            // stray workbook) is of no use to the engine and is skipped.
+            let Some(name) = item
                 .get("name")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(super::is_sync_target)
-            {
-                files.push(remote_file(&item)?);
+                .filter(|n| n.ends_with(".xlsx"))
+            else {
+                continue;
+            };
+            match remote_file(&item) {
+                Ok(file) => files.push(file),
+                Err(e) if super::is_sync_target(name) => return Err(e),
+                Err(_) => {}
             }
         }
         Ok(files)
@@ -461,7 +467,7 @@ fn remote_file(item: &serde_json::Value) -> Result<RemoteFile, BackendError> {
         .unwrap_or_default();
     let unreadable = |what: &str| {
         BackendError::Other(format!(
-            "Drive の『{name}』の{what}を読めません。Drive 上でこのファイルを開き直すか、名前を変えてください"
+            "Drive の「{name}」の{what}を読めません。Drive 上でこのファイルの名前を変えるか、PowerToDo フォルダの外へ移してください"
         ))
     };
     let id = id_of(item).ok_or_else(|| unreadable("ID"))?;
@@ -471,7 +477,7 @@ fn remote_file(item: &serde_json::Value) -> Result<RemoteFile, BackendError> {
         .get("md5Checksum")
         .and_then(serde_json::Value::as_str)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| unreadable("版"))?
+        .ok_or_else(|| unreadable("版の情報"))?
         .to_string();
     let modified: NaiveDateTime = item
         .get("modifiedTime")
@@ -666,6 +672,10 @@ mod tests {
                 {"id": "f3", "name": "notes.txt", "md5Checksum": "x", "modifiedTime": MODIFIED, "size": "1"},
                 // Not a sync target and without any metadata: skipped, never fatal.
                 {"id": "f5", "name": "Budget"},
+                // A conflict copy is a listed file like any other ...
+                file_json("f7", "仕事 (競合 2026-10-16 0930).xlsx", "md5-7"),
+                // ... but one that cannot be read is skipped, not fatal.
+                {"id": "f8", "name": "仕事 (競合 2026-10-16 0931).xlsx"},
                 {"id": "f6", "name": "~$lock.xlsx"},
                 {"id": "f4", "name": "~$仕事.xlsx.tmp", "md5Checksum": "x", "modifiedTime": MODIFIED, "size": "1"},
             ]}),
@@ -676,7 +686,8 @@ mod tests {
             files,
             vec![
                 rf("f1", "受信トレイ.xlsx", "md5-1"),
-                rf("f2", "仕事.xlsx", "md5-2")
+                rf("f2", "仕事.xlsx", "md5-2"),
+                rf("f7", "仕事 (競合 2026-10-16 0930).xlsx", "md5-7")
             ]
         );
         // Every call carries the bearer token; the list asks for what the engine needs.
@@ -831,7 +842,11 @@ mod tests {
         assert!(matches!(err, BackendError::Other(_)));
         // Says which file, and what to do about it.
         let text = err.to_string();
-        assert!(text.contains("『a.xlsx』") && text.contains("名前を変えてください"));
+        assert!(
+            text.contains("「a.xlsx」")
+                && text.contains("版の情報を読めません")
+                && text.contains("PowerToDo フォルダの外へ移してください")
+        );
     }
 
     #[tokio::test]
