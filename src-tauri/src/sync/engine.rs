@@ -3274,13 +3274,17 @@ mod tests {
             let before = b.file(&file);
             open_in(&b, &lock);
             let r = b.sync().await;
-            assert_eq!(r.deferred, [file.clone()], "{lock}: {r:?}");
+            assert_eq!(r.deferred, std::slice::from_ref(&file), "{lock}: {r:?}");
             assert!(r.downloaded.is_empty() && r.conflicts.is_empty(), "{lock}");
             assert_eq!(b.file(&file), before, "{lock}");
             assert_open_notice(&b, &file, app);
             // Closed: the next run brings it down.
             fs::remove_file(b.data.join(&lock)).unwrap();
-            assert_eq!(b.sync().await.downloaded, [file.clone()], "{lock}");
+            assert_eq!(
+                b.sync().await.downloaded,
+                std::slice::from_ref(&file),
+                "{lock}"
+            );
             assert_eq!(b.titles(LONG), ["Aの変更"]);
             assert_eq!(b.engine.status().message, None);
         }
