@@ -2,7 +2,7 @@
 
 Excel (xlsx) をデータベースにした Todoist 風の ToDo アプリ。
 Windows / macOS / Ubuntu のデスクトップと、iOS / Android のモバイルで同じデータを扱う。
-データは Google Drive 経由で同期する。
+データは Synology NAS (Tailscale 経由) か Google Drive で同期する。
 
 - 1 プロジェクト = 1 xlsx ファイル (形式は [Qiita: エクセル七つ道具ではじめるシンプルなタスク管理](https://qiita.com/y-tetsu/items/c028737330fc47106fe8) 準拠 + 拡張列)
 - 技術: Tauri 2 (Rust コア) + React / TypeScript / Tailwind
@@ -12,7 +12,7 @@ Windows / macOS / Ubuntu のデスクトップと、iOS / Android のモバイ�
 
 ## アプリの起動 (Phase 1)
 
-前提: Node.js、Rust (stable)、各 OS の Tauri 2 の前提ツール。
+前提: Node.js、Rust (stable)、Go (版は `tailnet/go.mod` の `go` 行、同期用サイドカーのビルドに使う)、各 OS の Tauri 2 の前提ツール。
 
 1. `npm install`
 2. `npm run tauri dev`
@@ -36,16 +36,18 @@ Phase 2 でできること
 - 検索 (`Cmd/Ctrl+K` か `/`)。ひらがな・カタカナ・全角半角・大文字小文字の違いを区別せず、複数の語は AND
 - キーボード操作 (下の「操作」)
 - Excel 側の変更の自動検知と取り込み (下の「Excel で直したとき」)
-- CI (GitHub Actions: Web のチェック、Rust のテストとビルドを Ubuntu / Windows / macOS で実行)
+- CI (GitHub Actions: Web のチェック、Go のテストとサイドカーのビルド、Rust のテストとビルドを Ubuntu / Windows / macOS で実行)
 
 Phase 3 でできること
 - 繰り返し (下の「繰り返し」)。完了すると同じ行の期限が次回に進む
 - リマインダーと OS 通知 (下の「リマインダーと通知」)
 - ウィンドウを閉じても通知が届くトレイ常駐 (下の「トレイ」)
 
-Phase 4 以降 (アプリでは「Phase N で実装予定」と出るもの)
+Phase 4 でできること
+- Synology NAS (Tailscale 経由の WebDAV) か Google Drive へ、データフォルダを鏡として同期 (下の「同期」)
+
+Phase 5 以降 (アプリでは「Phase N で実装予定」と出るもの)
 - フィルター / ボードのビュー
-- Google Drive / NAS 同期 (設定の同期ペインは表示のみ)
 - モバイルビルド
 
 アプリ本体 (`npm run tauri dev` / `tauri build`) の動作確認は macOS のみ。Windows / Ubuntu は CI で `cargo test` と `cargo build` が通ることだけを確認する。
@@ -149,6 +151,76 @@ Phase 4 以降 (アプリでは「Phase N で実装予定」と出るもの)
 - 帯が出たままアプリを終了しようとすると (ウィンドウを閉じる、macOS のメニューの「PowerToDo を終了」や `Cmd+Q`)、確認が出る。「上書きして終了」はアプリの内容で上書きして終了、「終了しない」は戻って帯で選び直す。Excel 側の内容を採りたいときは、先に帯の「ファイルを読み込む」を押す
 - 確認を出せない終わり方 (macOS の Dock の「終了」、ログアウトやシステムの終了) では、帯が出ているファイルと、終了の直前に Excel 側で変わっていたファイルには書かない。代わりにアプリの内容を `<選んだフォルダ>/archive/<プロジェクト名> (未保存 YYYYMMDD-HHMM).xlsx` (共通ファイルは `archive/_PowerToDo (未保存 YYYYMMDD-HHMM).xlsx`) に書き出す。必要な行はそこから写す
 - 帯が出ているあいだは、データフォルダの変更もできない
+
+## 同期 (Phase 4)
+
+データフォルダ (正本) の `*.xlsx` を、Synology NAS か Google Drive のどちらか 1 つに鏡として同期する。設定の「同期」ペインで同期先を選ぶ (Google Drive | Synology NAS | 同期しない)。初回起動のステップ 2 でも選べる。同期先を切り替えると、次の同期で全ファイルを送り直す。
+
+- 起動時、保存の 5 秒後、5 分ごと、「今すぐ同期」で同期する。サイドバー最下部に状態 (同期済み / 同期中 / オフライン / エラー) が出る。オフラインのときもデータは失われず、つながったら次の同期で追いつく
+- 対象はデータフォルダ直下の `*.xlsx` (プロジェクトと `_PowerToDo.xlsx`)。`archive/`、ロックファイル、競合コピーは対象外
+- 同期の端末ごとの記録は、データフォルダではなく app data dir の `sync.json` に置く
+
+### Synology NAS (Tailscale 経由)
+
+アプリに同梱した Tailscale (サイドカー `powertodo-tailnet`) で NAS につなぐ。各 PC に Tailscale アプリは要らず、ルーターのポートも開けない。設定画面の「NAS の準備手順」にも同じ 5 ステップが出る。
+
+1. DSM のパッケージセンターで「WebDAV Server」を入れ、HTTP (ポート 5005) を有効にする
+2. 共有フォルダ `powertodo` を作る
+3. PowerToDo 専用のユーザーを作り、`powertodo` だけ読み書き可、ほかのフォルダは「アクセスなし」にする
+4. パッケージセンターで「Tailscale」を入れてログインし、NAS の名前を控える
+5. アプリで同期先に「Synology NAS (WebDAV)」を選び、NAS と同じアカウントで Tailscale にログインしてから、サーバー URL・ユーザー・パスワードを入れて「確かめる」を押す。例: `http://nas:5005/powertodo/`、ユーザー `たろう`
+
+Tailscale のログインと承認
+- 「Tailscale にログイン」を押すとブラウザでログインページが開く (開かないときは「ブラウザで開く」)。ログインするまで、アプリが勝手にブラウザを開くことはない
+- この PC は `powertodo-mac` / `powertodo-win` / `powertodo-linux` という名前の端末として tailnet に加わる。Tailscale の管理画面で端末の承認が有効なときは、これを承認する (承認するまで「承認待ち」と出る)
+- Tailscale のキーの有効期限が切れたら、同期ペインでもう一度ログインする
+- 起動中のまま 30 秒たっても「接続済み」にならないときは、「再試行」と「状態を消してログインし直す」が出る。後者は `<app data>/tailscale/` の状態を消して、最初からログインし直す
+- サイドカーが異常終了したときは、5 秒あけて 3 回まで自動で再起動する。それでも駄目なら「失敗」と理由が出る
+
+NAS の URL は `http://` で書く (`https` は使えない)。NAS の名前は tailnet の端末として確かめられ、tailnet にない名前は拒否される。ユーザー名は `settings.json`、パスワードは OS のキーチェーンに保存される。キーチェーンが使えない環境では、パスワードはそのセッションの間だけメモリに持つ (再起動でもう一度入力する)。
+
+### Google Drive
+
+Google Drive の `PowerToDo` フォルダに同期する。「Google でログイン」を押すとブラウザが開くので許可する。ログアウトでリフレッシュトークンがキーチェーンから消え、Google 側にも取り消しを送る (オフラインで送れなかったときはそう表示される)。ログインの同意画面で Drive へのアクセスのチェックを外すと、同期できないのでログインは受け付けられない。もう一度ログインして、チェックを入れる。
+
+アプリを作る人の準備 (Google Cloud)
+1. Google Cloud でプロジェクトを作り、Google Auth Platform で OAuth クライアントを作る。種類は「デスクトップ アプリ」
+2. 「データアクセス」で次のスコープを追加する: `https://www.googleapis.com/auth/drive.file`、`openid`、`email`
+3. 「対象」で公開ステータスを「本番環境」にする。「テスト」のままだと、リフレッシュトークンが 7 日で切れる。`drive.file` は機密でないスコープなので、審査 (verification) は要らない。未確認アプリの警告が出たら、ここに追記する
+4. クライアントの JSON (`{"installed": {...}}` 形式) をダウンロードし、`src-tauri/google-oauth.json` として置く。このファイルは git 管理外 (`.gitignore` 済み)。雛形は `src-tauri/google-oauth.example.json`。別の場所に置くときは、環境変数 `POWERTODO_GOOGLE_OAUTH_JSON` にパスを入れる (worktree や CI 用)
+
+`build.rs` がこの JSON を読み、クライアント ID とシークレットをビルドに埋め込む。JSON が無いビルドでも動くが、Drive は「このビルドでは使えません」と出る (NAS は影響を受けない)。注意
+- JSON を置いたビルドでは、`-v` / `-vv` を付けない (`cargo build -v` など)。ビルドスクリプトの出力に ID とシークレットが出る
+- JSON を置いたビルドの `target/` を、キャッシュにもアーティファクトにも上げない。値は `target/*/build/powertodo-*/output` と生成されたバイナリに残る
+- JSON をコミットしない、ログや Issue に貼らない
+
+Drive の挙動
+- `drive.file` は、このアプリが作ったファイルだけを見せるスコープ。ブラウザで Drive の `PowerToDo` フォルダに手で置いた xlsx は、アプリから見えない (同期されない)。ほかの PC に渡したいファイルは、データフォルダに置いて同期させる。NAS は WebDAV で直接見えるので、`powertodo` フォルダ直下に置いた `*.xlsx` は同期される
+- 既存の Drive のフォルダを選ぶ UI はない。アプリが `PowerToDo` フォルダを自分で作る (同じアカウントの別の PC は同じフォルダを使う)
+
+### 競合と archive
+
+- 2 台の PC で同じプロジェクトを編集してから同期すると、新しい方が残り、負けた方の内容が `<名前> (競合 yyyy-mm-dd hhmm).xlsx` (例: `仕事 (競合 2026-10-16 0930).xlsx`) としてデータフォルダと同期先の両方に残り、アプリに帯が出る (「競合ファイルを開く」でデータフォルダを開く)
+- 競合コピーは同期の対象外。必要な行を元のファイルへ写したら、不要になったコピーは各側 (この PC と NAS / Drive) で消す
+- 新しい PC を初めてつなぐときは、同期先に既にあるファイルを採用し、この PC の同名ファイルと中身が違えば競合コピーを残す。初期状態の `受信トレイ.xlsx` / `_PowerToDo.xlsx` は、競合コピーを作らずに同期先の内容へ置き換える
+- 削除は同期される: 片方でプロジェクトを消すと、もう片方のファイルは `archive/` に移る。`受信トレイ.xlsx` と `_PowerToDo.xlsx` は消しても戻る。archive は `<名前> (<更新日時>).xlsx` の名前で、同名があれば `-2`、`-3` … を付ける。物理削除はしない
+  - この PC: `<データフォルダ>/archive/`
+  - NAS: 共有フォルダ `powertodo` の `archive/`
+  - Google Drive: `PowerToDo` フォルダの `archive` フォルダ
+
+片方が空に見えるとき
+- データフォルダ、または同期先が空に見える (記録があるのにファイルが 1 つもない) と、誤って全部を消さないよう同期を止め、「同期が止まっています」と出る。次のどちらかを選ぶ (確認あり)
+  - 「<同期先> の内容でこの PC を戻す」: この PC に同期先の内容を写す
+  - 「この PC の内容で <同期先> を戻す」: 同期先にこの PC の内容を写す
+- 戻す前のファイルは、それぞれの `archive/` に残る。選ぶまで同期は動かない
+
+### ビルドの前提 (サイドカー)
+
+`tauri dev` / `tauri build` は、`beforeDevCommand` / `beforeBuildCommand` で `npm run build:tailnet` を自動で実行し、Go のサイドカーを `src-tauri/binaries/powertodo-tailnet-<ターゲット>` (Windows は `.exe`、git 管理外) にビルドする。Tauri はこれを `bundle.externalBin` として同梱する。
+- Go は `tailnet/go.mod` の `go` 行の版以上。見つける順は、環境変数 `GO`、`/opt/homebrew/bin/go`、`PATH` の `go`
+- 単体でビルドするときは `npm run build:tailnet` (`--target <triple>` で別のターゲット。`universal-apple-darwin` は非対応で、`aarch64-apple-darwin` と `x86_64-apple-darwin` を別々に作る)
+- Go 側のテストは `cd tailnet && go test ./...`
+- `cargo build` の前にサイドカーが要る (`tauri-build` が存在を確かめる)。CI も同じ順に実行する
 
 ## UI の確認 (Storybook)
 
