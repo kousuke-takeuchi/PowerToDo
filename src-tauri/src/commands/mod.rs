@@ -661,6 +661,13 @@ impl SyncHost for TauriSyncHost {
         // An adopted file or a re-listed project dirties the common workbook.
         schedule_dirty(&self.app, &self.app.state::<AppState>());
     }
+
+    fn project_archived(&self, project: &str) {
+        // Like `delete_project`: an archived project's reminders must not fire.
+        self.app
+            .state::<AppState>()
+            .update_fired(|f| f.forget_project(project));
+    }
 }
 
 /// Starts the sync engine's task (one per app; see `SyncEngine::run_loop`). It stays idle until

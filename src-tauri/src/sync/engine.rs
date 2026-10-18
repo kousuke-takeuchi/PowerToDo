@@ -128,6 +128,9 @@ pub trait SyncHost: Send + Sync {
     /// The project list or the common workbook changed: `projects-changed`, and saves for what
     /// became dirty.
     fn project_list_changed(&self, common_reloaded: bool);
+    /// The sync moved `project`'s file to `archive/` (deleted on the other side): forget its
+    /// reminders, as `delete_project` does. Called without the store lock.
+    fn project_archived(&self, project: &str);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1370,6 +1373,7 @@ impl Run<'_> {
             store.archive_synced(name).map_err(|e| failure(name, e))?;
         }
         host.project_list_changed(false);
+        host.project_archived(&key);
         self.forget(name)?;
         self.report.archived_local.push(name.to_string());
         Ok(())
@@ -1539,6 +1543,8 @@ mod tests {
         Conflict(String, String),
         Reloaded(Vec<String>),
         ListChanged(bool),
+        /// With whether the store lock was free then.
+        Archived(String, bool),
     }
 
     #[derive(Default)]
@@ -1572,6 +1578,10 @@ mod tests {
         }
         fn project_list_changed(&self, common_reloaded: bool) {
             self.push(Event::ListChanged(common_reloaded));
+        }
+        fn project_archived(&self, project: &str) {
+            let free = self.store.try_lock().is_ok();
+            self.push(Event::Archived(project.into(), free));
         }
     }
 
@@ -2315,6 +2325,8 @@ mod tests {
         assert!(a.with(|s| s.summaries().iter().all(|p| p.name != "p1")));
         assert!(!a.records().contains_key("p1.xlsx"));
         assert!(a.events().contains(&Event::ListChanged(false)));
+        // Its reminders are forgotten, as for a project deleted in the app (outside the lock).
+        assert!(a.events().contains(&Event::Archived("p1".into(), true)));
         // The common workbook (no p1 any more) goes up next.
         assert_eq!(a.sync().await.uploaded, ["_PowerToDo.xlsx"]);
     }

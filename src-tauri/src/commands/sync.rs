@@ -2219,6 +2219,7 @@ mod tests {
         fn conflict(&self, _: &str, _: &str) {}
         fn projects_reloaded(&self, _: &[String]) {}
         fn project_list_changed(&self, _: bool) {}
+        fn project_archived(&self, _: &str) {}
     }
 
     /// `target` is chosen and refused the saved credentials in a run.
