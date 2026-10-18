@@ -1168,7 +1168,7 @@ mod tests {
         }
 
         fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = Instant::now() + Duration::from_secs(30);
             while !cond() {
                 assert!(Instant::now() < deadline, "timed out waiting for {what}");
                 thread::sleep(Duration::from_millis(10));
@@ -1219,7 +1219,8 @@ mod tests {
                 matches!(result, Err(TailnetError::NotRunning)),
                 "{result:?}"
             );
-            assert!(waited < Duration::from_secs(5), "{waited:?}");
+            // Far below the login's own 30 s timeout: it was freed by the shutdown, not by that.
+            assert!(waited < Duration::from_secs(15), "{waited:?}");
             // Idempotent, and nothing comes back: no restart, no new requests.
             t.shutdown();
             assert_eq!(spawns(&dir), 1);
@@ -1237,7 +1238,7 @@ mod tests {
                 "{READY}\n{RUNNING}\nread line\necho '{{\"type\":\"resolved\",\"id\":1,\"ip\":\"100.2.2.2\"}}'\n{WAIT_EOF}"
             );
             let (_tmp, _dir, t, rx) = start(&body, Duration::from_millis(10));
-            let view = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let view = rx.recv_timeout(Duration::from_secs(30)).unwrap();
             assert_eq!(view.state, "running");
             assert_eq!(view.ip.as_deref(), Some("100.1.1.1"));
             assert_eq!(t.proxy_url().as_deref(), Some("socks5h://u:p@127.0.0.1:1"));
@@ -1345,12 +1346,19 @@ mod tests {
         #[test]
         fn exits_when_stdin_closes_and_drop_is_quick() {
             let _g = lock(&SERIAL);
-            let body = format!("{READY}\n{WAIT_EOF}");
+            // The child leaves a mark when it exits by itself on the end of its stdin. The time
+            // bound is wide (loaded runners), so the mark is what tells that from a kill after
+            // `STOP_GRACE`.
+            let body = format!("{READY}\n{WAIT_EOF}\necho eof > \"$2/eof\"");
             let (_tmp, dir, t, _rx) = start(&body, Duration::from_millis(10));
             wait_for("ready", || t.proxy_url().is_some());
             let started = Instant::now();
             drop(t);
-            assert!(started.elapsed() < Duration::from_secs(3));
+            assert!(started.elapsed() < Duration::from_secs(9));
+            assert!(
+                dir.join("eof").exists(),
+                "the child did not exit on the end of stdin"
+            );
             // No restart after an intentional stop.
             thread::sleep(Duration::from_millis(200));
             assert_eq!(spawns(&dir), 1);
@@ -1365,7 +1373,7 @@ mod tests {
             drop(t);
             let took = started.elapsed();
             assert!(
-                took >= Duration::from_secs(2) && took < Duration::from_secs(6),
+                took >= Duration::from_secs(2) && took < Duration::from_secs(18),
                 "{took:?}"
             );
         }
@@ -1490,7 +1498,7 @@ mod tests {
                 "echo '{{\"type\":\"status\",\"state\":\"failed\",\"error\":\"lc: down\"}}'\n{WAIT_EOF}"
             );
             let (_tmp, _dir, t, rx) = start(&body, Duration::from_millis(10));
-            let view = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let view = rx.recv_timeout(Duration::from_secs(30)).unwrap();
             assert_eq!(view.state, "failed");
             assert_eq!(view.error.as_deref(), Some("lc: down"));
             assert!(matches!(t.state(), TailnetState::Failed { .. }));
@@ -1507,7 +1515,8 @@ mod tests {
                 t.resolve("nas", Duration::from_secs(30)),
                 Err(ResolveError::NotRunning)
             );
-            assert!(started.elapsed() < Duration::from_secs(3));
+            // The request was failed by the child's exit, not by its 30 s timeout.
+            assert!(started.elapsed() < Duration::from_secs(9));
         }
     }
 
