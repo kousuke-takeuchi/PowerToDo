@@ -35,6 +35,7 @@ import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
 import { formatSynced, syncErrorText, targetName } from "./syncText";
 import { useSync } from "./useSync";
+import type { SyncConflicts } from "./useSyncConflicts";
 import { useSettingsPanes } from "./useSettingsPanes";
 
 type Nav = SidebarProps["active"];
@@ -45,7 +46,7 @@ const DEFAULT_LABEL_COLOR = "var(--color-text-muted)";
 const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 
 /** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
-export function Main({ app }: { app: AppStateDto }) {
+export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
   const today = useToday();
   const width = useShellWidth();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
@@ -569,9 +570,9 @@ export function Main({ app }: { app: AppStateDto }) {
           : undefined,
         errorMessage: syncErrorMessage,
         onDismissError: () => setDismissedSyncError(syncStatus?.message ?? null),
-        conflicts: sync.conflicts,
+        conflicts: syncConflicts.conflicts,
         onOpenConflict: reveal,
-        onDismissConflict: sync.dismissConflict,
+        onDismissConflict: syncConflicts.dismissConflict,
       }}
     />
   );

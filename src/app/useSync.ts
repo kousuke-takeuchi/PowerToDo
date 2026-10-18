@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
-import { onSyncConflict, onSyncStatus, onTailnetStatus } from "../api/events";
-import type { SyncBackend, SyncConflict, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
+import { onSyncStatus, onTailnetStatus } from "../api/events";
+import type { SyncBackend, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
 import type { SyncBusy, SyncPaneProps } from "../views/SyncPane";
 import { googleLoginNote, googleLogoutNote, isNasConnected, recoverQuestion, recoverResult, targetName } from "./syncText";
 
@@ -17,7 +17,7 @@ type Options = {
 const BACKEND_NAMES: Record<SyncBackend, string> = { gdrive: "Google Drive", nas: "Synology NAS", none: "同期しない" };
 
 /**
- * 同期の状態と操作 (Phase 4)。`sync-status` / `sync-conflict` は常に聞き、設定 (`sync_settings`) と Tailscale の状態
+ * 同期の状態と操作 (Phase 4)。`sync-status` は常に聞き、設定 (`sync_settings`) と Tailscale の状態
  * (`tailnet_status` / `tailnet-status`) は `active` の間と、片方が空に見えて同期が止まっている間だけ読む
  * (設定を読むとキーチェーンに触れるので、使わない起動では触れない)。
  * パスワードはここでも持たない: 「確かめる」の引数として通すだけで、ログにも保存にも出さない。
@@ -26,7 +26,6 @@ export function useSync({ active, onNotice }: Options) {
   const [status, setStatus] = useState<SyncStatusDto | null>(null);
   const [settings, setSettings] = useState<SyncSettingsDto | null>(null);
   const [tailnet, setTailnet] = useState<TailnetStatus | null>(null);
-  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [busy, setBusy] = useState<SyncBusy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -57,7 +56,7 @@ export function useSync({ active, onNotice }: Options) {
 
   const wanted = active || !!status?.suspect;
 
-  // ---- sync-status / sync-conflict: 常に ----
+  // ---- sync-status: 常に (競合の通知は App の useSyncConflicts が聞く) ----
   useEffect(() => {
     const read = () =>
       void api
@@ -67,14 +66,6 @@ export function useSync({ active, onNotice }: Options) {
     const off = onSyncStatus((s) => setStatus(s), read);
     return off;
   }, []);
-  useEffect(
-    () =>
-      onSyncConflict((c) =>
-        // 同じ競合コピーの通知は一つにまとめる
-        setConflicts((cur) => (cur.some((x) => x.conflictFile === c.conflictFile) ? cur : [...cur, c])),
-      ),
-    [],
-  );
 
   // ---- 設定と Tailscale: 必要なときだけ ----
   const reloadSettings = useCallback(async () => {
@@ -405,8 +396,6 @@ export function useSync({ active, onNotice }: Options) {
     [run, refreshStatus],
   );
 
-  const dismissConflict = useCallback((conflictFile: string) => setConflicts((cur) => cur.filter((c) => c.conflictFile !== conflictFile)), []);
-
   const nasConnected = isNasConnected(settings);
 
   /** 「同期」ペインにそのまま渡す。 */
@@ -440,8 +429,6 @@ export function useSync({ active, onNotice }: Options) {
     settings,
     tailnet,
     tailnetSecs,
-    conflicts,
-    dismissConflict,
     busy,
     error,
     recoverError,
