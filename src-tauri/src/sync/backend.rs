@@ -70,6 +70,13 @@ pub trait StorageBackend: Send + Sync {
     ) -> BoxFut<'a, RemoteFile>;
     /// Moves the file to `archive/` in the root folder (nothing is deleted for good).
     fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()>;
+    /// Which folder the last successful [`StorageBackend::list`] read, when the backend finds
+    /// its root folder by searching (Google Drive: the folder id) and so may land on another
+    /// one than before. `None` when the root is fixed by the address (WebDAV, memory). The
+    /// engine forgets its records when this changes: they describe another folder.
+    fn root_identity(&self) -> Option<String> {
+        None
+    }
 }
 
 struct Entry {

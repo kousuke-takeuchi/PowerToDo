@@ -76,8 +76,12 @@ pub struct FileRecord {
 pub struct SyncState {
     pub data_dir: PathBuf,
     pub backend: BackendKind,
-    /// The WebDAV URL or the Drive folder id.
+    /// What the target was set up as: the WebDAV URL, or `gdrive:<account>`.
     pub remote_root: String,
+    /// The root folder the records are about, for a backend that finds it by searching
+    /// (`StorageBackend::root_identity`: the Drive folder id). `None` until one was listed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_root_id: Option<String>,
     #[serde(default, with = "secs::option")]
     pub last_sync: Option<NaiveDateTime>,
     /// By file name.
@@ -93,6 +97,7 @@ impl SyncState {
             data_dir: data_dir.to_path_buf(),
             backend,
             remote_root: remote_root.to_string(),
+            remote_root_id: None,
             last_sync: None,
             files: BTreeMap::new(),
         }

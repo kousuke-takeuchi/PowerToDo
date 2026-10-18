@@ -47,7 +47,8 @@ pub struct GoogleDriveBackend {
     /// No trailing slash.
     api: String,
     /// The root folder's id once found (the other calls reuse it; every `list` looks again).
-    root: tokio::sync::Mutex<Option<String>>,
+    /// Never held across an await.
+    root: std::sync::Mutex<Option<String>>,
 }
 
 impl std::fmt::Debug for GoogleDriveBackend {
@@ -86,7 +87,7 @@ impl GoogleDriveBackend {
             http: oauth::http_client()?,
             tokens,
             api: api_base.trim_end_matches('/').to_string(),
-            root: tokio::sync::Mutex::new(None),
+            root: std::sync::Mutex::new(None),
         })
     }
 
@@ -223,12 +224,16 @@ impl GoogleDriveBackend {
         let id = self
             .find_or_create_folder(ROOT_FOLDER_NAME, PROP_ROOT, None)
             .await?;
-        *self.root.lock().await = Some(id.clone());
+        *self.root_lock() = Some(id.clone());
         Ok(id)
     }
 
+    fn root_lock(&self) -> std::sync::MutexGuard<'_, Option<String>> {
+        self.root.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     async fn root_id(&self) -> Result<String, BackendError> {
-        let known = self.root.lock().await.clone();
+        let known = self.root_lock().clone();
         match known {
             Some(id) => Ok(id),
             None => self.resolve_root().await,
@@ -237,7 +242,8 @@ impl GoogleDriveBackend {
 
     async fn list_files(&self) -> Result<Vec<RemoteFile>, BackendError> {
         // Looked up on every listing: a root that went missing is made again (an empty
-        // listing; the engine's Suspect guard decides what that means for a synced folder).
+        // listing), and another PC's root with a smaller id takes over. Either way
+        // `root_identity` changes and the engine stops trusting its records.
         let root = self.resolve_root().await?;
         let q = format!(
             "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}'",
@@ -442,6 +448,13 @@ impl StorageBackend for GoogleDriveBackend {
 
     fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
         Box::pin(self.archive_file(file))
+    }
+
+    /// The root folder `list` found last: it can change (another PC's folder with a smaller id,
+    /// or a new one after the old was deleted), and the records only fit the folder they were
+    /// made against.
+    fn root_identity(&self) -> Option<String> {
+        self.root_lock().clone()
     }
 }
 
@@ -727,37 +740,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_listing_of_a_made_again_root_is_a_suspect_remote_for_a_synced_folder() {
-        use crate::sync::state::{BackendKind, FileRecord, SyncState};
-        use crate::sync::{Action, LocalFile, PlanMode, Side, plan};
+    async fn a_made_again_root_is_another_root_folder() {
+        // The root folder was deleted (trashed) in Drive: `list` makes a new one and returns it
+        // empty. It is another folder, so the engine drops its records and uploads this PC's
+        // files again (compared by content) instead of reading the empty listing as deletions.
         let server = MockServer::start().await;
         let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            LIST_Q,
+            json!({"files": [file_json("f1", "a.xlsx", "m1")]}),
+        )
+        .await;
+        assert_eq!(b.list().await.unwrap().len(), 1);
+        assert_eq!(b.root_identity().as_deref(), Some("root1"));
+
+        server.reset().await;
         mount_list(&server, ROOT_Q, json!({"files": []})).await;
-        mount_list(&server, LIST_Q, json!({"files": []})).await;
+        mount_list(
+            &server,
+            "'root2' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
+            json!({"files": []}),
+        )
+        .await;
         Mock::given(method("POST"))
             .and(path("/drive/v3/files"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "root1"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "root2"})))
+            .expect(1)
             .mount(&server)
             .await;
-        let remote = b.list().await.unwrap();
-
-        let mut state = SyncState::new(std::path::Path::new("/d"), BackendKind::Gdrive, "root1");
-        state.files.insert(
-            "a.xlsx".into(),
-            FileRecord {
-                remote_id: "f1".into(),
-                remote_version: "md5-1".into(),
-                remote_modified: local(MODIFIED),
-                local_hash: "h".into(),
-            },
-        );
-        let locals = [LocalFile {
-            name: "a.xlsx".into(),
-            hash: "h".into(),
-            modified: local(MODIFIED),
-        }];
-        let got = plan(&locals, &remote, &state, &BTreeSet::new(), PlanMode::Normal);
-        assert_eq!(got, vec![Action::Suspect { side: Side::Remote }]);
+        assert_eq!(b.list().await.unwrap(), vec![]);
+        assert_eq!(b.root_identity().as_deref(), Some("root2"));
     }
 
     #[tokio::test]
@@ -866,6 +880,37 @@ mod tests {
         )
         .await;
         assert_eq!(b.list().await.unwrap(), vec![]);
+        // The engine compares this with the folder its records were made against.
+        assert_eq!(b.root_identity().as_deref(), Some("aaa"));
+    }
+
+    #[tokio::test]
+    async fn the_root_identity_is_the_folder_the_last_listing_read() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        assert_eq!(b.root_identity(), None);
+        mount_root(&server).await;
+        mount_list(&server, LIST_Q, json!({"files": []})).await;
+        b.list().await.unwrap();
+        assert_eq!(b.root_identity().as_deref(), Some("root1"));
+
+        // Another PC's root folder shows up with a smaller id: the next listing moves to it.
+        // (The access token is still cached: no token endpoint needed.)
+        server.reset().await;
+        mount_list(
+            &server,
+            ROOT_Q,
+            json!({"files": [{"id": "root1"}, {"id": "root0"}]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            "'root0' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
+            json!({"files": []}),
+        )
+        .await;
+        b.list().await.unwrap();
+        assert_eq!(b.root_identity().as_deref(), Some("root0"));
     }
 
     #[tokio::test]

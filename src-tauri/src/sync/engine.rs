@@ -734,10 +734,10 @@ impl SyncEngine {
             target.kind,
             &target.remote_root,
         );
-        if mode == PlanMode::Normal
-            && drop_gone_records(&mut state, &local, &remote, &skip)
-            && !self.save_state(generation, &state)
-        {
+        let new_root = adopt_root(&mut state, target.backend.root_identity());
+        let dropped =
+            mode == PlanMode::Normal && drop_gone_records(&mut state, &local, &remote, &skip);
+        if (new_root || dropped) && !self.save_state(generation, &state) {
             report.outcome = RunOutcome::Interrupted;
             return report;
         }
@@ -935,6 +935,28 @@ fn drop_gone_records(
     let before = state.files.len();
     state.files.retain(|name, _| present.contains(&fold(name)));
     state.files.len() != before
+}
+
+/// Notes the root folder the listing came from (`StorageBackend::root_identity`); `true` when
+/// `state` changed. When it is not the folder the records were made against (Drive found
+/// another `PowerToDo` folder, e.g. after two PCs made one each at their first sync), or the
+/// records do not say which folder they were made against, they are dropped: read against
+/// another folder they would take this PC's files for deleted (archive) and the remote's for
+/// updates (overwrite without a copy). Without records both sides are compared by content, as
+/// at a first sync. The same folder keeps its records, so an emptied folder is still `Suspect`.
+fn adopt_root(state: &mut SyncState, listed: Option<String>) -> bool {
+    let Some(listed) = listed else {
+        return false;
+    };
+    if state.remote_root_id.as_deref() == Some(listed.as_str()) {
+        return false;
+    }
+    if !state.files.is_empty() {
+        eprintln!("the sync target's root folder changed; comparing the files by content");
+        state.files.clear();
+    }
+    state.remote_root_id = Some(listed);
+    true
 }
 
 /// Writes `bytes` as a new file at `path`; never replaces an existing one.
@@ -2916,5 +2938,158 @@ mod tests {
             .run_mirror_confirmed(a.host.as_ref(), PlanMode::MirrorLocal, generation)
             .await;
         assert_eq!(r.outcome, RunOutcome::NotRun);
+    }
+
+    /// A remote that finds its root folder by searching (like Google Drive): it reports which
+    /// root it listed, and can be pointed at another one.
+    struct Rooted {
+        current: Mutex<(String, Arc<MemoryBackend>)>,
+    }
+
+    impl Rooted {
+        fn new(id: &str, inner: &Arc<MemoryBackend>) -> Arc<Rooted> {
+            Arc::new(Rooted {
+                current: Mutex::new((id.to_string(), inner.clone())),
+            })
+        }
+        fn switch(&self, id: &str, inner: &Arc<MemoryBackend>) {
+            *self.current.lock().unwrap() = (id.to_string(), inner.clone());
+        }
+        fn inner(&self) -> Arc<MemoryBackend> {
+            self.current.lock().unwrap().1.clone()
+        }
+    }
+
+    impl StorageBackend for Rooted {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            let inner = self.inner();
+            Box::pin(async move { inner.list().await })
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            let inner = self.inner();
+            Box::pin(async move { inner.download(file).await })
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            let inner = self.inner();
+            Box::pin(async move { inner.upload(name, existing, bytes).await })
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            let inner = self.inner();
+            Box::pin(async move { inner.move_to_archive(file).await })
+        }
+        fn root_identity(&self) -> Option<String> {
+            Some(self.current.lock().unwrap().0.clone())
+        }
+    }
+
+    fn saved_state(pc: &Pc) -> SyncState {
+        SyncState::load(&pc.app, &pc.data, BackendKind::Nas, ROOT)
+    }
+
+    #[tokio::test]
+    async fn a_new_root_folder_compares_by_content_instead_of_by_records() {
+        // A and B did their first sync at the same moment and each made a root folder. A's
+        // wins from now on; B's first files went into the losing one.
+        let root_a = backend();
+        let root_b = backend();
+        let a = Pc::with_backend(Rooted::new("root-a", &root_a), None);
+        a.add(INBOX, "Aのタスク");
+        assert_eq!(a.sync().await.outcome, RunOutcome::Done);
+        let b_side = Rooted::new("root-b", &root_b);
+        let b = Pc::with_backend(b_side.clone(), None);
+        b.add(INBOX, "Bのタスク");
+        b.create("Bの仕事");
+        b.add("Bの仕事", "Bだけの予定");
+        let r = b.sync().await;
+        assert_eq!(r.uploaded.len(), 3, "{r:?}");
+        assert_eq!(saved_state(&b).remote_root_id.as_deref(), Some("root-b"));
+
+        b_side.switch("root-a", &root_a);
+        let r = b.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        // B's own project is not taken for deleted by the other PC: it goes up.
+        assert!(r.archived_local.is_empty(), "{r:?}");
+        assert!(b.has("Bの仕事.xlsx"));
+        assert!(r.uploaded.contains(&"Bの仕事.xlsx".to_string()), "{r:?}");
+        assert_eq!(root_a.get("Bの仕事.xlsx").unwrap(), b.file("Bの仕事.xlsx"));
+        // B's inbox is not silently replaced: the remote one wins, B's stays as a copy.
+        let copy = "受信トレイ (競合 2026-10-16 0930).xlsx";
+        assert!(
+            r.conflicts
+                .contains(&(INBOX_FILE.to_string(), copy.to_string())),
+            "{r:?}"
+        );
+        assert_eq!(b.titles(INBOX), ["Aのタスク"]);
+        assert_eq!(titles_in(&b.file(copy)), ["Bのタスク"]);
+        assert_eq!(saved_state(&b).remote_root_id.as_deref(), Some("root-a"));
+        // From now on the records are about root-a: the files B uploaded meanwhile stay
+        // put, and A does not lose its own.
+        let r = b.sync().await;
+        assert!(
+            r.archived_local.is_empty() && r.conflicts.is_empty(),
+            "{r:?}"
+        );
+        let r = a.sync().await;
+        assert!(
+            r.archived_local.is_empty() && r.conflicts.is_empty(),
+            "{r:?}"
+        );
+        assert!(a.has("Bの仕事.xlsx"));
+    }
+
+    #[tokio::test]
+    async fn the_first_run_only_stores_the_root_folder() {
+        let remote = backend();
+        let side = Rooted::new("root-a", &remote);
+        let a = Pc::with_backend(side, None);
+        a.create("p0");
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done);
+        assert_eq!(r.uploaded.len(), 3);
+        let state = saved_state(&a);
+        assert_eq!(state.remote_root_id.as_deref(), Some("root-a"));
+        assert_eq!(state.files.len(), 3);
+        assert!(idle(&a.sync().await));
+    }
+
+    #[tokio::test]
+    async fn records_without_a_known_root_folder_are_not_trusted() {
+        // Records saved before the root folder was noted (or by a backend that did not say):
+        // nothing is archived on their word, everything is compared by content.
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.create("p0");
+        a.create("p1");
+        a.sync().await;
+        assert_eq!(saved_state(&a).remote_root_id, None);
+        assert!(remote.remove("p1.xlsx"));
+        a.engine
+            .set_backend(Some(Rooted::new("root-a", &remote)), BackendKind::Nas, ROOT);
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert!(r.archived_local.is_empty(), "{r:?}");
+        assert_eq!(r.uploaded, ["p1.xlsx"]);
+        assert_eq!(saved_state(&a).remote_root_id.as_deref(), Some("root-a"));
+    }
+
+    #[tokio::test]
+    async fn an_emptied_root_folder_that_stayed_the_same_is_still_suspect() {
+        let remote = backend();
+        let a = Pc::with_backend(Rooted::new("root-a", &remote), None);
+        a.create("p0");
+        a.sync().await;
+        for n in futures_names(&remote) {
+            remote.remove(&n);
+        }
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Suspect(Side::Remote));
+        assert!(idle(&r));
+        assert!(a.has("p0.xlsx"));
+        assert_eq!(saved_state(&a).files.len(), 3);
     }
 }
