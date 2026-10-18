@@ -15,6 +15,7 @@ import type { ExpandApi } from "../views/ProjectView";
 import { LabelDetailView } from "../views/LabelDetailView";
 import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
+import { targetName } from "../views/SyncPane";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDetailPanel } from "../views/TaskDetailPanel";
 import { TodayView } from "../views/TodayView";
@@ -33,6 +34,8 @@ import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
+import { formatSynced } from "./syncText";
+import { useSync } from "./useSync";
 import { useSettingsPanes } from "./useSettingsPanes";
 
 type Nav = SidebarProps["active"];
@@ -57,6 +60,17 @@ export function Main({ app }: { app: AppStateDto }) {
   const [drawer, setDrawer] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
+  const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
+  const syncStatus = sync.status;
+  const syncState = syncStatus?.state ?? "off";
+  // 同期のエラーの帯は閉じられる。エラーが続く間は同じ文言を出し直さず、直って別のエラーが起きたらまた出す。
+  const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
+  useEffect(() => {
+    if (syncState !== "error") setDismissedSyncError(null);
+  }, [syncState]);
+  const syncErrorMessage =
+    syncState === "error" && !syncStatus?.suspect && syncStatus?.message && syncStatus.message !== dismissedSyncError ? syncStatus.message : null;
   // キーボードのフォーカス行: 画面に出ている行のキー (表示順) は各ビューが知らせる。ナビゲーションで外れる。
   const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
   const reportKeys = useCallback(
@@ -324,7 +338,10 @@ export function Main({ app }: { app: AppStateDto }) {
       active={nav}
       counts={counts}
       projects={summaries}
-      syncState="off"
+      syncState={syncState}
+      lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
+      syncDetail={syncStatus?.message}
+      onSyncClick={syncState === "error" ? () => void sync.syncNow(true) : undefined}
       displayName={displayName}
       onNavigate={navigate}
       onAddTask={() => {
@@ -535,6 +552,22 @@ export function Main({ app }: { app: AppStateDto }) {
       onClearNotice={p.clearNotice}
       flash={flash}
       onClearFlash={() => setFlash(null)}
+      sync={{
+        suspect: syncStatus?.suspect
+          ? {
+              side: syncStatus.suspect,
+              target: targetName(sync.settings?.backend),
+              busy: sync.busy === "recover",
+              error: sync.recoverError,
+              onRecover: (mode) => void sync.recover(mode),
+            }
+          : undefined,
+        errorMessage: syncErrorMessage,
+        onDismissError: () => setDismissedSyncError(syncStatus?.message ?? null),
+        conflicts: sync.conflicts,
+        onOpenConflict: reveal,
+        onDismissConflict: sync.dismissConflict,
+      }}
     />
   );
 
@@ -606,7 +639,7 @@ export function Main({ app }: { app: AppStateDto }) {
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
         open={settingsOpen}
-        syncPlaceholder
+        syncPane={sync.pane}
         initialPane="account"
         onClose={() => setSettingsOpen(false)}
         dataPane={settingsPanes.data}
@@ -621,9 +654,12 @@ export function Main({ app }: { app: AppStateDto }) {
     <AppShell
       width={width}
       fill
-      syncState="off"
+      syncState={syncState}
       sidebar={sidebar}
       rail={{
+        lastSyncedAt: formatSynced(syncStatus?.lastSynced),
+        syncDetail: syncStatus?.message,
+        onSyncClick: syncState === "error" ? () => void sync.syncNow(true) : undefined,
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,
         onNavigate: (t) => {

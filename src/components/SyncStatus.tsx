@@ -2,7 +2,14 @@ import type React from "react";
 import { CircleCheck, CloudOff, LoaderCircle, TriangleAlert } from "lucide-react";
 
 export type SyncState = "syncing" | "synced" | "offline" | "error" | "off";
-export type SyncStatusProps = { state: SyncState; lastSyncedAt?: string; compact?: boolean; onClick?: () => void };
+export type SyncStatusProps = {
+  state: SyncState;
+  lastSyncedAt?: string;
+  compact?: boolean;
+  onClick?: () => void;
+  /** 補足 (エラーの理由など)。ツールチップに出す。 */
+  detail?: string;
+};
 
 type Def = {
   Icon: React.ComponentType<{ size?: number }>;
@@ -20,7 +27,7 @@ const defs: Record<SyncState, Def> = {
   off: { Icon: CloudOff, iconColor: "var(--color-text-muted)", textColor: "var(--color-text-secondary)", text: () => "同期オフ · 未ログイン" },
 };
 
-export function SyncStatus({ state, lastSyncedAt, compact, onClick }: SyncStatusProps) {
+export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail }: SyncStatusProps) {
   const d = defs[state];
   const text = d.text(lastSyncedAt);
   const icon = (
@@ -40,7 +47,7 @@ export function SyncStatus({ state, lastSyncedAt, compact, onClick }: SyncStatus
       type="button"
       onClick={onClick}
       aria-label={compact ? text : undefined}
-      title={compact ? text : undefined}
+      title={detail ? `${text}\n${detail}` : compact ? text : undefined}
       className="bg-transparent hover:bg-[var(--color-bg-hover)]"
       style={
         compact

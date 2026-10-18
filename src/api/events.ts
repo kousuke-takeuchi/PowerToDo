@@ -94,14 +94,17 @@ export function onOpenQuickAdd(cb: () => void): () => void {
   return subscribe<Record<string, never>>("open-quick-add", () => cb());
 }
 
-/** `sync-status`: the state of the sync (also sent for `off`). The same shape as the `sync_status` command. */
-export function onSyncStatus(cb: (s: SyncStatusDto) => void): () => void {
-  return subscribe<SyncStatusDto>("sync-status", cb);
+/**
+ * `sync-status`: the state of the sync (also sent for `off`). The same shape as the `sync_status` command.
+ * `onReady`: the subscription is in place; re-read `sync_status` there so an event sent before it is not lost.
+ */
+export function onSyncStatus(cb: (s: SyncStatusDto) => void, onReady?: () => void): () => void {
+  return subscribe<SyncStatusDto>("sync-status", cb, onReady);
 }
 
 /** `tailnet-status`: the Tailscale sidecar's state changed (login URL, approval, running, failed, ...). */
-export function onTailnetStatus(cb: (s: TailnetStatus) => void): () => void {
-  return subscribe<TailnetStatus>("tailnet-status", cb);
+export function onTailnetStatus(cb: (s: TailnetStatus) => void, onReady?: () => void): () => void {
+  return subscribe<TailnetStatus>("tailnet-status", cb, onReady);
 }
 
 /** `sync-conflict`: both sides changed a file; a conflict copy was saved. */

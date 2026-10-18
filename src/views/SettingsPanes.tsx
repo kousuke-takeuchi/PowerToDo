@@ -17,7 +17,9 @@ export function Section({ label, children }: { label: string; children: React.Re
 }
 
 export const Desc = ({ children }: { children: React.ReactNode }) => <div style={hintStyle}>{children}</div>;
-export const Row = ({ children }: { children: React.ReactNode }) => <div style={{ display: "flex", gap: "var(--space-2)" }}>{children}</div>;
+export const Row = ({ children }: { children: React.ReactNode }) => (
+  <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>{children}</div>
+);
 const ErrorText = ({ children }: { children: React.ReactNode }) => (
   <div role="alert" style={{ ...hintStyle, color: "var(--color-danger)" }}>
     {children}
