@@ -7,6 +7,8 @@
 
 pub mod backend;
 pub mod engine;
+pub mod gdrive;
+pub mod oauth;
 pub mod secrets;
 pub mod state;
 pub mod tailnet;
