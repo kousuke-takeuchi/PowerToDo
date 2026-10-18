@@ -29,11 +29,12 @@
 ## 2. 構成
 
 ```
-tailnet/                       Go モジュール (サイドカー)。main.go 1 本 + go.mod
+tailnet/                       Go モジュール (サイドカー)。main.go (起動、tsnet、SOCKS5 プロキシ、コマンドの処理) と protocol.go (JSON 行のメッセージ、状態の対応、ピーの照合) + go.mod
 scripts/build-tailnet.mjs      ターゲットごとにサイドカーをビルドし src-tauri/binaries/powertodo-tailnet-<target-triple>[.exe] に置く
 src-tauri/src/
   sync/
-    mod.rs           同期エンジン (純関数の判定 plan() と、実行 run_once())
+    mod.rs           純関数の判定 plan()、競合コピーの名前
+    engine.rs        実行 (SyncEngine: run_loop、競合コピー、ミラーでの回復、状態の通知)
     state.rs         sync.json (データフォルダ単位、app data dir)
     backend.rs       StorageBackend trait (list / download / upload / delete / move_to_archive)、MemoryBackend (テスト用)
     webdav.rs        WebDAV 実装 (reqwest + SOCKS5)
@@ -49,7 +50,7 @@ src/
 ```
 
 - 新しい依存 (Rust): `keyring` (3 OS のネイティブ保存)、`reqwest` に `socks` feature (既存の reqwest が無ければ追加: rustls)、`quick-xml` (PROPFIND)、`sha2`、`base64`、`url`、`rand` (PKCE)。バージョンは計画で crates.io を確認して固定する
-- 新しい依存 (Go): `tailscale.com` (tsnet)。Go は 1.25 系を CI とローカルで固定する
+- 新しい依存 (Go): `tailscale.com` (tsnet)。Go の版は go.mod の `go 1.27.1` (CI は `go-version-file: tailnet/go.mod` で同じ版を入れる。§9)
 - Tauri: サイドカーは `bundle.externalBin` で同梱。起動は `std::process::Command` (shell プラグインは使わない)。開発時は `src-tauri/binaries/` のものを使う
 
 ## 3. 同期コア
@@ -99,7 +100,7 @@ app data dir の `sync.json`。`fired.json` と同じく、どのデータフォ
 
 - 新しい方を採用する: ローカルはファイルの更新時刻、リモートは `remoteModified`。同時刻はリモートを採用
 - 負けた側の内容を、データフォルダに `<名前> (競合 yyyy-mm-dd hhmm).xlsx` として保存し、リモートにも同じ名前でアップロードする (どちらの PC からも見える)。競合コピーは同期対象外なので、以後は動かない
-- UI にイベント `sync-conflict { file, conflictFile }` → D-09b の帯 (「競合ファイルを開く」= データフォルダを開いてファイルを選択)
+- UI にイベント `sync-conflict { file, conflictFile }` → D-09b の帯 (「競合ファイルを開く」= データフォルダを開く。ファイルは選択しない)
 
 ### 3.4 実行
 
