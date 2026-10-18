@@ -1311,18 +1311,23 @@ mod tests {
         #[test]
         fn crashing_sidecar_is_restarted_three_times_then_fails() {
             let _g = lock(&SERIAL);
-            let (_tmp, dir, t, rx) = start("exit 1", Duration::from_millis(10));
-            wait_for("failed state", || {
-                matches!(t.state(), TailnetState::Failed { .. })
+            let (_tmp, dir, t, rx) = start("exit 1", Duration::from_millis(100));
+            // More than four spawns would be a restart too many; stop waiting then so the
+            // assertion below can say what happened.
+            wait_for("a failed state or five spawns", || {
+                spawns(&dir) >= 5 || matches!(t.state(), TailnetState::Failed { .. })
             });
             assert_eq!(
                 t.state(),
                 TailnetState::Failed {
                     reason: "Tailscale を起動できません".into()
-                }
+                },
+                "state after {} spawns",
+                spawns(&dir)
             );
-            // First run plus three restarts, and no more.
-            thread::sleep(Duration::from_millis(200));
+            // First run plus three restarts, and no more (a fourth restart would come one
+            // delay after the failure).
+            thread::sleep(Duration::from_millis(400));
             assert_eq!(spawns(&dir), 4);
             let views: Vec<_> = rx.try_iter().collect();
             assert_eq!(views.last().unwrap().state, "failed");
@@ -1338,9 +1343,18 @@ mod tests {
             let _g = lock(&SERIAL);
             // Reports `running`, then dies: every run is "healthy", so it never gives up.
             let body = format!("{READY}\n{RUNNING}\nexit 1");
-            let (_tmp, dir, t, _rx) = start(&body, Duration::from_millis(10));
-            wait_for("more than four spawns", || spawns(&dir) > 6);
-            assert!(!matches!(t.state(), TailnetState::Failed { .. }));
+            let (_tmp, dir, t, _rx) = start(&body, Duration::from_millis(100));
+            // A run plus three restarts is four spawns; a fifth only happens when the counter
+            // was reset. Stop waiting at a failure so the assertion can report its cause.
+            wait_for("a failed state or five spawns", || {
+                spawns(&dir) >= 5 || matches!(t.state(), TailnetState::Failed { .. })
+            });
+            let state = t.state();
+            assert!(
+                !matches!(state, TailnetState::Failed { .. }),
+                "gave up after {} spawns: {state:?}",
+                spawns(&dir)
+            );
         }
 
         #[test]

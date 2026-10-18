@@ -1083,7 +1083,8 @@ pub struct GoogleLogoutDto {
 /// (spec section 6: the pane then shows the login again).
 ///
 /// The lock is held to read the login and again for the state changes, not across the revoke
-/// (a request on the network). When Google could not be reached and the keychain refuses to
+/// (a request on the network). If the stored token is no longer the one that was revoked (a
+/// login saved a new one meanwhile), nothing changes. When Google could not be reached and the keychain refuses to
 /// let go of the token, nothing changes (the login still works, the user can try again); once
 /// Google has forgotten it, a keychain that refuses does not stop the logout (the leftover is
 /// a dead token, and the address is cleared so the next start does not look for it).
@@ -1120,6 +1121,18 @@ async fn google_logout_flow<C: Ctx>(
     let current = state.lock_settings().sync.clone();
     if google_account(current.google_email.as_deref()) != account {
         // Another account logged in while Google was being asked: that login is not ours to end.
+        return Ok(GoogleLogoutDto {
+            revoked,
+            keychain_failed: false,
+        });
+    }
+    // The same account may have logged in again while Google was being asked (a login for it
+    // does not change the address). The token to delete must still be the one that was revoked.
+    let now = {
+        let (secrets, account) = (Arc::clone(&secrets), account.clone());
+        blocking(move || secrets.get_fresh(GOOGLE_SERVICE, &account)).await?
+    };
+    if now != token {
         return Ok(GoogleLogoutDto {
             revoked,
             keychain_failed: false,
@@ -2930,6 +2943,42 @@ mod tests {
             };
             assert!(message.contains("キーチェーン"), "{message}");
             // Nothing else changed: the address is still there, the sync still attached.
+            assert_eq!(
+                state.lock_settings().sync.google_email.as_deref(),
+                Some(EMAIL)
+            );
+            assert!(state.sync.has_target());
+        }
+
+        #[tokio::test]
+        async fn a_logout_leaves_a_token_that_was_saved_while_google_was_asked() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/revoke"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_delay(std::time::Duration::from_millis(500)),
+                )
+                .mount(&server)
+                .await;
+            let app = tempfile::tempdir().unwrap();
+            let state = logged_in_state(app.path()).await;
+            let (st, o) = (Arc::clone(&state), oauth(&server));
+            let logout = tokio::spawn(async move { google_logout_flow(&st, Some(&o)).await });
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            // The same account logs in again meanwhile: a new token under the same address.
+            assert!(
+                state
+                    .sync_rt
+                    .secrets()
+                    .set(GOOGLE_SERVICE, EMAIL, "refresh-saved-meanwhile")
+            );
+            let dto = logout.await.unwrap().unwrap();
+            assert!(dto.revoked && !dto.keychain_failed);
+            // Nothing was changed: the new login is intact and still attached.
+            assert_eq!(
+                stored(&state, EMAIL).as_deref(),
+                Some("refresh-saved-meanwhile")
+            );
             assert_eq!(
                 state.lock_settings().sync.google_email.as_deref(),
                 Some(EMAIL)
