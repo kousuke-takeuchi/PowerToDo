@@ -790,13 +790,24 @@ impl Tailnet {
     }
 }
 
-impl Drop for Tailnet {
-    fn drop(&mut self) {
+impl Tailnet {
+    /// Ends the sidecar for good: no restart, the child is terminated (killed after a grace
+    /// period) and reaped before this returns, and every request waiting on it fails with
+    /// `NotRunning` at once. Idempotent. Other handles to the same `Tailnet` (an `Arc` clone
+    /// held by a command that is waiting) cannot keep the child alive, which matters when a
+    /// new sidecar is about to use the same state folder (tsnet does not lock it).
+    pub fn shutdown(&self) {
         let inner = &self.inner;
         *lock(&inner.shutdown) = true;
         inner.shutdown_cv.notify_all();
         let _life = lock(&inner.lifecycle);
         stop_child(inner);
+    }
+}
+
+impl Drop for Tailnet {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -1168,6 +1179,56 @@ mod tests {
         const RUNNING: &str =
             r#"echo '{"type":"status","state":"running","name":"me.ts.net","ip":"100.1.1.1"}'"#;
         const WAIT_EOF: &str = "while read line; do :; done";
+
+        #[test]
+        fn shutdown_ends_the_child_and_frees_waiters_on_other_handles() {
+            let _g = lock(&SERIAL);
+            // The child records its pid, then answers nothing.
+            let body = format!("echo $$ > \"$2/pid\"\n{READY}\n{RUNNING}\n{WAIT_EOF}");
+            let (_tmp, dir, t, _rx) = start(&body, Duration::from_millis(10));
+            let t = Arc::new(t);
+            wait_for("the child's pid", || dir.join("pid").exists());
+            let pid = std::fs::read_to_string(dir.join("pid")).unwrap();
+            let pid = pid.trim().to_string();
+            let alive = |pid: &str| {
+                std::process::Command::new("kill")
+                    .args(["-0", pid])
+                    .stderr(Stdio::null())
+                    .status()
+                    .unwrap()
+                    .success()
+            };
+            assert!(alive(&pid));
+            // A command waiting on a clone of the handle (the login has no answer).
+            let waiter = {
+                let t = Arc::clone(&t);
+                thread::spawn(move || {
+                    let started = Instant::now();
+                    (t.login(), started.elapsed())
+                })
+            };
+            thread::sleep(Duration::from_millis(200));
+            t.shutdown();
+            // The child is gone as soon as `shutdown` returns, although the clone lives on.
+            assert!(
+                !alive(&pid),
+                "the old child must be reaped before a new start"
+            );
+            let (result, waited) = waiter.join().unwrap();
+            assert!(
+                matches!(result, Err(TailnetError::NotRunning)),
+                "{result:?}"
+            );
+            assert!(waited < Duration::from_secs(5), "{waited:?}");
+            // Idempotent, and nothing comes back: no restart, no new requests.
+            t.shutdown();
+            assert_eq!(spawns(&dir), 1);
+            assert!(matches!(t.reset(), Err(TailnetError::NotRunning)));
+            assert!(matches!(
+                t.resolve("nas", Duration::from_secs(1)),
+                Err(ResolveError::NotRunning)
+            ));
+        }
 
         #[test]
         fn ready_status_and_resolve_round_trip() {

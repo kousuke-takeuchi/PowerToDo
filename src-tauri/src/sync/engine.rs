@@ -505,7 +505,8 @@ impl SyncEngine {
                 next_interval = now + INTERVAL;
             }
             if let Some(is_retry) = self.take_due_run(now) {
-                self.run(host.as_ref(), PlanMode::Normal, is_retry).await;
+                self.run(host.as_ref(), PlanMode::Normal, is_retry, None)
+                    .await;
                 continue;
             }
             let until = self
@@ -517,7 +518,7 @@ impl SyncEngine {
 
     /// One normal sync (spec section 3.4). Waits for a run in progress to end first.
     pub async fn run_once(&self, host: &dyn SyncHost) -> SyncReport {
-        self.run(host, PlanMode::Normal, false).await
+        self.run(host, PlanMode::Normal, false, None).await
     }
 
     /// The one-shot recovery after a [`Side`] looked wiped (the UI asks the user first):
@@ -527,7 +528,31 @@ impl SyncEngine {
     /// rebuilt from what the mirror copied (names it skipped or failed keep theirs), so the
     /// next normal run starts clean.
     pub async fn run_mirror(&self, host: &dyn SyncHost, mode: PlanMode) -> SyncReport {
-        self.run(host, mode, false).await
+        self.run(host, mode, false, None).await
+    }
+
+    /// Whether a target is set, the status and the target's generation, read together. The
+    /// generation changes with every target change and records reset.
+    pub fn snapshot(&self) -> (bool, SyncStatusView, u64) {
+        let inner = self.lock();
+        (
+            inner.target.is_some(),
+            inner.status.clone(),
+            inner.generation,
+        )
+    }
+
+    /// [`SyncEngine::run_mirror`] for a user who confirmed it on the screen of `snapshot`
+    /// (`generation`): when the target or the records changed since, or the sync is no longer
+    /// stopped on a wiped side, nothing runs (`NotRun`, no status change). Decided under the
+    /// run lock, right before the run starts.
+    pub async fn run_mirror_confirmed(
+        &self,
+        host: &dyn SyncHost,
+        mode: PlanMode,
+        generation: u64,
+    ) -> SyncReport {
+        self.run(host, mode, false, Some(generation)).await
     }
 
     /// Updates the status and sends it to `host`, or to the loop's host when there is none.
@@ -606,11 +631,21 @@ impl SyncEngine {
     /// `is_retry`: this run was asked for by a precondition failure alone. It does not ask for
     /// another retry, so a remote that keeps failing the precondition is retried once and then
     /// left to the normal schedule.
-    async fn run(&self, host: &dyn SyncHost, mode: PlanMode, is_retry: bool) -> SyncReport {
+    async fn run(
+        &self,
+        host: &dyn SyncHost,
+        mode: PlanMode,
+        is_retry: bool,
+        confirmed: Option<u64>,
+    ) -> SyncReport {
         let _one_at_a_time = self.shared.running.lock().await;
         let mut report = SyncReport::default();
         let snapshot = {
             let inner = self.lock();
+            // A mirror the user confirmed against an older situation must not run.
+            if confirmed.is_some_and(|g| g != inner.generation || inner.status.suspect.is_none()) {
+                return report;
+            }
             (inner.target.clone(), inner.generation, inner.auth_rejected)
         };
         let (target, generation) = match snapshot {
@@ -1922,7 +1957,10 @@ mod tests {
         assert!(r.rerun);
         // The run asked for a retry, alone.
         assert_eq!(a.engine.take_due_run(Instant::now()), Some(true));
-        let r = a.engine.run(a.host.as_ref(), PlanMode::Normal, true).await;
+        let r = a
+            .engine
+            .run(a.host.as_ref(), PlanMode::Normal, true, None)
+            .await;
         assert!(!r.rerun);
         assert_eq!(a.engine.take_due_run(Instant::now()), None);
         // The failure is visible: the status is an error naming a file, not "synced".
@@ -2747,5 +2785,55 @@ mod tests {
         assert!(e.has_target());
         assert_eq!(e.status(), before);
         assert_eq!(host.events.lock().unwrap().len(), events);
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_mirror_runs_only_for_the_situation_that_was_flagged() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.create("p1");
+        a.add("p1", "大事なタスク");
+        a.sync().await;
+        wipe_local(&a);
+        assert_eq!(a.sync().await.outcome, RunOutcome::Suspect(Side::Local));
+        let (has_target, status, generation) = a.engine.snapshot();
+        assert!(has_target);
+        assert_eq!(status.suspect, Some(Side::Local));
+
+        // The user changes the target before the confirmed recovery starts.
+        a.engine
+            .set_backend(Some(backend()), BackendKind::Nas, "http://other/");
+        let before = a.engine.status();
+        let r = a
+            .engine
+            .run_mirror_confirmed(a.host.as_ref(), PlanMode::MirrorRemote, generation)
+            .await;
+        assert_eq!(r.outcome, RunOutcome::NotRun);
+        assert!(idle(&r));
+        // Nothing ran and the status was not touched.
+        assert_eq!(a.engine.status(), before);
+        assert!(!a.has("p1.xlsx"));
+
+        // Back on the first remote: flagged again, confirmed against what the user saw.
+        a.engine
+            .set_backend(Some(remote.clone()), BackendKind::Nas, ROOT);
+        assert_eq!(a.sync().await.outcome, RunOutcome::Suspect(Side::Local));
+        let (_, status, generation) = a.engine.snapshot();
+        assert!(status.suspect.is_some());
+        let r = a
+            .engine
+            .run_mirror_confirmed(a.host.as_ref(), PlanMode::MirrorRemote, generation)
+            .await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert!(a.has("p1.xlsx"));
+
+        // A mirror needs the stopped state it was confirmed for: not stopped any more, no run.
+        let (_, status, generation) = a.engine.snapshot();
+        assert_eq!(status.suspect, None);
+        let r = a
+            .engine
+            .run_mirror_confirmed(a.host.as_ref(), PlanMode::MirrorLocal, generation)
+            .await;
+        assert_eq!(r.outcome, RunOutcome::NotRun);
     }
 }

@@ -90,13 +90,25 @@ impl Secrets {
     /// a locked keychain would otherwise prompt again every time the settings open). Saving a
     /// password (`set`) is what makes it be tried again.
     pub fn get(&self, service: &str, account: &str) -> Option<String> {
+        self.read(service, account, false)
+    }
+
+    /// Like [`Secrets::get`], but asks the keychain again even if an earlier failure is
+    /// remembered. For what the user asked for (「今すぐ同期」) and for connecting after the
+    /// sidecar came up, where a keychain unlocked since then should work.
+    pub fn get_fresh(&self, service: &str, account: &str) -> Option<String> {
+        self.read(service, account, true)
+    }
+
+    fn read(&self, service: &str, account: &str, fresh: bool) -> Option<String> {
         let key = (service.to_string(), account.to_string());
-        if let Some(hit) = lock(&self.cache).get(&key) {
+        if !fresh && let Some(hit) = lock(&self.cache).get(&key) {
             return hit.clone();
         }
-        // Single flight: whoever comes second finds the first one's answer.
+        // Single flight: whoever comes second finds the first one's answer, unless it only
+        // came to read afresh a moment after another fresh read finished (harmless).
         let _fill = lock(&self.fill);
-        if let Some(hit) = lock(&self.cache).get(&key) {
+        if !fresh && let Some(hit) = lock(&self.cache).get(&key) {
             return hit.clone();
         }
         let found = match self.primary.get(service, account) {
@@ -469,7 +481,9 @@ fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
         if !needs_restart(&t.state()) {
             return Ok(Arc::clone(t));
         }
-        drop(slot.take());
+        if let Some(old) = slot.take() {
+            old.shutdown();
+        }
     }
     let cb_app = app.clone();
     let started = Tailnet::start(
@@ -507,8 +521,11 @@ fn stop_sidecar(app: &AppHandle) {
     rt.note_tailnet_state(false);
     rt.invalidate();
     *lock(&rt.start_error) = None;
-    let t = lock(&rt.tailnet).take();
-    drop(t);
+    // `shutdown`, not just dropping our handle: a command waiting on a clone must not keep the
+    // old child alive next to a new one on the same state folder.
+    if let Some(t) = lock(&rt.tailnet).take() {
+        t.shutdown();
+    }
     let _ = app.emit("tailnet-status", TailnetState::Stopped.view());
 }
 
@@ -518,16 +535,19 @@ fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     rt.note_tailnet_state(false);
-    let old = lock(&rt.tailnet).take();
-    drop(old);
+    // The old child is gone before the new one starts (see `stop_sidecar`).
+    if let Some(old) = lock(&rt.tailnet).take() {
+        old.shutdown();
+    }
     ensure_tailnet(app)
 }
 
 /// For the app's exit: the sidecar also ends by itself when our end of its stdin closes.
 pub fn shutdown(app: &AppHandle) {
-    if let Some(state) = app.try_state::<AppState>() {
-        let t = lock(&state.sync_rt.tailnet).take();
-        drop(t);
+    if let Some(state) = app.try_state::<AppState>()
+        && let Some(t) = lock(&state.sync_rt.tailnet).take()
+    {
+        t.shutdown();
     }
 }
 
@@ -606,7 +626,7 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
     let secrets = rt.secrets();
     let built = blocking(move || {
         // Disconnected, or not connected yet: nothing to build.
-        let password = secrets.get(NAS_SERVICE, &account)?;
+        let password = secrets.get_fresh(NAS_SERVICE, &account)?;
         Some(build_webdav(&tailnet, &url, &user, &password).map(|b| (b, url)))
     })
     .await;
@@ -950,9 +970,21 @@ pub async fn sync_recover(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<SyncRecoverDto> {
-    recover_precondition(state.sync.has_target(), &state.sync.status())?;
+    // What the user is looking at, read once: the generation is checked again when the run
+    // starts, so the mirror never runs against a target (or records) that was not flagged.
+    let (has_target, status, generation) = state.sync.snapshot();
+    recover_precondition(has_target, &status)?;
     let host = TauriSyncHost { app };
-    let report = state.sync.run_mirror(&host, mode.plan_mode()).await;
+    let report = state
+        .sync
+        .run_mirror_confirmed(&host, mode.plan_mode(), generation)
+        .await;
+    if report.outcome == RunOutcome::NotRun {
+        return Err(AppError::Invalid {
+            message: "同期の状態が変わったため、実行しませんでした。状態を確かめてからもう一度お試しください"
+                .into(),
+        });
+    }
     Ok(SyncRecoverDto {
         outcome: outcome_name(report.outcome),
         uploaded: count(report.uploaded.len()),
@@ -1385,6 +1417,28 @@ mod tests {
         }
         // Asked once, not on every settings read.
         assert_eq!(kc.gets.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn an_explicit_read_asks_the_keychain_again_after_a_failure() {
+        let kc = Keychain::new();
+        kc.inner.set(NAS_SERVICE, "u@nas", "pw").unwrap();
+        kc.broken.store(true, Ordering::SeqCst);
+        let secrets = Secrets::new(kc.clone());
+        // The settings read fails once and remembers it.
+        assert_eq!(secrets.get(NAS_SERVICE, "u@nas"), None);
+        assert_eq!(secrets.get(NAS_SERVICE, "u@nas"), None);
+        assert_eq!(kc.gets.load(Ordering::SeqCst), 1);
+        // The keychain is unlocked; connecting (or 「今すぐ同期」) reads it afresh.
+        kc.broken.store(false, Ordering::SeqCst);
+        assert_eq!(
+            secrets.get_fresh(NAS_SERVICE, "u@nas").as_deref(),
+            Some("pw")
+        );
+        assert_eq!(kc.gets.load(Ordering::SeqCst), 2);
+        // And the settings read now sees it, without asking again.
+        assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
+        assert_eq!(kc.gets.load(Ordering::SeqCst), 2);
     }
 
     #[test]
