@@ -586,16 +586,36 @@ struct Cached {
     expires_at: Instant,
 }
 
+/// A refresh that failed, remembered so the callers queued behind it fail at once instead of
+/// each trying (and waiting out the timeouts) again.
+struct Failed {
+    error: OAuthError,
+    /// `None`: for good (see [`TokenSource`]).
+    until: Option<Instant>,
+}
+
+#[derive(Default)]
+struct SourceState {
+    token: Option<Cached>,
+    failed: Option<Failed>,
+}
+
+/// How long an `Offline` refresh failure is remembered.
+const FAILURE_MEMORY: Duration = Duration::from_secs(5);
+
 /// The access token for the Drive backend: kept in memory, renewed shortly before it expires,
 /// and renewed once more when Google answers 401. Renewals are single-flight: concurrent
-/// callers wait for the one in progress and share its token.
+/// callers wait for the one in progress and share its token, or its failure: an `Offline`
+/// failure is remembered for 5 seconds, an `InvalidGrant` for the life of this value (the
+/// refresh token is dead; logging in again makes a new `TokenSource`).
 ///
 /// The refresh token is handed in by the caller (which reads it from the keychain, off the
 /// async threads); nothing here touches the keychain.
 pub struct TokenSource {
     oauth: GoogleOAuth,
     refresh_token: String,
-    cached: tokio::sync::Mutex<Option<Cached>>,
+    state: tokio::sync::Mutex<SourceState>,
+    failure_memory: Duration,
 }
 
 impl std::fmt::Debug for TokenSource {
@@ -612,45 +632,70 @@ impl TokenSource {
         TokenSource {
             oauth,
             refresh_token: refresh_token.into(),
-            cached: tokio::sync::Mutex::new(None),
+            state: tokio::sync::Mutex::new(SourceState::default()),
+            failure_memory: FAILURE_MEMORY,
         }
     }
 
     /// A token that is valid for at least a minute more, renewing when needed.
     pub async fn access_token(&self) -> Result<String, OAuthError> {
-        let mut cached = self.cached.lock().await;
-        if let Some(c) = cached.as_ref().filter(|c| Instant::now() < c.expires_at) {
+        let mut state = self.state.lock().await;
+        if let Some(c) = state
+            .token
+            .as_ref()
+            .filter(|c| Instant::now() < c.expires_at)
+        {
             return Ok(c.token.clone());
         }
-        self.renew_locked(&mut cached).await
+        self.renew_locked(&mut state).await
     }
 
     /// After Google rejected `rejected` with 401: a different token. When another caller has
     /// already renewed since, that token is returned without asking Google again.
     pub async fn renew(&self, rejected: &str) -> Result<String, OAuthError> {
-        let mut cached = self.cached.lock().await;
-        if let Some(c) = cached
+        let mut state = self.state.lock().await;
+        if let Some(c) = state
+            .token
             .as_ref()
             .filter(|c| c.token != rejected && Instant::now() < c.expires_at)
         {
             return Ok(c.token.clone());
         }
-        self.renew_locked(&mut cached).await
+        self.renew_locked(&mut state).await
     }
 
-    async fn renew_locked(&self, cached: &mut Option<Cached>) -> Result<String, OAuthError> {
+    async fn renew_locked(&self, state: &mut SourceState) -> Result<String, OAuthError> {
+        if let Some(f) = &state.failed {
+            if f.until.is_none_or(|until| Instant::now() < until) {
+                return Err(f.error.clone());
+            }
+            state.failed = None;
+        }
         match self.oauth.refresh(&self.refresh_token).await {
             Ok(fresh) => {
                 let expires_at = Instant::now() + fresh.expires_in.saturating_sub(EXPIRY_MARGIN);
-                *cached = Some(Cached {
+                state.token = Some(Cached {
                     token: fresh.access_token.clone(),
                     expires_at,
                 });
                 Ok(fresh.access_token)
             }
             Err(e) => {
-                if e == OAuthError::InvalidGrant {
-                    *cached = None;
+                match &e {
+                    OAuthError::InvalidGrant => {
+                        state.token = None;
+                        state.failed = Some(Failed {
+                            error: e.clone(),
+                            until: None,
+                        });
+                    }
+                    OAuthError::Offline(_) => {
+                        state.failed = Some(Failed {
+                            error: e.clone(),
+                            until: Some(Instant::now() + self.failure_memory),
+                        });
+                    }
+                    _ => {}
                 }
                 Err(e)
             }
@@ -1285,6 +1330,125 @@ mod tests {
         assert_eq!(
             source.access_token().await.unwrap_err(),
             OAuthError::InvalidGrant
+        );
+    }
+
+    /// Sends raw bytes to the loopback port and reads until it closes; whatever the other side
+    /// does (answer, hang up, reset) is fine.
+    async fn raw_send(port: u16, bytes: &[u8]) {
+        if let Ok(mut s) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await {
+            let _ = s.write_all(bytes).await;
+            let mut sink = Vec::new();
+            let _ = s.read_to_end(&mut sink).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn garbage_and_oversized_requests_do_not_end_the_login() {
+        let server = MockServer::start().await;
+        mount_token(
+            &server,
+            200,
+            json!({"access_token": "at", "expires_in": 3600, "refresh_token": "rt"}),
+        )
+        .await;
+        let mut started = start_login(oauth(&server), Duration::from_secs(30)).await;
+        let port = started.port();
+        let state = started.query("state");
+
+        raw_send(port, b"\x00\x01\xff not http at all\r\n\r\n").await;
+        raw_send(port, b"POST / HTTP/1.1\r\nHost: x\r\n\r\n").await;
+        raw_send(port, b"GET\r\n\r\n").await;
+        // A head over 16 KB: dropped without an answer.
+        let mut big = b"GET /?x=".to_vec();
+        big.extend(std::iter::repeat_n(b'a', 20_000));
+        big.extend_from_slice(b" HTTP/1.1\r\n\r\n");
+        raw_send(port, &big).await;
+        // A head that never ends and a client that goes away.
+        raw_send(port, b"GET / HTTP/1.1\r\nHost: x").await;
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut started.task)
+                .await
+                .is_err()
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+
+        let (status, _) = http_get(port, &format!("/?code=good&state={state}")).await;
+        assert_eq!(status, 200);
+        assert!(started.task.await.unwrap().is_ok());
+    }
+
+    async fn failing_source(server: &MockServer, delay: Duration) -> TokenSource {
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(503).set_delay(delay))
+            .mount(server)
+            .await;
+        TokenSource::new(oauth(server), REFRESH)
+    }
+
+    #[tokio::test]
+    async fn waiting_callers_share_an_offline_failure_instead_of_retrying() {
+        let server = MockServer::start().await;
+        let source = Arc::new(failing_source(&server, Duration::from_millis(150)).await);
+        let calls: Vec<_> = (0..5)
+            .map(|_| {
+                let s = Arc::clone(&source);
+                tokio::spawn(async move { s.access_token().await })
+            })
+            .collect();
+        for c in calls {
+            assert!(matches!(c.await.unwrap(), Err(OAuthError::Offline(_))));
+        }
+        // And a 401 renewal right after fails at once too.
+        assert!(matches!(
+            source.renew("x").await,
+            Err(OAuthError::Offline(_))
+        ));
+        assert_eq!(
+            token_requests(&server.received_requests().await.unwrap()),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn an_offline_failure_is_forgotten_after_a_while() {
+        let server = MockServer::start().await;
+        let mut source = failing_source(&server, Duration::ZERO).await;
+        source.failure_memory = Duration::from_millis(100);
+        assert!(source.access_token().await.is_err());
+        assert!(source.access_token().await.is_err());
+        assert_eq!(
+            token_requests(&server.received_requests().await.unwrap()),
+            1
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(source.access_token().await.is_err());
+        assert_eq!(
+            token_requests(&server.received_requests().await.unwrap()),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn an_invalid_grant_is_remembered_for_good() {
+        let server = MockServer::start().await;
+        mount_token(&server, 400, json!({"error": "invalid_grant"})).await;
+        let mut source = TokenSource::new(oauth(&server), REFRESH);
+        source.failure_memory = Duration::from_millis(10);
+        assert_eq!(
+            source.access_token().await.unwrap_err(),
+            OAuthError::InvalidGrant
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            source.renew("x").await.unwrap_err(),
+            OAuthError::InvalidGrant
+        );
+        assert_eq!(
+            token_requests(&server.received_requests().await.unwrap()),
+            1
         );
     }
 }

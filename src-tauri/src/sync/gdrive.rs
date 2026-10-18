@@ -245,11 +245,13 @@ impl GoogleDriveBackend {
         );
         let mut files = Vec::new();
         for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
-            // Only workbooks matter (`is_sync_target` takes the exact lower-case `.xlsx`).
+            // Only sync targets matter; anything else (a stray text file, a lock file, a
+            // Google-native document) is skipped before its metadata is looked at, so it can
+            // never fail the listing.
             if item
                 .get("name")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|n| n.ends_with(".xlsx"))
+                .is_some_and(super::is_sync_target)
             {
                 files.push(remote_file(&item)?);
             }
@@ -317,9 +319,13 @@ impl GoogleDriveBackend {
         file: &RemoteFile,
         bytes: Vec<u8>,
     ) -> Result<RemoteFile, BackendError> {
+        // Drive keeps a file's id across a move or a rename, so the id alone does not say it
+        // is still the file that was listed: another PC may have archived it (moved and
+        // renamed) or the user may have renamed it in the browser.
+        let root = self.root_id().await?;
         let meta_url = self.url(
             &Self::file_path("/drive/v3", &file.id),
-            &[("fields", "md5Checksum,trashed")],
+            &[("fields", "md5Checksum,trashed,name,parents")],
         )?;
         let reply = self.get_json(meta_url).await?;
         if reply.status == 404 {
@@ -331,7 +337,16 @@ impl GoogleDriveBackend {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         let md5 = meta.get("md5Checksum").and_then(serde_json::Value::as_str);
-        if trashed || md5 != Some(file.version.as_str()) {
+        let name = meta.get("name").and_then(serde_json::Value::as_str);
+        let in_root = meta
+            .get("parents")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|ps| ps.iter().any(|p| p.as_str() == Some(root.as_str())));
+        if trashed
+            || md5 != Some(file.version.as_str())
+            || !in_root
+            || name != Some(file.name.as_str())
+        {
             return Err(BackendError::Precondition);
         }
         let url = self.url(
@@ -444,7 +459,11 @@ fn remote_file(item: &serde_json::Value) -> Result<RemoteFile, BackendError> {
         .get("name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let unreadable = |what: &str| BackendError::Other(format!("「{name}」の{what}を読めません"));
+    let unreadable = |what: &str| {
+        BackendError::Other(format!(
+            "Drive の『{name}』の{what}を読めません。Drive 上でこのファイルを開き直すか、名前を変えてください"
+        ))
+    };
     let id = id_of(item).ok_or_else(|| unreadable("ID"))?;
     // A file without an md5 is not an uploaded binary (a Google-native document): it has no
     // version to compare, so the listing cannot be trusted.
@@ -601,6 +620,11 @@ mod tests {
         json!({"id": id, "name": name, "md5Checksum": md5, "modifiedTime": MODIFIED, "size": "123"})
     }
 
+    /// What `files.get` says about `a.xlsx` where it was listed (in `root1`).
+    fn live_meta(md5: &str) -> serde_json::Value {
+        json!({"md5Checksum": md5, "trashed": false, "name": "a.xlsx", "parents": ["root1"]})
+    }
+
     fn rf(id: &str, name: &str, version: &str) -> RemoteFile {
         RemoteFile {
             id: id.into(),
@@ -640,6 +664,9 @@ mod tests {
                 file_json("f1", "受信トレイ.xlsx", "md5-1"),
                 file_json("f2", "仕事.xlsx", "md5-2"),
                 {"id": "f3", "name": "notes.txt", "md5Checksum": "x", "modifiedTime": MODIFIED, "size": "1"},
+                // Not a sync target and without any metadata: skipped, never fatal.
+                {"id": "f5", "name": "Budget"},
+                {"id": "f6", "name": "~$lock.xlsx"},
                 {"id": "f4", "name": "~$仕事.xlsx.tmp", "md5Checksum": "x", "modifiedTime": MODIFIED, "size": "1"},
             ]}),
         )
@@ -800,7 +827,11 @@ mod tests {
             json!({"files": [{"id": "f1", "name": "a.xlsx", "modifiedTime": MODIFIED}]}),
         )
         .await;
-        assert!(matches!(b.list().await, Err(BackendError::Other(_))));
+        let err = b.list().await.unwrap_err();
+        assert!(matches!(err, BackendError::Other(_)));
+        // Says which file, and what to do about it.
+        let text = err.to_string();
+        assert!(text.contains("『a.xlsx』") && text.contains("名前を変えてください"));
     }
 
     #[tokio::test]
@@ -948,13 +979,11 @@ mod tests {
     async fn an_update_checks_the_version_then_patches_the_media() {
         let server = MockServer::start().await;
         let b = backend(&server).await;
+        mount_root(&server).await;
         Mock::given(method("GET"))
             .and(path("/drive/v3/files/f1"))
-            .and(query_param("fields", "md5Checksum,trashed"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({"md5Checksum": "md5-1", "trashed": false})),
-            )
+            .and(query_param("fields", "md5Checksum,trashed,name,parents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(live_meta("md5-1")))
             .mount(&server)
             .await;
         Mock::given(method("PATCH"))
@@ -973,21 +1002,60 @@ mod tests {
             .unwrap();
         assert_eq!(got.version, "md5-2");
         assert_eq!(sent(&server, "PATCH").await[0].body, vec![9u8, 9, 9]);
+        // The check came before the write.
+        let order: Vec<(String, String)> = server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path().contains("/files/f1"))
+            .map(|r| (r.method.to_string(), r.url.path().to_string()))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                ("GET".to_string(), "/drive/v3/files/f1".to_string()),
+                ("PATCH".to_string(), "/upload/drive/v3/files/f1".to_string())
+            ]
+        );
     }
 
     #[tokio::test]
     async fn an_update_of_a_changed_trashed_or_gone_file_writes_nothing() {
         for (status, body) in [
+            (200, live_meta("someone-else")),
             (
                 200,
-                json!({"md5Checksum": "someone-else", "trashed": false}),
+                json!({"md5Checksum": "md5-1", "trashed": true, "name": "a.xlsx", "parents": ["root1"]}),
             ),
-            (200, json!({"md5Checksum": "md5-1", "trashed": true})),
-            (200, json!({"trashed": false})),
+            (
+                200,
+                json!({"trashed": false, "name": "a.xlsx", "parents": ["root1"]}),
+            ),
+            // Moved into the archive (another PC archived it), content unchanged.
+            (
+                200,
+                json!({"md5Checksum": "md5-1", "trashed": false, "name": "a (2026-10-16 0930).xlsx", "parents": ["arch1"]}),
+            ),
+            // Moved but still named alike, and no parents at all.
+            (
+                200,
+                json!({"md5Checksum": "md5-1", "trashed": false, "name": "a.xlsx", "parents": ["arch1"]}),
+            ),
+            (
+                200,
+                json!({"md5Checksum": "md5-1", "trashed": false, "name": "a.xlsx"}),
+            ),
+            // Renamed in the browser, still in the root.
+            (
+                200,
+                json!({"md5Checksum": "md5-1", "trashed": false, "name": "renamed.xlsx", "parents": ["root1"]}),
+            ),
             (404, json!({"error": {"code": 404}})),
         ] {
             let server = MockServer::start().await;
             let b = backend(&server).await;
+            mount_root(&server).await;
             Mock::given(method("GET"))
                 .and(path("/drive/v3/files/f1"))
                 .respond_with(ResponseTemplate::new(status).set_body_json(body.clone()))
@@ -1006,12 +1074,10 @@ mod tests {
     async fn a_file_that_vanishes_between_the_check_and_the_patch_is_a_precondition_failure() {
         let server = MockServer::start().await;
         let b = backend(&server).await;
+        mount_root(&server).await;
         Mock::given(method("GET"))
             .and(path("/drive/v3/files/f1"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({"md5Checksum": "md5-1", "trashed": false})),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(live_meta("md5-1")))
             .mount(&server)
             .await;
         Mock::given(method("PATCH"))
