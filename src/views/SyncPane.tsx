@@ -21,7 +21,7 @@ const srOnly: React.CSSProperties = { position: "absolute", width: 1, height: 1,
  * 読み上げ用の領域。常に表示に置いたまま、文言だけを変える (出たり消えたりする要素は、出た時に読まれないことがある)。
  * 見える側の同じ文言は `aria-hidden` にして、二重に読ませない。見えない (レイアウトに加わらない) ので、空のときも余白を作らない。
  */
-function LiveText({ text }: { text: string }) {
+export function LiveText({ text }: { text: string }) {
   return (
     <span role="status" aria-live="polite" style={srOnly}>
       {text}

@@ -172,3 +172,14 @@ export interface TailnetStatus {
   startedSecs?: number;
 }
 
+
+// ---- アプリの更新 (src-tauri/src/commands/update.rs) ----
+/** `dev`: デバッグビルド (確認しない)。`manual`: AppImage 以外の Linux (deb / rpm)。release ページから入れ直す。 */
+export type UpdateSupport = "supported" | "dev" | "manual";
+/** `update_status`. */
+export interface UpdateStatusDto { currentVersion: string; support: UpdateSupport; autoCheck: boolean; }
+/** `update_check`. `available: false` のときほかの項目は無い。`date` は RFC 3339。`notes` は release の本文 (Markdown のまま)。 */
+export interface UpdateCheckDto { available: boolean; version?: string; notes?: string; date?: string; }
+/** `update-progress` event。`received` / `total` は `downloading` のバイト数 (`total` が無いことがある)。 */
+export type UpdatePhase = "waitingSync" | "downloading" | "installing";
+export interface UpdateProgress { phase: UpdatePhase; received?: number; total?: number; }

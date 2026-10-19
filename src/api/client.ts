@@ -32,6 +32,8 @@ import type {
   TaskPatch,
   TodayViewDto,
   UpcomingDto,
+  UpdateCheckDto,
+  UpdateStatusDto,
 } from "../types/model";
 
 /** Typed wrapper over Tauri `invoke`. Command names and argument keys follow src-tauri/src/commands/mod.rs (camelCase of the Rust params). */
@@ -137,6 +139,18 @@ export const api = {
   googleLoginCancel: () => invoke<null>("google_login_cancel"),
   /** Revokes (best effort; `revoked: false` when Google could not be reached), forgets the login and detaches the sync. The target stays Google Drive. */
   googleLogout: () => invoke<GoogleLogoutDto>("google_logout"),
+
+  // ---- アプリの更新 ----
+  updateStatus: () => invoke<UpdateStatusDto>("update_status"),
+  /** 新しい版を探す。失敗は 日本語の文で reject する。インストール中は `available: false`。 */
+  updateCheck: () => invoke<UpdateCheckDto>("update_check"),
+  /**
+   * 「今すぐ更新」: 同期を止め、保存して、ダウンロードして入れ替える。進み具合は `update-progress` event。
+   * macOS / Linux は成功するとアプリが自分で再起動する (この Promise は戻らないことがある)。Windows はインストーラーがアプリを終わらせる。
+   * 失敗 (保存できていない変更がある、ネットワークなど) は 日本語の文で reject する。データはそのまま。
+   */
+  updateInstall: () => invoke<null>("update_install"),
+  setUpdateAutoCheck: (enabled: boolean) => invoke<null>("set_update_auto_check", { enabled }),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];

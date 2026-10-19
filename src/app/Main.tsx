@@ -11,6 +11,7 @@ import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
+import { UpdateDialog } from "../views/UpdateDialog";
 import type { ExpandApi } from "../views/ProjectView";
 import { LabelDetailView } from "../views/LabelDetailView";
 import { LabelsView } from "../views/LabelsView";
@@ -37,6 +38,8 @@ import { formatSynced, syncErrorText, syncPausedText, targetName } from "./syncT
 import { useSync } from "./useSync";
 import type { SyncConflicts } from "./useSyncConflicts";
 import { useSettingsPanes } from "./useSettingsPanes";
+import { useUpdates } from "./useUpdates";
+import type { UpdateOffer } from "./useUpdates";
 
 type Nav = SidebarProps["active"];
 type Flash = { text: string; tone: "error" | "info" };
@@ -63,6 +66,11 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
+  // アプリの更新: 起動 5 秒後の確認、更新ダイアログ、設定の「アップデート」ペイン
+  const updates = useUpdates();
+  // 閉じるアニメーションのあいだも文言を保つため、最後に見つかった版を覚えておく
+  const shownOffer = useRef<UpdateOffer | null>(null);
+  if (updates.offer) shownOffer.current = updates.offer;
   const syncState = syncStatus?.state ?? "off";
   // 片方が空に見えて止まっているあいだ (帯で戻す方向を選ぶ) と、認証が断られたあいだ (ログインし直すか「確かめる」まで
   // 同期しない) は、「今すぐ同期」しても動かない
@@ -654,7 +662,30 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         accountPane={settingsPanes.account}
         notificationsPane={{ ...settingsPanes.notifications, trayError: app.trayError }}
         datetimePane={settingsPanes.datetime}
+        updatesPane={{
+          status: updates.status,
+          checking: updates.checking,
+          upToDate: updates.upToDate,
+          error: updates.error,
+          onToggleAutoCheck: (v) => void updates.setAutoCheck(v),
+          onCheck: () => void updates.check(true),
+          onOpenReleasePage: () => void updates.openReleasePage(),
+        }}
       />
+      {/* 設定の上に重ねる (後に置くので Esc も先にこちらへ届く) */}
+      {shownOffer.current && updates.status && (
+        <UpdateDialog
+          open={!!updates.offer}
+          currentVersion={updates.status.currentVersion}
+          version={shownOffer.current.version}
+          notes={shownOffer.current.notes}
+          installing={updates.installing}
+          progress={updates.progress}
+          error={updates.installError}
+          onInstall={() => void updates.install()}
+          onClose={updates.later}
+        />
+      )}
     </>
   );
 

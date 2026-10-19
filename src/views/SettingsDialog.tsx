@@ -1,4 +1,4 @@
-import { Bell, Calendar, Cloud, Folder, Keyboard, Palette, User } from "lucide-react";
+import { Bell, Calendar, Cloud, Download, Folder, Keyboard, Palette, User } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
@@ -13,9 +13,11 @@ import { NasFields, syncTargetOptions } from "./SyncFields";
 import { isNasConnected } from "../app/syncText";
 import { SyncPane } from "./SyncPane";
 import type { SyncPaneProps } from "./SyncPane";
+import { UpdatesPane } from "./UpdatesPane";
+import type { UpdatesPaneProps } from "./UpdatesPane";
 
 export type SyncTarget = "google" | "nas" | "none";
-export type SettingsPane = "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard";
+export type SettingsPane = "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard" | "updates";
 export type SettingsDialogProps = {
   open: boolean;
   initialTarget?: SyncTarget;
@@ -36,6 +38,8 @@ export type SettingsDialogProps = {
   notificationsPane?: NotificationsPaneProps;
   /** 「日付と時刻」ペイン。無ければ従来の「実装予定」の表示。 */
   datetimePane?: DateTimePaneProps;
+  /** 「アップデート」ペイン (src/app/useUpdates.ts)。渡したときだけ左の一覧に「アップデート」が出る。 */
+  updatesPane?: UpdatesPaneProps;
 };
 
 type Icon = React.ComponentType<{ size?: number }>;
@@ -48,6 +52,7 @@ const navItems: { pane: SettingsPane; label: string; icon: Icon }[] = [
   { pane: "appearance", label: "外観", icon: Palette },
   { pane: "datetime", label: "日付と時刻", icon: Calendar },
   { pane: "keyboard", label: "キーボード", icon: Keyboard },
+  { pane: "updates", label: "アップデート", icon: Download },
 ];
 
 const titles: Record<SyncTarget, string> = { google: "Google Drive", nas: "Synology NAS (WebDAV)", none: "同期" };
@@ -83,6 +88,7 @@ export function SettingsDialog({
   accountPane,
   notificationsPane,
   datetimePane,
+  updatesPane,
 }: SettingsDialogProps) {
   const [pane, setPane] = useState<SettingsPane>(initialPane);
   const [target, setTarget] = useState<SyncTarget>(initialTarget);
@@ -257,7 +263,7 @@ export function SettingsDialog({
               }}
             >
               <div style={{ fontSize: 16, lineHeight: "23px", fontWeight: 700, color: "var(--color-text-primary)" }}>設定</div>
-              {navItems.map(({ pane: p, label, icon: I }) => {
+              {navItems.filter((n) => n.pane !== "updates" || updatesPane).map(({ pane: p, label, icon: I }) => {
                 const active = p === pane;
                 return (
                 <button
@@ -322,6 +328,7 @@ export function SettingsDialog({
               {pane === "notifications" && (notificationsPane ? <NotificationsPane {...notificationsPane} /> : <LaterPane pane={pane} />)}
               {pane === "datetime" && (datetimePane ? <DateTimePane {...datetimePane} /> : <LaterPane pane={pane} />)}
               {pane === "appearance" && <LaterPane pane={pane} />}
+              {pane === "updates" && updatesPane && <UpdatesPane {...updatesPane} />}
             </div>
           </motion.div>
         </motion.div>
