@@ -27,12 +27,22 @@ use tauri_plugin_updater::UpdaterExt;
 /// How long `update_install` waits for a running sync to end.
 #[cfg(desktop)]
 const SYNC_WAIT: Duration = Duration::from_secs(60);
+/// The longest wait for a connection to the update server.
+#[cfg(desktop)]
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// The longest silence on an open connection. It is per read, so a slow download that keeps
+/// receiving data is not cut off (unlike `UpdaterBuilder::timeout`, a limit on the whole
+/// request).
+#[cfg(desktop)]
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// The least time between two `downloading` events.
 #[cfg(desktop)]
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
 #[cfg(desktop)]
 const MSG_OFFLINE: &str = "更新を確かめられませんでした (ネットワークを確かめてください)";
+#[cfg(desktop)]
+const MSG_NO_MANIFEST: &str = "更新の案内がまだありません。しばらくしてからもう一度お試しください";
 #[cfg(desktop)]
 const MSG_INVALID: &str = "更新ファイルを確かめられませんでした";
 #[cfg(desktop)]
@@ -125,7 +135,6 @@ pub struct UpdateCheckDto {
 #[cfg(desktop)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg(desktop)]
 struct ProgressEvent {
     phase: Phase,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -304,7 +313,11 @@ fn is_bad_package(e: &tauri_plugin_updater::Error) -> bool {
 /// An error of `Updater::check`.
 #[cfg(desktop)]
 fn check_error(e: &tauri_plugin_updater::Error) -> AppError {
-    invalid(if is_bad_package(e) {
+    use tauri_plugin_updater::Error as E;
+    invalid(if matches!(e, E::ReleaseNotFound) {
+        // The endpoint answered without a manifest (e.g. `latest.json` is not uploaded yet).
+        MSG_NO_MANIFEST
+    } else if is_bad_package(e) {
         MSG_INVALID
     } else {
         MSG_OFFLINE
@@ -404,7 +417,15 @@ pub async fn update_check(app: AppHandle) -> AppResult<UpdateCheckDto> {
     if state.update_slot.is_installing() {
         return Ok(UpdateCheckDto::default());
     }
-    let updater = app.updater().map_err(|e| check_error(&e))?;
+    // The context in `Update` is a clone of this one, so `download` gets the same timeouts.
+    let updater = app
+        .updater_builder()
+        .configure_client(|c| {
+            c.connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
+        })
+        .build()
+        .map_err(|e| check_error(&e))?;
     let found = updater.check().await.map_err(|e| check_error(&e))?;
     let dto = found.as_ref().map(|u| UpdateCheckDto {
         available: true,
@@ -834,14 +855,42 @@ mod tests {
 
         #[tokio::test]
         async fn an_unreachable_server_is_offline() {
-            let server = MockServer::start().await;
-            let uri = server.uri();
-            drop(server);
+            // A port nobody listens on (a dropped `MockServer` can go back to a pool and keep
+            // answering 404, so it is not unreachable).
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
             let app = app();
-            let err = updater(&app, &uri).check().await.err().expect("no server");
+            let err = updater(&app, &format!("http://127.0.0.1:{port}"))
+                .check()
+                .await
+                .err()
+                .expect("no server");
             assert_eq!(
                 check_error(&err).to_string(),
                 "更新を確かめられませんでした (ネットワークを確かめてください)"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_server_without_latest_json_says_the_guide_is_not_there_yet() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/latest.json"))
+                .respond_with(ResponseTemplate::new(404))
+                .mount(&server)
+                .await;
+            let app = app();
+            let err = updater(&app, &server.uri())
+                .check()
+                .await
+                .err()
+                .expect("404");
+            assert_eq!(
+                check_error(&err).to_string(),
+                "更新の案内がまだありません。しばらくしてからもう一度お試しください"
             );
         }
 
@@ -1123,11 +1172,7 @@ mod tests {
 
         #[test]
         fn errors_of_the_check_are_offline_or_invalid() {
-            for e in [
-                E::ReleaseNotFound,
-                E::Network("x".into()),
-                E::EmptyEndpoints,
-            ] {
+            for e in [E::Network("x".into()), E::EmptyEndpoints] {
                 assert_eq!(check_error(&e).to_string(), MSG_OFFLINE, "{e:?}");
             }
             for e in [
@@ -1137,6 +1182,16 @@ mod tests {
             ] {
                 assert_eq!(check_error(&e).to_string(), MSG_INVALID, "{e:?}");
             }
+        }
+
+        #[test]
+        fn a_missing_manifest_gets_its_own_message() {
+            let err = check_error(&E::ReleaseNotFound);
+            assert_eq!(err.to_string(), MSG_NO_MANIFEST);
+            assert_eq!(
+                MSG_NO_MANIFEST,
+                "更新の案内がまだありません。しばらくしてからもう一度お試しください"
+            );
         }
 
         #[test]
