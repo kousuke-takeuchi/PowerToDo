@@ -72,7 +72,7 @@ MadakeCAD の形をそのまま使い、PowerToDo の事情 (Go のサイドカ�
 - `tauri-plugin-updater` 2.14 を `#[cfg(desktop)]` で登録 (iOS には入れない)。再起動は `AppHandle::restart` を使うので `tauri-plugin-process` は入れない (§9)
 - `tauri.conf.json`: `plugins.updater.pubkey` (公開鍵、リポジトリに入れる)、`endpoints: ["https://github.com/kousuke-takeuchi/PowerToDo/releases/latest/download/latest.json"]`、`windows.installMode: "passive"`
 - `releases/latest` は pre-release を飛ばすので、pre-release の版は更新として届かない (テスト用に配るだけ)
-- 公開鍵が入っていないビルド (開発中) では updater を組み立てず、確認は「使えない」を返す
+- debug ビルド (開発中) では updater を組み立てず、確認は「使えない」を返す (`support_now()` が debug かどうかで決める)。公開鍵はリポジトリに入っているので、鍵の有無では分けない
 - 権限: Rust 側で呼ぶので JS 用の `updater:*` 権限は付けない (§9)
 
 ### 3.2 command (`src-tauri/src/commands/update.rs`)
@@ -80,7 +80,7 @@ MadakeCAD の形をそのまま使い、PowerToDo の事情 (Go のサイドカ�
   - `dev`: debug ビルド。確認しない
   - `manual`: Linux で AppImage から動いていない (`APPIMAGE` 環境変数が無い)。deb / rpm は release ページへ案内
   - `supported`: それ以外
-- `update_check() -> UpdateCheckDto { available: bool, version?, notes?, date? }` — `app.updater()?.check()`。ネットワークの失敗は日本語の `UpdateError::Offline`、署名の検証失敗は `UpdateError::Invalid` (「更新ファイルを確かめられませんでした」)
+- `update_check() -> UpdateCheckDto { available: bool, version?, notes?, date? }` — `app.updater_builder().configure_client(..).build()?.check()` (接続 30 秒、読み取り 60 秒のタイムアウト付き。全体の `timeout` は遅い回線のダウンロードを切るので使わない)。ネットワークの失敗は日本語の `UpdateError::Offline`、`latest.json` がまだ無いとき (`Error::ReleaseNotFound`) は「更新の案内がまだありません。しばらくしてからもう一度お試しください」、署名の検証失敗は `UpdateError::Invalid` (「更新ファイルを確かめられませんでした」)
 - `update_install()` — 直前の `check` で得た `Update` を保持しておき、次の順で行う
   1. 状態イベント `update-progress { phase: "waitingSync" }`。同期エンジンに新しい実行をさせない印を立て、走っている同期の終了を待つ (最大 60 秒。過ぎたら `UpdateError::Busy` で中止し、印を外す)
   2. 書き込み待ちの保存が無いことを確かめる (Phase 1 / 2 の保存は command の中で終わる。外部変更の「保留」があれば中止して理由を返す)
@@ -183,3 +183,8 @@ README に章を足す
 | 2026-10-19 | release の本文を `releaseBody` として `tauri-action` に渡す (`prepare` ジョブが API で読んで出力する) | `releaseId` だけを渡すと `latest.json` の `notes` が空になり、§4.2 の更新内容が出ない |
 | 2026-10-19 | CI の Node は `ci.yml` に合わせて 26 (§2.2 の手順 2 の「20」は置き換え) | PR の CI で通っている版でリリースも作る |
 | 2026-10-19 | `bundle` のあとに `verify` ジョブを足し、`latest.json` に 4 プラットフォームの url と署名がそろっているか確かめる。自動の再マージはしない | `tauri-action` は `latest.json` を読んで足して上げ直すだけで排他がなく、同時に終わった 2 つのジョブの片方の分が消えることがある。消えたら赤にして、足りないジョブの再実行を促す |
+| 2026-10-19 | 更新の確認とダウンロードに、接続 30 秒・読み取り 60 秒のタイムアウトを `configure_client` で付ける。`UpdaterBuilder::timeout` は使わない | `timeout` は要求全体の上限で、遅い回線のダウンロードを途中で切る。読み取りの上限は「データが来ない時間」だけを見る。`Update` は `Updater` の設定を引き継ぐので、`download` にも効く (`tauri-plugin-updater` 2.14.0 `updater.rs:739,858`) |
+| 2026-10-19 | `Error::ReleaseNotFound` (エンドポイントが成功の応答を返さなかった。`latest.json` 未アップロードの 404 など) には「更新の案内がまだありません」の専用文言を出す。起動時の自動確認は失敗を黙って捨てるので何も出ない | 「ネットワークを確かめてください」では、リリース直後で `latest.json` が無いだけのときに誤解させる |
+| 2026-10-19 | `verify` ジョブの必須キーに `windows-x86_64-msi` を足す。`latest.json` が release に無いときは、再実行の案内つきで赤にする | `tauri-action` は署名ファイルごとに `{os}-{arch}-{bundle}` を書くので、msi の分が抜けても検出したい。`gh release download` の素のエラーでは原因が分かりにくい |
+| 2026-10-19 | §3.1 の「公開鍵が入っていないビルドでは updater を組み立てない」を、実装どおり「debug ビルドでは組み立てない」に直す | 実装は `support_now()` が debug かどうかで分ける。公開鍵は常にリポジトリに入っている |
+| 2026-10-19 | `release.yml` の `actions/checkout` に `persist-credentials: false`、`tauri-apps/tauri-action` を `v0` タグが指すコミット (`84b9d35b5fc46c1e45415bdb6144030364f7ebc5`) に固定 | 署名鍵と OAuth の値を扱うジョブで、タグの付け替えと残った認証情報の悪用を避ける |

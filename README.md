@@ -100,8 +100,8 @@ GitHub で release を公開すると、Actions の Release が macOS (Apple シ
 リリースする
 1. main が CI 緑であることを確かめる
 2. GitHub → Releases → Draft a new release → タグ `vX.Y.Z` (新規、main から。数字だけの `X.Y.Z`。`v1.2.3-rc1` のような版は CI が断る) → タイトルと更新内容を書く → Publish release。更新内容はアプリの更新ダイアログにそのまま出る。テスト用は「Set as a pre-release」にする
-3. Actions の Release が 4 ジョブとも緑になるのを待つ (20〜30 分)。release に 7 種 + 更新ファイル + `latest.json` が付いたことを確かめる
-   - 最後の「Check latest.json」ジョブが、`latest.json` に 4 つのプラットフォームすべて (macOS の Apple シリコン / Intel、Linux、Windows) の更新ファイルと署名が入っているかを確かめる。GitHub の仕組みで 2 つのジョブが同時に `latest.json` を書くと、片方が消えることがあり、そのとき赤になる
+3. Actions の Release が全ジョブ (準備、4 つの「Installers」、「Check latest.json」の 6 つ) 緑になるのを待つ (20〜30 分)。release に 7 種 + 更新ファイル + `latest.json` が付いたことを確かめる
+   - 最後の「Check latest.json」ジョブが、`latest.json` に 4 つのプラットフォームすべて (macOS の Apple シリコン / Intel、Linux、Windows の exe と msi) の更新ファイルと署名が入っているかを確かめる。tauri-action は `latest.json` を排他なしで読んで書き直すので、2 つのジョブが同時に書くと片方のプラットフォームが消えることがあり、そのとき赤になる
    - 赤になったら: Actions → その実行 → 足りないプラットフォームの「Installers」ジョブを選んで「Re-run jobs」。ジョブの再実行で `latest.json` に足され、確認も自動でやり直される。それでも直らなければ、4 の作り直しをする
 4. 作り直し: Actions → Release → Run workflow → 既存のタグを入れる (公開済みの release が対象)
 
