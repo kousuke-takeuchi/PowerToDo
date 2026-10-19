@@ -52,6 +52,62 @@ Phase 5 以降 (アプリでは「Phase N で実装予定」と出るもの)
 
 アプリ本体 (`npm run tauri dev` / `tauri build`) の動作確認は macOS のみ。Windows / Ubuntu は CI で `cargo test` と `cargo build` が通ることだけを確認する。
 
+## インストール
+
+[GitHub の Releases ページ](https://github.com/kousuke-takeuchi/PowerToDo/releases/latest) から、使っている OS のファイルを取る。このアプリはコード署名と公証をしていないため、OS の警告が出る。下の手順で越える。
+
+| OS | ファイル | 入れ方 |
+| --- | --- | --- |
+| macOS (Apple シリコン) | `.dmg` (`aarch64`) | 開いて `PowerToDo` を `Applications` へドラッグ |
+| macOS (Intel) | `.dmg` (`x64`) | 同上 |
+| Windows | `-setup.exe` (または `.msi`) | 実行する。更新は exe (NSIS) の版で届くので、迷ったら exe を使う |
+| Linux | `.AppImage` | `chmod +x PowerToDo_*.AppImage` してから実行 |
+| Linux (Debian / Ubuntu) | `.deb` | `sudo dpkg -i PowerToDo_*.deb` |
+| Linux (Fedora など) | `.rpm` | `sudo rpm -i PowerToDo-*.rpm` |
+
+初回起動の警告
+- macOS: 「開発元を検証できないため開けません」と出る。`Applications` の `PowerToDo` を右クリック →「開く」→ もう一度「開く」。それでも開けないときは、ターミナルで `xattr -d com.apple.quarantine /Applications/PowerToDo.app` を実行してから開く。更新のあとに警告がもう一度出たら、同じ手順で開く
+- Windows: SmartScreen の「Windows によって PC が保護されました」が出る。「詳細情報」→「実行」
+- Linux: 警告は出ない。AppImage は実行権限 (`chmod +x`) が要る
+
+リリース版には Google Drive 用の OAuth クライアントが組み込まれている。自分でビルドしたときは、「同期」の Google Drive の準備が要る。
+
+## 自動更新
+
+- 起動の 5 秒後に、新しい版があるか一度だけ確認する。見つかると「新しいバージョンがあります」のダイアログが出る。「今すぐ更新」で、ダウンロード → 入れ替え → 再起動まで進む。「あとで」にした版は、そのまま起動しているあいだは出ない (次の起動でまた確認する)
+- クイック追加や検索を開いているあいだ、文字を打っているあいだは、自動で見つけた更新のダイアログを出さずに待つ。設定の「更新を確認」で調べたときはすぐ出る
+- 同期の途中で「今すぐ更新」を押すと、同期が終わるのを待ってから入れ替える (「同期の完了を待っています…」)。最大 60 秒待っても終わらないときは更新を中止する。データは何も変わらない
+- 設定の「アップデート」ペインに、いまの版、「起動時に更新を確認する」(既定はオン)、「更新を確認」ボタンがある。起動時の確認を切っても、ボタンでいつでも確認できる
+- 更新の確認は GitHub の最新の release を見る。pre-release (テスト用) は更新として届かない
+- 更新ファイルは署名つきで、アプリに入っている公開鍵で確かめてから入れる。確かめられなければ入れずに、理由を出す
+- 自動更新できない入れ方
+  - Linux で AppImage から動かしていないとき (deb / rpm): 設定に「この入れ方では自動更新できません」と release ページへのリンクが出る。新しい版を手で入れ直す
+  - 開発版 (`npm run tauri dev` や debug ビルド): 「開発版のため更新を確認しません」と出る
+
+## リリースの手順
+
+GitHub で release を公開すると、Actions の Release が macOS (Apple シリコン / Intel)、Windows、Linux の 4 ジョブで、インストーラー 7 種 (dmg ×2、exe、msi、AppImage、deb、rpm)、更新ファイルとその署名、更新の案内 `latest.json` を作り、その release に付ける。
+
+事前準備 (所有者が 1 回だけ)
+1. 署名鍵を作る: `npx tauri signer generate -w ~/.tauri/powertodo.key` (パスワードを付ける)
+2. GitHub の Settings → Secrets and variables → Actions に登録する
+   - `TAURI_SIGNING_PRIVATE_KEY`: 鍵ファイルの中身
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: 1 のパスワード
+   - `POWERTODO_GOOGLE_OAUTH_JSON_CONTENT`: `src-tauri/google-oauth.json` の中身 (「同期」の Google Drive の準備を参照)
+3. 公開鍵 (`~/.tauri/powertodo.key.pub` の中身) を `src-tauri/tauri.conf.json` の `plugins.updater.pubkey` に入れる。公開してよい値
+4. 秘密鍵とパスワードは、パスワード管理ツールなどに控える。**秘密鍵をなくすと、すでに入っているアプリに更新を届けられなくなる** (別の鍵で署名した版は、アプリの検証に通らない)。そのときは、新しい鍵で作った版を手で入れ直してもらうしかない
+
+リリースする
+1. main が CI 緑であることを確かめる
+2. GitHub → Releases → Draft a new release → タグ `vX.Y.Z` (新規、main から。数字だけの `X.Y.Z`。`v1.2.3-rc1` のような版は CI が断る) → タイトルと更新内容を書く → Publish release。更新内容はアプリの更新ダイアログにそのまま出る。テスト用は「Set as a pre-release」にする
+3. Actions の Release が 4 ジョブとも緑になるのを待つ (20〜30 分)。release に 7 種 + 更新ファイル + `latest.json` が付いたことを確かめる
+4. 作り直し: Actions → Release → Run workflow → 既存のタグを入れる (公開済みの release が対象)
+
+メモ
+- リポジトリの `tauri.conf.json` の `version` は開発用の値 (`0.1.0`) のまま。配布版の版は CI がタグの数字で書き換える。アプリが表示する版も、配布版ではタグの値になる
+- secret が無いときは CI は止まらず、警告を出して作る: `TAURI_SIGNING_PRIVATE_KEY` が無ければ更新ファイルなし、`POWERTODO_GOOGLE_OAUTH_JSON_CONTENT` が無ければ Drive なしのビルドになる。公開前に Actions のログで警告が出ていないことを見る
+- ビルドのログとキャッシュ: release のワークフローは `-v` / `-vv` を付けず、`target/` をキャッシュにもアーティファクトにも上げない (OAuth のクライアントの値が残るため)。この決まりを変えない
+
 ## 操作
 
 キーボードで操作できる。入力欄にカーソルがあるとき、日本語入力の変換中は効かない。Shift を押しながらのキーは何もしない (`↑` `↓` `←` `→` を除く)。`g` のあとの 1 秒は Shift 抜きで押す。ダイアログが開いているあいだは、ダイアログ自身のキーが優先される。
