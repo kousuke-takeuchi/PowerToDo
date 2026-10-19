@@ -52,7 +52,7 @@ export type UpdatesApi = {
 /**
  * アプリの更新 (リリースの仕様 §4)。起動時に状態を読み、`supported` で自動確認がオンなら 5 秒後に一度だけ確認する。
  * `hold`: true のあいだ (クイック追加 / 検索を開いている)、自動で見つけた更新は出さずに待つ。文字を打てる欄にフォーカスがあるあいだも待ち、
- * 閉じたとき / フォーカスが外れたとき (`focusout`) に、少し置いて出す。手動の確認はすぐ出す。
+ * 閉じたとき / フォーカスが外れたとき (`focusout`) に、少し置いて出す (欄がフォーカスごと消えた場合に備え、待つあいだは 500 ms ごとにも見直す)。手動の確認はすぐ出す。
  * 状態は state だけで持つ (「あとで」の版も保存しない)。アンマウントでタイマーと購読を解除する。
  */
 export function useUpdates({ hold = false }: { hold?: boolean } = {}): UpdatesApi {
@@ -141,6 +141,7 @@ export function useUpdates({ hold = false }: { hold?: boolean } = {}): UpdatesAp
   }, [check]);
 
   // 待たせていた自動の更新: 閉じたら / 入力が済んだら、少し置いて出す。
+  // `focusout` は欄が外されただけ (フォーカスが外れずに消えた) では来ないので、一定間隔でも見直す。
   useEffect(() => {
     if (!pending) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -153,9 +154,11 @@ export function useUpdates({ hold = false }: { hold?: boolean } = {}): UpdatesAp
       timer = setTimeout(tryShow, SHOW_RETRY_MS);
     };
     schedule();
+    const poll = setInterval(tryShow, SHOW_RETRY_MS);
     document.addEventListener("focusout", schedule);
     return () => {
       clearTimeout(timer);
+      clearInterval(poll);
       document.removeEventListener("focusout", schedule);
     };
   }, [pending, hold]);
