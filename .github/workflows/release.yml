@@ -74,6 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 26
@@ -128,7 +129,7 @@ jobs:
           umask 077
           printf '%s' "$OAUTH_JSON" > "$f"
           echo "POWERTODO_GOOGLE_OAUTH_JSON=$f" >> "$GITHUB_ENV"
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -162,9 +163,15 @@ jobs:
             echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: no latest.json to check"
             exit 0
           fi
+          # Into a variable first: with pipefail, `grep -q` closing the pipe early could fail the pipeline.
+          assets=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if ! grep -qx latest.json <<< "$assets"; then
+            echo "::error::The release $TAG has no latest.json. No Installers job uploaded it (the signing key may be missing, or every job failed). Re-run the 'Installers' job of each platform (Actions > this run > Re-run jobs)."
+            exit 1
+          fi
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --output latest.json --clobber
           # {os}-{arch} is what older clients look up; the suffixed keys are what tauri-plugin-updater looks up first.
-          required='["darwin-aarch64","darwin-x86_64","linux-x86_64","windows-x86_64","darwin-aarch64-app","darwin-x86_64-app","linux-x86_64-appimage","windows-x86_64-nsis"]'
+          required='["darwin-aarch64","darwin-x86_64","linux-x86_64","windows-x86_64","darwin-aarch64-app","darwin-x86_64-app","linux-x86_64-appimage","windows-x86_64-nsis","windows-x86_64-msi"]'
           echo "version: $(jq -r '.version' latest.json)"
           echo "platforms: $(jq -r '.platforms | keys | join(", ")' latest.json)"
           missing=$(jq -r --argjson required "$required" '
