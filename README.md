@@ -60,7 +60,7 @@ Phase 5 以降 (アプリでは「Phase N で実装予定」と出るもの)
 | --- | --- | --- |
 | macOS (Apple シリコン) | `.dmg` (`aarch64`) | 開いて `PowerToDo` を `Applications` へドラッグ |
 | macOS (Intel) | `.dmg` (`x64`) | 同上 |
-| Windows | `-setup.exe` (または `.msi`) | 実行する。更新は exe (NSIS) の版で届くので、迷ったら exe を使う |
+| Windows | `-setup.exe` (または `.msi`) | 実行する。exe を勧める (ユーザー単位で入り、管理者権限が要らない)。msi は管理者向け |
 | Linux | `.AppImage` | `chmod +x PowerToDo_*.AppImage` してから実行 |
 | Linux (Debian / Ubuntu) | `.deb` | `sudo dpkg -i PowerToDo_*.deb` |
 | Linux (Fedora など) | `.rpm` | `sudo rpm -i PowerToDo-*.rpm` |
@@ -86,7 +86,7 @@ Phase 5 以降 (アプリでは「Phase N で実装予定」と出るもの)
 
 ## リリースの手順
 
-GitHub で release を公開すると、Actions の Release が macOS (Apple シリコン / Intel)、Windows、Linux の 4 ジョブで、インストーラー 7 種 (dmg ×2、exe、msi、AppImage、deb、rpm)、更新ファイルとその署名、更新の案内 `latest.json` を作り、その release に付ける。
+GitHub で release を公開すると、Actions の Release が macOS (Apple シリコン / Intel)、Windows、Linux の 4 つの「Installers」ジョブで、インストーラー 7 種 (dmg ×2、exe、msi、AppImage、deb、rpm)、更新ファイルとその署名、更新の案内 `latest.json` を作り、その release に付ける。
 
 事前準備 (所有者が 1 回だけ)
 1. 署名鍵を作る: `npx tauri signer generate -w ~/.tauri/powertodo.key` (パスワードを付ける)
@@ -101,6 +101,8 @@ GitHub で release を公開すると、Actions の Release が macOS (Apple シ
 1. main が CI 緑であることを確かめる
 2. GitHub → Releases → Draft a new release → タグ `vX.Y.Z` (新規、main から。数字だけの `X.Y.Z`。`v1.2.3-rc1` のような版は CI が断る) → タイトルと更新内容を書く → Publish release。更新内容はアプリの更新ダイアログにそのまま出る。テスト用は「Set as a pre-release」にする
 3. Actions の Release が 4 ジョブとも緑になるのを待つ (20〜30 分)。release に 7 種 + 更新ファイル + `latest.json` が付いたことを確かめる
+   - 最後の「Check latest.json」ジョブが、`latest.json` に 4 つのプラットフォームすべて (macOS の Apple シリコン / Intel、Linux、Windows) の更新ファイルと署名が入っているかを確かめる。GitHub の仕組みで 2 つのジョブが同時に `latest.json` を書くと、片方が消えることがあり、そのとき赤になる
+   - 赤になったら: Actions → その実行 → 足りないプラットフォームの「Installers」ジョブを選んで「Re-run jobs」。ジョブの再実行で `latest.json` に足され、確認も自動でやり直される。それでも直らなければ、4 の作り直しをする
 4. 作り直し: Actions → Release → Run workflow → 既存のタグを入れる (公開済みの release が対象)
 
 メモ
