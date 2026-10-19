@@ -33,7 +33,7 @@ import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
-import { formatSynced, syncErrorText, targetName } from "./syncText";
+import { formatSynced, syncErrorText, syncPausedText, targetName } from "./syncText";
 import { useSync } from "./useSync";
 import type { SyncConflicts } from "./useSyncConflicts";
 import { useSettingsPanes } from "./useSettingsPanes";
@@ -68,6 +68,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // 同期しない) は、「今すぐ同期」しても動かない
   const syncClickable = syncState === "error" && !syncStatus?.suspect && !syncStatus?.authRejected;
   const syncError = syncErrorText(syncStatus, syncClickable);
+  const syncPaused = syncPausedText(syncStatus);
   // 同期のエラーの帯は閉じられる。エラーが続く間は同じ文言を出し直さず、直って別のエラーが起きたらまた出す。
   const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
   useEffect(() => {
@@ -347,6 +348,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       syncDetail={syncStatus?.message}
       syncOffText="同期オフ"
       syncErrorText={syncError}
+      syncPausedText={syncPaused}
       onSyncClick={syncClickable ? () => void sync.syncNow(true) : undefined}
       displayName={displayName}
       onNavigate={navigate}
@@ -667,6 +669,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         syncDetail: syncStatus?.message,
         syncOffText: "同期オフ",
         syncErrorText: syncError,
+        syncPausedText: syncPaused,
         onSyncClick: syncClickable ? () => void sync.syncNow(true) : undefined,
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,

@@ -2432,6 +2432,7 @@ mod tests {
             pending: 0,
             suspect,
             auth_rejected: false,
+            paused: false,
         };
         let m = invalid_text(recover_precondition(
             false,

@@ -95,6 +95,9 @@ pub struct SyncStatusView {
     /// in again, so the UI offers that only while it is set.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub auth_rejected: bool,
+    /// An update is being prepared: syncs wait until it ends or fails.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub paused: bool,
 }
 
 impl SyncStatusView {
@@ -106,6 +109,7 @@ impl SyncStatusView {
             pending: 0,
             suspect: None,
             auth_rejected: false,
+            paused: false,
         }
     }
 }
@@ -272,6 +276,8 @@ struct Inner {
     /// The wanted run was asked for by [`SyncReason::Retry`] alone (no other reason joined it).
     due_retry: bool,
     status: SyncStatusView,
+    /// Set while an app update is being prepared: no new run starts (requests are kept).
+    paused: bool,
     /// Where status changes made outside a run go (set by `run_loop`).
     host: Option<Arc<dyn SyncHost>>,
 }
@@ -362,6 +368,7 @@ impl SyncEngine {
                     due: None,
                     due_retry: false,
                     status: SyncStatusView::off(),
+                    paused: false,
                     host: None,
                 }),
                 running: tokio::sync::Mutex::new(()),
@@ -412,6 +419,7 @@ impl SyncEngine {
                     SyncPhase::Off
                 },
                 last_synced: last.map(stamp),
+                paused: s.paused,
                 ..SyncStatusView::off()
             };
         });
@@ -439,6 +447,7 @@ impl SyncEngine {
             self.publish(None, None, |s| {
                 *s = SyncStatusView {
                     state: SyncPhase::Syncing,
+                    paused: s.paused,
                     ..SyncStatusView::off()
                 };
             });
@@ -455,6 +464,30 @@ impl SyncEngine {
 
     pub fn auth_rejected(&self) -> bool {
         self.lock().auth_rejected
+    }
+
+    /// Stops new runs from starting while an app update is prepared; requests made meanwhile are
+    /// kept for [`SyncEngine::resume`]. A run in progress is not stopped: wait for it with
+    /// [`SyncEngine::wait_idle`]. The status shows `paused`.
+    pub fn pause_for_update(&self) {
+        self.lock().paused = true;
+        self.publish(None, None, |s| s.paused = true);
+    }
+
+    /// Whether a run is over: `true` once no run is in progress (the next one to start sees the
+    /// pause and does nothing), `false` when one is still going after `timeout`.
+    pub async fn wait_idle(&self, timeout: Duration) -> bool {
+        tokio::time::timeout(timeout, self.shared.running.lock())
+            .await
+            .is_ok()
+    }
+
+    /// Ends the pause (the update failed or was left) and wakes the loop for the requests that
+    /// came meanwhile.
+    pub fn resume(&self) {
+        self.lock().paused = false;
+        self.publish(None, None, |s| s.paused = false);
+        self.shared.wake.notify_one();
     }
 
     pub fn status(&self) -> SyncStatusView {
@@ -560,14 +593,19 @@ impl SyncEngine {
                 self.request(SyncReason::Interval);
                 next_interval = now + INTERVAL;
             }
-            if let Some(is_retry) = self.take_due_run(now) {
+            // While paused the requests stay (`resume` wakes the loop for them).
+            let paused = self.lock().paused;
+            if !paused && let Some(is_retry) = self.take_due_run(now) {
                 self.run(host.as_ref(), PlanMode::Normal, is_retry, None)
                     .await;
                 continue;
             }
-            let until = self
-                .next_due()
-                .map_or(next_interval, |d| d.min(next_interval));
+            let until = if paused {
+                next_interval
+            } else {
+                self.next_due()
+                    .map_or(next_interval, |d| d.min(next_interval))
+            };
             let _ = tokio::time::timeout_at(until, self.shared.wake.notified()).await;
         }
     }
@@ -705,6 +743,10 @@ impl SyncEngine {
         let mut report = SyncReport::default();
         let snapshot = {
             let inner = self.lock();
+            // Checked under the run lock, so `wait_idle` returning means no run starts after it.
+            if inner.paused {
+                return report;
+            }
             // A mirror the user confirmed against an older situation must not run.
             if confirmed.is_some_and(|g| g != inner.generation || inner.status.suspect.is_none()) {
                 return report;
@@ -713,7 +755,12 @@ impl SyncEngine {
         };
         let (target, generation) = match snapshot {
             (None, g, _) => {
-                self.publish(Some(host), Some(g), |s| *s = SyncStatusView::off());
+                self.publish(Some(host), Some(g), |s| {
+                    *s = SyncStatusView {
+                        paused: s.paused,
+                        ..SyncStatusView::off()
+                    };
+                });
                 return report;
             }
             // The status still says why.
@@ -736,6 +783,7 @@ impl SyncEngine {
             self.publish(Some(host), g, |s| {
                 *s = SyncStatusView {
                     message: Some("データフォルダが開かれていません".into()),
+                    paused: s.paused,
                     ..SyncStatusView::off()
                 };
             });
@@ -2728,6 +2776,7 @@ mod tests {
             pending: 1,
             suspect: Some(Side::Remote),
             auth_rejected: false,
+            paused: false,
         })
         .unwrap();
         assert_eq!(
@@ -2774,6 +2823,121 @@ mod tests {
         a.sync().await;
         assert!(a.engine.take_due(Instant::now()));
         assert!(!a.engine.take_due(Instant::now() + INTERVAL));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_while_paused_runs_after_resume() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.engine.pause_for_update();
+        assert!(a.engine.status().paused);
+        assert!(a.engine.request(SyncReason::AfterSave));
+        // Every way into a run is refused, and the request is kept.
+        assert_eq!(a.sync().await.outcome, RunOutcome::NotRun);
+        assert_eq!(
+            a.mirror(PlanMode::MirrorLocal).await.outcome,
+            RunOutcome::NotRun
+        );
+        let generation = a.engine.snapshot().2;
+        let r = a
+            .engine
+            .run_mirror_confirmed(a.host.as_ref(), PlanMode::MirrorLocal, generation)
+            .await;
+        assert_eq!(r.outcome, RunOutcome::NotRun);
+        assert!(remote.get(INBOX_FILE).is_none());
+        assert!(a.engine.next_due().is_some());
+
+        a.engine.resume();
+        assert!(!a.engine.status().paused);
+        assert_eq!(a.sync().await.outcome, RunOutcome::Done);
+        assert!(remote.get(INBOX_FILE).is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_idle_waits_for_a_running_run_and_times_out() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        // Nothing runs: idle at once.
+        assert!(a.engine.wait_idle(Duration::from_secs(60)).await);
+
+        let guard = a.engine.shared.running.lock().await; // a run in progress
+        let waiter = {
+            let e = a.engine.clone();
+            tokio::spawn(async move { e.wait_idle(Duration::from_secs(60)).await })
+        };
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(!waiter.is_finished());
+        drop(guard);
+        assert!(waiter.await.unwrap());
+
+        let _guard = a.engine.shared.running.lock().await;
+        assert!(!a.engine.wait_idle(Duration::from_secs(60)).await);
+    }
+
+    #[tokio::test]
+    async fn pausing_does_not_stop_a_run_in_progress_and_new_runs_start_nothing() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        let guard = a.engine.shared.running.lock().await;
+        let run = {
+            let (e, h) = (a.engine.clone(), a.host.clone());
+            tokio::spawn(async move { e.run_once(h.as_ref()).await })
+        };
+        tokio::task::yield_now().await;
+        a.engine.pause_for_update();
+        drop(guard);
+        // The queued run got the lock after the pause and so does nothing.
+        assert_eq!(run.await.unwrap().outcome, RunOutcome::NotRun);
+        assert!(remote.get(INBOX_FILE).is_none());
+    }
+
+    #[tokio::test]
+    async fn the_paused_flag_goes_out_in_the_status_and_survives_a_new_target() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        let v = serde_json::to_value(a.engine.status()).unwrap();
+        assert!(v.get("paused").is_none());
+
+        a.engine.pause_for_update();
+        assert_eq!(
+            serde_json::to_value(a.engine.status()).unwrap()["paused"],
+            true
+        );
+
+        // Rebuilding the status from `off` keeps the mark.
+        a.engine
+            .set_backend(Some(remote.clone()), BackendKind::Nas, ROOT);
+        assert!(a.engine.status().paused);
+        a.engine.reset_records();
+        assert!(a.engine.status().paused);
+        a.engine.set_backend(None, BackendKind::Nas, "");
+        assert!(a.engine.status().paused);
+
+        a.engine.resume();
+        assert!(!a.engine.status().paused);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_loop_starts_nothing_while_paused_and_catches_up_after_resume() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.engine.pause_for_update();
+        let host: Arc<dyn SyncHost> = a.host.clone();
+        let task = tokio::spawn(a.engine.clone().run_loop(host));
+        // Past the start-up request and an interval: still nothing.
+        tokio::time::sleep(INTERVAL + Duration::from_secs(10)).await;
+        assert!(remote.get(INBOX_FILE).is_none());
+
+        a.engine.resume();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(remote.get(INBOX_FILE).unwrap(), a.file(INBOX_FILE));
+        // The loop told the host about the end of the pause.
+        assert!(
+            a.events()
+                .iter()
+                .any(|e| matches!(e, Event::Status(s) if !s.paused))
+        );
+        task.abort();
     }
 
     #[tokio::test(start_paused = true)]

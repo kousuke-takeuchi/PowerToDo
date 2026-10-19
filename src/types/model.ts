@@ -141,6 +141,8 @@ export interface SyncStatusDto {
   suspect?: "local" | "remote";
   /** 同期先が認証を断った (Google なら、ログインが切れた)。このときだけ「ログインし直す」で直る。設定が変わる (ログインし直す、「確かめる」) と消える。 */
   authRejected?: true;
+  /** アプリの更新を準備している。新しい同期は始まらず、更新が終わる (失敗する) まで待つ。 */
+  paused?: true;
 }
 /** `sync-conflict` event: both sides changed `file`; the loser was saved as `conflictFile` (locally and on the target). */
 export interface SyncConflict { file: string; conflictFile: string; }
