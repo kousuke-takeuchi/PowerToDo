@@ -39,6 +39,7 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYyNUQxRjY0RUU5NUI1OTgKUldTWXRaWHVaQjlkOHFEMk9HdXprWnBndkt4cUl6VENzNHJwK21HU3NRYms1UjFHeno4Ky96Sk8K",
+      "requireSignedVersion": true,
       "endpoints": [
         "https://github.com/kousuke-takeuchi/PowerToDo/releases/latest/download/latest.json"
       ],

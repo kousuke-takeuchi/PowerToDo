@@ -64,7 +64,7 @@ pub struct AppState {
     pub sync_rt: sync::SyncRuntime,
     /// The new version `update_check` found, for `update_install` (see `update`). A leaf lock.
     #[cfg(desktop)]
-    pub pending_update: Mutex<Option<tauri_plugin_updater::Update>>,
+    pub update_slot: update::UpdateSlot<tauri_plugin_updater::Update>,
     app_data_dir: PathBuf,
 }
 
@@ -100,7 +100,7 @@ impl AppState {
             sync: SyncEngine::new(app_data_dir.clone()),
             sync_rt: sync::SyncRuntime::new(),
             #[cfg(desktop)]
-            pending_update: Mutex::new(None),
+            update_slot: update::UpdateSlot::default(),
             app_data_dir,
         }
     }
