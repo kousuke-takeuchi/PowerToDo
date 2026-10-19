@@ -42,7 +42,8 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 #[cfg(desktop)]
 const MSG_OFFLINE: &str = "更新を確かめられませんでした (ネットワークを確かめてください)";
 #[cfg(desktop)]
-const MSG_NO_MANIFEST: &str = "更新の案内がまだありません。しばらくしてからもう一度お試しください";
+const MSG_NO_MANIFEST: &str =
+    "更新の案内を取得できませんでした。しばらくしてからもう一度お試しください";
 #[cfg(desktop)]
 const MSG_INVALID: &str = "更新ファイルを確かめられませんでした";
 #[cfg(desktop)]
@@ -890,7 +891,7 @@ mod tests {
                 .expect("404");
             assert_eq!(
                 check_error(&err).to_string(),
-                "更新の案内がまだありません。しばらくしてからもう一度お試しください"
+                "更新の案内を取得できませんでした。しばらくしてからもう一度お試しください"
             );
         }
 
@@ -1190,7 +1191,7 @@ mod tests {
             assert_eq!(err.to_string(), MSG_NO_MANIFEST);
             assert_eq!(
                 MSG_NO_MANIFEST,
-                "更新の案内がまだありません。しばらくしてからもう一度お試しください"
+                "更新の案内を取得できませんでした。しばらくしてからもう一度お試しください"
             );
         }
 
