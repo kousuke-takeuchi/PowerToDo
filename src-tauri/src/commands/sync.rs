@@ -664,6 +664,18 @@ pub fn shutdown(app: &AppHandle) {
     }
 }
 
+/// Before an app update is installed: ends the sidecar (on Windows the installer replaces files
+/// the sidecar's process holds open). Blocking.
+pub fn stop_for_update(app: &AppHandle) {
+    stop_sidecar(app);
+}
+
+/// The update failed and the app goes on: starts the sidecar again under the same conditions as
+/// at launch (the engine gets its backend when the sidecar reports `running`). Blocking.
+pub fn restart_after_failed_update(app: &AppHandle) {
+    start_if_logged_in(app);
+}
+
 /// Starts the sidecar if the target is the NAS and a login exists. Blocking.
 fn start_if_logged_in(app: &AppHandle) {
     let state = app.state::<AppState>();

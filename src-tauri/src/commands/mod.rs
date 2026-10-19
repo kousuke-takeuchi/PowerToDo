@@ -4,6 +4,7 @@
 
 pub mod saver;
 pub mod sync;
+pub mod update;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -61,6 +62,9 @@ pub struct AppState {
     pub sync: SyncEngine,
     /// The NAS side of the sync: the Tailscale sidecar, the keychain, the connection details.
     pub sync_rt: sync::SyncRuntime,
+    /// The new version `update_check` found, for `update_install` (see `update`). A leaf lock.
+    #[cfg(desktop)]
+    pub pending_update: Mutex<Option<tauri_plugin_updater::Update>>,
     app_data_dir: PathBuf,
 }
 
@@ -95,6 +99,8 @@ impl AppState {
             fired: Mutex::new(Fired::load(&app_data_dir)),
             sync: SyncEngine::new(app_data_dir.clone()),
             sync_rt: sync::SyncRuntime::new(),
+            #[cfg(desktop)]
+            pending_update: Mutex::new(None),
             app_data_dir,
         }
     }
@@ -2226,6 +2232,7 @@ mod tests {
                 nas_user: Some("たろう".into()),
                 google_email: None,
             },
+            ..AppSettings::default()
         }
         .save(app_dir.path())
         .unwrap();

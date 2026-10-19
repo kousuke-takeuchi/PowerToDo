@@ -59,6 +59,9 @@ strip = true
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time", "test-util", "net", "io-util"] }
 wiremock = "0.6"
+# `tauri::test` (a mock app) drives the updater plugin in `commands::update` tests.
+tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-updater = "2.14"
