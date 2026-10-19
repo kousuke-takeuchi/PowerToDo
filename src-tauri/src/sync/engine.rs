@@ -742,9 +742,16 @@ impl SyncEngine {
         let _one_at_a_time = self.shared.running.lock().await;
         let mut report = SyncReport::default();
         let snapshot = {
-            let inner = self.lock();
+            let mut inner = self.lock();
             // Checked under the run lock, so `wait_idle` returning means no run starts after it.
             if inner.paused {
+                // The loop took its request before the pause; give it back for `resume`. A
+                // mirror is not a request.
+                if mode == PlanMode::Normal {
+                    inner.due_retry = is_retry && (inner.due.is_none() || inner.due_retry);
+                    let now = Instant::now();
+                    inner.due = Some(inner.due.map_or(now, |d| d.min(now)));
+                }
                 return report;
             }
             // A mirror the user confirmed against an older situation must not run.
@@ -2851,6 +2858,38 @@ mod tests {
         assert!(!a.engine.status().paused);
         assert_eq!(a.sync().await.outcome, RunOutcome::Done);
         assert!(remote.get(INBOX_FILE).is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_taken_just_before_a_pause_is_kept() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        // The loop took a retry request, then the pause came before the run got the lock.
+        a.engine.take_due(Instant::now());
+        a.engine.request(SyncReason::Retry);
+        assert_eq!(a.engine.take_due_run(Instant::now()), Some(true));
+        a.engine.pause_for_update();
+        let r = a
+            .engine
+            .run(a.host.as_ref(), PlanMode::Normal, true, None)
+            .await;
+        assert_eq!(r.outcome, RunOutcome::NotRun);
+        // Still asked for, and still a retry.
+        assert_eq!(a.engine.take_due_run(Instant::now()), Some(true));
+
+        // A request that joined meanwhile makes it a normal run.
+        a.engine.request(SyncReason::SyncNow);
+        let r = a
+            .engine
+            .run(a.host.as_ref(), PlanMode::Normal, true, None)
+            .await;
+        assert_eq!(r.outcome, RunOutcome::NotRun);
+        assert_eq!(a.engine.take_due_run(Instant::now()), Some(false));
+
+        // A mirror is not a request: nothing is left behind by it.
+        let r = a.mirror(PlanMode::MirrorLocal).await;
+        assert_eq!(r.outcome, RunOutcome::NotRun);
+        assert_eq!(a.engine.take_due_run(Instant::now()), None);
     }
 
     #[tokio::test(start_paused = true)]
