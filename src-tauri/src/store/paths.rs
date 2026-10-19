@@ -109,7 +109,7 @@ pub struct AppSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSettings {
-    /// Check for a new version at launch and once a day. On unless the user turned it off.
+    /// Check for a new version 5 s after launch. On unless the user turned it off.
     #[serde(default = "yes")]
     pub auto_check: bool,
 }
