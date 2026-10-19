@@ -68,7 +68,7 @@ export function UpdatesPane({ status, checking = false, upToDate = false, error,
       </Section>
       <Section label="更新の確認">
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <Switch id={switchId} checked={status.autoCheck} disabled={!supported} onChange={onToggleAutoCheck} />
+          <Switch id={switchId} checked={supported && status.autoCheck} disabled={!supported} onChange={onToggleAutoCheck} />
           <label htmlFor={switchId} style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>
             起動時に更新を確認する
           </label>

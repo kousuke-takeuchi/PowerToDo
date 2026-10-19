@@ -45,7 +45,8 @@ function percent(p: UpdateProgress): number | null {
  * (進み具合ごとに読み上げると、後ろの読み上げを溜めてしまう)。
  */
 export function installingText(progress: UpdateProgress | null | undefined, announce = false): string {
-  if (!progress) return "準備しています…";
+  // 最初の event が届くまでも、Rust は同期の完了を待っている
+  if (!progress) return "同期の完了を待っています…";
   if (progress.phase === "waitingSync") return "同期の完了を待っています…";
   if (progress.phase === "installing") return "入れ替えています…";
   const pct = percent(progress);

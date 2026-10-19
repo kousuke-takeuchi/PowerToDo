@@ -11,6 +11,18 @@ export const AUTO_CHECK_DELAY_MS = 5000;
 /** 見つかった新しい版。 */
 export type UpdateOffer = { version: string; notes?: string; date?: string };
 
+/** 自動で見つけた更新を、この間隔で出せるか見直す (入力中でなくなってから少し待つ)。 */
+const SHOW_RETRY_MS = 500;
+/** `update-progress` の購読が済むのを待つ上限 (購読に失敗しても更新は止めない)。 */
+const LISTEN_WAIT_MS = 2000;
+
+/** 文字を打てる欄にフォーカスがある。 */
+function typingNow(): boolean {
+  const a = document.activeElement;
+  if (a instanceof HTMLTextAreaElement || (a instanceof HTMLElement && a.isContentEditable)) return true;
+  return a instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"].includes(a.type);
+}
+
 export type UpdatesApi = {
   /** 現在の版と、この入れ方で更新できるか。読み込むまで null。 */
   status: UpdateStatusDto | null;
@@ -39,11 +51,15 @@ export type UpdatesApi = {
 
 /**
  * アプリの更新 (リリースの仕様 §4)。起動時に状態を読み、`supported` で自動確認がオンなら 5 秒後に一度だけ確認する。
+ * `hold`: true のあいだ (クイック追加 / 検索を開いている)、自動で見つけた更新は出さずに待つ。文字を打てる欄にフォーカスがあるあいだも待ち、
+ * 閉じたとき / フォーカスが外れたとき (`focusout`) に、少し置いて出す。手動の確認はすぐ出す。
  * 状態は state だけで持つ (「あとで」の版も保存しない)。アンマウントでタイマーと購読を解除する。
  */
-export function useUpdates(): UpdatesApi {
+export function useUpdates({ hold = false }: { hold?: boolean } = {}): UpdatesApi {
   const [status, setStatus] = useState<UpdateStatusDto | null>(null);
   const [offer, setOffer] = useState<UpdateOffer | null>(null);
+  /** 自動で見つけたが、入力のじゃまになるのでまだ出していない版。 */
+  const [pending, setPending] = useState<UpdateOffer | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [checking, setChecking] = useState(false);
@@ -63,6 +79,7 @@ export function useUpdates(): UpdatesApi {
   const applyOffer = (o: UpdateOffer | null) => {
     offerRef.current = o;
     setOffer(o);
+    setPending(null);
   };
 
   const check = useCallback(async (manual: boolean) => {
@@ -78,9 +95,9 @@ export function useUpdates(): UpdatesApi {
       const r = await api.updateCheck();
       if (!alive.current) return;
       if (r.available && r.version) {
-        if (manual || laterVersion.current !== r.version) {
-          applyOffer({ version: r.version, notes: r.notes, date: r.date });
-        }
+        const found = { version: r.version, notes: r.notes, date: r.date };
+        if (manual) applyOffer(found);
+        else if (laterVersion.current !== r.version && !offerRef.current) setPending(found);
       } else if (manual) {
         setUpToDate(true);
       }
@@ -95,11 +112,13 @@ export function useUpdates(): UpdatesApi {
   // 起動: 状態を読み、`supported` で自動確認がオンなら 5 秒後に一度だけ確認する (待つあいだにスイッチが切られたら、その時の値で決める)。
   useEffect(() => {
     alive.current = true;
+    // この effect だけの印: StrictMode の 1 回目の cleanup 後に、その回の待ちがタイマーを作らないように
+    let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     api
       .updateStatus()
       .then((s) => {
-        if (!alive.current) return;
+        if (cancelled) return;
         statusRef.current = s;
         setStatus(s);
         if (s.support === "supported" && s.autoCheck) {
@@ -110,15 +129,36 @@ export function useUpdates(): UpdatesApi {
         }
       })
       .catch((e) => {
-        if (alive.current) setError(errorMessage(e));
+        if (!cancelled) setError(errorMessage(e));
       });
     return () => {
+      cancelled = true;
       alive.current = false;
       if (timer !== undefined) clearTimeout(timer);
       stopProgress.current?.();
       stopProgress.current = null;
     };
   }, [check]);
+
+  // 待たせていた自動の更新: 閉じたら / 入力が済んだら、少し置いて出す。
+  useEffect(() => {
+    if (!pending) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tryShow = () => {
+      if (hold || typingNow() || offerRef.current) return;
+      applyOffer(pending);
+    };
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(tryShow, SHOW_RETRY_MS);
+    };
+    schedule();
+    document.addEventListener("focusout", schedule);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("focusout", schedule);
+    };
+  }, [pending, hold]);
 
   const install = useCallback(async () => {
     if (installingRef.current || !offerRef.current) return;
@@ -127,10 +167,19 @@ export function useUpdates(): UpdatesApi {
     setInstallError(null);
     setProgress(null);
     stopProgress.current?.();
+    // 購読が済んでから始める (先に始めると、最初の `waitingSync` を取りこぼす)。購読に失敗しても止まらないよう上限を置く。
+    let ready: () => void = () => undefined;
+    const subscribed = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
     stopProgress.current = onUpdateProgress((p) => {
       if (alive.current) setProgress(p);
-    });
+    }, ready);
     try {
+      let wait: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([subscribed, new Promise<void>((resolve) => (wait = setTimeout(resolve, LISTEN_WAIT_MS)))]);
+      clearTimeout(wait);
+      if (!alive.current) return;
       await api.updateInstall();
       // 成功: アプリが再起動する (Windows はインストーラーが終わらせる)。ボタンを戻さず「入れ替えています…」のままにする。
     } catch (e) {

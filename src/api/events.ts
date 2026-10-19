@@ -112,7 +112,10 @@ export function onSyncConflict(cb: (c: SyncConflict) => void): () => void {
   return subscribe<SyncConflict>("sync-conflict", cb);
 }
 
-/** `update-progress`: where `update_install` is (`waitingSync` -> `downloading` (with bytes) -> `installing`). */
-export function onUpdateProgress(cb: (p: UpdateProgress) => void): () => void {
-  return subscribe<UpdateProgress>("update-progress", cb);
+/**
+ * `update-progress`: where `update_install` is (`waitingSync` -> `downloading` (with bytes) -> `installing`).
+ * `onReady`: the subscription is in place; call `update_install` only after it, or `waitingSync` is lost.
+ */
+export function onUpdateProgress(cb: (p: UpdateProgress) => void, onReady?: () => void): () => void {
+  return subscribe<UpdateProgress>("update-progress", cb, onReady);
 }

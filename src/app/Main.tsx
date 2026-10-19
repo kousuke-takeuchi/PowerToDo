@@ -66,11 +66,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
-  // アプリの更新: 起動 5 秒後の確認、更新ダイアログ、設定の「アップデート」ペイン
-  const updates = useUpdates();
-  // 閉じるアニメーションのあいだも文言を保つため、最後に見つかった版を覚えておく
-  const shownOffer = useRef<UpdateOffer | null>(null);
-  if (updates.offer) shownOffer.current = updates.offer;
   const syncState = syncStatus?.state ?? "off";
   // 片方が空に見えて止まっているあいだ (帯で戻す方向を選ぶ) と、認証が断られたあいだ (ログインし直すか「確かめる」まで
   // 同期しない) は、「今すぐ同期」しても動かない
@@ -206,6 +201,12 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [pendingOpen, view, current, p.error]);
   const openCross = (t: Task) => openTaskAt(t.project, t.no);
   const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current, setFlash });
+  // アプリの更新: 起動 5 秒後の確認、更新ダイアログ、設定の「アップデート」ペイン
+  // クイック追加 / 検索が開いているあいだ、自動で見つかった更新は出さずに待つ (入力を奪わない)
+  const updates = useUpdates({ hold: qa.open || searchOpen });
+  // 閉じるアニメーションのあいだも文言を保つため、最後に見つかった版を覚えておく
+  const shownOffer = useRef<UpdateOffer | null>(null);
+  if (updates.offer) shownOffer.current = updates.offer;
 
   // リマインダーの帯と、通知 / トレイ由来のイベント (open-task / open-quick-add / window-shown)。
   const reminders = useReminders({
@@ -216,15 +217,16 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     openTask: (project, no) => openTaskAt(project, no, true),
   });
   // イベントの購読は 1 回だけにして、呼ぶ先は毎描画の最新を参照する
-  const wired = useRef({ openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
-  wired.current = { openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask };
+  const wired = useRef({ updateOpen: !!updates.offer, openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
+  wired.current = { updateOpen: !!updates.offer, openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask };
   useEffect(() => {
     const offs = [
       onOpenTask((project, no) => {
         wired.current.removeTask(project, no); // 通知から開いたタスクの帯は要らない
         wired.current.openTaskAt(project, no, true);
       }),
-      onOpenQuickAdd(() => wired.current.openQuickAdd()),
+      // 更新ダイアログが開いているあいだは開かない (トレイから押されても、後ろの画面は操作できない)
+      onOpenQuickAdd(() => !wired.current.updateOpen && wired.current.openQuickAdd()),
       // 通知のボタン (完了) が失敗した (保留中のプロジェクトなど)。Rust 側がウィンドウを出してから送る
       onNotificationError((text) => setFlash({ text, tone: "error" })),
       // 隠れている間に変わった分 (Excel での編集、発火したリマインダー) を取り直す
@@ -265,7 +267,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     setOpenNo,
     openNo,
     expandApi,
-    enabled: !qa.open && !searchOpen && !settingsOpen,
+    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer,
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
