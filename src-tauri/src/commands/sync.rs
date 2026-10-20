@@ -252,14 +252,16 @@ impl SyncRuntime {
     pub fn new() -> Self {
         #[cfg(desktop)]
         let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
-        // The iOS keychain; without it (an unsigned build) the secrets live in memory and the
-        // UI says so (`Secrets` reports `persistent() == false`).
+        // The iOS keychain. `Store::new` practically always succeeds; on an unsigned build the
+        // first `AppleStore::set` fails (-34018), and `Secrets` then keeps the secret in memory
+        // and reports `persistent() == false`, which the UI shows. If the store could not even
+        // be created, every call fails the same way (`UnavailableStore`).
         #[cfg(target_os = "ios")]
         let store: Arc<dyn SecretStore> = match crate::sync::secrets::AppleStore::new() {
             Ok(s) => Arc::new(s),
             Err(e) => {
                 eprintln!("iOS keychain unavailable: {e}");
-                Arc::new(MemoryStore::new())
+                Arc::new(crate::sync::secrets::UnavailableStore(e.0))
             }
         };
         #[cfg(all(mobile, not(target_os = "ios")))]
@@ -2688,6 +2690,15 @@ mod tests {
             kc.broken.store(false, Ordering::SeqCst);
             assert!(secrets.set(GOOGLE_SERVICE, EMAIL, "token2"));
             assert!(secrets.persistent_for(GOOGLE_SERVICE) && secrets.persistent());
+        }
+
+        #[test]
+        fn an_unavailable_store_keeps_secrets_in_memory_and_not_persistent() {
+            use crate::sync::secrets::UnavailableStore;
+            let secrets = Secrets::new(Arc::new(UnavailableStore("no keychain".into())));
+            assert!(!secrets.set(NAS_SERVICE, "u@nas", "pw"));
+            assert!(!secrets.persistent_for(NAS_SERVICE));
+            assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
         }
 
         #[tokio::test]
