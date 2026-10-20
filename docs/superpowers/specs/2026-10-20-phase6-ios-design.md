@@ -203,3 +203,4 @@
 | 2026-10-20 | iOS では URL を `app.opener()` で開く | 自由関数 `open_url` が iOS で `os error 2` (試作で確認) |
 | 2026-10-20 | iOS の CI はコンパイル確認だけ。署名・アップロードは手元 | 署名の秘密を CI に置かない。所有者 1 人の内部テスト |
 | 2026-10-20 | Google ログインは `ASWebAuthenticationSession` (Safari + ディープリンクではなく) | アプリ内で完結し、戻りの URL を確実に受け取れる。回線監視と同じ Swift プラグインに入れる |
+| 2026-10-20 | iOS の Tailscale の状態フォルダは `<アプリのデータ>/tailscale` (デスクトップと同じ `tailnet::state_dir`)。試作の `Library/Application Support/tailnet` とは別で、試作でログインした状態は引き継がない。作成時にバックアップから除外する | `has_tailnet_login` (起動時にログイン済みかの判定) を共有するため。復元した別の端末にノード鍵が複製されないようにする |

@@ -105,7 +105,7 @@ impl TailnetState {
     }
 
     /// Builds the state for a `status` message. `None` for a state this app does not know.
-    fn from_status(
+    pub(crate) fn from_status(
         state: &str,
         name: Option<String>,
         ip: Option<String>,
@@ -269,7 +269,7 @@ pub fn state_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("tailscale")
 }
 
-fn create_state_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn create_state_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};

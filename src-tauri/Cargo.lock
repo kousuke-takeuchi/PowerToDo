@@ -3295,6 +3295,8 @@ dependencies = [
  "chrono",
  "keyring",
  "notify",
+ "objc2",
+ "objc2-foundation",
  "percent-encoding",
  "quick-xml 0.42.0",
  "rand",

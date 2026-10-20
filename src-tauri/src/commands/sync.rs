@@ -40,9 +40,15 @@ use crate::sync::oauth::{GoogleOAuth, OAuthError, TokenSource, Tokens};
 use crate::sync::secrets::KeyringStore;
 use crate::sync::secrets::{GOOGLE_SERVICE, MemoryStore, NAS_SERVICE, SecretResult, SecretStore};
 use crate::sync::state::BackendKind;
-use crate::sync::tailnet::{
-    self, RESOLVE_TIMEOUT, Tailnet, TailnetError, TailnetState, TailnetStatusView,
-};
+#[cfg(desktop)]
+use crate::sync::tailnet::Tailnet;
+use crate::sync::tailnet::{self, RESOLVE_TIMEOUT, TailnetError, TailnetState, TailnetStatusView};
+#[cfg(all(mobile, tailnet_ffi))]
+use crate::sync::tailnet_inproc::FfiApi;
+#[cfg(all(mobile, not(tailnet_ffi)))]
+use crate::sync::tailnet_inproc::NoApi;
+#[cfg(mobile)]
+use crate::sync::tailnet_inproc::{IOS_HOSTNAME, InProcTailnet, TnApi};
 use crate::sync::webdav::{NasUrlError, WebDavBackend, resolve_nas_url};
 use crate::sync::{PlanMode, RunOutcome, SyncReason, SyncStatusView};
 
@@ -201,7 +207,7 @@ impl Secrets {
 /// What the NAS sync keeps next to the engine: the sidecar, the secrets, and the bookkeeping
 /// that decides when the engine gets a backend.
 pub struct SyncRuntime {
-    tailnet: Mutex<Option<Arc<Tailnet>>>,
+    tailnet: Mutex<Option<Arc<TailnetHandle>>>,
     /// Why the sidecar could not be started (binary missing, no permission); `None` otherwise.
     start_error: Mutex<Option<String>>,
     secrets: Arc<Secrets>,
@@ -307,7 +313,7 @@ impl SyncRuntime {
         seq.is_none_or(|s| self.seq.load(Ordering::SeqCst) == s)
     }
 
-    fn current_tailnet(&self) -> Option<Arc<Tailnet>> {
+    fn current_tailnet(&self) -> Option<Arc<TailnetHandle>> {
         lock(&self.tailnet).clone()
     }
 
@@ -571,7 +577,6 @@ fn should_start_sidecar(s: &SyncSettings, app_data_dir: &Path) -> bool {
 }
 
 /// A handle in this state will not come back by itself.
-#[cfg_attr(mobile, allow(dead_code))]
 fn needs_restart(state: &TailnetState) -> bool {
     matches!(state, TailnetState::Failed { .. })
 }
@@ -586,33 +591,59 @@ fn tailnet_view(state: Option<TailnetState>, start_error: Option<String>) -> Tai
 
 // ---- sidecar ----
 
-/// The running sidecar, started when there is none. Blocking.
-fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
-    let state = app.state::<AppState>();
-    // iPhone has no sidecar (no child processes); the in-app tailnet comes later.
-    #[cfg(mobile)]
-    {
-        let rt = &state.sync_rt;
-        let reason = "準備中".to_string();
-        *lock(&rt.start_error) = Some(reason.clone());
-        let _ = app.emit("tailnet-status", tailnet_view(None, Some(reason.clone())));
-        Err(AppError::Io { message: reason })
-    }
-    #[cfg(desktop)]
-    {
-        ensure_tailnet_sidecar(app, &state)
-    }
+/// The Tailscale node of this platform: the desktop sidecar process, or on mobile the node
+/// linked into the app. Both have the same methods.
+#[cfg(desktop)]
+type TailnetHandle = Tailnet;
+#[cfg(mobile)]
+type TailnetHandle = InProcTailnet;
+
+/// Starts this platform's node. `on_status` runs on a background thread (no call into the
+/// handle from it).
+#[cfg(desktop)]
+fn start_node(
+    app_data_dir: &Path,
+    on_status: impl Fn(TailnetStatusView) + Send + 'static,
+) -> Result<TailnetHandle, TailnetError> {
+    Tailnet::start(
+        tailnet::sidecar_path(),
+        tailnet::state_dir(app_data_dir),
+        tailnet::default_hostname(),
+        on_status,
+    )
 }
 
-/// Desktop: starts the sidecar. Blocking.
+/// Mobile: the c-archive when this build has it (`cfg(tailnet_ffi)`, set by `build.rs`), else a
+/// stand-in whose start fails with a clear reason.
+#[cfg(mobile)]
+fn start_node(
+    app_data_dir: &Path,
+    on_status: impl Fn(TailnetStatusView) + Send + 'static,
+) -> Result<TailnetHandle, TailnetError> {
+    #[cfg(tailnet_ffi)]
+    let api: Arc<dyn TnApi> = Arc::new(FfiApi);
+    #[cfg(not(tailnet_ffi))]
+    let api: Arc<dyn TnApi> = Arc::new(NoApi);
+    InProcTailnet::start(
+        api,
+        tailnet::state_dir(app_data_dir),
+        IOS_HOSTNAME,
+        on_status,
+    )
+}
+
 #[cfg(desktop)]
-fn ensure_tailnet_sidecar(
-    app: &AppHandle,
-    state: &tauri::State<'_, AppState>,
-) -> AppResult<Arc<Tailnet>> {
+const START_ERROR: &str =
+    "Tailscale を起動できません (powertodo-tailnet が見つからないか、実行できません)";
+#[cfg(mobile)]
+const START_ERROR: &str = "Tailscale を起動できません";
+
+/// The running node, started when there is none. Blocking.
+fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<TailnetHandle>> {
+    let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     let mut slot = lock(&rt.tailnet);
-    // A sidecar that gave up (`failed`) is replaced, so asking again is a retry (spec 4.1).
+    // A node that gave up (`failed`) is replaced, so asking again is a retry (spec 4.1).
     if let Some(t) = slot.as_ref() {
         if !needs_restart(&t.state()) {
             return Ok(Arc::clone(t));
@@ -622,12 +653,9 @@ fn ensure_tailnet_sidecar(
         }
     }
     let cb_app = app.clone();
-    let started = Tailnet::start(
-        tailnet::sidecar_path(),
-        tailnet::state_dir(state.app_data_dir()),
-        tailnet::default_hostname(),
-        move |view| on_tailnet_status(&cb_app, view),
-    );
+    let started = start_node(state.app_data_dir(), move |view| {
+        on_tailnet_status(&cb_app, view)
+    });
     match started {
         Ok(t) => {
             *lock(&rt.start_error) = None;
@@ -636,10 +664,8 @@ fn ensure_tailnet_sidecar(
             Ok(t)
         }
         Err(e) => {
-            eprintln!("could not start the Tailscale sidecar: {e}");
-            let reason =
-                "Tailscale を起動できません (powertodo-tailnet が見つからないか、実行できません)"
-                    .to_string();
+            eprintln!("could not start Tailscale: {e}");
+            let reason = START_ERROR.to_string();
             *lock(&rt.start_error) = Some(reason.clone());
             drop(slot);
             let _ = app.emit("tailnet-status", tailnet_view(None, Some(reason.clone())));
@@ -668,7 +694,7 @@ fn stop_sidecar(app: &AppHandle) {
 
 /// 「再試行」: ends a stuck or failed sidecar and starts a new one. The state folder (the
 /// Tailscale login) is kept; `tailnet_reset` is the one that deletes it. Blocking.
-fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
+fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<TailnetHandle>> {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     rt.note_tailnet_state(false);
@@ -714,7 +740,6 @@ fn start_if_logged_in(app: &AppHandle) {
 }
 
 /// Called on the sidecar's reader thread: no call into `Tailnet` from here (its documentation).
-#[cfg_attr(mobile, allow(dead_code))]
 fn on_tailnet_status(app: &AppHandle, view: TailnetStatusView) {
     let _ = app.emit("tailnet-status", &view);
     let state = app.state::<AppState>();
@@ -742,7 +767,7 @@ fn report_unreachable(app: &AppHandle, message: &str) {
 /// The WebDAV backend for typed or saved details. Asks the sidecar where the NAS is (a host
 /// outside the tailnet is refused) and goes through its proxy. Blocking.
 fn build_webdav(
-    tailnet: &Tailnet,
+    tailnet: &TailnetHandle,
     url: &str,
     user: &str,
     password: &str,
@@ -1421,7 +1446,7 @@ fn check_preconditions(
     url: &str,
     user: &str,
     password: &str,
-) -> AppResult<(NasTarget, String, Arc<Tailnet>)> {
+) -> AppResult<(NasTarget, String, Arc<TailnetHandle>)> {
     let (target, user) = validate_nas_input(url, user, password)?;
     require_nas(state)?;
     let tailnet = state

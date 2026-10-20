@@ -65,3 +65,8 @@ tauri = { version = "2", features = ["test"] }
 tauri-plugin-single-instance = "2.5.4"
 tauri-plugin-updater = "2.14"
 keyring = { version = "4.2", features = ["v1"] }
+
+# iOS: the node's state folder is excluded from backup (`sync::tailnet_inproc::exclude_from_backup`).
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
