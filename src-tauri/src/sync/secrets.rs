@@ -27,13 +27,15 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, service: &str, account: &str) -> SecretResult<()>;
 }
 
-/// The OS keychain, through `keyring::v1::Entry`.
+/// The OS keychain, through `keyring::v1::Entry`. Desktop only (see Cargo.toml).
 ///
 /// The calls are synchronous and may block (the Linux Secret Service, an unlock prompt):
 /// callers on an async runtime must run them in `spawn_blocking`.
+#[cfg(desktop)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringStore;
 
+#[cfg(desktop)]
 fn keychain_error(e: &keyring::v1::Error) -> SecretError {
     use keyring::v1::Error;
     SecretError(match e {
@@ -48,10 +50,12 @@ fn keychain_error(e: &keyring::v1::Error) -> SecretError {
     })
 }
 
+#[cfg(desktop)]
 fn entry(service: &str, account: &str) -> SecretResult<keyring::v1::Entry> {
     keyring::v1::Entry::new(service, account).map_err(|e| keychain_error(&e))
 }
 
+#[cfg(desktop)]
 impl SecretStore for KeyringStore {
     fn get(&self, service: &str, account: &str) -> SecretResult<Option<String>> {
         match entry(service, account)?.get_password() {
@@ -151,6 +155,7 @@ mod tests {
         );
     }
 
+    #[cfg(desktop)]
     #[test]
     fn keychain_errors_have_a_message_for_the_user() {
         use keyring::v1::Error;
@@ -163,6 +168,7 @@ mod tests {
 
     /// Needs a real keychain (and may ask the user to unlock it): run by hand with
     /// `cargo test -- --ignored keyring_store`.
+    #[cfg(desktop)]
     #[test]
     #[ignore = "uses the OS keychain"]
     fn keyring_store_round_trips() {

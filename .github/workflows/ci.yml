@@ -60,3 +60,10 @@ jobs:
           workspaces: src-tauri
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: cargo build --manifest-path src-tauri/Cargo.toml
+      # The iOS target must keep compiling (desktop-only code sits behind cfg(desktop)).
+      - name: Add the iOS target
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-ios
+      - name: Check the iOS target
+        if: runner.os == 'macOS'
+        run: cargo check --manifest-path src-tauri/Cargo.toml --target aarch64-apple-ios --lib

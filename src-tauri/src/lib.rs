@@ -5,6 +5,8 @@ pub mod platform;
 pub mod scheduler;
 pub mod store;
 pub mod sync;
+// `tauri::tray` exists only with cfg(desktop).
+#[cfg(desktop)]
 pub mod tray;
 pub mod window;
 
@@ -100,6 +102,7 @@ pub fn run() {
             scheduler::register(app.handle());
             scheduler::start(app.handle().clone());
             commands::start_sync(app.handle());
+            #[cfg(desktop)]
             tray::setup(app.handle());
             Ok(())
         })
@@ -107,6 +110,7 @@ pub fn run() {
             commands::app_state,
             commands::set_data_dir,
             commands::watch_status,
+            commands::platform_info,
             commands::pick_folder,
             commands::reveal_data_dir,
             commands::retry_save,
@@ -191,6 +195,7 @@ pub fn run() {
         // Closing the main window hides it (kept in the tray / Dock) unless the user turned that
         // off; then it ends the app, after asking about held projects while the page can still
         // ask. See `tray::close_policy`.
+        #[cfg(desktop)]
         tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { api, .. },

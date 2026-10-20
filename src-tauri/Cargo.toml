@@ -42,7 +42,6 @@ base64 = "0.22"
 # build that needs extra tooling on Windows. `socks` is for the tailnet proxy.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "socks"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-keyring = { version = "4.2", features = ["v1"] }
 quick-xml = "0.42"
 percent-encoding = "2.3"
 url = "2.5"
@@ -65,3 +64,4 @@ tauri = { version = "2", features = ["test"] }
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
 tauri-plugin-updater = "2.14"
+keyring = { version = "4.2", features = ["v1"] }

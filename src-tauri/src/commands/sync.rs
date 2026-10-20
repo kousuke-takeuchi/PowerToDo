@@ -28,7 +28,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Notify;
 
 use super::{AppState, TauriSyncHost};
@@ -37,9 +36,9 @@ use crate::store::paths::{AppSettings, SyncBackend, SyncSettings};
 use crate::sync::backend::{BackendError, StorageBackend};
 use crate::sync::gdrive::GoogleDriveBackend;
 use crate::sync::oauth::{GoogleOAuth, OAuthError, TokenSource, Tokens};
-use crate::sync::secrets::{
-    GOOGLE_SERVICE, KeyringStore, MemoryStore, NAS_SERVICE, SecretResult, SecretStore,
-};
+#[cfg(desktop)]
+use crate::sync::secrets::KeyringStore;
+use crate::sync::secrets::{GOOGLE_SERVICE, MemoryStore, NAS_SERVICE, SecretResult, SecretStore};
 use crate::sync::state::BackendKind;
 use crate::sync::tailnet::{
     self, RESOLVE_TIMEOUT, Tailnet, TailnetError, TailnetState, TailnetStatusView,
@@ -245,7 +244,12 @@ impl Drop for LoginSlot<'_> {
 
 impl SyncRuntime {
     pub fn new() -> Self {
-        Self::with_secrets(Secrets::new(Arc::new(KeyringStore)))
+        #[cfg(desktop)]
+        let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+        // No keychain on iOS yet (Task 4 replaces this).
+        #[cfg(mobile)]
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        Self::with_secrets(Secrets::new(store))
     }
 
     fn with_secrets(secrets: Secrets) -> Self {
@@ -567,6 +571,7 @@ fn should_start_sidecar(s: &SyncSettings, app_data_dir: &Path) -> bool {
 }
 
 /// A handle in this state will not come back by itself.
+#[cfg_attr(mobile, allow(dead_code))]
 fn needs_restart(state: &TailnetState) -> bool {
     matches!(state, TailnetState::Failed { .. })
 }
@@ -584,6 +589,27 @@ fn tailnet_view(state: Option<TailnetState>, start_error: Option<String>) -> Tai
 /// The running sidecar, started when there is none. Blocking.
 fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
     let state = app.state::<AppState>();
+    // iPhone has no sidecar (no child processes); the in-app tailnet comes later.
+    #[cfg(mobile)]
+    {
+        let rt = &state.sync_rt;
+        let reason = "準備中".to_string();
+        *lock(&rt.start_error) = Some(reason.clone());
+        let _ = app.emit("tailnet-status", tailnet_view(None, Some(reason.clone())));
+        Err(AppError::Io { message: reason })
+    }
+    #[cfg(desktop)]
+    {
+        ensure_tailnet_sidecar(app, &state)
+    }
+}
+
+/// Desktop: starts the sidecar. Blocking.
+#[cfg(desktop)]
+fn ensure_tailnet_sidecar(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+) -> AppResult<Arc<Tailnet>> {
     let rt = &state.sync_rt;
     let mut slot = lock(&rt.tailnet);
     // A sidecar that gave up (`failed`) is replaced, so asking again is a retry (spec 4.1).
@@ -666,12 +692,14 @@ pub fn shutdown(app: &AppHandle) {
 
 /// Before an app update is installed: ends the sidecar (on Windows the installer replaces files
 /// the sidecar's process holds open). Blocking.
+#[cfg(desktop)]
 pub fn stop_for_update(app: &AppHandle) {
     stop_sidecar(app);
 }
 
 /// The update failed and the app goes on: starts the sidecar again under the same conditions as
 /// at launch (the engine gets its backend when the sidecar reports `running`). Blocking.
+#[cfg(desktop)]
 pub fn restart_after_failed_update(app: &AppHandle) {
     start_if_logged_in(app);
 }
@@ -686,6 +714,7 @@ fn start_if_logged_in(app: &AppHandle) {
 }
 
 /// Called on the sidecar's reader thread: no call into `Tailnet` from here (its documentation).
+#[cfg_attr(mobile, allow(dead_code))]
 fn on_tailnet_status(app: &AppHandle, view: TailnetStatusView) {
     let _ = app.emit("tailnet-status", &view);
     let state = app.state::<AppState>();
@@ -1587,9 +1616,7 @@ pub async fn google_login(app: AppHandle) -> AppResult<GoogleLoginDto> {
     let failure = Arc::new(Mutex::new(None));
     let opener_app = app.clone();
     let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |url| {
-        opener_app
-            .opener()
-            .open_url(url, None::<&str>)
+        crate::platform::open_url(&opener_app, url)
             .map_err(|_| "ブラウザを開けませんでした".to_string())
     });
     let end = google_login_flow(

@@ -1134,9 +1134,15 @@ pub async fn pick_folder(app: AppHandle) -> AppResult<Option<String>> {
 }
 
 #[tauri::command]
-pub async fn reveal_data_dir(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn reveal_data_dir(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     let dir = with_store(state.inner(), |s| Ok(s.paths().data_dir.clone()))?;
-    platform::reveal_path(&dir)
+    platform::reveal_path(&app, &dir)
+}
+
+/// The OS the app runs on (the page hides what iPhone cannot do).
+#[tauri::command]
+pub fn platform_info() -> platform::PlatformInfo {
+    platform::PlatformInfo::current()
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
