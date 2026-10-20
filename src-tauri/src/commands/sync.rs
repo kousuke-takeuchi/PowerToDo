@@ -47,6 +47,7 @@ use crate::sync::tailnet::{self, RESOLVE_TIMEOUT, TailnetError, TailnetState, Ta
 use crate::sync::tailnet_inproc::FfiApi;
 #[cfg(all(mobile, not(tailnet_ffi)))]
 use crate::sync::tailnet_inproc::NoApi;
+use crate::sync::tailnet_inproc::ProxyCheck;
 #[cfg(mobile)]
 use crate::sync::tailnet_inproc::{IOS_HOSTNAME, InProcTailnet, TnApi};
 use crate::sync::webdav::{NasUrlError, WebDavBackend, resolve_nas_url};
@@ -853,6 +854,46 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
         }
         Err(e) if rt.is_current(seq) => report_unreachable(app, &e.to_string()),
         Err(_) => {}
+    }
+}
+
+/// Whether the run may go ahead after the proxy check (spec 3.2). Only a listener reopened on a
+/// new address needs a new backend first: the old one still points at the dead address, and
+/// `set_backend` asks for a run once the new one is attached. `Unavailable` runs on: the run
+/// fails as offline and the screen says so.
+#[cfg_attr(desktop, allow(dead_code))]
+fn proxy_decision(check: ProxyCheck, old: Option<&str>, new: Option<&str>) -> bool {
+    !(check == ProxyCheck::Reopened && old != new)
+}
+
+/// Before every normal sync run: when the target is the NAS through the in-process tailnet,
+/// check the proxy (iOS takes the sockets of a suspended app). `false` means this run waits for a
+/// rebuilt backend (started here). The only blocking call is the 500 ms connect to 127.0.0.1.
+/// The desktop sidecar is a separate process and needs no check.
+pub fn prepare_run(app: &AppHandle) -> bool {
+    #[cfg(mobile)]
+    {
+        let state = app.state::<AppState>();
+        if state.lock_settings().sync.backend != SyncBackend::Nas {
+            return true;
+        }
+        let Some(tailnet) = state.sync_rt.current_tailnet() else {
+            return true;
+        };
+        let old = tailnet.proxy_url();
+        let check = tailnet.ensure_proxy();
+        let new = tailnet.proxy_url();
+        let go = proxy_decision(check, old.as_deref(), new.as_deref());
+        if !go {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move { connect_nas(&handle, None).await });
+        }
+        go
+    }
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        true
     }
 }
 
@@ -1709,6 +1750,23 @@ mod tests {
             Err(e) => panic!("expected an invalid error, got {e:?}"),
             Ok(_) => panic!("expected an error"),
         }
+    }
+
+    // ---- before each run ----
+
+    #[test]
+    fn prepare_run_reopens_the_proxy_before_the_run() {
+        let a = Some("socks5h://u:p@127.0.0.1:1111");
+        let b = Some("socks5h://u:p@127.0.0.1:2222");
+        // A reopened listener with a new URL: the backend is rebuilt and this run waits for it.
+        assert!(!proxy_decision(ProxyCheck::Reopened, a, b));
+        assert!(!proxy_decision(ProxyCheck::Reopened, None, b));
+        // Same URL: the backend's proxy still works.
+        assert!(proxy_decision(ProxyCheck::Reopened, a, a));
+        assert!(proxy_decision(ProxyCheck::Alive, a, a));
+        assert!(proxy_decision(ProxyCheck::Alive, a, b));
+        // No proxy: the run goes and fails offline, which the screen shows.
+        assert!(proxy_decision(ProxyCheck::Unavailable, a, None));
     }
 
     // ---- NAS input ----

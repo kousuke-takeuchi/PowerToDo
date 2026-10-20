@@ -134,6 +134,12 @@ pub trait SyncHost: Send + Sync {
     /// The sync moved `project`'s file to `archive/` (deleted on the other side): forget its
     /// reminders, as `delete_project` does. Called without the store lock.
     fn project_archived(&self, project: &str);
+    /// Right before a normal run: bring the app up to date with the disk and the network (iOS:
+    /// external edits, the proxy). `false` skips the run; the request that made it due is spent
+    /// (whatever changed asks again). Blocking; the loop calls it off the async threads.
+    fn before_run(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -596,8 +602,15 @@ impl SyncEngine {
             // While paused the requests stay (`resume` wakes the loop for them).
             let paused = self.lock().paused;
             if !paused && let Some(is_retry) = self.take_due_run(now) {
-                self.run(host.as_ref(), PlanMode::Normal, is_retry, None)
-                    .await;
+                let checked = Arc::clone(&host);
+                // A failed join (the hook panicked) lets the run go ahead.
+                let go = tokio::task::spawn_blocking(move || checked.before_run())
+                    .await
+                    .unwrap_or(true);
+                if go {
+                    self.run(host.as_ref(), PlanMode::Normal, is_retry, None)
+                        .await;
+                }
                 continue;
             }
             let until = if paused {
@@ -1622,6 +1635,8 @@ mod tests {
         store: Mutex<Option<ProjectStore>>,
         saving: Mutex<BTreeSet<String>>,
         events: Mutex<Vec<Event>>,
+        /// `before_run` answers `false` while set.
+        skip_runs: std::sync::atomic::AtomicBool,
     }
 
     impl Host {
@@ -1648,6 +1663,9 @@ mod tests {
         }
         fn project_list_changed(&self, common_reloaded: bool) {
             self.push(Event::ListChanged(common_reloaded));
+        }
+        fn before_run(&self) -> bool {
+            !self.skip_runs.load(std::sync::atomic::Ordering::SeqCst)
         }
         fn project_archived(&self, project: &str) {
             let free = self.store.try_lock().is_ok();
@@ -2107,6 +2125,33 @@ mod tests {
         fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
             self.inner.move_to_archive(file)
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn before_run_false_skips_the_run() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        a.create("x");
+        a.host
+            .skip_runs
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let host: Arc<dyn SyncHost> = a.host.clone();
+        let task = tokio::spawn(a.engine.clone().run_loop(host));
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        // No run: no status change was published and nothing reached the target.
+        assert!(
+            !a.host
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, Event::Status(_))),
+            "a run started"
+        );
+        assert!(remote.get("x.xlsx").is_none(), "something was uploaded");
+        // The request was consumed: nothing is due until the interval.
+        assert_eq!(a.engine.next_due(), None);
+        task.abort();
     }
 
     #[tokio::test(start_paused = true)]

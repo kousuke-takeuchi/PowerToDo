@@ -31,7 +31,9 @@ use crate::store::external::{FileKind, Verdict, classify_path, fingerprint, verd
 use crate::store::fired::{Fired, ReminderItem, ReminderKey};
 use crate::store::paths::{AppSettings, Paths};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
-use crate::store::watcher::{self, Watcher};
+#[cfg(desktop)]
+use crate::store::watcher;
+use crate::store::watcher::Watcher;
 use crate::sync::{SyncEngine, SyncHost, SyncReason, SyncStatusView};
 
 use saver::{COMMON_KEY, SaveSink, SaveStatus, Saver};
@@ -674,6 +676,20 @@ impl SyncHost for TauriSyncHost {
             .state::<AppState>()
             .update_fired(|f| f.forget_project(project));
     }
+
+    /// iOS: take in edits made in Excel, then check the tailnet proxy. A run that has to wait for
+    /// a rebuilt backend is asked again by `set_backend`. Desktop watches the folder instead.
+    fn before_run(&self) -> bool {
+        #[cfg(target_os = "ios")]
+        {
+            scan_external(&self.app);
+            sync::prepare_run(&self.app)
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            true
+        }
+    }
 }
 
 /// Starts the sync engine's task (one per app; see `SyncEngine::run_loop`). It stays idle until
@@ -768,6 +784,13 @@ fn mutate_structure<T>(
 
 /// Reads `settings.json` and opens the data folder it names, if the store is not open yet.
 pub fn startup(state: &AppState) -> AppResult<AppStateDto> {
+    startup_in(state, None)
+}
+
+/// [`startup`] with a data folder the platform fixes (iOS: `Documents`; there is no folder
+/// picker). A missing or different `dataDir` in `settings.json` (the spike's folder) is replaced
+/// by it. `None` on desktop.
+pub fn startup_in(state: &AppState, fixed_dir: Option<&Path>) -> AppResult<AppStateDto> {
     let mut store = state.lock_store();
     if store.is_some() {
         return Ok(state_dto(store.as_ref(), None));
@@ -782,6 +805,12 @@ pub fn startup(state: &AppState) -> AppResult<AppStateDto> {
     };
     let data_dir = loaded.data_dir.clone();
     *state.lock_settings() = loaded;
+    if let Some(fixed) = fixed_dir
+        && data_dir.as_deref() != Some(fixed)
+    {
+        drop(store);
+        return switch_data_dir(state, &fixed.to_string_lossy());
+    }
     let Some(dir) = data_dir else {
         return Ok(state_dto(None, None));
     };
@@ -1009,8 +1038,51 @@ fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
     });
 }
 
+/// Everything a scan has to look at (仕様 §3.7): the common workbook, every `*.xlsx` directly in
+/// the data folder, and the projects the store knows (to find the ones that vanished). No
+/// duplicates; `archive/` is not entered. `apply_fs_batch` decides what each path means.
+pub fn scan_paths(store: &ProjectStore) -> Vec<PathBuf> {
+    let paths = store.paths();
+    let mut found = BTreeSet::new();
+    found.insert(paths.common());
+    if let Ok(entries) = std::fs::read_dir(&paths.data_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let name = entry.file_name();
+            let is_xlsx = path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("xlsx"));
+            if is_xlsx && !name.to_string_lossy().starts_with("~$") && path.is_file() {
+                found.insert(path);
+            }
+        }
+    }
+    for p in store.summaries() {
+        if let Ok(path) = paths.project(&p.name) {
+            found.insert(path);
+        }
+    }
+    found.into_iter().collect()
+}
+
+/// Looks for edits made outside the app (Excel on the phone) and treats them like a watcher
+/// batch. Called on resume and before each sync run, instead of a file watcher (iOS).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub fn scan_external(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let paths = {
+        let guard = state.lock_store();
+        match guard.as_ref() {
+            Some(store) => scan_paths(store),
+            None => return,
+        }
+    };
+    handle_fs_batch(app, paths);
+}
+
 /// Starts (or restarts) watching the open data folder, replacing the previous watcher. Without
 /// an open store, or when watching cannot start, no watcher is left running.
+#[cfg(desktop)]
 fn start_watching(app: &AppHandle, state: &AppState) {
     let dir = state
         .lock_store()
@@ -1083,18 +1155,25 @@ pub fn quick_add_in(
 
 #[tauri::command]
 pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStateDto> {
+    #[cfg(target_os = "ios")]
+    let dto = startup_in(state.inner(), Some(&platform::ios_data_dir(&app)?))?;
+    #[cfg(not(target_os = "ios"))]
     let dto = startup(state.inner())?;
     state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
     // The store is open now (the sync plans only against an opened store).
     state.sync.request(SyncReason::Startup);
-    let watching = state
-        .watcher
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some();
-    if !watching {
-        start_watching(&app, state.inner());
+    // iOS has no file watcher: external edits are looked for on resume and before each sync run.
+    #[cfg(desktop)]
+    {
+        let watching = state
+            .watcher
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        if !watching {
+            start_watching(&app, state.inner());
+        }
     }
     Ok(AppStateDto {
         watch_error: state.watch_error(),
@@ -1114,6 +1193,7 @@ pub async fn set_data_dir(
     schedule_dirty(&app, state.inner());
     // `sync.json` belongs to the old folder; the new one starts from fresh records.
     state.sync.request(SyncReason::Settings);
+    #[cfg(desktop)]
     start_watching(&app, state.inner());
     Ok(AppStateDto {
         watch_error: state.watch_error(),
@@ -2419,6 +2499,84 @@ mod tests {
                 tmp.path().join("archive").join("x.xlsx"),
             ],
         );
+        assert!(out.is_empty(), "{out:?}");
+        assert!(cancelled.is_empty());
+    }
+
+    fn scan(store: &mut ProjectStore, busy: bool) -> (BatchOutcome, Vec<String>) {
+        let paths = scan_paths(store);
+        run_batch(store, busy, &paths)
+    }
+
+    #[test]
+    fn scan_paths_lists_files_on_disk_and_known_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("残る", "#e44").unwrap();
+        store.create_project("消える", "#e44").unwrap();
+        std::fs::remove_file(tmp.path().join("消える.xlsx")).unwrap();
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |_| {});
+        std::fs::copy(tmp.path().join("残る.xlsx"), tmp.path().join("新しい.xlsx")).unwrap();
+        std::fs::copy(tmp.path().join("残る.xlsx"), tmp.path().join("~$残る.xlsx")).unwrap();
+        std::fs::create_dir(tmp.path().join("archive")).unwrap();
+        std::fs::copy(
+            tmp.path().join("残る.xlsx"),
+            tmp.path().join("archive").join("古い.xlsx"),
+        )
+        .unwrap();
+        let got: BTreeSet<PathBuf> = scan_paths(&store).into_iter().collect();
+        let list = scan_paths(&store);
+        assert_eq!(list.len(), got.len(), "no duplicates: {list:?}");
+        for name in ["_PowerToDo", "受信トレイ", "残る", "消える", "新しい"] {
+            assert!(
+                got.contains(&tmp.path().join(format!("{name}.xlsx"))),
+                "{name}"
+            );
+        }
+        assert!(
+            !got.iter()
+                .any(|p| p.starts_with(tmp.path().join("archive")))
+        );
+        // Applied as a batch the scan finds the gone and the new project.
+        let (out, _) = run_batch(&mut store, false, &list);
+        assert!(out.projects_changed);
+        assert!(out.failures.is_empty());
+    }
+
+    #[test]
+    fn ios_scan_reloads_an_external_edit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let (out, _) = scan(&mut store, false);
+        assert_eq!(out.reloaded, vec![INBOX.to_string()]);
+        assert_eq!(titles(&store, INBOX), vec!["Excel で追加".to_string()]);
+    }
+
+    #[test]
+    fn ios_scan_holds_a_dirty_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "未保存", INBOX, d("2026-10-14")).unwrap();
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let (out, cancelled) = scan(&mut store, false);
+        assert_eq!(out.held, vec![INBOX.to_string()]);
+        assert_eq!(cancelled, vec![INBOX.to_string()]);
+        assert_eq!(titles(&store, INBOX), vec!["未保存".to_string()]);
+    }
+
+    #[test]
+    fn ios_scan_ignores_own_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "自分", INBOX, d("2026-10-14")).unwrap();
+        store.save(INBOX).unwrap();
+        store.save_common().unwrap();
+        let (out, cancelled) = scan(&mut store, false);
         assert!(out.is_empty(), "{out:?}");
         assert!(cancelled.is_empty());
     }

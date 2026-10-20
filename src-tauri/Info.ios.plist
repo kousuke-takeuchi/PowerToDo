@@ -5,5 +5,10 @@
 	<!-- Tailscale talks to the NAS directly on the home network (TN3179). -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>家の NAS と直接つないで同期を速くするために使います。</string>
+	<!-- The data folder is Documents: shown in the Files app and editable in place (spec 3.6). -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

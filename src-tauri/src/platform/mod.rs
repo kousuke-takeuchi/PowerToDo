@@ -17,6 +17,15 @@ pub fn app_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
     })
 }
 
+/// iOS: the fixed data folder, the app's `Documents` (shown in the Files app because the plist
+/// sets `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`).
+#[cfg(target_os = "ios")]
+pub fn ios_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    app.path().document_dir().map_err(|e| AppError::Io {
+        message: e.to_string(),
+    })
+}
+
 /// Native folder picker. `None` when the user cancels. Blocks, so call it off the main thread
 /// (async commands already are).
 pub fn pick_folder(app: &AppHandle) -> AppResult<Option<String>> {
