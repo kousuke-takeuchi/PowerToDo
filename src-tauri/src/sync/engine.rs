@@ -38,6 +38,23 @@ pub const INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// How long after a save its sync runs. More saves in that time join the same run.
 pub const AFTER_SAVE_DELAY: Duration = Duration::from_secs(5);
 
+/// Spec 3.3: within this time after a network change or a resume, an offline run is retried.
+pub const NETWORK_WINDOW: Duration = Duration::from_secs(30);
+pub const NETWORK_RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(15)];
+
+/// The delay of the next retry, or `None` when the window is over or both retries were used.
+pub fn network_retry_delay(
+    since: Option<Instant>,
+    now: Instant,
+    attempts: u32,
+) -> Option<Duration> {
+    let since = since?;
+    if now.saturating_duration_since(since) > NETWORK_WINDOW {
+        return None;
+    }
+    NETWORK_RETRY_DELAYS.get(attempts as usize).copied()
+}
+
 /// Why a sync is asked for (spec section 3.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncReason {
@@ -52,6 +69,8 @@ pub enum SyncReason {
     Settings,
     /// An upload met a concurrent change on the remote; plan again at once.
     Retry,
+    /// The network changed or the app came to the front (and its offline retries).
+    Network,
 }
 
 impl SyncReason {
@@ -281,6 +300,10 @@ struct Inner {
     due: Option<Instant>,
     /// The wanted run was asked for by [`SyncReason::Retry`] alone (no other reason joined it).
     due_retry: bool,
+    /// When the network last changed (or the app resumed): opens the offline retry window.
+    network_since: Option<Instant>,
+    /// Offline retries used in the current window.
+    network_attempts: u32,
     status: SyncStatusView,
     /// Set while an app update is being prepared: no new run starts (requests are kept).
     paused: bool,
@@ -373,6 +396,8 @@ impl SyncEngine {
                     auth_rejected: false,
                     due: None,
                     due_retry: false,
+                    network_since: None,
+                    network_attempts: 0,
                     status: SyncStatusView::off(),
                     paused: false,
                     host: None,
@@ -551,12 +576,28 @@ impl SyncEngine {
     /// (`false`) without a target or while the target rejects the credentials: retrying would
     /// only fail again, and a NAS may lock the account after repeated failures.
     pub fn request(&self, reason: SyncReason) -> bool {
+        self.request_after(reason, reason.delay())
+    }
+
+    /// The network changed or the app came to the front: opens the retry window and asks for a
+    /// run.
+    pub fn network_changed(&self) {
+        {
+            let mut inner = self.lock();
+            inner.network_since = Some(Instant::now());
+            inner.network_attempts = 0;
+        }
+        self.request(SyncReason::Network);
+    }
+
+    /// [`SyncEngine::request`] with the delay chosen by the caller.
+    fn request_after(&self, reason: SyncReason, delay: Duration) -> bool {
         {
             let mut inner = self.lock();
             if inner.target.is_none() || inner.auth_rejected {
                 return false;
             }
-            let at = Instant::now() + reason.delay();
+            let at = Instant::now() + delay;
             inner.due_retry =
                 reason == SyncReason::Retry && (inner.due.is_none() || inner.due_retry);
             inner.due = Some(inner.due.map_or(at, |d| d.min(at)));
@@ -746,6 +787,43 @@ impl SyncEngine {
     /// another retry, so a remote that keeps failing the precondition is retried once and then
     /// left to the normal schedule.
     async fn run(
+        &self,
+        host: &dyn SyncHost,
+        mode: PlanMode,
+        is_retry: bool,
+        confirmed: Option<u64>,
+    ) -> SyncReport {
+        let report = self.run_inner(host, mode, is_retry, confirmed).await;
+        match report.outcome {
+            // Spec 3.3: offline soon after a network change is retried twice.
+            RunOutcome::Offline if mode == PlanMode::Normal => {
+                let delay = {
+                    let mut inner = self.lock();
+                    let d = network_retry_delay(
+                        inner.network_since,
+                        Instant::now(),
+                        inner.network_attempts,
+                    );
+                    if d.is_some() {
+                        inner.network_attempts += 1;
+                    }
+                    d
+                };
+                if let Some(d) = delay {
+                    self.request_after(SyncReason::Network, d);
+                }
+            }
+            RunOutcome::Done => {
+                let mut inner = self.lock();
+                inner.network_since = None;
+                inner.network_attempts = 0;
+            }
+            _ => {}
+        }
+        report
+    }
+
+    async fn run_inner(
         &self,
         host: &dyn SyncHost,
         mode: PlanMode,
@@ -2125,6 +2203,135 @@ mod tests {
         fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
             self.inner.move_to_archive(file)
         }
+    }
+
+    #[test]
+    fn network_retry_delay_follows_5_then_15_seconds_inside_the_window() {
+        let t0 = Instant::now();
+        assert_eq!(
+            network_retry_delay(Some(t0), t0 + Duration::from_secs(3), 0),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            network_retry_delay(Some(t0), t0 + Duration::from_secs(10), 1),
+            Some(Duration::from_secs(15))
+        );
+        assert_eq!(
+            network_retry_delay(Some(t0), t0 + Duration::from_secs(10), 2),
+            None
+        );
+    }
+
+    #[test]
+    fn network_retry_delay_is_none_outside_the_window_or_without_a_change() {
+        let t0 = Instant::now();
+        assert_eq!(
+            network_retry_delay(Some(t0), t0 + Duration::from_secs(31), 0),
+            None
+        );
+        assert_eq!(network_retry_delay(None, t0, 0), None);
+    }
+
+    /// Lists are counted; they fail offline while `offline` is set.
+    struct Flaky {
+        inner: Arc<MemoryBackend>,
+        lists: std::sync::atomic::AtomicUsize,
+        offline: std::sync::atomic::AtomicBool,
+    }
+
+    impl Flaky {
+        fn new(inner: &Arc<MemoryBackend>) -> Arc<Flaky> {
+            Arc::new(Flaky {
+                inner: inner.clone(),
+                lists: Default::default(),
+                offline: std::sync::atomic::AtomicBool::new(true),
+            })
+        }
+        fn lists(&self) -> usize {
+            self.lists.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl StorageBackend for Flaky {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.lists
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.offline.load(std::sync::atomic::Ordering::SeqCst) {
+                return Box::pin(async { Err(BackendError::Offline("down".into())) });
+            }
+            self.inner.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn network_failure_retries_twice_then_stops() {
+        let remote = backend();
+        let flaky = Flaky::new(&remote);
+        let a = Pc::with_backend(flaky.clone(), None);
+        let host: Arc<dyn SyncHost> = a.host.clone();
+        let task = tokio::spawn(a.engine.clone().run_loop(host));
+        // The start-up run fails offline; with no network change it is not retried.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(flaky.lists(), 1);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(flaky.lists(), 1);
+
+        a.engine.network_changed();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(flaky.lists(), 2, "immediate run");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(flaky.lists(), 3, "retry after 5 s");
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        assert_eq!(flaky.lists(), 4, "retry after 15 s more");
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(flaky.lists(), 4, "no fourth retry");
+        assert_eq!(a.engine.status().state, SyncPhase::Offline);
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn network_success_closes_the_window() {
+        let remote = backend();
+        let flaky = Flaky::new(&remote);
+        let a = Pc::with_backend(flaky.clone(), None);
+        let host: Arc<dyn SyncHost> = a.host.clone();
+        let task = tokio::spawn(a.engine.clone().run_loop(host));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        a.engine.network_changed();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let before = flaky.lists();
+        // Back online before the first retry: it succeeds.
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(flaky.lists(), before + 1);
+        assert_eq!(a.engine.status().state, SyncPhase::Synced);
+        // Offline again inside the old window: no retry, the window is closed.
+        flaky
+            .offline
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        a.engine.request(SyncReason::SyncNow);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let after_fail = flaky.lists();
+        assert_eq!(a.engine.status().state, SyncPhase::Offline);
+        tokio::time::sleep(Duration::from_secs(25)).await;
+        assert_eq!(flaky.lists(), after_fail, "no retry after success");
+        task.abort();
     }
 
     #[tokio::test(start_paused = true)]
