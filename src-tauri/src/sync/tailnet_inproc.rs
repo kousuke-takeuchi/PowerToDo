@@ -269,7 +269,7 @@ impl Inner {
         {
             let _ = h.join();
         }
-        // `tn_stop` queues a `stopped` status, a failed start a `failed` one: they belong to
+        // `tn_stop` queues a `stopped` status, a refused start a `failed` one (also drained in `start_locked`): they belong to
         // the node that is gone and must not reach the next reader.
         while self.api.next_event(1).is_some() {}
         *lock(&self.proxy) = None;
@@ -281,6 +281,10 @@ impl Inner {
     fn start_locked(self: &Arc<Self>) -> Result<TailnetState, TailnetError> {
         // Never `tn_start` over a node that is still closing (Go side race): stop first.
         self.api.stop();
+        // A refused `tn_start` leaves its `failed` event in the process-global Go queue (no
+        // reader runs then, and `shutdown` skips `stop_locked`): drop what is left of an
+        // earlier node before this one starts.
+        while self.api.next_event(1).is_some() {}
         create_state_dir(&self.dir)?;
         #[cfg(target_os = "ios")]
         exclude_from_backup(&self.dir)?;
@@ -658,7 +662,7 @@ mod tests {
     }
 
     struct FakeApi {
-        start_rc: i32,
+        start_rc: std::sync::atomic::AtomicI32,
         s: Mutex<FakeState>,
         cv: Condvar,
     }
@@ -666,7 +670,7 @@ mod tests {
     impl FakeApi {
         fn new(start_rc: i32) -> Arc<Self> {
             Arc::new(Self {
-                start_rc,
+                start_rc: start_rc.into(),
                 s: Mutex::new(FakeState::default()),
                 cv: Condvar::new(),
             })
@@ -694,7 +698,11 @@ mod tests {
             let mut s = lock(&self.s);
             s.calls.push("start".into());
             s.stopped = false;
-            self.start_rc
+            let rc = self.start_rc.load(Ordering::SeqCst);
+            if rc != 0 && rc != 1 {
+                s.events.push_back(FAILED.to_string());
+            }
+            rc
         }
         fn command(&self, json: &str) -> i32 {
             lock(&self.s).calls.push(format!("command {json}"));
@@ -775,6 +783,20 @@ mod tests {
         assert!(matches!(t.state(), TailnetState::Failed { .. }));
         assert_eq!(states(&seen), ["failed"]);
         assert_eq!(api.count("proxy_open"), 0);
+    }
+
+    #[test]
+    fn a_refused_start_leaves_no_failed_event_for_the_next_start() {
+        let tmp = tempfile::tempdir().unwrap();
+        let api = FakeApi::new(2);
+        let (t1, _seen1) = start(&api, &tmp.path().join("ts"), FAILED_GRACE);
+        assert!(matches!(t1.state(), TailnetState::Failed { .. }));
+        t1.shutdown(); // like 「再試行」: skips stop_locked, nothing drains
+        api.start_rc.store(0, Ordering::SeqCst);
+        let (t2, seen2) = start(&api, &tmp.path().join("ts"), FAILED_GRACE);
+        thread::sleep(Duration::from_millis(1200)); // a few reader polls
+        assert!(states(&seen2).is_empty(), "{:?}", states(&seen2));
+        assert!(matches!(t2.state(), TailnetState::Starting { .. }));
     }
 
     #[test]
