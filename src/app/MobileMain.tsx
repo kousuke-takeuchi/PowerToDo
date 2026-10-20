@@ -37,6 +37,13 @@ import { formatSynced, syncErrorText, targetName } from "./syncText";
 type Nav = SidebarProps["active"];
 type Tab = NonNullable<TabBarProps["active"]>;
 type Flash = { text: string; tone: "error" | "info" };
+const sheetTitle: Record<NonNullable<SheetState>["kind"], (s: NonNullable<SheetState>) => string> = {
+  menu: (s) => (s.kind === "menu" ? s.task.title : ""),
+  date: () => "日付",
+  priority: () => "優先度",
+  move: () => "移動",
+  reschedule: () => "期限切れの日付",
+};
 /** 開いている下部シート。状態はここ (画面の子ではなく MobileMain) に持つ: 一覧の再読み込みや画面の差し替えで失わない。 */
 type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | { kind: "reschedule" } | null;
 
@@ -281,7 +288,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       </AnimatePresence>
       <BottomSheet
         open={sheet !== null}
-        title={sheet === null ? undefined : sheet.kind === "menu" ? sheet.task.title : sheet.kind === "reschedule" ? "期限切れの日付" : "日付"}
+        title={sheet === null ? undefined : sheetTitle[sheet.kind](sheet)}
         onClose={closeSheet}
       >
         {sheet?.kind === "menu" && (

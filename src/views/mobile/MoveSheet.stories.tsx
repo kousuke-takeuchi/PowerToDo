@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { projects, sections } from "../../mock/data";
 import type { ProjectSummary } from "../../types/model";
 import { BottomSheet } from "./BottomSheet";
-import { SheetFrame } from "./BottomSheet.stories";
+import { SheetFrame } from "./SheetFrame";
 import { MoveSheet } from "./MoveSheet";
 
 const summaries: ProjectSummary[] = projects.map((p) => ({ ...p, taskCount: 3 }));

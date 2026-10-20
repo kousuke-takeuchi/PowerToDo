@@ -40,6 +40,8 @@ const panel: React.CSSProperties = {
 export function SwipeRow({ children, onComplete, onDate, onLongPress, disabled, initialOffset }: SwipeRowProps) {
   const { reduced } = useMotionTiming();
   const swallow = useRef(false);
+  // 長押しが発火したあとのスワイプは捨てる (メニューが開いているのに完了 / 日付が動かない)
+  const pressed = useRef(false);
   const swipe = useSwipe({
     onComplete: disabled ? undefined : onComplete,
     onDate: disabled ? undefined : onDate,
@@ -47,6 +49,7 @@ export function SwipeRow({ children, onComplete, onDate, onLongPress, disabled, 
   const press = useLongPress(() => {
     if (disabled || !onLongPress) return;
     swallow.current = true;
+    pressed.current = true;
     onLongPress();
   });
   const offset = initialOffset !== undefined && !swipe.active && swipe.offset === 0 ? initialOffset : swipe.offset;
@@ -60,16 +63,18 @@ export function SwipeRow({ children, onComplete, onDate, onLongPress, disabled, 
     : {
         onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
           swallow.current = false;
+          pressed.current = false;
           swipe.bind.onPointerDown(e);
           press.onPointerDown(e);
         },
         onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
-          swipe.bind.onPointerMove(e);
+          if (!pressed.current) swipe.bind.onPointerMove(e);
           press.onPointerMove(e);
         },
         onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
           if (swipe.active) swallow.current = true;
-          swipe.bind.onPointerUp(e);
+          if (pressed.current) swipe.bind.onPointerCancel(e);
+          else swipe.bind.onPointerUp(e);
           press.onPointerUp(e);
         },
         onPointerCancel: (e: React.PointerEvent<HTMLElement>) => {

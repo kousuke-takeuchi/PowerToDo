@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { BottomSheet } from "./BottomSheet";
-import { SheetFrame } from "./BottomSheet.stories";
+import { SheetFrame } from "./SheetFrame";
 import { PrioritySheet } from "./PrioritySheet";
 
 const meta = {

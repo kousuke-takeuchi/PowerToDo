@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { TODAY } from "../../mock/data";
 import { BottomSheet } from "./BottomSheet";
-import { SheetFrame } from "./BottomSheet.stories";
+import { SheetFrame } from "./SheetFrame";
 import { DateSheet } from "./DateSheet";
 
 const meta = {

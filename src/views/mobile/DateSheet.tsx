@@ -1,8 +1,9 @@
 import type React from "react";
 import { useState } from "react";
 import { Ban, Calendar, CalendarPlus, CalendarSearch, Sofa, Sun } from "lucide-react";
-import { TODAY, addDays, weekdayIndex, weekdayShort } from "../../mock/data";
+import { TODAY, weekdayShort } from "../../mock/data";
 import { DatePicker } from "../DatePicker";
+import { quickDates } from "../quickDates";
 import { SheetRow } from "./BottomSheet";
 
 export type DateSheetProps = {
@@ -16,7 +17,7 @@ export type DateSheetProps = {
 };
 
 /**
- * 日付のシートの中身 (BottomSheet の children)。今日 / 明日 / 次の週末 / 来週 / 日付なし の 5 つは押すと選んで閉じ、
+ * 日付のシートの中身 (BottomSheet の children)。今日 / 明日 / 今週末 / 来週 / 日付なし の 5 つは押すと選んで閉じ、
  * 「カレンダーから選ぶ」でデスクトップと同じ DatePicker を開く (日付を変えたら閉じる)。選んだ時刻は残す。
  */
 export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateOnly }: DateSheetProps) {
@@ -25,13 +26,12 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
     onChange(time && date ? { date, time } : { date });
     onClose();
   };
-  const nextSaturday = addDays(today, (6 - weekdayIndex(today) + 7) % 7 || 7);
-  const nextMonday = addDays(today, ((1 - weekdayIndex(today) + 7) % 7) || 7);
+  const q = quickDates(today);
   const rows: { key: string; icon: React.ReactNode; color: string; label: string; date?: string }[] = [
     { key: "today", icon: <Calendar size={18} />, color: "var(--color-success)", label: "今日", date: today },
-    { key: "tomorrow", icon: <Sun size={18} />, color: "var(--color-priority-2)", label: "明日", date: addDays(today, 1) },
-    { key: "weekend", icon: <Sofa size={18} />, color: "var(--color-priority-3)", label: "次の週末", date: nextSaturday },
-    { key: "nextweek", icon: <CalendarPlus size={18} />, color: "var(--color-priority-3)", label: "来週", date: nextMonday },
+    { key: "tomorrow", icon: <Sun size={18} />, color: "var(--color-priority-2)", label: "明日", date: q.tomorrow },
+    { key: "weekend", icon: <Sofa size={18} />, color: "var(--color-priority-3)", label: "今週末", date: q.weekend },
+    { key: "nextweek", icon: <CalendarPlus size={18} />, color: "var(--color-priority-3)", label: "来週", date: q.nextWeek },
     ...(dateOnly ? [] : [{ key: "none", icon: <Ban size={18} />, color: "var(--color-text-secondary)", label: "日付なし", date: undefined }]),
   ];
   return (
@@ -54,6 +54,8 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
             time={time}
             today={today}
             dateOnly={dateOnly}
+            hideQuickPicks
+            hideTimeRepeat
             onChange={(v) => {
               if (dateOnly && !v.date) return;
               onChange(v);

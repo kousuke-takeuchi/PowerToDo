@@ -1,16 +1,7 @@
-import type React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { BottomSheet, SheetRow } from "./BottomSheet";
-
-/** シートを重ねる 390x560 の枠 (実画面では MobileShell の overlay)。 */
-export function SheetFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ position: "relative", width: 390, height: 560, overflow: "hidden", background: "var(--color-bg-hover)", fontFamily: "var(--font-body)" }}>
-      <div style={{ position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>{children}</div>
-    </div>
-  );
-}
+import { SheetFrame } from "./SheetFrame";
 
 const meta = { title: "Views/Mobile/BottomSheet", parameters: { layout: "centered" } } satisfies Meta;
 export default meta;
