@@ -27,6 +27,8 @@ export type MobileTaskDetailProps = {
   today?: string;
   /** 画面に重ねる層 (帯など)。 */
   overlay?: React.ReactNode;
+  /** header の下に流す帯 (MobileShell の banner)。 */
+  banner?: React.ReactNode;
   onToggleDone?: (done: boolean) => void;
   onToggleSubtask?: (t: Task, done: boolean) => void;
 };
@@ -57,7 +59,7 @@ function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)
 }
 
 /** M-03: タスク詳細 (全画面、下部タブなし)。戻る + パンくず、プロパティ 5 行、サブタスク、下端のコメント欄。完了チェックとサブタスクのチェックは見た目だけトグルする。 */
-export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, onToggleDone, onToggleSubtask }: MobileTaskDetailProps) {
+export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask }: MobileTaskDetailProps) {
   const [localDone, setLocalDone] = useState(task.progress === 100);
   const done = live ? task.progress === 100 : localDone;
   const setDone = (v: boolean) => (live ? onToggleDone?.(v) : setLocalDone(v));
@@ -72,6 +74,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
 
   return (
     <MobileShell
+      banner={banner}
       fill={fill}
       overlay={overlay}
       header={

@@ -16,13 +16,15 @@ export type MobileShellProps = {
   overlay?: React.ReactNode;
   /** 実機用: 幅 100% / 高さ 100dvh、本文はスクロール、上下の空きはセーフエリア (header 側は MobileHeader の safeArea)。省略すると 390x844 の絵のまま。 */
   fill?: boolean;
+  /** header の下、本文の上に置く帯 (通常の流れ。本文はその分だけ縮む)。省略すると何も出さない。 */
+  banner?: React.ReactNode;
 }; // 390x844、TabBar 下固定、FAB 56 右下
 
 /**
  * モバイルのシェル 390x844: header + body (flex 1) + TabBar (下)。FAB は右 16 / タブの上 16。
  * overflow: hidden はルートだけ。body はクリップしない。
  */
-export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay, fill }: MobileShellProps) {
+export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay, fill, banner }: MobileShellProps) {
   // 選択中のタブはシェルが持つ (見た目だけ。画面遷移は Story を切り替える)。tab が変わったらそれに合わせる。
   // onTabChange があるとき (実画面) は持たずに tab をそのまま出す (「一覧」はドロワーを開くだけで選択は移らない)。
   const [cur, setCur] = useState(tab);
@@ -43,6 +45,7 @@ export function MobileShell({ header, children, tab, onTabChange, fab, onFab, ov
       }}
     >
       {header}
+      {banner && <div style={{ flex: "0 0 auto", maxHeight: "40%", overflowY: "auto" }}>{banner}</div>}
       <div
         style={{
           flex: 1,

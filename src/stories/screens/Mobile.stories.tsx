@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { SaveBanner } from "../../app/SaveBanner";
 import { TODAY, projects, sections, tasks } from "../../mock/data";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
@@ -102,4 +103,27 @@ function LiveTodayNoOverdue() {
 export const M04NoOverdue: Story = {
   name: "M-04 期限切れなし",
   render: () => <LiveTodayNoOverdue />,
+};
+
+// 残る帯 (保存失敗) は header の下に流れ、一覧はその分だけ下がる (上の行が隠れない)
+export const M01Banner: Story = {
+  name: "M-01 帯つき (fill)",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView
+          live
+          fill
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          today={TODAY}
+          onToggleDone={toggle}
+          banner={<SaveBanner message="保存できませんでした" onRetry={() => undefined} />}
+        />
+      );
+    };
+    return <Live />;
+  },
 };

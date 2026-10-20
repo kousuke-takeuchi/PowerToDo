@@ -26,6 +26,8 @@ export type MobileSearchProps = {
   onMenu?: () => void;
   onTabChange?: TabBarProps["onChange"];
   overlay?: React.ReactNode;
+  /** header の下に流す帯 (MobileShell の banner)。 */
+  banner?: React.ReactNode;
 };
 
 const modeOptions = [
@@ -50,9 +52,11 @@ export function MobileSearch({
   onMenu,
   onTabChange,
   overlay,
+  banner,
 }: MobileSearchProps) {
   return (
     <MobileShell
+      banner={banner}
       fill={fill}
       header={<MobileHeader title="検索" safeArea={fill} sync={sync} onMenu={onMenu} />}
       tab="search"

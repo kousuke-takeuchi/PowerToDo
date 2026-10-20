@@ -34,16 +34,18 @@ export type MobileUpcomingProps = {
   onExtend?: () => void;
   onTabChange?: TabBarProps["onChange"];
   overlay?: React.ReactNode;
+  /** header の下に流す帯 (MobileShell の banner)。 */
+  banner?: React.ReactNode;
 };
 
 /** M-05: 近日。WeekStrip (今日から 7 日、タップで選択) + タスクのある日だけの日付グループ。行は日付チップなし (見出しが日付)。 */
-export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onSelectDay, onExtend, onTabChange, overlay }: MobileUpcomingProps) {
+export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onSelectDay, onExtend, onTabChange, overlay, banner }: MobileUpcomingProps) {
   const local = useDone();
   const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
   const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
   const days = [...new Set(tasks.map((t) => t.due).filter((d): d is string => d !== undefined && d >= today))].sort();
   return (
-    <MobileShell fill={fill} header={<MobileHeader title="近日" safeArea={fill} sync={sync} onMenu={onMenu} />} tab="upcoming" onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
+    <MobileShell banner={banner} fill={fill} header={<MobileHeader title="近日" safeArea={fill} sync={sync} onMenu={onMenu} />} tab="upcoming" onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div style={{ padding: "0 16px" }}>
         <WeekStrip variant="mobile" start={today} today={today} onSelect={(ymd) => {
             onSelectDay?.(ymd);

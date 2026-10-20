@@ -51,6 +51,8 @@ export type MobileProjectViewProps = {
   onTabChange?: TabBarProps["onChange"];
   /** 呼び出し側が持つ層。ドロワー / クイック追加の内部の状態の代わりに出す。 */
   overlay?: React.ReactNode;
+  /** header の下に流す帯 (MobileShell の banner)。 */
+  banner?: React.ReactNode;
   /** タスクが 1 件もないときの文言 (live のみ)。 */
   emptyText?: string;
 };
@@ -112,6 +114,7 @@ export function MobileProjectView({
   tab = "list",
   onTabChange,
   overlay: externalOverlay,
+  banner,
   emptyText = "タスクはありません",
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
@@ -171,6 +174,7 @@ export function MobileProjectView({
 
   return (
     <MobileShell
+      banner={banner}
       fill={fill}
       header={<MobileHeader title={title ?? project} safeArea={fill} sync={sync} onMenu={onMenu ?? (() => setOverlay("drawer"))} />}
       tab={tab}

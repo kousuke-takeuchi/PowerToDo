@@ -15,6 +15,7 @@ type Common = {
   onFab?: () => void;
   onTabChange?: TabBarProps["onChange"];
   overlay?: React.ReactNode;
+  banner?: React.ReactNode;
 };
 
 export type MobileLabelsProps = Common & {
@@ -24,9 +25,10 @@ export type MobileLabelsProps = Common & {
 };
 
 /** 「フィルターとラベル」: ラベルの一覧 (件数つき)。タップでそのラベルのタスク (MobileLabelDetail)。 */
-export function MobileLabels({ labels, counts, onOpenLabel, fill, sync, onMenu, onFab, onTabChange, overlay }: MobileLabelsProps) {
+export function MobileLabels({ labels, counts, onOpenLabel, fill, sync, onMenu, onFab, onTabChange, overlay, banner }: MobileLabelsProps) {
   return (
     <MobileShell
+      banner={banner}
       fill={fill}
       header={<MobileHeader title="ラベル" safeArea={fill} sync={sync} onMenu={onMenu} />}
       tab="list"
@@ -82,9 +84,10 @@ export type MobileLabelDetailProps = Common & {
 };
 
 /** ラベル詳細: そのラベルが付いたタスク (プロジェクトをまたぐ)。 */
-export function MobileLabelDetail({ label, tasks, today = TODAY, onToggleDone, onOpenTask, fill, sync, onMenu, onFab, onTabChange, overlay }: MobileLabelDetailProps) {
+export function MobileLabelDetail({ label, tasks, today = TODAY, onToggleDone, onOpenTask, fill, sync, onMenu, onFab, onTabChange, overlay, banner }: MobileLabelDetailProps) {
   return (
     <MobileShell
+      banner={banner}
       fill={fill}
       header={<MobileHeader title={`@${label}`} safeArea={fill} sync={sync} onMenu={onMenu} />}
       tab="list"

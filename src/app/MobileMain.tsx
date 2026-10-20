@@ -179,10 +179,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
-  const layers = (
-    <>
-      <div style={{ position: "absolute", left: 0, right: 0, top: "calc(env(safe-area-inset-top) + 56px)", maxHeight: "40%", overflowY: "auto", pointerEvents: "auto" }}>
-        <Banners
+  const banner = (
+    <Banners
           reminders={{
             items: reminders.items,
             today,
@@ -223,7 +221,9 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onDismissConflict: syncConflicts.dismissConflict,
           }}
         />
-      </div>
+  );
+  const layers = (
+    <>
       <AnimatePresence initial={false}>
         {qa.open && <MobileQuickAddSheet key="quickAdd" tokens={tokens} onClose={closeQuickAdd} />}
         {drawer && (
@@ -254,6 +254,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       header={<MobileHeader title={title} safeArea sync={syncState} onMenu={header.onMenu} />}
       tab={tab}
       onTabChange={goTab}
+      banner={banner}
       overlay={layers}
     >
       <div
@@ -283,6 +284,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       return (
         <MobileShell
           fill
+          banner={banner}
           header={<MobileHeader title="タスク詳細" safeArea showBack onBack={() => setDetail(null)} />}
           overlay={layers}
         >
@@ -303,6 +305,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         onBack={() => setDetail(null)}
         onToggleDone={(done) => void p.completeTask(openTask.no, done)}
         onToggleSubtask={(t, done) => void p.completeTask(t.no, done)}
+        banner={banner}
         overlay={layers}
       />
     );
@@ -316,7 +319,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     return (
       <MobileToday
         live
-        {...header}
+        {...header} banner={banner}
         today={today}
         overdue={d.overdue}
         todays={d.today}
@@ -334,7 +337,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     return (
       <MobileUpcoming
         live
-        {...header}
+        {...header} banner={banner}
         today={today}
         tasks={d.days.flatMap((g) => g.tasks)}
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
@@ -347,7 +350,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   if (tab === "search") {
     return (
       <MobileSearch
-        {...header}
+        {...header} banner={banner}
         today={today}
         query={search.query}
         onChangeQuery={search.setQuery}
@@ -365,7 +368,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     const d = labelsData.data;
     if (labelsData.error) return frame("ラベル", labelsData.error, "danger");
     if (!d) return frame("ラベル", "読み込み中…");
-    return <MobileLabels {...header} labels={d.labels} counts={d.counts} onOpenLabel={(name) => setNav({ kind: "label", name })} overlay={layers} />;
+    return <MobileLabels {...header} banner={banner} labels={d.labels} counts={d.counts} onOpenLabel={(name) => setNav({ kind: "label", name })} overlay={layers} />;
   }
   if (nav.kind === "label") {
     const d = labelData.data;
@@ -373,7 +376,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     if (!d || !labelName) return frame(`@${nav.name ?? ""}`, "読み込み中…");
     return (
       <MobileLabelDetail
-        {...header}
+        {...header} banner={banner}
         today={today}
         label={d.label.name}
         tasks={d.tasks}
@@ -391,7 +394,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     <MobileProjectView
       key={current}
       live
-      {...header}
+      {...header} banner={banner}
       tab="list"
       today={today}
       title={title}
