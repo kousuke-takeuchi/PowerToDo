@@ -2,15 +2,19 @@ import type React from "react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useEscLayer } from "../../app/layers";
 import { useMotionTiming } from "../../motion";
+import { useKeyboardInset } from "./useKeyboardInset";
 
 export type BottomSheetProps = {
   open: boolean;
   title?: string;
   onClose: () => void;
   children: React.ReactNode;
+  /** 実機用: キーボードの高さぶん持ち上げる (入力欄のあるシートが、キーボードで隠れないように)。省略すると今のまま。 */
+  fill?: boolean;
 };
 
-function Sheet({ title, onClose, children }: Omit<BottomSheetProps, "open">) {
+function Sheet({ title, onClose, children, fill }: Omit<BottomSheetProps, "open">) {
+  const inset = useKeyboardInset(!!fill);
   // 閉じるアニメーション中は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)
   useEscLayer(useIsPresent(), onClose);
   const { reduced, t } = useMotionTiming();
@@ -33,6 +37,8 @@ function Sheet({ title, onClose, children }: Omit<BottomSheetProps, "open">) {
         background: "var(--color-scrim)",
         pointerEvents: "auto",
         fontFamily: "var(--font-body)",
+        paddingBottom: inset > 0 ? inset : undefined,
+        boxSizing: "border-box",
       }}
     >
       <motion.div
@@ -50,7 +56,8 @@ function Sheet({ title, onClose, children }: Omit<BottomSheetProps, "open">) {
           display: "flex",
           flexDirection: "column",
           gap: "var(--space-2)",
-          padding: "var(--space-2) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom))",
+          // キーボードが出ている間 (inset > 0) は、キーボードの上端が下端なのでセーフエリアは空けない
+          padding: `var(--space-2) var(--space-4) ${inset > 0 ? "var(--space-3)" : "calc(var(--space-3) + env(safe-area-inset-bottom))"}`,
           background: "var(--color-bg)",
           color: "var(--color-text-primary)",
           borderRadius: "16px 16px 0 0",
@@ -71,11 +78,11 @@ function Sheet({ title, onClose, children }: Omit<BottomSheetProps, "open">) {
  * 下からせり上がるシート (250 ms)。scrim のタップ / Esc で閉じる。下はセーフエリアぶん空ける。MobileShell の overlay に入れる。
  * 開いたまま中身 (children) を入れ替えられる (メニュー -> 日付のシート)。最初の描画で既に開いているときは動かさない。
  */
-export function BottomSheet({ open, title, onClose, children }: BottomSheetProps) {
+export function BottomSheet({ open, title, onClose, children, fill }: BottomSheetProps) {
   return (
     <AnimatePresence initial={false}>
       {open && (
-        <Sheet key="sheet" title={title} onClose={onClose}>
+        <Sheet key="sheet" title={title} onClose={onClose} fill={fill}>
           {children}
         </Sheet>
       )}

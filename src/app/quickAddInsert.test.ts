@@ -12,5 +12,5 @@ test("a space is added between the title and the word", () => {
 });
 test("no second space after trailing whitespace (ASCII or ideographic)", () => {
   assert.equal(insertToken("牛乳 ", "label"), "牛乳 @");
-  assert.equal(insertToken("牛乳　", "reminder"), "牛乳　!");
+  assert.equal(insertToken("牛乳　", "label"), "牛乳　@");
 });

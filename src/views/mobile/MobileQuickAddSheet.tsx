@@ -1,11 +1,13 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { motion, useIsPresent } from "motion/react";
 import { ArrowUp, Bell, Calendar, Flag, Folder, Tag } from "lucide-react";
 import { isImeKey } from "../../app/keys";
 import { useEscLayer } from "../../app/layers";
+import { reminderLabel } from "../ReminderPicker";
 import type { InsertKind } from "../../app/quickAddInsert";
 import { useMotionTiming } from "../../motion";
+import { useKeyboardInset } from "./useKeyboardInset";
 import type { QuickAddToken } from "../QuickAddDialog";
 
 export type MobileQuickAddSheetProps = {
@@ -21,25 +23,10 @@ export type MobileQuickAddSheetProps = {
   error?: string;
   /** ツールバー (日付 / 優先度 / ラベル / リマインダー) が押されたとき。入力欄の末尾に語を足すのは呼び出し側。 */
   onInsert?: (kind: InsertKind) => void;
+  /** リマインダー (クイック追加の構文に無い): 選んだコード。ボタンは onPickReminder で別のシートを開く。 */
+  reminders?: string[];
+  onPickReminder?: () => void;
 };
-
-/** キーボードで隠れる高さ (px)。visualViewport が無い / 隠れていないときは 0。 */
-function useKeyboardInset(active: boolean): number {
-  const [inset, setInset] = useState(0);
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!active || !vv) return;
-    const update = () => setInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-    };
-  }, [active]);
-  return inset;
-}
 
 const tokenColor = { date: "var(--color-success)", priority: "var(--color-priority-1)", project: "var(--color-priority-3)", label: "var(--color-text-secondary)" } as const;
 
@@ -78,7 +65,7 @@ function ToolbarIcon({
  * シートの下端 = キーボードの上端なので、シートは常に全体が見える。保存はしない。
  * scrim は pointerEvents: "auto" (MobileShell の overlay ラッパーは "none")。
  */
-export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange, onSubmit, busy, error, onInsert }: MobileQuickAddSheetProps) {
+export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange, onSubmit, busy, error, onInsert, reminders = [], onPickReminder }: MobileQuickAddSheetProps) {
   const live = onTextChange !== undefined;
   const ts = live ? 44 : 32;
   const inset = useKeyboardInset(!!fill);
@@ -177,6 +164,15 @@ export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange,
               ))}
           </div>
         )}
+        {live && reminders.length > 0 && (
+          <div role="group" aria-label="リマインダー" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px" }}>
+            {reminders.map((c) => (
+              <span key={c} style={{ padding: "1px 6px", borderRadius: 4, background: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}>
+                {reminderLabel(c)}
+              </span>
+            ))}
+          </div>
+        )}
         {live && error && (
           <div role="alert" style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-danger)" }}>
             {error}
@@ -220,7 +216,7 @@ export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange,
           {live ? (
             <>
               <ToolbarIcon icon={Tag} label="ラベル" size={ts} onClick={() => insert("label")} />
-              <ToolbarIcon icon={Bell} label="リマインダー" size={ts} onClick={() => insert("reminder")} />
+              <ToolbarIcon icon={Bell} label="リマインダー" size={ts} color={reminders.length > 0 ? "var(--color-success)" : undefined} onClick={onPickReminder} />
             </>
           ) : (
             <>

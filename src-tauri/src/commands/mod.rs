@@ -347,6 +347,8 @@ pub struct AppStateDto {
 pub struct QuickAddOutcome {
     pub parsed: QuickAddResult,
     pub view: ProjectView,
+    /// Number of the task just added (new numbers are above every existing one, so it is the highest in `view`).
+    pub no: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1200,7 +1202,8 @@ pub fn quick_add_in(
         reminders: Vec::new(),
     };
     let view = store.add_task(&project, input)?;
-    Ok(QuickAddOutcome { parsed, view })
+    let no = view.tasks.iter().map(|t| t.no).max().unwrap_or(0);
+    Ok(QuickAddOutcome { parsed, view, no })
 }
 
 // ---- commands: app and data folder ----
@@ -2290,6 +2293,11 @@ mod tests {
         assert_eq!(out.view.tasks.len(), 1);
         assert_eq!(out.view.tasks[0].title, "牛乳を買う");
         assert_eq!(out.view.tasks[0].due, Some(d("2026-10-15")));
+        assert_eq!(out.no, out.view.tasks[0].no);
+
+        // The returned no is the task just added, not an older one.
+        let out = quick_add_in(&mut store, "二つ目", "仕事", d("2026-10-14")).unwrap();
+        assert_eq!(out.view.tasks.iter().find(|t| t.no == out.no).unwrap().title, "二つ目");
 
         let out = quick_add_in(&mut store, "資料 #受信トレイ p1", "仕事", d("2026-10-14")).unwrap();
         assert_eq!(out.view.project.name, "受信トレイ");

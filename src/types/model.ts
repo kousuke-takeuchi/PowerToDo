@@ -41,7 +41,8 @@ export type TokenKind = "date" | "time" | "priority" | "project" | "label" | "re
 export interface Span { start: number; end: number; kind: TokenKind; }
 /** Rust serializes the absent Options as null (no skip_serializing_if); dueTime is "HH:MM". */
 export interface QuickAddResult { title: string; due: string | null; dueTime: string | null; rrule: string | null; priority: Priority | null; project: string | null; labels: string[]; spans: Span[]; }
-export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; }
+/** `no`: the number of the task just added (in `view.project`). */
+export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; no: number; }
 export interface MoveOutcome { from: ProjectView; to: ProjectView; }
 /** `parse_recurrence`: rrule and label are both null when the text is not a recurrence. */
 export interface RecurrenceDto { rrule: string | null; label: string | null; }

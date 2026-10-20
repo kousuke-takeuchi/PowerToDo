@@ -134,7 +134,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
       overlay={
         <>
           {overlay}
-          <BottomSheet open={sheet !== null} title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}>
+          <BottomSheet fill={fill} open={sheet !== null} title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}>
             {sheet === "title" && (
               <TextSheet
                 label="名前"
@@ -188,6 +188,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
                   value={task.rrule}
                   valueLabel={task.rruleLabel ?? recurrenceLabel(task.rrule)}
                   onParse={onParseRecurrence}
+                  fontSize={16}
                   onChange={(r) => {
                     onChange?.({ rrule: r ?? null });
                     closeSheet();

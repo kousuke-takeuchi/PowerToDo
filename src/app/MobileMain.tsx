@@ -17,6 +17,7 @@ import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
+import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
 import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
 import type { SidebarProps } from "../views/Sidebar";
@@ -64,6 +65,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
+  // クイック追加の上に重ねるリマインダーのシート
+  const [qaReminderSheet, setQaReminderSheet] = useState(false);
 
   const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
@@ -102,7 +105,11 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   });
 
   const search = useSearch(tab === "search");
-  const { qa, openQuickAdd, closeQuickAdd, setText, submit, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+
+  useEffect(() => {
+    if (!qa.open) setQaReminderSheet(false);
+  }, [qa.open]);
 
   // ラベルのシートに並べる、ストアにあるラベル (詳細を開いたとき読む)
   const [allLabels, setAllLabels] = useState<Label[]>([]);
@@ -296,6 +303,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             busy={qa.busy}
             error={qa.error}
             onInsert={(kind) => setText(insertToken(qa.text, kind))}
+            reminders={qa.reminders}
+            onPickReminder={() => setQaReminderSheet(true)}
             onClose={closeQuickAdd}
           />
         )}
@@ -317,7 +326,11 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
           />
         )}
       </AnimatePresence>
+      <BottomSheet open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
+        <ReminderSheet value={qa.reminders} onChange={setReminders} />
+      </BottomSheet>
       <BottomSheet
+        fill
         open={sheet !== null}
         title={sheet === null ? undefined : sheetTitle[sheet.kind](sheet)}
         onClose={closeSheet}
