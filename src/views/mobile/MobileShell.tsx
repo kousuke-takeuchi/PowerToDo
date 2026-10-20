@@ -14,24 +14,28 @@ export type MobileShellProps = {
   onFab?: () => void;
   /** 画面全体に重ねる層 (M-02 のシート、M-06 のドロワー)。ラッパーは pointer-events: none、中身側で auto にする。 */
   overlay?: React.ReactNode;
+  /** 実機用: 幅 100% / 高さ 100dvh、本文はスクロール、上下の空きはセーフエリア (header 側は MobileHeader の safeArea)。省略すると 390x844 の絵のまま。 */
+  fill?: boolean;
 }; // 390x844、TabBar 下固定、FAB 56 右下
 
 /**
  * モバイルのシェル 390x844: header + body (flex 1) + TabBar (下)。FAB は右 16 / タブの上 16。
  * overflow: hidden はルートだけ。body はクリップしない。
  */
-export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay }: MobileShellProps) {
+export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay, fill }: MobileShellProps) {
   // 選択中のタブはシェルが持つ (見た目だけ。画面遷移は Story を切り替える)。tab が変わったらそれに合わせる。
+  // onTabChange があるとき (実画面) は持たずに tab をそのまま出す (「一覧」はドロワーを開くだけで選択は移らない)。
   const [cur, setCur] = useState(tab);
   useEffect(() => setCur(tab), [tab]);
+  const shownTab = onTabChange ? tab : cur;
   return (
     <div
       style={{
         position: "relative",
         display: "flex",
         flexDirection: "column",
-        width: 390,
-        height: 844,
+        width: fill ? "100%" : 390,
+        height: fill ? "100dvh" : 844,
         overflow: "hidden",
         background: "var(--color-bg)",
         color: "var(--color-text-primary)",
@@ -39,11 +43,22 @@ export function MobileShell({ header, children, tab, onTabChange, fab, onFab, ov
       }}
     >
       {header}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{children}</div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          ...(fill ? { overflowY: "auto", overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" } : null),
+        }}
+      >
+        {children}
+      </div>
       {tab !== undefined && (
         <div style={{ position: "relative", zIndex: 1, flex: "0 0 auto" }}>
           <TabBar
-            active={cur === "none" ? undefined : cur}
+            safeArea={fill}
+            active={shownTab === "none" ? undefined : shownTab}
             onChange={(id) => {
               setCur(id);
               onTabChange?.(id);
@@ -59,7 +74,7 @@ export function MobileShell({ header, children, tab, onTabChange, fab, onFab, ov
           style={{
             position: "absolute",
             right: 16,
-            bottom: 90 + 16,
+            bottom: fill ? "calc(56px + env(safe-area-inset-bottom) + 16px)" : 90 + 16,
             zIndex: 2,
             width: 56,
             height: 56,

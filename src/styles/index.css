@@ -19,5 +19,6 @@
   --font-body: var(--font-body);
   --radius-app: var(--radius);
 }
+html { -webkit-text-size-adjust: 100%; }
 html, body { font-family: var(--font-body); background: var(--color-bg); color: var(--color-text-primary); }
 @keyframes spin { to { transform: rotate(360deg); } }

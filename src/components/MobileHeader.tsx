@@ -13,6 +13,8 @@ export type MobileHeaderProps = {
   onBack?: () => void;
   /** 指定すると title の代わりに表示する (M-03 のパンくず)。title は aria-label になる。 */
   breadcrumb?: React.ReactNode;
+  /** 上の空き 47 (StatusBar) を、実機の上のセーフエリア (env(safe-area-inset-top)) に置き換える。 */
+  safeArea?: boolean;
 }; // 右端に同期アイコン (syncing 回転 / offline・error アイコン / synced 非表示)
 
 const syncIcon = {
@@ -22,11 +24,11 @@ const syncIcon = {
 } as const;
 
 /** モバイルのヘッダー (pen の MobileHeader): StatusBar 47 (空) + Row 44。同期アイコンは More の左 (synced / off は出さない)。 */
-export function MobileHeader({ title, onMenu, onMore, sync, showBack, onBack, breadcrumb }: MobileHeaderProps) {
+export function MobileHeader({ title, onMenu, onMore, sync, showBack, onBack, breadcrumb, safeArea }: MobileHeaderProps) {
   const s = sync === "syncing" || sync === "offline" || sync === "error" ? syncIcon[sync] : undefined;
   return (
     <header style={{ display: "flex", flexDirection: "column", background: "var(--color-bg)", fontFamily: "var(--font-body)", flex: "0 0 auto" }}>
-      <div aria-hidden style={{ height: 47 }} />
+      <div aria-hidden style={{ height: safeArea ? "env(safe-area-inset-top)" : 47 }} />
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "6px 12px" }}>
         {showBack ? (
           <Button variant="icon" icon={ChevronLeft} ariaLabel="戻る" onClick={onBack} />

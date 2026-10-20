@@ -183,3 +183,6 @@ export interface UpdateCheckDto { available: boolean; version?: string; notes?: 
 /** `update-progress` event。`received` / `total` は `downloading` のバイト数 (`total` が無いことがある)。 */
 export type UpdatePhase = "waitingSync" | "downloading" | "installing";
 export interface UpdateProgress { phase: UpdatePhase; received?: number; total?: number; }
+
+/** `platform_info`: the OS the app runs on. `mobile` is true on iOS / Android (the page switches to the phone screens). */
+export interface PlatformInfo { os: "macos" | "windows" | "linux" | "ios" | "android"; mobile: boolean; }

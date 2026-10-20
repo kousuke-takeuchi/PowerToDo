@@ -7,7 +7,7 @@ import { Checkbox } from "../../components/Checkbox";
 import { MobileHeader } from "../../components/MobileHeader";
 import { TaskRow } from "../../components/TaskRow";
 import { TextField } from "../../components/TextField";
-import { dateLabel } from "../../mock/data";
+import { TODAY, dateLabel } from "../../mock/data";
 import type { Project, Task } from "../../types/model";
 import { recurrenceLabel } from "../RecurrencePicker";
 import { reminderLabel } from "../ReminderPicker";
@@ -20,6 +20,15 @@ export type MobileTaskDetailProps = {
   project: Project;
   section?: string;
   onBack?: () => void;
+  /** 実データで動かす: 完了は task.progress を見て onToggleDone / onToggleSubtask を呼ぶ。省略すると見た目だけトグルする。 */
+  live?: boolean;
+  /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア。 */
+  fill?: boolean;
+  today?: string;
+  /** 画面に重ねる層 (帯など)。 */
+  overlay?: React.ReactNode;
+  onToggleDone?: (done: boolean) => void;
+  onToggleSubtask?: (t: Task, done: boolean) => void;
 };
 
 type Icon = React.ComponentType<{ size?: number }>;
@@ -48,17 +57,26 @@ function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)
 }
 
 /** M-03: タスク詳細 (全画面、下部タブなし)。戻る + パンくず、プロパティ 5 行、サブタスク、下端のコメント欄。完了チェックとサブタスクのチェックは見た目だけトグルする。 */
-export function MobileTaskDetail({ task, subtasks, project, section, onBack }: MobileTaskDetailProps) {
-  const [done, setDone] = useState(task.progress === 100);
-  const sub = useDone();
-  const due = dateLabel(task.due);
+export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, onToggleDone, onToggleSubtask }: MobileTaskDetailProps) {
+  const [localDone, setLocalDone] = useState(task.progress === 100);
+  const done = live ? task.progress === 100 : localDone;
+  const setDone = (v: boolean) => (live ? onToggleDone?.(v) : setLocalDone(v));
+  const local = useDone();
+  const sub = {
+    isDone: (t: Task) => (live ? t.progress === 100 : local.isDone(t)),
+    toggle: (t: Task) => (live ? onToggleSubtask?.(t, t.progress !== 100) : local.toggle(t)),
+  };
+  const due = dateLabel(task.due, today);
   const dueColor = due?.tone === "success" ? "var(--color-success)" : due?.tone === "danger" ? "var(--color-danger)" : "var(--color-text-secondary)";
   const dueText = due ? `${due.label}${task.dueTime ? ` ${task.dueTime}` : ""}` : "なし";
 
   return (
     <MobileShell
+      fill={fill}
+      overlay={overlay}
       header={
         <MobileHeader
+          safeArea={fill}
           title="タスク詳細"
           showBack
           onBack={onBack}
@@ -111,7 +129,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack }: M
         </div>
         <Button variant="icon" icon={Send} ariaLabel="送信" />
       </div>
-      <div aria-hidden style={{ height: 34, flex: "0 0 auto" }} />
+      <div aria-hidden style={{ height: fill ? "env(safe-area-inset-bottom)" : 34, flex: "0 0 auto" }} />
     </MobileShell>
   );
 }

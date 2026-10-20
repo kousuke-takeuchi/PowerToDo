@@ -4,6 +4,8 @@ import { CalendarCheck, CalendarDays, List, Search } from "lucide-react";
 export type TabBarProps = {
   active?: "today" | "upcoming" | "search" | "list";
   onChange?: (t: NonNullable<TabBarProps["active"]>) => void;
+  /** ホームインジケータの 34 (絵) を、実機の下のセーフエリア (env(safe-area-inset-bottom)) に置き換える (絵は描かない)。 */
+  safeArea?: boolean;
 }; // 56 + ホームインジケータ 34
 
 const tabs: { id: NonNullable<TabBarProps["active"]>; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
@@ -14,7 +16,7 @@ const tabs: { id: NonNullable<TabBarProps["active"]>; label: string; Icon: React
 ];
 
 /** モバイルの下部タブ (pen の TabBar: Tabs 56 + HomeIndicator 34、上に 1px の線)。状態は持たない (active + onChange)。 */
-export function TabBar({ active, onChange }: TabBarProps) {
+export function TabBar({ active, onChange, safeArea }: TabBarProps) {
   return (
     <nav
       aria-label="タブ"
@@ -58,9 +60,13 @@ export function TabBar({ active, onChange }: TabBarProps) {
           );
         })}
       </div>
-      <div aria-hidden style={{ height: 34, display: "flex", justifyContent: "center", alignItems: "center" }}>
-        <div style={{ width: 134, height: 5, borderRadius: 3, background: "var(--color-text-primary)" }} />
-      </div>
+      {safeArea ? (
+        <div aria-hidden style={{ height: "env(safe-area-inset-bottom)" }} />
+      ) : (
+        <div aria-hidden style={{ height: 34, display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <div style={{ width: 134, height: 5, borderRadius: 3, background: "var(--color-text-primary)" }} />
+        </div>
+      )}
     </nav>
   );
 }

@@ -1,0 +1,407 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
+import { api, errorMessage } from "../api/client";
+import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
+import { MobileHeader } from "../components/MobileHeader";
+import type { TabBarProps } from "../components/TabBar";
+import type { AppStateDto, SearchHit, Task } from "../types/model";
+import { Drawer } from "../views/mobile/Drawer";
+import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
+import { MobileProjectView } from "../views/mobile/MobileProjectView";
+import { MobileQuickAddSheet } from "../views/mobile/MobileQuickAddSheet";
+import { MobileSearch } from "../views/mobile/MobileSearch";
+import { MobileShell } from "../views/mobile/MobileShell";
+import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
+import { MobileToday } from "../views/mobile/MobileToday";
+import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
+import type { SidebarProps } from "../views/Sidebar";
+import { Banners } from "./Banners";
+import { useToday } from "./hooks";
+import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
+import { useCrossViews } from "./useCrossViews";
+import { useProject } from "./useProject";
+import { useQuickAdd } from "./useQuickAdd";
+import { useReminders } from "./useReminders";
+import { useSaveErrors } from "./useSaveStatus";
+import { useSearch } from "./useSearch";
+import { useSummaries } from "./useSummaries";
+import { useSync } from "./useSync";
+import type { SyncConflicts } from "./useSyncConflicts";
+import { formatSynced, syncErrorText, targetName } from "./syncText";
+
+type Nav = SidebarProps["active"];
+type Tab = NonNullable<TabBarProps["active"]>;
+type Flash = { text: string; tone: "error" | "info" };
+
+/**
+ * iPhone の通常画面 (仕様 §4): 下部タブ (今日 / 近日 / 検索 / 一覧) + ドロワー + プロジェクト / ラベルの画面 + タスク詳細。
+ * デスクトップの Main と同じフックにつなぐ。「一覧」のタブはドロワーを開き、選んだ受信トレイ / プロジェクト / ラベルを本文に出す。
+ */
+export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
+  const today = useToday();
+  const { errors: saveErrors } = useSaveErrors();
+
+  // 画面: tab (下部タブ) と、tab が「一覧」のときに本文に出す nav。起動直後は受信トレイ。
+  const [tab, setTab] = useState<Tab>("list");
+  const [nav, setNav] = useState<Nav>({ kind: "inbox" });
+  const [drawer, setDrawer] = useState(false);
+  // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
+  const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
+  const [flash, setFlash] = useState<Flash | null>(null);
+
+  const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
+
+  const sync = useSync({ active: false, onNotice: (text, tone) => setFlash({ text, tone }) });
+  const syncStatus = sync.status;
+  const syncState = syncStatus?.state ?? "off";
+  const syncClickable = syncState === "error" && !syncStatus?.suspect && !syncStatus?.authRejected;
+  const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
+  useEffect(() => {
+    if (syncState !== "error") setDismissedSyncError(null);
+  }, [syncState]);
+  const syncErrorMessage =
+    syncState === "error" && !syncStatus?.suspect && syncStatus?.message && syncStatus.message !== dismissedSyncError ? syncStatus.message : null;
+
+  // 本文の元になる nav: 今日 / 近日のタブはそれぞれ、検索は何も取らない (受信トレイを読み続ける)
+  const viewNav: Nav = tab === "today" ? { kind: "today" } : tab === "upcoming" ? { kind: "upcoming" } : tab === "list" ? nav : { kind: "inbox" };
+  const listProject = tab === "list" && (nav.kind === "inbox" || nav.kind === "project");
+  const navCurrent = nav.kind === "project" && nav.name ? nav.name : app.inbox;
+  // タスク詳細を開くあいだは、そのプロジェクトを読む
+  const current = detail ? detail.project : navCurrent;
+
+  const showError = useCallback((e: unknown) => setFlash({ text: errorMessage(e), tone: "error" }), []);
+  const showWarnings = useCallback((w: string[]) => setFlash({ text: w.join(" / "), tone: "error" }), []);
+  const p = useProject(current, { onMutated: refreshSummaries, onWarnings: showWarnings });
+  const view = p.view && p.view.project.name === current ? p.view : null;
+  const ext = useExternalChanges(showError);
+  const readFailures = useExternalReadFailures();
+
+  const { todayData, lastUpcoming, upcomingData, setUpDays, labelData, labelsData, cross, refreshAll, labelName } = useCrossViews({
+    nav: viewNav,
+    today,
+    inbox: app.inbox,
+    showError,
+    showWarnings,
+    refreshSummaries,
+  });
+
+  const search = useSearch(tab === "search");
+  const { qa, openQuickAdd, closeQuickAdd, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+
+  // ---- 画面の切り替え ----
+  const goTab = (id: Tab) => {
+    if (id === "list") {
+      setDrawer(true); // 一覧はドロワーを開く (選択は移らない)
+      return;
+    }
+    setTab(id);
+  };
+  const navigateTo = (target: Nav) => {
+    setDrawer(false);
+    setDetail(null);
+    if (target.kind === "today") setTab("today");
+    else if (target.kind === "upcoming") setTab("upcoming");
+    else {
+      setTab("list");
+      setNav(target);
+    }
+  };
+  /** タスクの詳細を開く (別のプロジェクトのタスクでも、元の画面を保ったまま)。 */
+  const openTaskAt = (project: string, no: number) => {
+    if (project !== app.inbox && !summaries.some((s) => s.name === project)) {
+      setFlash({ text: "タスクが見つかりません", tone: "error" });
+      return;
+    }
+    setDrawer(false);
+    closeQuickAdd();
+    setDetail({ project, no });
+  };
+  const openCross = (t: Task) => openTaskAt(t.project, t.no);
+
+  // 詳細を開いた先にタスクが無い (通知を受けてから消えた) / 読み込めない: 閉じて知らせる
+  useEffect(() => {
+    if (!detail) return;
+    if (p.error) {
+      setDetail(null);
+      return;
+    }
+    if (view && !view.tasks.some((t) => t.no === detail.no)) {
+      setDetail(null);
+      setFlash({ text: "タスクが見つかりません", tone: "error" });
+    }
+  }, [detail, view, p.error]);
+
+  // ---- リマインダー・バックエンドのイベント (Main と同じ) ----
+  const reminders = useReminders({
+    onError: showError,
+    onInfo: (text) => setFlash({ text, tone: "info" }),
+    complete: (project, no) => ((listProject || detail) && project === current ? p.completeTask(no, true) : cross.setDone(project, no, true)),
+    openTask: (project, no) => openTaskAt(project, no),
+  });
+  const wired = useRef({ openTaskAt, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
+  wired.current = { openTaskAt, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask };
+  useEffect(() => {
+    const offs = [
+      onOpenTask((project, no) => {
+        wired.current.removeTask(project, no);
+        wired.current.openTaskAt(project, no);
+      }),
+      onNotificationError((text) => setFlash({ text, tone: "error" })),
+      // アプリに戻ったとき: 離れている間に変わった分 (同期、発火したリマインダー) を取り直す
+      onWindowShown(() => {
+        wired.current.refreshAll();
+        void wired.current.fetchPending();
+      }),
+      onProjectChanged((name, reason) => {
+        if (reason === "external") setFlash({ text: `「${name}」の変更を取り込みました`, tone: "info" });
+      }),
+      onProjectsChanged(() => {
+        void refreshSummaries();
+        loadDisplayName();
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [refreshSummaries, loadDisplayName]);
+  const watchFailed = useCallback((m: string) => setFlash({ text: `ファイルの変更監視を開始できません (${m})`, tone: "error" }), []);
+  useEffect(() => {
+    if (app.watchError) watchFailed(app.watchError);
+  }, [app.watchError, watchFailed]);
+  useEffect(() => onWatchFailed(watchFailed), [watchFailed]);
+  useEffect(() => {
+    if (flash?.tone !== "info") return;
+    const id = window.setTimeout(() => setFlash(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [flash]);
+
+  const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
+  const syncNow = syncClickable ? () => void sync.syncNow(true) : undefined;
+  const header = { fill: true as const, sync: syncState, onMenu: () => setDrawer(true), onFab: openQuickAdd, onTabChange: goTab };
+
+  // ---- 層: 帯 + クイック追加 + ドロワー ----
+  const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
+  const layers = (
+    <>
+      <div style={{ position: "absolute", left: 0, right: 0, top: "calc(env(safe-area-inset-top) + 56px)", maxHeight: "40%", overflowY: "auto", pointerEvents: "auto" }}>
+        <Banners
+          reminders={{
+            items: reminders.items,
+            today,
+            notifyTime: reminders.notifyTime,
+            onDone: (item) => void reminders.done(item),
+            onSnooze: (item, until) => void reminders.snooze(item, until),
+            onOpen: reminders.open,
+            onDismiss: reminders.dismiss,
+            onDismissAll: reminders.clear,
+          }}
+          saveErrors={saveErrors}
+          onRetrySave={(project) => void api.retrySave(project).catch(() => undefined)}
+          readFailures={readFailures}
+          held={ext.held}
+          heldFileName={heldFileName}
+          onResolve={(project, choice) => void ext.resolve(project, choice)}
+          invalidCount={invalidCount}
+          onReveal={reveal}
+          onReload={() => void p.reload().catch(() => undefined)}
+          notice={p.notice}
+          onClearNotice={p.clearNotice}
+          flash={flash}
+          onClearFlash={() => setFlash(null)}
+          sync={{
+            suspect: syncStatus?.suspect
+              ? {
+                  side: syncStatus.suspect,
+                  target: targetName(sync.settings?.backend),
+                  busy: sync.busy === "recover",
+                  error: sync.recoverError,
+                  onRecover: (mode) => void sync.recover(mode),
+                }
+              : undefined,
+            errorMessage: syncErrorMessage,
+            onDismissError: () => setDismissedSyncError(syncStatus?.message ?? null),
+            conflicts: syncConflicts.conflicts,
+            onOpenConflict: reveal,
+            onDismissConflict: syncConflicts.dismissConflict,
+          }}
+        />
+      </div>
+      <AnimatePresence initial={false}>
+        {qa.open && <MobileQuickAddSheet key="quickAdd" tokens={tokens} onClose={closeQuickAdd} />}
+        {drawer && (
+          <Drawer
+            key="drawer"
+            safeArea
+            counts={counts}
+            projects={summaries}
+            active={tab === "search" ? undefined : viewNav}
+            syncState={syncState}
+            lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
+            syncOffText="同期オフ"
+            syncErrorText={syncErrorText(syncStatus, syncClickable)}
+            onSyncClick={syncNow}
+            displayName={displayName}
+            onNavigate={navigateTo}
+            onClose={() => setDrawer(false)}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+
+  /** 読み込み中 / 失敗の本文 (タブとヘッダーはそのまま)。 */
+  const frame = (title: string, text: string, tone: "muted" | "danger" = "muted", retry?: () => void) => (
+    <MobileShell
+      fill
+      header={<MobileHeader title={title} safeArea sync={syncState} onMenu={header.onMenu} />}
+      tab={tab}
+      onTabChange={goTab}
+      overlay={layers}
+    >
+      <div
+        role={tone === "danger" ? "alert" : undefined}
+        style={{ padding: "var(--space-6) 16px", textAlign: "center", fontSize: 14, color: tone === "danger" ? "var(--color-danger)" : "var(--color-text-secondary)" }}
+      >
+        {text}
+        {retry && (
+          <div style={{ paddingTop: "var(--space-3)" }}>
+            <button
+              type="button"
+              onClick={retry}
+              style={{ padding: "8px 12px", border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 14, fontWeight: 600, color: "var(--color-accent)", cursor: "pointer" }}
+            >
+              再試行
+            </button>
+          </div>
+        )}
+      </div>
+    </MobileShell>
+  );
+
+  // ---- タスク詳細 (全画面) ----
+  if (detail) {
+    const openTask = view?.tasks.find((t) => t.no === detail.no);
+    if (!view || !openTask) {
+      return (
+        <MobileShell
+          fill
+          header={<MobileHeader title="タスク詳細" safeArea showBack onBack={() => setDetail(null)} />}
+          overlay={layers}
+        >
+          <div style={{ padding: "var(--space-6) 16px", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>読み込み中…</div>
+        </MobileShell>
+      );
+    }
+    return (
+      <MobileTaskDetail
+        key={`${detail.project}/${openTask.no}`}
+        live
+        fill
+        today={today}
+        task={openTask}
+        subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
+        project={view.project}
+        section={openTask.category ?? undefined}
+        onBack={() => setDetail(null)}
+        onToggleDone={(done) => void p.completeTask(openTask.no, done)}
+        onToggleSubtask={(t, done) => void p.completeTask(t.no, done)}
+        overlay={layers}
+      />
+    );
+  }
+
+  // ---- 本文 ----
+  if (tab === "today") {
+    const d = todayData.data;
+    if (todayData.error) return frame("今日", todayData.error, "danger");
+    if (!d) return frame("今日", "読み込み中…");
+    return (
+      <MobileToday
+        live
+        {...header}
+        today={today}
+        overdue={d.overdue}
+        todays={d.today}
+        onToggleDone={(t, done) => void cross.toggleDone(t, done)}
+        onOpenTask={openCross}
+        onReschedule={() => void api.rescheduleOverdue(today, today).catch(showError).finally(refreshAll)}
+        overlay={layers}
+      />
+    );
+  }
+  if (tab === "upcoming") {
+    const d = lastUpcoming.current;
+    if (upcomingData.error) return frame("近日", upcomingData.error, "danger");
+    if (!d) return frame("近日", "読み込み中…");
+    return (
+      <MobileUpcoming
+        live
+        {...header}
+        today={today}
+        tasks={d.days.flatMap((g) => g.tasks)}
+        onToggleDone={(t, done) => void cross.toggleDone(t, done)}
+        onOpenTask={openCross}
+        onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
+        overlay={layers}
+      />
+    );
+  }
+  if (tab === "search") {
+    return (
+      <MobileSearch
+        {...header}
+        today={today}
+        query={search.query}
+        onChangeQuery={search.setQuery}
+        includeDone={search.includeDone}
+        onToggleIncludeDone={search.toggleIncludeDone}
+        hits={search.hits}
+        busy={search.busy}
+        onOpenHit={(h: SearchHit) => openCross(h.task)}
+        onToggleDone={(h, done) => void cross.toggleDone(h.task, done).then(() => search.refresh())}
+        overlay={layers}
+      />
+    );
+  }
+  if (nav.kind === "labels") {
+    const d = labelsData.data;
+    if (labelsData.error) return frame("ラベル", labelsData.error, "danger");
+    if (!d) return frame("ラベル", "読み込み中…");
+    return <MobileLabels {...header} labels={d.labels} counts={d.counts} onOpenLabel={(name) => setNav({ kind: "label", name })} overlay={layers} />;
+  }
+  if (nav.kind === "label") {
+    const d = labelData.data;
+    if (labelData.error) return frame(`@${nav.name ?? ""}`, labelData.error, "danger");
+    if (!d || !labelName) return frame(`@${nav.name ?? ""}`, "読み込み中…");
+    return (
+      <MobileLabelDetail
+        {...header}
+        today={today}
+        label={d.label.name}
+        tasks={d.tasks}
+        onToggleDone={(t, done) => void cross.toggleDone(t, done)}
+        onOpenTask={openCross}
+        overlay={layers}
+      />
+    );
+  }
+  // 受信トレイ / プロジェクト
+  const title = current === app.inbox ? "受信トレイ" : current;
+  if (p.error) return frame(title, p.error, "danger", () => void p.reload().catch(() => undefined));
+  if (!view) return frame(title, "読み込み中…");
+  return (
+    <MobileProjectView
+      key={current}
+      live
+      {...header}
+      tab="list"
+      today={today}
+      title={title}
+      project={current}
+      tasks={view.tasks}
+      sections={view.sections}
+      projects={summaries}
+      onToggleDone={(t, done) => void p.completeTask(t.no, done)}
+      onOpenTask={(t) => setDetail({ project: current, no: t.no })}
+      overlay={layers}
+    />
+  );
+}

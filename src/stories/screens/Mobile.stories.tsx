@@ -1,9 +1,11 @@
+import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { TODAY, projects, sections, tasks } from "../../mock/data";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
 import { MobileTaskDetail } from "../../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../../views/mobile/MobileToday";
+import type { Task } from "../../types/model";
 import { MobileUpcoming } from "../../views/mobile/MobileUpcoming";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
@@ -73,4 +75,31 @@ export const M06: Story = {
 export const M07: Story = {
   name: "M-07 設定",
   render: () => <MobileSettings />,
+};
+
+// ---- Phase 6: 実データ (live) で動かす画面。チェックは task.progress を書き換えて呼び出し側が持つ。fill は実機と同じ 100dvh / セーフエリア ----
+function useTasks(initial: Task[]) {
+  const [list, setList] = useState(initial);
+  const toggle = (t: Task, done: boolean) => setList((cur) => cur.map((x) => (x.no === t.no ? { ...x, progress: done ? 100 : 0 } : x)));
+  return { list, toggle };
+}
+
+function LiveProject() {
+  const { list, toggle } = useTasks(shopping);
+  return <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+}
+
+export const M01Live: Story = {
+  name: "M-01 データ入り (fill)",
+  render: () => <LiveProject />,
+};
+
+function LiveTodayNoOverdue() {
+  const { list, toggle } = useTasks([...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]);
+  return <MobileToday live fill overdue={[]} todays={list} today={TODAY} onToggleDone={toggle} />;
+}
+
+export const M04NoOverdue: Story = {
+  name: "M-04 期限切れなし",
+  render: () => <LiveTodayNoOverdue />,
 };
