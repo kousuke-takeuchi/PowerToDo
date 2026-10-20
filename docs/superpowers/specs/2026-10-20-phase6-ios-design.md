@@ -204,3 +204,4 @@
 | 2026-10-20 | iOS の CI はコンパイル確認だけ。署名・アップロードは手元 | 署名の秘密を CI に置かない。所有者 1 人の内部テスト |
 | 2026-10-20 | Google ログインは `ASWebAuthenticationSession` (Safari + ディープリンクではなく) | アプリ内で完結し、戻りの URL を確実に受け取れる。回線監視と同じ Swift プラグインに入れる |
 | 2026-10-20 | iOS の Tailscale の状態フォルダは `<アプリのデータ>/tailscale` (デスクトップと同じ `tailnet::state_dir`)。試作の `Library/Application Support/tailnet` とは別で、試作でログインした状態は引き継がない。作成時にバックアップから除外する | `has_tailnet_login` (起動時にログイン済みかの判定) を共有するため。復元した別の端末にノード鍵が複製されないようにする |
+| 2026-10-20 | iOS のデータフォルダ (`Documents`) の絶対パスがアプリの更新・再インストールで変わったら (保存した `dataDir` も今のも `…/Containers/Data/Application/<id>/Documents`)、`sync.json` と `fired.json` の `dataDir` を新しいパスに書き換えて引き継ぐ。それ以外のフォルダの組み合わせは今までどおり新規 | iOS はコンテナの UUID を保証しない。引き継がないと更新のたびに同期の基準の記録が消え、競合コピーや全件アップロードになり、通知も再発火する。iOS にフォルダ選択はないので、パスの変化は利用者の選択ではない |

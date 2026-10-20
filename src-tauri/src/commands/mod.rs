@@ -34,6 +34,7 @@ use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
 #[cfg(desktop)]
 use crate::store::watcher;
 use crate::store::watcher::Watcher;
+use crate::sync::state::SyncState;
 use crate::sync::{SyncEngine, SyncHost, SyncReason, SyncStatusView};
 
 use saver::{COMMON_KEY, SaveSink, SaveStatus, Saver};
@@ -809,6 +810,9 @@ pub fn startup_in(state: &AppState, fixed_dir: Option<&Path>) -> AppResult<AppSt
         && data_dir.as_deref() != Some(fixed)
     {
         drop(store);
+        if let Some(old) = data_dir.as_deref() {
+            migrate_moved_container(&state.app_data_dir, &mut state.lock_fired(), old, fixed);
+        }
         return switch_data_dir(state, &fixed.to_string_lossy());
     }
     let Some(dir) = data_dir else {
@@ -825,6 +829,54 @@ pub fn startup_in(state: &AppState, fixed_dir: Option<&Path>) -> AppResult<AppSt
         )),
         Err(e) => Err(e),
     }
+}
+
+/// `<...>/Containers/Data/Application/<id>/Documents`: the data folder iOS gives the app.
+fn is_container_documents(path: &Path) -> bool {
+    let parts: Vec<_> = path.components().rev().take(5).collect();
+    let name = |i: usize| parts.get(i).and_then(|c| c.as_os_str().to_str());
+    name(0) == Some("Documents")
+        && name(1).is_some_and(|id| !id.is_empty())
+        && name(2) == Some("Application")
+        && name(3) == Some("Data")
+        && name(4) == Some("Containers")
+}
+
+/// iOS does not keep the app container's path across updates and reinstalls. When the saved data
+/// folder and the current one are both container `Documents` folders (the container moved: iOS
+/// has no folder picker, so it is not a choice), the records tied to the folder by its absolute
+/// path follow it: `sync.json` (else the first sync after an update plans without its base) and
+/// `fired.json` (else reminders fire again). Any other pair of folders is left alone, so those
+/// records still start fresh. `true` when something was rewritten. Write failures are logged.
+pub fn migrate_moved_container(
+    app_data_dir: &Path,
+    fired: &mut Fired,
+    old: &Path,
+    new: &Path,
+) -> bool {
+    if old == new || !is_container_documents(old) || !is_container_documents(new) {
+        return false;
+    }
+    let mut changed = false;
+    let sync_path = app_data_dir.join(SyncState::FILE);
+    if let Ok(text) = std::fs::read_to_string(&sync_path)
+        && let Ok(mut sync) = serde_json::from_str::<SyncState>(&text)
+        && sync.data_dir == old
+    {
+        sync.data_dir = new.to_path_buf();
+        match sync.save(app_data_dir) {
+            Ok(()) => changed = true,
+            Err(e) => eprintln!("could not write {}: {e}", SyncState::FILE),
+        }
+    }
+    if fired.data_dir.as_deref() == Some(old) {
+        fired.data_dir = Some(new.to_path_buf());
+        match fired.save(app_data_dir) {
+            Ok(()) => changed = true,
+            Err(e) => eprintln!("could not write {}: {e}", Fired::FILE),
+        }
+    }
+    changed
 }
 
 /// Opens (creating if needed) `path` as the data folder and remembers it in `settings.json`.
@@ -2579,6 +2631,73 @@ mod tests {
         let (out, cancelled) = scan(&mut store, false);
         assert!(out.is_empty(), "{out:?}");
         assert!(cancelled.is_empty());
+    }
+
+    fn container(root: &Path, id: &str) -> PathBuf {
+        root.join("Containers/Data/Application")
+            .join(id)
+            .join("Documents")
+    }
+
+    #[test]
+    fn a_moved_container_keeps_the_sync_and_fired_records() {
+        use crate::sync::state::{BackendKind, FileRecord};
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let old = container(tmp.path(), "AAAA");
+        let new = container(tmp.path(), "BBBB");
+        let mut state = SyncState::new(&old, BackendKind::Nas, "http://nas:5005/powertodo/");
+        state.files.insert(
+            "受信トレイ.xlsx".into(),
+            FileRecord {
+                remote_id: "id".into(),
+                remote_version: "v1".into(),
+                remote_modified: fixed_now(),
+                local_hash: "h".into(),
+            },
+        );
+        state.save(&app).unwrap();
+        let mut fired = Fired {
+            data_dir: Some(old.clone()),
+            last_seen: Some(fixed_now()),
+            ..Fired::default()
+        };
+        fired.save(&app).unwrap();
+        assert!(migrate_moved_container(&app, &mut fired, &old, &new));
+        let loaded = SyncState::load(&app, &new, BackendKind::Nas, "http://nas:5005/powertodo/");
+        assert_eq!(loaded.files, state.files);
+        assert_eq!(fired.data_dir.as_deref(), Some(new.as_path()));
+        assert_eq!(Fired::load(&app).data_dir.as_deref(), Some(new.as_path()));
+        // Binding to the new folder keeps the records instead of dropping them.
+        assert!(!fired.bind(&new));
+    }
+
+    #[test]
+    fn other_folders_are_not_migrated() {
+        use crate::sync::state::BackendKind;
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let new = container(tmp.path(), "BBBB");
+        for old in [tmp.path().join("Documents"), tmp.path().join("elsewhere")] {
+            let state = SyncState::new(&old, BackendKind::Nas, "r");
+            state.save(&app).unwrap();
+            let mut fired = Fired {
+                data_dir: Some(old.clone()),
+                ..Fired::default()
+            };
+            assert!(!migrate_moved_container(&app, &mut fired, &old, &new));
+            assert_eq!(fired.data_dir.as_deref(), Some(old.as_path()));
+            assert!(
+                SyncState::load(&app, &new, BackendKind::Nas, "r")
+                    .files
+                    .is_empty()
+            );
+            let raw = std::fs::read_to_string(app.join(SyncState::FILE)).unwrap();
+            assert!(raw.contains(&*old.to_string_lossy()));
+        }
+        // The same folder is not a move either.
+        let mut fired = Fired::default();
+        assert!(!migrate_moved_container(&app, &mut fired, &new, &new));
     }
 
     #[test]
