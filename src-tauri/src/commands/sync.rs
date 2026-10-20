@@ -389,7 +389,12 @@ struct DtoFacts {
 }
 
 fn google_available() -> bool {
-    option_env!("POWERTODO_GOOGLE_CLIENT_ID").is_some()
+    if cfg!(target_os = "ios") {
+        // The iOS client has no secret: only its id is embedded.
+        crate::sync::oauth::ios_client_id().is_some()
+    } else {
+        option_env!("POWERTODO_GOOGLE_CLIENT_ID").is_some()
+    }
 }
 
 fn settings_dto(s: &SyncSettings, facts: DtoFacts) -> SyncSettingsDto {
@@ -1101,6 +1106,7 @@ fn drive_backend(tokens: Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>>
 /// that fails (or the browser cannot be opened) the reason is kept in `failure` and the login
 /// is cancelled, so it does not wait five minutes for a page nobody sees. The URL itself is
 /// never kept or logged: it carries `state` and `code_challenge`.
+#[cfg(not(target_os = "ios"))]
 fn guarded_opener(
     cancel: Arc<Notify>,
     failure: Arc<Mutex<Option<String>>>,
@@ -1243,6 +1249,7 @@ async fn finish_login<C: Ctx>(
 
 /// The Google login: the browser round trip (no lock held: it takes minutes), then
 /// [`finish_login`]. `Denied` and a cancel are ends, not failures.
+#[cfg(not(target_os = "ios"))]
 async fn google_login_flow<C: Ctx>(
     ctx: &C,
     oauth: &GoogleOAuth,
@@ -1251,7 +1258,18 @@ async fn google_login_flow<C: Ctx>(
     make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
 ) -> AppResult<LoginEnd> {
     require_gdrive(ctx.app_state())?;
-    let tokens = match oauth.login(open_url, cancel).await {
+    let result = oauth.login(open_url, cancel).await;
+    complete_login(ctx, oauth, result, make_backend).await
+}
+
+/// What follows the round trip, on every platform.
+async fn complete_login<C: Ctx>(
+    ctx: &C,
+    oauth: &GoogleOAuth,
+    result: Result<Tokens, OAuthError>,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
+) -> AppResult<LoginEnd> {
+    let tokens = match result {
         Ok(tokens) => tokens,
         Err(OAuthError::Cancelled) => return Ok(LoginEnd::Cancelled),
         Err(OAuthError::Denied) => return Ok(LoginEnd::Denied),
@@ -1259,6 +1277,50 @@ async fn google_login_flow<C: Ctx>(
     };
     finish_login(ctx, oauth, tokens, make_backend).await?;
     Ok(LoginEnd::Done)
+}
+
+/// The Google login on iOS: the system login sheet instead of the browser and the loopback
+/// port. `open` shows the authorization URL and returns the URL the sheet ended on.
+#[cfg(target_os = "ios")]
+async fn google_login_ios_flow<C: Ctx, Fut>(
+    ctx: &C,
+    oauth: &GoogleOAuth,
+    redirect_uri: &str,
+    open: impl FnOnce(String) -> Fut + Send,
+    cancel: impl Future<Output = ()> + Send,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
+) -> AppResult<LoginEnd>
+where
+    Fut: Future<Output = Result<String, OAuthError>> + Send,
+{
+    require_gdrive(ctx.app_state())?;
+    let result = oauth.login_with_redirect(redirect_uri, open, cancel).await;
+    complete_login(ctx, oauth, result, make_backend).await
+}
+
+/// Shows `url` in the system login sheet (only when it is Google's) and returns the URL the
+/// sheet ended on. The sheet blocks its thread until it closes, so it runs on the blocking
+/// pool, never on the main thread.
+#[cfg(target_os = "ios")]
+async fn present_login_sheet(
+    app: AppHandle,
+    url: String,
+    scheme: String,
+) -> Result<String, OAuthError> {
+    use tauri_plugin_powertodo_ios::{Error as SheetError, PowerToDoIosExt};
+    if !url.starts_with(GOOGLE_AUTH_URL_PREFIX) {
+        return Err(OAuthError::Other(
+            "Google のログイン用のアドレスを確かめられないため、ログイン画面を開きませんでした"
+                .into(),
+        ));
+    }
+    let joined =
+        tokio::task::spawn_blocking(move || app.powertodo_ios().authenticate(&url, &scheme)).await;
+    match joined {
+        Ok(Ok(callback)) => Ok(callback),
+        Ok(Err(SheetError::Cancelled)) => Err(OAuthError::Cancelled),
+        _ => Err(OAuthError::Other("ログイン画面を開けませんでした".into())),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1744,28 +1806,66 @@ pub async fn google_login(app: AppHandle) -> AppResult<GoogleLoginDto> {
         });
     };
     let cancel = Arc::clone(&slot.cancel);
-    let failure = Arc::new(Mutex::new(None));
-    let opener_app = app.clone();
-    let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |url| {
-        crate::platform::open_url(&opener_app, url)
-            .map_err(|_| "ブラウザを開けませんでした".to_string())
-    });
-    let end = google_login_flow(
-        &app,
-        &oauth,
-        open,
+    #[cfg(target_os = "ios")]
+    {
+        let end = google_login_ios(&app, &oauth, cancel).await;
+        drop(slot);
+        Ok(GoogleLoginDto {
+            outcome: end?.name(),
+        })
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let failure = Arc::new(Mutex::new(None));
+        let opener_app = app.clone();
+        let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |url| {
+            crate::platform::open_url(&opener_app, url)
+                .map_err(|_| "ブラウザを開けませんでした".to_string())
+        });
+        let end = google_login_flow(
+            &app,
+            &oauth,
+            open,
+            async move { cancel.notified().await },
+            drive_backend,
+        )
+        .await;
+        drop(slot);
+        // The browser could not be opened: the cancel above ended the wait; say why.
+        if let Some(message) = lock(&failure).take() {
+            return Err(AppError::Io { message });
+        }
+        Ok(GoogleLoginDto {
+            outcome: end?.name(),
+        })
+    }
+}
+
+/// The iOS half of `google_login`: the redirect is the reversed client id, whose scheme is what
+/// the login sheet watches for.
+#[cfg(target_os = "ios")]
+async fn google_login_ios(
+    app: &AppHandle,
+    oauth: &GoogleOAuth,
+    cancel: Arc<Notify>,
+) -> AppResult<LoginEnd> {
+    let unavailable = || AppError::Invalid {
+        message: GOOGLE_UNAVAILABLE.into(),
+    };
+    let redirect = crate::sync::oauth::ios_client_id()
+        .and_then(crate::sync::oauth::ios_redirect_uri)
+        .ok_or_else(unavailable)?;
+    let scheme = redirect.split(':').next().unwrap_or_default().to_string();
+    let sheet_app = app.clone();
+    google_login_ios_flow(
+        app,
+        oauth,
+        &redirect,
+        move |url| present_login_sheet(sheet_app, url, scheme),
         async move { cancel.notified().await },
         drive_backend,
     )
-    .await;
-    drop(slot);
-    // The browser could not be opened: the cancel above ended the wait; say why.
-    if let Some(message) = lock(&failure).take() {
-        return Err(AppError::Io { message });
-    }
-    Ok(GoogleLoginDto {
-        outcome: end?.name(),
-    })
+    .await
 }
 
 /// 「キャンセル」 while `google_login` waits for the browser. Nothing to do when none waits.

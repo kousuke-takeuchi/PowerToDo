@@ -61,6 +61,24 @@ pub fn client() -> Option<(&'static str, &'static str)> {
     ))
 }
 
+/// The iOS client id embedded at build time (no secret: an installed-app client of type iOS), or
+/// `None` for a build made without `google-oauth-ios.plist`.
+pub fn ios_client_id() -> Option<&'static str> {
+    option_env!("POWERTODO_GOOGLE_IOS_CLIENT_ID")
+}
+
+/// `com.googleusercontent.apps.<prefix>:/oauthredirect` for `<prefix>.apps.googleusercontent.com`
+/// (Google's redirect for an iOS client: the reversed client id as the scheme).
+pub fn ios_redirect_uri(client_id: &str) -> Option<String> {
+    let prefix = client_id.strip_suffix(".apps.googleusercontent.com")?;
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "com.googleusercontent.apps.{prefix}:/oauthredirect"
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OAuthError {
     #[error("Google でのログインがキャンセルされました")]
@@ -185,7 +203,8 @@ pub(crate) fn transport(e: &reqwest::Error) -> OAuthError {
 pub struct GoogleOAuth {
     http: reqwest::Client,
     client_id: String,
-    client_secret: String,
+    /// `None` for an iOS client, which has no secret.
+    client_secret: Option<String>,
     endpoints: Endpoints,
 }
 
@@ -208,7 +227,20 @@ impl GoogleOAuth {
         Ok(GoogleOAuth {
             http: http_client()?,
             client_id: client_id.into(),
-            client_secret: client_secret.into(),
+            client_secret: Some(client_secret.into()),
+            endpoints,
+        })
+    }
+
+    /// A client without a secret (iOS). Token requests then leave `client_secret` out.
+    pub fn public_client(
+        client_id: impl Into<String>,
+        endpoints: Endpoints,
+    ) -> Result<Self, OAuthError> {
+        Ok(GoogleOAuth {
+            http: http_client()?,
+            client_id: client_id.into(),
+            client_secret: None,
             endpoints,
         })
     }
@@ -216,8 +248,16 @@ impl GoogleOAuth {
     /// The embedded client against Google's real endpoints; `None` in a build without
     /// `google-oauth.json`.
     pub fn production() -> Option<Result<Self, OAuthError>> {
-        let (id, secret) = client()?;
-        Some(Self::new(id, secret, Endpoints::default()))
+        #[cfg(target_os = "ios")]
+        {
+            let id = ios_client_id()?;
+            Some(Self::public_client(id, Endpoints::default()))
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            let (id, secret) = client()?;
+            Some(Self::new(id, secret, Endpoints::default()))
+        }
     }
 
     fn authorization_url(
@@ -290,22 +330,60 @@ impl GoogleOAuth {
         }
     }
 
+    /// Login through a custom-scheme redirect (iOS): `open` shows the authorization URL (the
+    /// system login sheet) and returns the URL Google redirected to. Ends early with
+    /// [`OAuthError::Cancelled`] when `cancel` completes (`open` may return it too, for the
+    /// user closing the sheet) and with [`OAuthError::Timeout`] after 300 s.
+    pub async fn login_with_redirect<F, Fut>(
+        &self,
+        redirect_uri: &str,
+        open: F,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Result<Tokens, OAuthError>
+    where
+        F: FnOnce(String) -> Fut + Send,
+        Fut: Future<Output = Result<String, OAuthError>> + Send,
+    {
+        let verifier = new_verifier();
+        let state = random_token(32);
+        let url = self.authorization_url(redirect_uri, &state, &pkce_challenge(&verifier))?;
+        let flow = async {
+            let callback = open(url.to_string()).await?;
+            drop(url);
+            match parse_redirect(&callback, redirect_uri, &state)? {
+                Callback::Code(code) => self.exchange(&code, &verifier, redirect_uri).await,
+                Callback::Denied => Err(OAuthError::Denied),
+                Callback::Failed => {
+                    Err(OAuthError::Other("Google のログインに失敗しました".into()))
+                }
+            }
+        };
+        tokio::pin!(flow);
+        tokio::pin!(cancel);
+        tokio::select! {
+            result = &mut flow => result,
+            () = &mut cancel => Err(OAuthError::Cancelled),
+            () = tokio::time::sleep(LOGIN_TIMEOUT) => Err(OAuthError::Timeout),
+        }
+    }
+
     async fn exchange(
         &self,
         code: &str,
         verifier: &str,
         redirect_uri: &str,
     ) -> Result<Tokens, OAuthError> {
-        let json = self
-            .token_request(&[
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("code_verifier", verifier),
-                ("redirect_uri", redirect_uri),
-                ("client_id", &self.client_id),
-                ("client_secret", &self.client_secret),
-            ])
-            .await?;
+        let mut fields = vec![
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("redirect_uri", redirect_uri),
+            ("client_id", self.client_id.as_str()),
+        ];
+        if let Some(secret) = &self.client_secret {
+            fields.push(("client_secret", secret));
+        }
+        let json = self.token_request(&fields).await?;
         let access_token = string_field(&json, "access_token")?;
         let refresh_token = json
             .get("refresh_token")
@@ -338,14 +416,15 @@ impl GoogleOAuth {
     /// A new access token for `refresh_token`. [`OAuthError::InvalidGrant`] when Google no
     /// longer accepts it.
     pub async fn refresh(&self, refresh_token: &str) -> Result<AccessToken, OAuthError> {
-        let json = self
-            .token_request(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh_token),
-                ("client_id", &self.client_id),
-                ("client_secret", &self.client_secret),
-            ])
-            .await?;
+        let mut fields = vec![
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", self.client_id.as_str()),
+        ];
+        if let Some(secret) = &self.client_secret {
+            fields.push(("client_secret", secret));
+        }
+        let json = self.token_request(&fields).await?;
         Ok(AccessToken {
             access_token: string_field(&json, "access_token")?,
             expires_in: expires_in(&json),
@@ -550,6 +629,39 @@ async fn read_request_line(stream: &mut TcpStream) -> Option<String> {
     }
     let head = String::from_utf8_lossy(&buf);
     head.lines().next().map(str::to_string)
+}
+
+/// Reads the URL the login sheet ended on: our scheme and path, our `state`, and a `code` or an
+/// `error` (the same rules as [`classify`], but anything else is an error here: there is no
+/// socket to keep waiting on). No value of the URL is put into the error.
+fn parse_redirect(callback: &str, redirect_uri: &str, state: &str) -> Result<Callback, OAuthError> {
+    let wrong = || OAuthError::Other("Google からの戻り先が正しくありません".into());
+    let (Ok(url), Ok(expected)) = (Url::parse(callback), Url::parse(redirect_uri)) else {
+        return Err(wrong());
+    };
+    if url.scheme() != expected.scheme() || url.path() != expected.path() {
+        return Err(wrong());
+    }
+    let mut code = None;
+    let mut error = None;
+    let mut state_ok = false;
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "state" => state_ok = v == state,
+            "code" => code = Some(v.into_owned()),
+            "error" => error = Some(v.into_owned()),
+            _ => {}
+        }
+    }
+    if !state_ok {
+        return Err(wrong());
+    }
+    match (code, error) {
+        (Some(code), _) if !code.is_empty() => Ok(Callback::Code(code)),
+        (_, Some(e)) if e == "access_denied" => Ok(Callback::Denied),
+        (_, Some(_)) => Ok(Callback::Failed),
+        _ => Err(wrong()),
+    }
 }
 
 fn classify(request_line: &str, state: &str) -> Incoming {
@@ -940,6 +1052,206 @@ mod tests {
         assert!(!err.contains("LEAK"));
         let err = parse(r#"{"installed":{"client_id":"LEAK-ID""#).unwrap_err();
         assert!(!err.contains("LEAK"));
+    }
+
+    const IOS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string> 123-abc.apps.googleusercontent.com </string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.123-abc</string>
+</dict>
+</plist>"#;
+
+    #[test]
+    fn parse_google_ios_plist_reads_client_id() {
+        assert_eq!(
+            build_oauth::parse_google_ios_plist(IOS_PLIST),
+            Ok("123-abc.apps.googleusercontent.com".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_google_ios_plist_rejects_missing_or_empty() {
+        use build_oauth::parse_google_ios_plist as parse;
+        assert!(parse("not a plist").is_err());
+        assert!(parse("<plist><dict><key>OTHER</key><string>x</string></dict></plist>").is_err());
+        assert!(
+            parse("<plist><dict><key>CLIENT_ID</key><string> </string></dict></plist>").is_err()
+        );
+        assert!(
+            parse("<plist><dict><key>CLIENT_ID</key><integer>1</integer></dict></plist>").is_err()
+        );
+        // The messages are fixed texts: no value of the file in them.
+        let err = parse("<key>CLIENT_ID</key><string>LEAK").unwrap_err();
+        assert!(!err.contains("LEAK"));
+    }
+
+    #[test]
+    fn parse_google_ios_plist_rejects_control_characters() {
+        let text = "<key>CLIENT_ID</key><string>a\nb</string>";
+        assert!(build_oauth::parse_google_ios_plist(text).is_err());
+    }
+
+    #[test]
+    fn ios_redirect_uri_reverses_the_client_id() {
+        assert_eq!(
+            ios_redirect_uri("123-abc.apps.googleusercontent.com").as_deref(),
+            Some("com.googleusercontent.apps.123-abc:/oauthredirect")
+        );
+        assert_eq!(ios_redirect_uri("123-abc.example.com"), None);
+        assert_eq!(ios_redirect_uri(".apps.googleusercontent.com"), None);
+        assert_eq!(ios_redirect_uri(""), None);
+    }
+
+    const REDIRECT: &str = "com.example.app:/oauthredirect";
+
+    #[test]
+    fn parse_redirect_rejects_a_wrong_state() {
+        let url = format!("{REDIRECT}?code=c&state=other");
+        assert!(parse_redirect(&url, REDIRECT, "mine").is_err());
+        assert!(parse_redirect(&format!("{REDIRECT}?code=c"), REDIRECT, "mine").is_err());
+    }
+
+    #[test]
+    fn parse_redirect_reads_code() {
+        let url = format!("{REDIRECT}?code=the-code&state=mine&scope=x");
+        assert!(matches!(
+            parse_redirect(&url, REDIRECT, "mine"),
+            Ok(Callback::Code(c)) if c == "the-code"
+        ));
+        // Neither a code nor an error.
+        assert!(parse_redirect(&format!("{REDIRECT}?state=mine"), REDIRECT, "mine").is_err());
+    }
+
+    #[test]
+    fn parse_redirect_reads_access_denied() {
+        let url = format!("{REDIRECT}?error=access_denied&state=mine");
+        assert!(matches!(
+            parse_redirect(&url, REDIRECT, "mine"),
+            Ok(Callback::Denied)
+        ));
+        let url = format!("{REDIRECT}?error=server_error&state=mine");
+        assert!(matches!(
+            parse_redirect(&url, REDIRECT, "mine"),
+            Ok(Callback::Failed)
+        ));
+    }
+
+    #[test]
+    fn parse_redirect_rejects_another_scheme_or_path() {
+        let q = "?code=c&state=mine";
+        let bad = |u: String| parse_redirect(&u, REDIRECT, "mine").is_err();
+        assert!(bad(format!("com.other.app:/oauthredirect{q}")));
+        assert!(bad(format!("com.example.app:/elsewhere{q}")));
+        assert!(bad(format!("https://example.com/oauthredirect{q}")));
+        assert!(bad("not a url".to_string()));
+    }
+
+    fn public_oauth(server: &MockServer) -> GoogleOAuth {
+        GoogleOAuth::public_client("client-id-123", endpoints(server)).unwrap()
+    }
+
+    async fn token_form(server: &MockServer) -> std::collections::BTreeMap<String, String> {
+        let sent = server.received_requests().await.unwrap();
+        let sent = sent.iter().find(|r| r.url.path() == "/token").unwrap();
+        url::form_urlencoded::parse(&sent.body)
+            .into_owned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn public_client_exchange_sends_no_secret() {
+        let server = MockServer::start().await;
+        mount_token(
+            &server,
+            200,
+            json!({"access_token": "at-2", "expires_in": 3599}),
+        )
+        .await;
+        public_oauth(&server).refresh(REFRESH).await.unwrap();
+        let form = token_form(&server).await;
+        assert_eq!(form["client_id"], "client-id-123");
+        assert!(!form.contains_key("client_secret"));
+
+        let server = MockServer::start().await;
+        mount_token(
+            &server,
+            200,
+            json!({"access_token": "at", "expires_in": 3599, "refresh_token": "rt"}),
+        )
+        .await;
+        public_oauth(&server)
+            .exchange("c", "v", REDIRECT)
+            .await
+            .unwrap();
+        assert!(!token_form(&server).await.contains_key("client_secret"));
+    }
+
+    #[tokio::test]
+    async fn login_with_redirect_trades_the_code() {
+        let server = MockServer::start().await;
+        mount_token(
+            &server,
+            200,
+            json!({
+                "access_token": "at-1", "expires_in": 3599, "refresh_token": "rt-1",
+                "id_token": id_token("user@example.com"), "token_type": "Bearer"
+            }),
+        )
+        .await;
+        let g = public_oauth(&server);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let seen2 = std::sync::Arc::clone(&seen);
+        let tokens = g
+            .login_with_redirect(
+                REDIRECT,
+                move |auth_url: String| async move {
+                    let url = Url::parse(&auth_url).unwrap();
+                    let q: std::collections::BTreeMap<_, _> =
+                        url.query_pairs().into_owned().collect();
+                    *seen2.lock().unwrap() = Some(q.clone());
+                    Ok(format!("{REDIRECT}?code=the-code&state={}", q["state"]))
+                },
+                std::future::pending(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tokens.refresh_token, "rt-1");
+        assert_eq!(tokens.email.as_deref(), Some("user@example.com"));
+        let q = seen.lock().unwrap().clone().unwrap();
+        assert_eq!(q["redirect_uri"], REDIRECT);
+        assert_eq!(q["code_challenge_method"], "S256");
+        let form = token_form(&server).await;
+        assert_eq!(form["code"], "the-code");
+        assert_eq!(form["redirect_uri"], REDIRECT);
+        assert!(!form.contains_key("client_secret"));
+        assert_eq!(pkce_challenge(&form["code_verifier"]), q["code_challenge"]);
+    }
+
+    #[tokio::test]
+    async fn login_with_redirect_cancel_is_cancelled() {
+        let server = MockServer::start().await;
+        let g = public_oauth(&server);
+        let r = g
+            .login_with_redirect(
+                REDIRECT,
+                |_url: String| std::future::pending::<Result<String, OAuthError>>(),
+                async {},
+            )
+            .await;
+        assert_eq!(r.unwrap_err(), OAuthError::Cancelled);
+        // The user closing the sheet is the opener's Cancelled, passed through.
+        let r = g
+            .login_with_redirect(
+                REDIRECT,
+                |_url: String| async { Err(OAuthError::Cancelled) },
+                std::future::pending(),
+            )
+            .await;
+        assert_eq!(r.unwrap_err(), OAuthError::Cancelled);
     }
 
     #[test]
