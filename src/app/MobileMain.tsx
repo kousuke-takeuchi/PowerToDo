@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import { MobileHeader } from "../components/MobileHeader";
 import type { TabBarProps } from "../components/TabBar";
-import type { AppStateDto, SearchHit, Task } from "../types/model";
+import type { AppStateDto, Label, SearchHit, Task } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
 import { DateSheet } from "../views/mobile/DateSheet";
 import { Drawer } from "../views/mobile/Drawer";
@@ -25,6 +25,7 @@ import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
+import { insertToken } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
@@ -101,7 +102,24 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   });
 
   const search = useSearch(tab === "search");
-  const { qa, openQuickAdd, closeQuickAdd, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, closeQuickAdd, setText, submit, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+
+  // ラベルのシートに並べる、ストアにあるラベル (詳細を開いたとき読む)
+  const [allLabels, setAllLabels] = useState<Label[]>([]);
+  const detailOpen = detail !== null;
+  useEffect(() => {
+    if (!detailOpen) return;
+    let cancelled = false;
+    api
+      .labels()
+      .then((d) => {
+        if (!cancelled) setAllLabels(d.labels);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [detailOpen]);
 
   // ---- 行の操作 (スワイプ / 長押しのシート)。開いているプロジェクトの行は useProject、横断ビューの行は cross (操作のあと refreshAll) ----
   const closeSheet = () => setSheet(null);
@@ -267,7 +285,20 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const layers = (
     <>
       <AnimatePresence initial={false}>
-        {qa.open && <MobileQuickAddSheet key="quickAdd" tokens={tokens} onClose={closeQuickAdd} />}
+        {qa.open && (
+          <MobileQuickAddSheet
+            key="quickAdd"
+            fill
+            tokens={tokens}
+            text={qa.text}
+            onTextChange={setText}
+            onSubmit={(t) => void submit(t).then(refreshAll)}
+            busy={qa.busy}
+            error={qa.error}
+            onInsert={(kind) => setText(insertToken(qa.text, kind))}
+            onClose={closeQuickAdd}
+          />
+        )}
         {drawer && (
           <Drawer
             key="drawer"
@@ -384,8 +415,16 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         project={view.project}
         section={openTask.category ?? undefined}
         onBack={() => setDetail(null)}
-        onToggleDone={(done) => void p.completeTask(openTask.no, done)}
-        onToggleSubtask={(t, done) => void p.completeTask(t.no, done)}
+        onToggleDone={(done) => void p.completeTask(openTask.no, done).then(refreshAll)}
+        onToggleSubtask={(t, done) => void p.completeTask(t.no, done).then(refreshAll)}
+        onChange={(patch) => void p.updateTask(openTask.no, patch).then(refreshAll)}
+        onAddSubtask={(title) => void p.addSubtask(openTask.no, title).then(refreshAll)}
+        onDelete={() => {
+          setDetail(null);
+          void p.deleteTask(openTask.no).then(refreshAll);
+        }}
+        labels={allLabels}
+        onParseRecurrence={api.parseRecurrence}
         banner={banner}
         overlay={layers}
       />

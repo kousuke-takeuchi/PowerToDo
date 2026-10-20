@@ -10,6 +10,9 @@ import type { Task } from "../../types/model";
 import { MobileUpcoming } from "../../views/mobile/MobileUpcoming";
 import { BottomSheet } from "../../views/mobile/BottomSheet";
 import { DateSheet } from "../../views/mobile/DateSheet";
+import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
+import { SheetFrame } from "../../views/mobile/SheetFrame";
+import { insertToken } from "../../app/quickAddInsert";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
@@ -168,4 +171,36 @@ export const M01Menu: Story = {
 export const M01DateSheet: Story = {
   name: "M-01 日付のシート (fill)",
   render: () => <LiveWithSheet kind="date" />,
+};
+
+// ---- Task 11: 入力中のクイック追加 / 編集できる詳細 ----
+function TypingQuickAdd() {
+  const [text, setText] = useState("牛乳");
+  // 実機は parse_quick_add の結果から作る。Story は「明日」だけ日付として色を付ける。
+  const i = text.indexOf("明日");
+  const tokens = i < 0 ? [{ text }] : [{ text: text.slice(0, i) }, { text: "明日", kind: "date" as const }, ...(text.slice(i + 2) ? [{ text: text.slice(i + 2) }] : [])];
+  return (
+    <SheetFrame>
+      <MobileQuickAddSheet tokens={tokens} text={text} onTextChange={setText} onSubmit={() => undefined} onInsert={(k) => setText(insertToken(text, k))} />
+    </SheetFrame>
+  );
+}
+
+export const M02Typing: Story = {
+  name: "M-02 入力中 (ツールバーで日付を足した)",
+  render: () => <TypingQuickAdd />,
+};
+
+export const M03DateSheet: Story = {
+  name: "M-03 日付のシートを開いた",
+  render: () => (
+    <MobileTaskDetail
+      task={{ ...tasks[0], labels: ["食品", "急ぎ"], reminders: ["-30m"], note: "近所のスーパーで。卵は 10 個入り。" }}
+      subtasks={byNo(4, 5, 7)}
+      project={projects.find((p) => p.name === "買い物")!}
+      section="今週"
+      onChange={() => undefined}
+      initialSheet="date"
+    />
+  ),
 };
