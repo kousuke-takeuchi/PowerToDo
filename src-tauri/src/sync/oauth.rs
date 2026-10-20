@@ -54,6 +54,7 @@ const CANCELLED_HTML: &str = "<!doctype html><html lang=\"ja\"><head><meta chars
 
 /// The OAuth client embedded at build time (`build.rs`), or `None` for a build made without
 /// `google-oauth.json`: Google Drive is then unavailable.
+#[cfg(not(target_os = "ios"))]
 pub fn client() -> Option<(&'static str, &'static str)> {
     Some((
         option_env!("POWERTODO_GOOGLE_CLIENT_ID")?,

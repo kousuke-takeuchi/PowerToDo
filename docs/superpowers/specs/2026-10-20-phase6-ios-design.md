@@ -148,9 +148,9 @@
 
 ## 6. iPhone での Google ログイン
 - iOS 用の OAuth クライアント (Google Cloud の同じプロジェクト、種類 iOS、Bundle ID `app.powertodo`)。クライアントシークレットは無い
-- リダイレクトは `com.googleusercontent.apps.<クライアント ID の数字部分>:/oauthredirect`。Info.plist の URL スキームに登録する
+- リダイレクトは `com.googleusercontent.apps.<クライアント ID の数字部分>:/oauthredirect`。Info.plist の URL スキームへの登録は要らない (`callbackURLScheme` で足りる。§9 の決定ログ)
 - ログイン画面は `ASWebAuthenticationSession` で開く (§3.3 の Swift プラグインに入れる)。戻ってきた URL を Rust に渡し、PKCE と `state` の確認、コードの交換、トークンの扱いは Phase 4 の `oauth.rs` を使う (ループバックの受け口の代わりにこの URL を受け取る経路を足す。秘密が無いときはトークン交換で送らない)
-- クライアント ID は、デスクトップと同じく git 管理外のファイルからビルド時に埋め込む (`POWERTODO_GOOGLE_IOS_OAUTH_PLIST` = Google からダウンロードした plist のパス、無ければ `src-tauri/google-oauth-ios.plist`)。URL スキームも同じ値から作る (`Info.plist` へはビルド時に書く。値はコミットしない)
+- クライアント ID は、デスクトップと同じく git 管理外のファイルからビルド時に埋め込む (`POWERTODO_GOOGLE_IOS_OAUTH_PLIST` = Google からダウンロードした plist のパス、無ければ `src-tauri/google-oauth-ios.plist`)。リダイレクトの URL もこの値から作る (値はコミットしない)
 - 無ければ「このビルドでは Google Drive を使えません」(デスクトップと同じ)
 - Drive の同期 (`gdrive.rs`) はデスクトップと同じ
 

@@ -113,7 +113,12 @@ fn embed_windows_manifest() {
 /// `google-oauth.json` next to this file. Without the file nothing is embedded and the build
 /// still passes (CI): `sync::oauth::client()` is then `None`. Only the `cargo:` lines below
 /// are printed, never a value from the file, and a malformed file only produces a warning.
+/// Not for iOS targets: the desktop client has a secret that must not reach the iOS binary
+/// (see `embed_google_ios_oauth`).
 fn embed_google_oauth() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
+        return;
+    }
     println!("cargo:rerun-if-env-changed=POWERTODO_GOOGLE_OAUTH_JSON");
     let path = match std::env::var_os("POWERTODO_GOOGLE_OAUTH_JSON") {
         Some(p) if !p.is_empty() => PathBuf::from(p),
