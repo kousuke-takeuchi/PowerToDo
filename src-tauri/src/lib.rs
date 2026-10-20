@@ -203,6 +203,7 @@ pub fn run() {
         } => {
             if launched.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 commands::sync::on_resumed(handle);
+                scheduler::on_resumed(handle);
             }
         }
         // iOS: going to the background. Nothing is closed (spec 3.4): the proxy is checked on
@@ -215,6 +216,7 @@ pub fn run() {
             if let Some(state) = handle.try_state::<AppState>() {
                 state.flush_all();
             }
+            scheduler::on_suspended(handle);
         }
         // Quitting (Cmd+Q, or the last window closing) must not drop an external change the
         // user has not decided about: keep running and let the UI ask. The `quit` command exits
