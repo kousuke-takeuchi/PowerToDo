@@ -1,0 +1,19 @@
+11:10:00.010 state dir: .../Library/Application Support/tailnet
+11:10:00.103 tn_start returned 0 after 85.506625ms
+11:10:00.104 tn_proxy_open: 127.0.0.1:Some(63401) after 458.209µs
+11:10:00.106 autotest: begin
+11:10:00.117 ready: proxy on 127.0.0.1:Some(63401)
+11:10:00.118 status: starting
+11:10:00.118 autotest: login command done (11.560292ms)
+11:10:00.18111:10:00.181  tn_proxy_open: 127.0.0.1:Some(63402) after 180.5µs
+ready: proxy on 127.0.0.1:Some(63402)
+11:10:04.119 status: needs_login (login URL host: login.tailscale.com)
+11:10:04.204 autotest: needs_login, URL host login.tailscale.com (4.097725667s after start of autotest)
+11:10:09.224 autotest: probe via proxy: error after 5.005348209s: error sending request for url (http://example.com/) <- client error (Connect) <- error connecting to socks proxy <- SOCKS error: general server failure
+11:10:09.225 tn_proxy_close
+11:10:09.226 autotest: connect to the closed port 63402: refused as expected (Connection refused (os error 61))
+11:10:09.22611:10:09.226 ready: proxy on 127.0.0.1:Some(63417) 
+tn_proxy_open: 127.0.0.1:Some(63417) after 309.083µs
+11:10:09.227 autotest: reopened proxy, port Some(63402) -> Some(63417)
+11:10:14.231 autotest: probe after reopen: error after 5.003077541s: error sending request for url (http://example.com/) <- client error (Connect) <- error connecting to socks proxy <- SOCKS error: general server failure
+11:10:14.232 autotest: end (14.125119667s)
