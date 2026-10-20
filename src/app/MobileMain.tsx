@@ -5,6 +5,8 @@ import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, o
 import { MobileHeader } from "../components/MobileHeader";
 import type { TabBarProps } from "../components/TabBar";
 import type { AppStateDto, SearchHit, Task } from "../types/model";
+import { BottomSheet } from "../views/mobile/BottomSheet";
+import { DateSheet } from "../views/mobile/DateSheet";
 import { Drawer } from "../views/mobile/Drawer";
 import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
 import { MobileProjectView } from "../views/mobile/MobileProjectView";
@@ -14,6 +16,9 @@ import { MobileShell } from "../views/mobile/MobileShell";
 import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
+import { MoveSheet } from "../views/mobile/MoveSheet";
+import { PrioritySheet } from "../views/mobile/PrioritySheet";
+import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
 import type { SidebarProps } from "../views/Sidebar";
 import { Banners } from "./Banners";
 import { useToday } from "./hooks";
@@ -32,6 +37,8 @@ import { formatSynced, syncErrorText, targetName } from "./syncText";
 type Nav = SidebarProps["active"];
 type Tab = NonNullable<TabBarProps["active"]>;
 type Flash = { text: string; tone: "error" | "info" };
+/** 開いている下部シート。状態はここ (画面の子ではなく MobileMain) に持つ: 一覧の再読み込みや画面の差し替えで失わない。 */
+type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | { kind: "reschedule" } | null;
 
 /**
  * iPhone の通常画面 (仕様 §4): 下部タブ (今日 / 近日 / 検索 / 一覧) + ドロワー + プロジェクト / ラベルの画面 + タスク詳細。
@@ -48,6 +55,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
+  const [sheet, setSheet] = useState<SheetState>(null);
 
   const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
@@ -87,6 +95,33 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
 
   const search = useSearch(tab === "search");
   const { qa, openQuickAdd, closeQuickAdd, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+
+  // ---- 行の操作 (スワイプ / 長押しのシート)。開いているプロジェクトの行は useProject、横断ビューの行は cross (操作のあと refreshAll) ----
+  const closeSheet = () => setSheet(null);
+  const inCurrent = (t: Task) => (listProject || !!detail) && t.project === current;
+  const setDue = (t: Task, date?: string) => {
+    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? undefined : null });
+    else void cross.setDue(t, date ?? null);
+  };
+  const setPriority = (t: Task, priority: 1 | 2 | 3 | 4) => {
+    if (inCurrent(t)) void p.updateTask(t.no, { priority });
+    else void cross.setPriority(t, priority);
+  };
+  const removeTask = (t: Task) => {
+    if (detail && detail.project === t.project && detail.no === t.no) setDetail(null);
+    if (inCurrent(t)) void p.deleteTask(t.no);
+    else void cross.remove(t);
+  };
+  const moveTask = async (t: Task, toProject: string, toSection: string | null) => {
+    try {
+      await api.moveTask(t.project, t.no, toProject, toSection);
+    } catch (e) {
+      showError(e);
+    }
+    if (listProject || detail) void p.reload().catch(() => undefined);
+    refreshAll();
+  };
+  const rowOps = { onSwipeDate: (t: Task) => setSheet({ kind: "date", task: t }), onTaskMenu: (t: Task) => setSheet({ kind: "menu", task: t }) };
 
   // ---- 画面の切り替え ----
   const goTab = (id: Tab) => {
@@ -244,6 +279,45 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
           />
         )}
       </AnimatePresence>
+      <BottomSheet
+        open={sheet !== null}
+        title={sheet === null ? undefined : sheet.kind === "menu" ? sheet.task.title : sheet.kind === "reschedule" ? "期限切れの日付" : "日付"}
+        onClose={closeSheet}
+      >
+        {sheet?.kind === "menu" && (
+          <TaskMenuSheet
+            task={sheet.task}
+            onDate={() => setSheet({ kind: "date", task: sheet.task })}
+            onPriority={() => setSheet({ kind: "priority", task: sheet.task })}
+            onMove={sheet.task.parentNo === undefined ? () => setSheet({ kind: "move", task: sheet.task }) : undefined}
+            onDelete={() => removeTask(sheet.task)}
+            onClose={closeSheet}
+          />
+        )}
+        {sheet?.kind === "date" && (
+          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => setDue(sheet.task, v.date)} onClose={closeSheet} />
+        )}
+        {sheet?.kind === "priority" && <PrioritySheet value={sheet.task.priority} onChange={(v) => setPriority(sheet.task, v)} onClose={closeSheet} />}
+        {sheet?.kind === "move" && (
+          <MoveSheet
+            projects={summaries}
+            sections={view && view.project.name === sheet.task.project ? view.sections : []}
+            current={{ project: sheet.task.project, section: sheet.task.category }}
+            onMove={(project, section) => void moveTask(sheet.task, project, section)}
+            onClose={closeSheet}
+          />
+        )}
+        {sheet?.kind === "reschedule" && (
+          <DateSheet
+            dateOnly
+            today={today}
+            onChange={(v) => {
+              if (v.date) void api.rescheduleOverdue(today, v.date).catch(showError).finally(refreshAll);
+            }}
+            onClose={closeSheet}
+          />
+        )}
+      </BottomSheet>
     </>
   );
 
@@ -325,7 +399,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         todays={d.today}
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
         onOpenTask={openCross}
-        onReschedule={() => void api.rescheduleOverdue(today, today).catch(showError).finally(refreshAll)}
+        onReschedule={() => setSheet({ kind: "reschedule" })}
+        {...rowOps}
         overlay={layers}
       />
     );
@@ -343,6 +418,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
         onOpenTask={openCross}
         onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
+        {...rowOps}
         overlay={layers}
       />
     );
@@ -404,6 +480,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       projects={summaries}
       onToggleDone={(t, done) => void p.completeTask(t.no, done)}
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
+      {...rowOps}
       overlay={layers}
     />
   );

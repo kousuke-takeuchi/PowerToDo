@@ -14,6 +14,7 @@ import { useDone } from "../useDone";
 import { Drawer } from "./Drawer";
 import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
+import { SwipeRow } from "./SwipeRow";
 import type { TabBarProps } from "../../components/TabBar";
 import type { QuickAddToken } from "../QuickAddDialog";
 
@@ -55,6 +56,9 @@ export type MobileProjectViewProps = {
   banner?: React.ReactNode;
   /** タスクが 1 件もないときの文言 (live のみ)。 */
   emptyText?: string;
+  /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。どちらも省略すると行はスワイプしない。 */
+  onSwipeDate?: (t: Task) => void;
+  onTaskMenu?: (t: Task) => void;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -116,6 +120,8 @@ export function MobileProjectView({
   overlay: externalOverlay,
   banner,
   emptyText = "タスクはありません",
+  onSwipeDate,
+  onTaskMenu,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
@@ -134,12 +140,22 @@ export function MobileProjectView({
       return next;
     });
 
+  /** live のとき、行をスワイプ / 長押しのラッパーで包む。 */
+  const swipeable = (t: Task, row: React.ReactNode): React.ReactNode =>
+    live && (onSwipeDate || onTaskMenu) ? (
+      <SwipeRow key={t.no} onComplete={() => toggle(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+        {row}
+      </SwipeRow>
+    ) : (
+      row
+    );
+
   const renderRow = (t: Task): React.ReactNode => {
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
     return (
       <div key={t.no}>
-        <TaskRow
+        {swipeable(t, <TaskRow
           variant="mobile"
           title={t.title}
           done={isDone(t)}
@@ -149,12 +165,12 @@ export function MobileProjectView({
           onToggleDone={() => toggle(t)}
           onClick={onOpenTask ? () => onOpenTask(t) : undefined}
           onToggleExpand={() => toggleExpand(t.no)}
-        />
+        />)}
         <AnimatePresence initial={false}>
           {open && (
             <Collapse key="subtasks">
               {kids.map((k) => (
-                <TaskRow key={k.no} variant="mobile" indent={1} title={k.title} done={isDone(k)} priority={priorityOf(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />
+                swipeable(k, <TaskRow key={k.no} variant="mobile" indent={1} title={k.title} done={isDone(k)} priority={priorityOf(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />)
               ))}
               <div style={{ marginLeft: 24 }}>
                 <AddTaskRow label="サブタスクを追加" onClick={onFab ?? (() => setOverlay("quickAdd"))} />

@@ -8,6 +8,7 @@ import type { TabBarProps } from "../../components/TabBar";
 import type { Task } from "../../types/model";
 import { useDone } from "../useDone";
 import { MobileShell } from "./MobileShell";
+import { SwipeRow } from "./SwipeRow";
 
 export type MobileTodayProps = {
   overdue: Task[];
@@ -28,14 +29,18 @@ export type MobileTodayProps = {
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
+  /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。 */
+  onSwipeDate?: (t: Task) => void;
+  onTaskMenu?: (t: Task) => void;
 };
 
 /** M-04: 今日 (ヘッダーに同期アイコンなし)。期限切れ (再スケジュール付き) + 今日。pen のとおりチェックの色は全行 priority-4。 */
-export function MobileToday({ overdue, todays, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onReschedule, onTabChange, overlay, banner }: MobileTodayProps) {
+export function MobileToday({ overdue, todays, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onReschedule, onTabChange, overlay, banner, onSwipeDate, onTaskMenu }: MobileTodayProps) {
   const local = useDone();
   const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
   const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
-  const row = (t: Task, showDate: boolean) => (
+  const row = (t: Task, showDate: boolean) => {
+    const r = (
     <TaskRow
       key={t.no}
       variant="mobile"
@@ -46,7 +51,15 @@ export function MobileToday({ overdue, todays, today, live, fill, sync, onToggle
       onToggleDone={() => toggle(t)}
       onClick={onOpenTask ? () => onOpenTask(t) : undefined}
     />
-  );
+    );
+    return live && (onSwipeDate || onTaskMenu) ? (
+      <SwipeRow key={t.no} onComplete={() => toggle(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+        {r}
+      </SwipeRow>
+    ) : (
+      r
+    );
+  };
   return (
     <MobileShell banner={banner} fill={fill} header={<MobileHeader title="今日" safeArea={fill} sync={sync} onMenu={onMenu} />} tab="today" onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div style={{ padding: "0 16px" }}>

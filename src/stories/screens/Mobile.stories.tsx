@@ -8,6 +8,9 @@ import { MobileTaskDetail } from "../../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../../views/mobile/MobileToday";
 import type { Task } from "../../types/model";
 import { MobileUpcoming } from "../../views/mobile/MobileUpcoming";
+import { BottomSheet } from "../../views/mobile/BottomSheet";
+import { DateSheet } from "../../views/mobile/DateSheet";
+import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -126,4 +129,43 @@ export const M01Banner: Story = {
     };
     return <Live />;
   },
+};
+
+// ---- Phase 6 Task 10: 長押しメニューと日付のシート (実データの画面に重ねた状態) ----
+function LiveWithSheet({ kind }: { kind: "menu" | "date" }) {
+  const { list, toggle } = useTasks(shopping);
+  const task = shopping[0];
+  const close = () => undefined;
+  return (
+    <MobileProjectView
+      live
+      fill
+      project="買い物"
+      tasks={list}
+      sections={sections}
+      today={TODAY}
+      onToggleDone={toggle}
+      onSwipeDate={() => undefined}
+      onTaskMenu={() => undefined}
+      overlay={
+        <BottomSheet open title={kind === "menu" ? task.title : "日付"} onClose={close}>
+          {kind === "menu" ? (
+            <TaskMenuSheet task={task} onDate={close} onPriority={close} onMove={close} onDelete={close} onClose={close} />
+          ) : (
+            <DateSheet value={task.due} time={task.dueTime} today={TODAY} onChange={close} onClose={close} />
+          )}
+        </BottomSheet>
+      }
+    />
+  );
+}
+
+export const M01Menu: Story = {
+  name: "M-01 長押しメニュー (fill)",
+  render: () => <LiveWithSheet kind="menu" />,
+};
+
+export const M01DateSheet: Story = {
+  name: "M-01 日付のシート (fill)",
+  render: () => <LiveWithSheet kind="date" />,
 };

@@ -9,6 +9,7 @@ import type { Task } from "../../types/model";
 import { useDone } from "../useDone";
 import { WeekStrip } from "../WeekStrip";
 import { MobileShell } from "./MobileShell";
+import { SwipeRow } from "./SwipeRow";
 
 /** 見出し: 今日 / 明日は「10月13日 · 今日」、それ以外は「10月16日 · 金曜日」 (pen の M-05)。 */
 function dayTitle(ymd: string, today: string): string {
@@ -36,10 +37,13 @@ export type MobileUpcomingProps = {
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
+  /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。 */
+  onSwipeDate?: (t: Task) => void;
+  onTaskMenu?: (t: Task) => void;
 };
 
 /** M-05: 近日。WeekStrip (今日から 7 日、タップで選択) + タスクのある日だけの日付グループ。行は日付チップなし (見出しが日付)。 */
-export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onSelectDay, onExtend, onTabChange, overlay, banner }: MobileUpcomingProps) {
+export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onSelectDay, onExtend, onTabChange, overlay, banner, onSwipeDate, onTaskMenu }: MobileUpcomingProps) {
   const local = useDone();
   const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
   const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
@@ -59,9 +63,16 @@ export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, o
             {tasks
               .filter((t) => t.due === ymd)
               .sort((a, b) => a.no - b.no)
-              .map((t) => (
-                <TaskRow key={t.no} variant="mobile" title={t.title} done={isDone(t)} priority={live ? t.priority : 4} onToggleDone={() => toggle(t)} onClick={onOpenTask ? () => onOpenTask(t) : undefined} />
-              ))}
+              .map((t) => {
+                const r = <TaskRow key={t.no} variant="mobile" title={t.title} done={isDone(t)} priority={live ? t.priority : 4} onToggleDone={() => toggle(t)} onClick={onOpenTask ? () => onOpenTask(t) : undefined} />;
+                return live && (onSwipeDate || onTaskMenu) ? (
+                  <SwipeRow key={t.no} onComplete={() => toggle(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+                    {r}
+                  </SwipeRow>
+                ) : (
+                  r
+                );
+              })}
           </section>
         ))}
         {live && days.length === 0 && (
