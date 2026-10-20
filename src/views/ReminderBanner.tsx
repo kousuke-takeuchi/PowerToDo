@@ -1,9 +1,10 @@
 import type React from "react";
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { Bell, ChevronDown, X } from "lucide-react";
 import { formatDue, snoozeChoices } from "../app/dates";
 import { useEscLayer } from "../app/layers";
+import { NarrowContext } from "../components/NarrowContext";
 import { Collapse } from "../motion";
 import type { ReminderItem } from "../types/model";
 import { useOutsideClose } from "./crossList";
@@ -128,9 +129,17 @@ function Summary({ item, today }: { item: ReminderItem; today: string }) {
 }
 
 function Row({ item, today, notifyTime, onDone, onSnooze, onOpen, onDismiss }: Omit<ReminderBannerProps, "items" | "onDismissAll"> & { item: ReminderItem; notifyTime: string }) {
+  const narrow = useContext(NarrowContext);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minHeight: 28 }}>
-      <Summary item={item} today={today} />
+    // 狭いときは文を一行使い、ボタンは次の行 (折り返す)
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minHeight: 28, ...(narrow ? { flexWrap: "wrap" } : null) }}>
+      {narrow ? (
+        <div style={{ flex: "1 1 100%", display: "flex" }}>
+          <Summary item={item} today={today} />
+        </div>
+      ) : (
+        <Summary item={item} today={today} />
+      )}
       <button type="button" className="hover:brightness-95" style={smallButton} onClick={() => onDone(item)} aria-label={`「${item.title}」を完了`}>
         完了
       </button>
@@ -157,6 +166,7 @@ function Row({ item, today, notifyTime, onDone, onSnooze, onOpen, onDismiss }: O
  */
 export function ReminderBanner({ items, onDone, onSnooze, onOpen, onDismiss, onDismissAll, today, notifyTime = "09:00" }: ReminderBannerProps) {
   const [expanded, setExpanded] = useState(true);
+  const narrow = useContext(NarrowContext);
   if (items.length === 0) return null;
   const rowProps = { today, notifyTime, onDone, onSnooze, onOpen, onDismiss };
   const bell = (
@@ -170,7 +180,7 @@ export function ReminderBanner({ items, onDone, onSnooze, onOpen, onDismiss, onD
       aria-label="リマインダー"
       aria-live="polite"
       style={{
-        padding: "10px 24px",
+        padding: narrow ? "10px 16px" : "10px 24px",
         background: "var(--color-accent-soft)",
         boxShadow: "inset 0 -1px 0 var(--color-border)",
         fontFamily: "var(--font-body)",
@@ -210,7 +220,7 @@ export function ReminderBanner({ items, onDone, onSnooze, onOpen, onDismiss, onD
           <AnimatePresence initial={false}>
             {expanded && (
               <Collapse key="list" duration={0.15}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 6, paddingLeft: 18 + 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 6, paddingLeft: narrow ? 0 : 18 + 12 }}>
                   <AnimatePresence initial={false}>
                     {items.map((item) => (
                       <Collapse key={keyOf(item)} duration={0.15}>

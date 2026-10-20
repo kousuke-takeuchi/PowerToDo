@@ -1,5 +1,8 @@
+import { useContext } from "react";
 import { TriangleAlert } from "lucide-react";
 import { Button } from "../components/Button";
+import { NarrowContext } from "../components/NarrowContext";
+import { BannerActions, bandNarrow } from "./BannerActions";
 import type { SyncRecoverMode } from "../types/model";
 
 export type SuspectBannerProps = {
@@ -20,6 +23,7 @@ export type SuspectBannerProps = {
  * 戻す方向を選ばせる: 同期先の内容でこの PC を戻す / この PC の内容で同期先を戻す。上書きされるファイルは archive/ に残る。
  */
 export function SuspectBanner({ side, target = "NAS", busy, error, onRecover }: SuspectBannerProps) {
+  const narrow = useContext(NarrowContext);
   return (
     <div
       role="alert"
@@ -32,23 +36,26 @@ export function SuspectBanner({ side, target = "NAS", busy, error, onRecover }: 
         background: "var(--color-accent-soft)",
         boxShadow: "inset 0 -1px 0 var(--color-border)",
         fontFamily: "var(--font-body)",
+        ...bandNarrow(narrow),
       }}
     >
       <span style={{ display: "inline-flex", color: "var(--color-danger)", flex: "0 0 auto" }}>
         <TriangleAlert size={18} />
       </span>
-      <span style={{ flex: "1 1 320px", minWidth: 0, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)", overflowWrap: "anywhere" }}>
+      <span style={{ flex: narrow ? "1 1 0" : "1 1 320px", minWidth: 0, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)", overflowWrap: "anywhere" }}>
         {side === "local"
           ? `この PC のデータフォルダが空に見えるため、同期を止めています。${target} の内容で戻すか、この PC の内容を正とするか選んでください。`
           : `${target} が空に見えるため、同期を止めています。この PC の内容で戻すか、${target} の内容を正とするか選んでください。`}
         {error && <span style={{ display: "block", color: "var(--color-danger)" }}>{error}</span>}
       </span>
-      <Button variant={side === "local" ? "primary" : "secondary"} onClick={() => onRecover?.("mirrorRemote")} disabled={busy}>
-        {`${target} の内容でこの PC を戻す`}
-      </Button>
-      <Button variant={side === "remote" ? "primary" : "secondary"} onClick={() => onRecover?.("mirrorLocal")} disabled={busy}>
-        {`この PC の内容で ${target} を戻す`}
-      </Button>
+      <BannerActions>
+        <Button variant={side === "local" ? "primary" : "secondary"} onClick={() => onRecover?.("mirrorRemote")} disabled={busy}>
+          {`${target} の内容でこの PC を戻す`}
+        </Button>
+        <Button variant={side === "remote" ? "primary" : "secondary"} onClick={() => onRecover?.("mirrorLocal")} disabled={busy}>
+          {`この PC の内容で ${target} を戻す`}
+        </Button>
+      </BannerActions>
     </div>
   );
 }

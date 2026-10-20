@@ -1,6 +1,8 @@
 import type React from "react";
 import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
+import { usePullToRefresh } from "../../app/useGestures";
+import { PullIndicator } from "../../components/PullIndicator";
 import { TabBar } from "../../components/TabBar";
 import type { TabBarProps } from "../../components/TabBar";
 
@@ -18,18 +20,30 @@ export type MobileShellProps = {
   fill?: boolean;
   /** header の下、本文の上に置く帯 (通常の流れ。本文はその分だけ縮む)。省略すると何も出さない。 */
   banner?: React.ReactNode;
+  /** 本文の先頭で下に引いて離すと呼ぶ (引っ張って更新)。完了を待って目印を畳む。省略すると引いても何もしない。 */
+  onRefresh?: () => Promise<void>;
+  /** 更新中の目印を強制して出す (Storybook 用)。省略すると onRefresh の実行中だけ出す。 */
+  refreshing?: boolean;
 }; // 390x844、TabBar 下固定、FAB 56 右下
 
 /**
  * モバイルのシェル 390x844: header + body (flex 1) + TabBar (下)。FAB は右 16 / タブの上 16。
  * overflow: hidden はルートだけ。body はクリップしない。
  */
-export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay, fill, banner }: MobileShellProps) {
+export function MobileShell({ header, children, tab, onTabChange, fab, onFab, overlay, fill, banner, onRefresh, refreshing: forceRefreshing }: MobileShellProps) {
+  const pulling = usePullToRefresh(onRefresh);
+  const withPull = onRefresh !== undefined || forceRefreshing !== undefined;
   // 選択中のタブはシェルが持つ (見た目だけ。画面遷移は Story を切り替える)。tab が変わったらそれに合わせる。
   // onTabChange があるとき (実画面) は持たずに tab をそのまま出す (「一覧」はドロワーを開くだけで選択は移らない)。
   const [cur, setCur] = useState(tab);
   useEffect(() => setCur(tab), [tab]);
   const shownTab = onTabChange ? tab : cur;
+  const bodyStyle: React.CSSProperties = {
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    ...(fill ? { overflowY: "auto", overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" } : null),
+  };
   return (
     <div
       style={{
@@ -46,17 +60,17 @@ export function MobileShell({ header, children, tab, onTabChange, fab, onFab, ov
     >
       {header}
       {banner && <div style={{ flex: "0 0 auto", maxHeight: "40%", overflowY: "auto" }}>{banner}</div>}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          ...(fill ? { overflowY: "auto", overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" } : null),
-        }}
-      >
-        {children}
-      </div>
+      {withPull ? (
+        // 目印を重ねるための枠 (本文は動かさない)。引きは本文 (スクロールする要素) の touch イベントで測る
+        <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <PullIndicator pull={pulling.pull} refreshing={forceRefreshing ?? pulling.refreshing} />
+          <div ref={pulling.ref} style={{ ...bodyStyle, flex: 1 }}>
+            {children}
+          </div>
+        </div>
+      ) : (
+        <div style={{ ...bodyStyle, flex: 1 }}>{children}</div>
+      )}
       {tab !== undefined && (
         <div style={{ position: "relative", zIndex: 1, flex: "0 0 auto" }}>
           <TabBar

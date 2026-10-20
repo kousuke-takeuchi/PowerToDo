@@ -47,6 +47,8 @@ export type MobileProjectViewProps = {
   onOpenTask?: (t: Task) => void;
   onFab?: () => void;
   onMenu?: () => void;
+  /** ヘッダーの同期アイコンを押したとき。 */
+  onSync?: () => void;
   /** 下部タブの選択。省略すると「一覧」。 */
   tab?: TabBarProps["active"];
   onTabChange?: TabBarProps["onChange"];
@@ -54,6 +56,10 @@ export type MobileProjectViewProps = {
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
+  /** 一覧を引っ張って更新したとき (MobileShell の onRefresh)。 */
+  onRefresh?: () => Promise<void>;
+  /** 更新中の目印を強制して出す (Storybook 用)。 */
+  refreshing?: boolean;
   /** タスクが 1 件もないときの文言 (live のみ)。 */
   emptyText?: string;
   /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。どちらも省略すると行はスワイプしない。 */
@@ -115,10 +121,13 @@ export function MobileProjectView({
   onOpenTask,
   onFab,
   onMenu,
+  onSync,
   tab = "list",
   onTabChange,
   overlay: externalOverlay,
   banner,
+  onRefresh,
+  refreshing,
   emptyText = "タスクはありません",
   onSwipeDate,
   onTaskMenu,
@@ -191,8 +200,10 @@ export function MobileProjectView({
   return (
     <MobileShell
       banner={banner}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       fill={fill}
-      header={<MobileHeader title={title ?? project} safeArea={fill} sync={sync} onMenu={onMenu ?? (() => setOverlay("drawer"))} />}
+      header={<MobileHeader title={title ?? project} safeArea={fill} sync={sync} onMenu={onMenu ?? (() => setOverlay("drawer"))} onSync={onSync} />}
       tab={tab}
       onTabChange={onTabChange}
       fab={externalOverlay !== undefined ? true : overlay === "none"}

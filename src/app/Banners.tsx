@@ -1,4 +1,5 @@
 import { AnimatePresence } from "motion/react";
+import { NarrowContext } from "../components/NarrowContext";
 import { Collapse } from "../motion";
 import type { SyncConflict, SyncRecoverMode } from "../types/model";
 import { ConflictBanner } from "../views/ConflictBanner";
@@ -46,6 +47,8 @@ export type BannersProps = {
   onClearFlash: () => void;
   /** 同期の帯。無ければ出さない。 */
   sync?: SyncBannersProps;
+  /** 縦長の幅 (iPhone): 余白を詰め、ボタンを次の行に全幅で並べる。デスクトップは渡さない。 */
+  narrow?: boolean;
 };
 
 /** 画面上部の帯 (リマインダー / 保存失敗 / 読み込めない変更 / 外部変更の保留 / 型の不整合 / 通知 / 一時メッセージ)。 */
@@ -65,11 +68,13 @@ export function Banners({
   flash,
   onClearFlash,
   sync,
+  narrow = false,
 }: BannersProps) {
   const shownConflicts = sync?.conflicts.slice(0, MAX_CONFLICT_BANNERS) ?? [];
   const hiddenConflicts = sync?.conflicts.slice(MAX_CONFLICT_BANNERS) ?? [];
   // 帯は上から 8px 降りてくる + フェードで出て、消えるときはフェードしながら畳む (150ms)。最初の描画では動かさない。
   return (
+    <NarrowContext.Provider value={narrow}>
     <AnimatePresence initial={false}>
       {/* リマインダーは時間に追われるので、他の帯より上。1 件でも複数でも 1 つの帯 (中の行の出入りは ReminderBanner が動かす) */}
       {reminders.items.length > 0 && (
@@ -148,5 +153,6 @@ export function Banners({
         </Collapse>
       )}
     </AnimatePresence>
+    </NarrowContext.Provider>
   );
 }

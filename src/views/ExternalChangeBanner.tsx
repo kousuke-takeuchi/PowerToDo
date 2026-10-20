@@ -1,5 +1,8 @@
+import { useContext } from "react";
 import { TriangleAlert } from "lucide-react";
 import { Button } from "../components/Button";
+import { NarrowContext } from "../components/NarrowContext";
+import { BannerActions, bandNarrow } from "./BannerActions";
 
 export type ExternalChangeBannerProps = {
   /** 「受信トレイ.xlsx」「共通設定 (_PowerToDo.xlsx)」のような、利用者に見せるファイル名。 */
@@ -12,6 +15,7 @@ export type ExternalChangeBannerProps = {
 
 /** 外部変更の帯 (仕様 §5.3)。FixBanner と同じ帯 (accent-soft, 下罫線)。AppShell の banner スロットに入れる。 */
 export function ExternalChangeBanner({ fileName, onReload, onOverwrite }: ExternalChangeBannerProps) {
+  const narrow = useContext(NarrowContext);
   return (
     <div
       role="alert"
@@ -23,6 +27,7 @@ export function ExternalChangeBanner({ fileName, onReload, onOverwrite }: Extern
         background: "var(--color-accent-soft)",
         boxShadow: "inset 0 -1px 0 var(--color-border)",
         fontFamily: "var(--font-body)",
+        ...bandNarrow(narrow),
       }}
     >
       <span style={{ display: "inline-flex", color: "var(--color-accent)", flex: "0 0 auto" }}>
@@ -31,12 +36,14 @@ export function ExternalChangeBanner({ fileName, onReload, onOverwrite }: Extern
       <span style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>
         {`「${fileName}」が Excel など別のアプリで変更されました。このアプリの未保存の変更があります。`}
       </span>
-      <Button variant="secondary" onClick={onReload}>
-        ファイルを読み込む
-      </Button>
-      <Button variant="primary" onClick={onOverwrite}>
-        このアプリの内容で上書き
-      </Button>
+      <BannerActions>
+        <Button variant="secondary" onClick={onReload}>
+          ファイルを読み込む
+        </Button>
+        <Button variant="primary" onClick={onOverwrite}>
+          このアプリの内容で上書き
+        </Button>
+      </BannerActions>
     </div>
   );
 }

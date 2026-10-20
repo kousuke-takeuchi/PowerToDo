@@ -4,13 +4,14 @@ import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import { MobileHeader } from "../components/MobileHeader";
 import type { TabBarProps } from "../components/TabBar";
-import type { AppStateDto, Label, SearchHit, Task } from "../types/model";
+import type { AppStateDto, Label, NotificationPermission, SearchHit, Task } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
 import { DateSheet } from "../views/mobile/DateSheet";
 import { Drawer } from "../views/mobile/Drawer";
 import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
 import { MobileProjectView } from "../views/mobile/MobileProjectView";
 import { MobileQuickAddSheet } from "../views/mobile/MobileQuickAddSheet";
+import { DATA_DIR_HINT, MobileSettings } from "../views/mobile/MobileSettings";
 import { MobileSearch } from "../views/mobile/MobileSearch";
 import { MobileShell } from "../views/mobile/MobileShell";
 import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
@@ -30,6 +31,7 @@ import { insertToken } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
+import { useSettingsPanes } from "./useSettingsPanes";
 import { useSearch } from "./useSearch";
 import { useSummaries } from "./useSummaries";
 import { useSync } from "./useSync";
@@ -67,10 +69,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const [sheet, setSheet] = useState<SheetState>(null);
   // クイック追加の上に重ねるリマインダーのシート
   const [qaReminderSheet, setQaReminderSheet] = useState(false);
+  // 設定 (M-07、全画面)。ドロワーの歯車で開く
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [permission, setPermission] = useState<NotificationPermission>("granted");
 
   const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
-  const sync = useSync({ active: false, onNotice: (text, tone) => setFlash({ text, tone }) });
+  const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
   const syncState = syncStatus?.state ?? "off";
   const syncClickable = syncState === "error" && !syncStatus?.suspect && !syncStatus?.authRejected;
@@ -78,6 +83,12 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   useEffect(() => {
     if (syncState !== "error") setDismissedSyncError(null);
   }, [syncState]);
+  // ヘッダーの同期アイコン: エラーのうち「今すぐ同期」で直らないもの (片側が空 / 認証の拒否) は設定の同期を開く。それ以外は今すぐ同期。
+  const syncNeedsSettings = !!syncStatus?.suspect || (syncState === "error" && !!syncStatus?.authRejected);
+  const headerSync = () => {
+    if (syncNeedsSettings) setSettingsOpen(true);
+    else if (syncState !== "syncing") void sync.syncNow(true);
+  };
   const syncErrorMessage =
     syncState === "error" && !syncStatus?.suspect && syncStatus?.message && syncStatus.message !== dismissedSyncError ? syncStatus.message : null;
 
@@ -105,6 +116,32 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   });
 
   const search = useSearch(tab === "search");
+  const settingsPanes = useSettingsPanes(settingsOpen, { onDataDirChanged: () => undefined, onDisplayNameChanged: () => loadDisplayName() });
+  // 引っ張って更新: 同期してから、見えている一覧を読み直す。同期先が無いときは同期は何もせず、読み直しだけ。
+  const pullRefresh = async () => {
+    await sync.syncNow(true);
+    refreshAll();
+  };
+  // 設定を開くとき、OS の通知の許可を読む
+  useEffect(() => {
+    if (!settingsOpen) return;
+    api
+      .notificationPermission()
+      .then(setPermission)
+      .catch(() => undefined);
+  }, [settingsOpen]);
+  const toggleNotifications = (enabled: boolean) => {
+    settingsPanes.notifications.onToggle?.(enabled);
+    // まだ聞いていないときは、オンにしたところで許可を求める
+    if (enabled && permission === "prompt") requestPermission();
+  };
+  const requestPermission = () => {
+    api
+      .requestNotificationPermission()
+      .then(setPermission)
+      .catch(() => undefined);
+  };
+
   const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
 
   useEffect(() => {
@@ -161,11 +198,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       setDrawer(true); // 一覧はドロワーを開く (選択は移らない)
       return;
     }
+    setSettingsOpen(false);
     setTab(id);
   };
   const navigateTo = (target: Nav) => {
     setDrawer(false);
     setDetail(null);
+    setSettingsOpen(false);
     if (target.kind === "today") setTab("today");
     else if (target.kind === "upcoming") setTab("upcoming");
     else {
@@ -180,6 +219,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       return;
     }
     setDrawer(false);
+    setSettingsOpen(false);
     closeQuickAdd();
     setDetail({ project, no });
   };
@@ -242,12 +282,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
 
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
   const syncNow = syncClickable ? () => void sync.syncNow(true) : undefined;
-  const header = { fill: true as const, sync: syncState, onMenu: () => setDrawer(true), onFab: openQuickAdd, onTabChange: goTab };
+  const header = { fill: true as const, sync: syncState, onSync: headerSync, onMenu: () => setDrawer(true), onFab: openQuickAdd, onTabChange: goTab };
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
   const banner = (
     <Banners
+          narrow
           reminders={{
             items: reminders.items,
             today,
@@ -322,6 +363,10 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onSyncClick={syncNow}
             displayName={displayName}
             onNavigate={navigateTo}
+            onSettings={() => {
+              setDrawer(false);
+              setSettingsOpen(true);
+            }}
             onClose={() => setDrawer(false)}
           />
         )}
@@ -376,7 +421,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const frame = (title: string, text: string, tone: "muted" | "danger" = "muted", retry?: () => void) => (
     <MobileShell
       fill
-      header={<MobileHeader title={title} safeArea sync={syncState} onMenu={header.onMenu} />}
+      header={<MobileHeader title={title} safeArea sync={syncState} onSync={headerSync} onMenu={header.onMenu} />}
       tab={tab}
       onTabChange={goTab}
       banner={banner}
@@ -401,6 +446,30 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       </div>
     </MobileShell>
   );
+
+  // ---- 設定 (全画面) ----
+  if (settingsOpen && !detail) {
+    return (
+      <MobileSettings
+        fill
+        banner={banner}
+        overlay={layers}
+        headerSync={syncState}
+        onHeaderSync={headerSync}
+        onBack={() => setSettingsOpen(false)}
+        onTabChange={goTab}
+        sync={sync.pane}
+        notifications={{ ...settingsPanes.notifications, permission }}
+        onToggleNotifications={toggleNotifications}
+        onRequestPermission={requestPermission}
+        displayName={settingsPanes.account.displayName}
+        onDisplayName={settingsPanes.account.onSaveDisplayName}
+        displayNameBusy={settingsPanes.account.busy}
+        displayNameError={settingsPanes.account.error}
+        dataDirHint={DATA_DIR_HINT}
+      />
+    );
+  }
 
   // ---- タスク詳細 (全画面) ----
   if (detail) {
@@ -453,6 +522,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       <MobileToday
         live
         {...header} banner={banner}
+        onRefresh={pullRefresh}
         today={today}
         overdue={d.overdue}
         todays={d.today}
@@ -472,6 +542,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       <MobileUpcoming
         live
         {...header} banner={banner}
+        onRefresh={pullRefresh}
         today={today}
         tasks={d.days.flatMap((g) => g.tasks)}
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
@@ -530,6 +601,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       key={current}
       live
       {...header} banner={banner}
+      onRefresh={pullRefresh}
       tab="list"
       today={today}
       title={title}

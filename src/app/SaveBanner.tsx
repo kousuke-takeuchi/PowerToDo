@@ -1,5 +1,8 @@
+import { useContext } from "react";
 import { TriangleAlert, X } from "lucide-react";
 import { Button } from "../components/Button";
+import { NarrowContext } from "../components/NarrowContext";
+import { BannerActions, bandNarrow } from "../views/BannerActions";
 
 const band = {
   display: "flex",
@@ -15,23 +18,27 @@ const text = { flex: 1, minWidth: 0, fontSize: 13, lineHeight: "19px", color: "v
 
 /** 保存失敗 (save-status: error) の帯。FixBanner と同じ見た目。再試行は retry_save (保存済みになれば save-status: saved で消える)。 */
 export function SaveBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const narrow = useContext(NarrowContext);
   return (
-    <div role="alert" style={band}>
+    <div role="alert" style={{ ...band, ...bandNarrow(narrow) }}>
       <span style={{ display: "inline-flex", color: "var(--color-danger)", flex: "0 0 auto" }}>
         <TriangleAlert size={18} />
       </span>
       <span style={text}>保存できません: {message}</span>
-      <Button variant="secondary" onClick={onRetry}>
-        再試行
-      </Button>
+      <BannerActions>
+        <Button variant="secondary" onClick={onRetry}>
+          再試行
+        </Button>
+      </BannerActions>
     </div>
   );
 }
 
 /** コマンドの失敗などを短く知らせる帯 (簡易トースト)。tone="info" は成功の補足 (別プロジェクトに追加した、など)。 */
 export function NoticeBanner({ message, tone = "error", onDismiss }: { message: string; tone?: "error" | "info"; onDismiss?: () => void }) {
+  const narrow = useContext(NarrowContext);
   return (
-    <div role={tone === "error" ? "alert" : "status"} style={band}>
+    <div role={tone === "error" ? "alert" : "status"} style={{ ...band, ...bandNarrow(narrow) }}>
       {tone === "error" && (
         <span style={{ display: "inline-flex", color: "var(--color-danger)", flex: "0 0 auto" }}>
           <TriangleAlert size={18} />

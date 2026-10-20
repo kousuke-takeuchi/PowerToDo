@@ -1,5 +1,6 @@
 import type React from "react";
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { NarrowContext } from "../components/NarrowContext";
 import { TextField } from "../components/TextField";
 
 export const labelStyle: React.CSSProperties = { fontSize: 13, lineHeight: "19px", fontWeight: 600, color: "var(--color-text-primary)" };
@@ -35,6 +36,7 @@ export type NasFieldsProps = {
 export function NasFields({ values, onChange, placeholders, passwordNote }: NasFieldsProps = {}) {
   const [sample, setSample] = useState<NasFieldValues>({ url: "https://nas.local:5006/todo", user: "powertodo", password: "••••••••" });
   const v = values ?? sample;
+  const fontSize = useContext(NarrowContext) ? 16 : undefined;
   const set = (patch: Partial<NasFieldValues>) => {
     const next = { ...v, ...patch };
     if (values) onChange?.(next);
@@ -43,13 +45,13 @@ export function NasFields({ values, onChange, placeholders, passwordNote }: NasF
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <Field label="サーバー URL">
-        <TextField type="url" value={v.url} onChange={(url) => set({ url })} placeholder={placeholders ? "http://nas:5005/powertodo/" : undefined} />
+        <TextField type="url" fontSize={fontSize} value={v.url} onChange={(url) => set({ url })} placeholder={placeholders ? "http://nas:5005/powertodo/" : undefined} />
       </Field>
       <Field label="ユーザー名">
-        <TextField value={v.user} onChange={(user) => set({ user })} placeholder={placeholders ? "たろう" : undefined} />
+        <TextField fontSize={fontSize} value={v.user} onChange={(user) => set({ user })} placeholder={placeholders ? "たろう" : undefined} />
       </Field>
       <Field label="パスワード">
-        <TextField type="password" value={v.password} onChange={(password) => set({ password })} />
+        <TextField type="password" fontSize={fontSize} value={v.password} onChange={(password) => set({ password })} />
       </Field>
       {passwordNote && (
         <div role="status" style={{ ...hintStyle, color: "var(--color-danger)" }}>

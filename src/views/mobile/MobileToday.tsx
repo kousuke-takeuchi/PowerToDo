@@ -23,19 +23,23 @@ export type MobileTodayProps = {
   onOpenTask?: (t: Task) => void;
   onFab?: () => void;
   onMenu?: () => void;
+  /** ヘッダーの同期アイコンを押したとき。 */
+  onSync?: () => void;
   /** 「再スケジュール」(期限切れをまとめて動かす)。 */
   onReschedule?: () => void;
   onTabChange?: TabBarProps["onChange"];
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
+  /** 一覧を引っ張って更新したとき (MobileShell の onRefresh)。 */
+  onRefresh?: () => Promise<void>;
   /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。 */
   onSwipeDate?: (t: Task) => void;
   onTaskMenu?: (t: Task) => void;
 };
 
 /** M-04: 今日 (ヘッダーに同期アイコンなし)。期限切れ (再スケジュール付き) + 今日。pen のとおりチェックの色は全行 priority-4。 */
-export function MobileToday({ overdue, todays, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onReschedule, onTabChange, overlay, banner, onSwipeDate, onTaskMenu }: MobileTodayProps) {
+export function MobileToday({ overdue, todays, today, live, fill, sync, onToggleDone, onOpenTask, onFab, onMenu, onSync, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu }: MobileTodayProps) {
   const local = useDone();
   const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
   const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
@@ -61,7 +65,7 @@ export function MobileToday({ overdue, todays, today, live, fill, sync, onToggle
     );
   };
   return (
-    <MobileShell banner={banner} fill={fill} header={<MobileHeader title="今日" safeArea={fill} sync={sync} onMenu={onMenu} />} tab="today" onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
+    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} header={<MobileHeader title="今日" safeArea={fill} sync={sync} onMenu={onMenu} onSync={onSync} />} tab="today" onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div style={{ padding: "0 16px" }}>
         <div style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-secondary)" }}>
           {`${monthDay(today)} ${weekdayLong(today)} · ${overdue.length + todays.length} 件`}

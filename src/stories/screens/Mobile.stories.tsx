@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { Banners } from "../../app/Banners";
 import { SaveBanner } from "../../app/SaveBanner";
+import { googleLoggedIn, nasConnected, syncStatuses, tailnets } from "../../mock/sync";
 import { TODAY, projects, sections, tasks } from "../../mock/data";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
@@ -203,4 +205,123 @@ export const M03DateSheet: Story = {
       initialSheet="date"
     />
   ),
+};
+
+// ---- Phase 6 Task 12: 設定 (同期 / 通知 / 表示名 / ファイル)、同期の帯、引っ張って更新 ----
+const noop = () => undefined;
+const syncPane = {
+  settings: nasConnected,
+  status: syncStatuses.synced,
+  tailnet: tailnets.running,
+  onChangeBackend: noop,
+  onSyncNow: noop,
+  onDisconnect: noop,
+};
+const dataDirHint = "「ファイル」アプリの「このiPhone内 → PowerToDo」にあります。Excel で直した内容は、アプリに戻ると反映されます";
+
+function LiveSettings({ permission }: { permission: "granted" | "denied" | "prompt" }) {
+  const [enabled, setEnabled] = useState(true);
+  const [name, setName] = useState("たろう");
+  return (
+    <MobileSettings
+      sync={syncPane}
+      notifications={{ enabled, permission }}
+      onToggleNotifications={setEnabled}
+      onRequestPermission={noop}
+      displayName={name}
+      onDisplayName={async (v) => {
+        setName(v);
+        return true;
+      }}
+      dataDirHint={dataDirHint}
+      headerSync="synced"
+      onHeaderSync={noop}
+      onBack={noop}
+    />
+  );
+}
+
+export const M07Nas: Story = {
+  name: "M-07 NAS 接続済み",
+  render: () => <LiveSettings permission="granted" />,
+};
+
+export const M07Denied: Story = {
+  name: "M-07 通知が拒否されている",
+  render: () => <LiveSettings permission="denied" />,
+};
+
+export const M07Google: Story = {
+  name: "M-07 Google Drive 接続済み",
+  render: () => (
+    <MobileSettings
+      sync={{ ...syncPane, settings: googleLoggedIn, status: syncStatuses.googleAuthRejected, tailnet: null, onGoogleLogin: async () => true }}
+      notifications={{ enabled: true, permission: "prompt" }}
+      onRequestPermission={noop}
+      dataDirHint={dataDirHint}
+      headerSync="error"
+      onHeaderSync={noop}
+      onBack={noop}
+    />
+  ),
+};
+
+export const M01Conflict: Story = {
+  name: "M-01 競合の帯",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView
+          live
+          fill
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          today={TODAY}
+          onToggleDone={toggle}
+          sync="synced"
+          onSync={noop}
+          banner={
+            <Banners
+              narrow
+              reminders={{ items: [], today: TODAY, onDone: noop, onSnooze: noop, onOpen: noop, onDismiss: noop, onDismissAll: noop }}
+              saveErrors={{}}
+              onRetrySave={noop}
+              readFailures={{ failures: {}, dismiss: noop } as never}
+              held={[]}
+              heldFileName={(p) => `${p}.xlsx`}
+              onResolve={noop}
+              invalidCount={0}
+              onReveal={noop}
+              onReload={noop}
+              notice={null}
+              onClearNotice={noop}
+              flash={null}
+              onClearFlash={noop}
+              sync={{
+                conflicts: [{ file: "買い物.xlsx", conflictFile: "買い物 (競合 iPhone 2026-10-20 09-41).xlsx" }],
+                onOpenConflict: noop,
+                onDismissConflict: noop,
+              }}
+            />
+          }
+        />
+      );
+    };
+    return <Live />;
+  },
+};
+
+export const M01Refreshing: Story = {
+  name: "M-01 引っ張って更新中",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} sync="syncing" onSync={noop} refreshing />
+      );
+    };
+    return <Live />;
+  },
 };

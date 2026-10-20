@@ -24,6 +24,8 @@ export type MobileSearchProps = {
   onToggleDone?: (hit: SearchHit, done: boolean) => void;
   onFab?: () => void;
   onMenu?: () => void;
+  /** ヘッダーの同期アイコンを押したとき。 */
+  onSync?: () => void;
   onTabChange?: TabBarProps["onChange"];
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
@@ -50,6 +52,7 @@ export function MobileSearch({
   onToggleDone,
   onFab,
   onMenu,
+  onSync,
   onTabChange,
   overlay,
   banner,
@@ -58,7 +61,7 @@ export function MobileSearch({
     <MobileShell
       banner={banner}
       fill={fill}
-      header={<MobileHeader title="検索" safeArea={fill} sync={sync} onMenu={onMenu} />}
+      header={<MobileHeader title="検索" safeArea={fill} sync={sync} onMenu={onMenu} onSync={onSync} />}
       tab="search"
       onTabChange={onTabChange}
       fab
