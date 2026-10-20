@@ -13,6 +13,8 @@ export type SyncStatusProps = {
   offText?: string;
   /** `error` の文言。既定は「同期エラー · クリックで再試行」 (絵コンテ)。再試行では直らないときやクリックできないときに渡す。 */
   errorText?: string;
+  /** アプリの更新の準備で同期を止めているときの文言 (どの状態にも勝つ)。渡すとクリックできない。 */
+  pausedText?: string;
 };
 
 type Def = {
@@ -31,9 +33,9 @@ const defs: Record<SyncState, Def> = {
   off: { Icon: CloudOff, iconColor: "var(--color-text-muted)", textColor: "var(--color-text-secondary)", text: () => "同期オフ · 未ログイン" },
 };
 
-export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail, offText, errorText }: SyncStatusProps) {
+export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail, offText, errorText, pausedText }: SyncStatusProps) {
   const d = defs[state];
-  const text = state === "off" && offText ? offText : state === "error" && errorText ? errorText : d.text(lastSyncedAt);
+  const text = pausedText ?? (state === "off" && offText ? offText : state === "error" && errorText ? errorText : d.text(lastSyncedAt));
   const icon = (
     <span
       style={{
@@ -49,7 +51,7 @@ export function SyncStatus({ state, lastSyncedAt, compact, onClick, detail, offT
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={pausedText ? undefined : onClick}
       aria-label={compact ? text : undefined}
       title={detail ? `${text}\n${detail}` : compact ? text : undefined}
       className="bg-transparent hover:bg-[var(--color-bg-hover)]"

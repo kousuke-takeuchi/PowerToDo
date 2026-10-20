@@ -1,0 +1,190 @@
+name: Release
+
+# Publishing a release builds the installers and update files and attaches them to that release.
+# Secrets used: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, POWERTODO_GOOGLE_OAUTH_JSON_CONTENT.
+# Rules for the secret OAuth client (spec 2026-10-19-release-updater-design.md section 2.2):
+#   - never pass -v / -vv to cargo or tauri (the build script output would print the values),
+#   - never add Swatinem/rust-cache or upload target/ here (the embedded values stay in target/).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of an existing published release to rebuild, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      release_id: ${{ steps.release.outputs.release_id }}
+      body: ${{ steps.release.outputs.body }}
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_ID: ${{ github.event.release.id }}
+        run: |
+          version="${TAG#v}"
+          if ! [[ "$TAG" == v* && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag '$TAG' must look like v1.2.3 (numbers only). Use 'Set as a pre-release' for test builds."
+            exit 1
+          fi
+          if [ -z "$RELEASE_ID" ]; then
+            RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)
+          fi
+          # The release text becomes "notes" in latest.json, which the update dialog shows.
+          body=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.body // ""')
+          delimiter="BODY_$(openssl rand -hex 16)"
+          {
+            echo "tag=$TAG"
+            echo "version=$version"
+            echo "release_id=$RELEASE_ID"
+            echo "body<<$delimiter"
+            printf '%s\n' "$body"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
+  bundle:
+    name: Installers (${{ matrix.name }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS Apple silicon, platform: macos-latest, target: aarch64-apple-darwin }
+          - { name: macOS Intel, platform: macos-latest, target: x86_64-apple-darwin }
+          - { name: Linux, platform: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { name: Windows, platform: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tailnet/go.mod
+          cache-dependency-path: tailnet/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - run: go test ./...
+        working-directory: tailnet
+      # No Swatinem/rust-cache here: target/ holds the embedded OAuth values (spec section 2.2).
+      - name: Stamp the version and updater artifacts (runner copy only)
+        id: stamp
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            conf.version = process.env.VERSION;
+            const signing = process.env.HAS_SIGNING_KEY === "true";
+            if (signing && !conf.plugins?.updater?.pubkey) {
+              console.error("::error::plugins.updater.pubkey is empty"); process.exit(1);
+            }
+            if (!signing) console.log("::warning::TAURI_SIGNING_PRIVATE_KEY is not set: no update files");
+            conf.bundle.createUpdaterArtifacts = signing;
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `updater=${signing}\n`);
+          '
+      - name: Google OAuth client (from a secret, never printed)
+        shell: bash
+        env:
+          OAUTH_JSON: ${{ secrets.POWERTODO_GOOGLE_OAUTH_JSON_CONTENT }}
+        run: |
+          if [ -z "$OAUTH_JSON" ]; then
+            echo "::warning::POWERTODO_GOOGLE_OAUTH_JSON_CONTENT is not set: building without Google Drive"
+            exit 0
+          fi
+          f="$RUNNER_TEMP/google-oauth.json"
+          umask 077
+          printf '%s' "$OAUTH_JSON" > "$f"
+          echo "POWERTODO_GOOGLE_OAUTH_JSON=$f" >> "$GITHUB_ENV"
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          releaseBody: ${{ needs.prepare.outputs.body }}
+          args: --target ${{ matrix.target }}
+          retryAttempts: 1
+          includeUpdaterJson: ${{ steps.stamp.outputs.updater == 'true' }}
+          updaterJsonPreferNsis: true
+
+  # tauri-action merges latest.json with no lock: it downloads the current file, adds its own platform and
+  # uploads it again. Jobs that finish close together can drop each other's platform. This job fails
+  # loudly when that happened; the fix is to re-run the "Installers" job of the missing platform.
+  verify:
+    name: Check latest.json
+    needs: [prepare, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Every platform is in latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$HAS_SIGNING_KEY" != "true" ]; then
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: no latest.json to check"
+            exit 0
+          fi
+          # Into a variable first: with pipefail, `grep -q` closing the pipe early could fail the pipeline.
+          assets=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if ! grep -qx latest.json <<< "$assets"; then
+            echo "::error::The release $TAG has no latest.json. No Installers job uploaded it (the signing key may be missing, or every job failed). Re-run the 'Installers' job of each platform (Actions > this run > Re-run jobs)."
+            exit 1
+          fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --output latest.json --clobber
+          # {os}-{arch} is what older clients look up; the suffixed keys are what tauri-plugin-updater looks up first.
+          required='["darwin-aarch64","darwin-x86_64","linux-x86_64","windows-x86_64","darwin-aarch64-app","darwin-x86_64-app","linux-x86_64-appimage","windows-x86_64-nsis","windows-x86_64-msi"]'
+          echo "version: $(jq -r '.version' latest.json)"
+          echo "platforms: $(jq -r '.platforms | keys | join(", ")' latest.json)"
+          missing=$(jq -r --argjson required "$required" '
+            .platforms as $p
+            | $required[]
+            | select(($p[.].url // "") == "" or ($p[.].signature // "") == "")
+          ' latest.json)
+          if [ -n "$missing" ]; then
+            echo "::error::latest.json is missing (or has an empty url / signature for): $(echo $missing). Two jobs probably wrote latest.json at the same time. Re-run the 'Installers' job of each missing platform (Actions > this run > Re-run jobs)."
+            exit 1
+          fi
+          if [ "$(jq -r '.version' latest.json)" != "$VERSION" ]; then
+            echo "::error::latest.json has version $(jq -r '.version' latest.json), expected $VERSION. Re-run the 'Installers' jobs."
+            exit 1
+          fi
+          echo "latest.json has all platforms for $VERSION"

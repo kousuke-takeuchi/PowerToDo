@@ -78,6 +78,10 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
         window::show_main_window(app);
     }));
+    // Updates are checked and installed by the commands in `commands::update`; the page gets no
+    // `updater:*` permission.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {
@@ -161,6 +165,10 @@ pub fn run() {
             commands::sync::google_login,
             commands::sync::google_login_cancel,
             commands::sync::google_logout,
+            commands::update::update_status,
+            commands::update::update_check,
+            commands::update::update_install,
+            commands::update::set_update_auto_check,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

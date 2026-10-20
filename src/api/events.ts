@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus, SyncConflict, SyncStatusDto, TailnetStatus } from "../types/model";
+import type { ChangeReason, ProjectsChanged, ReminderItem, SaveStatus, SyncConflict, SyncStatusDto, TailnetStatus, UpdateProgress } from "../types/model";
 
 /**
  * `listen` is async; the returned function unsubscribes even if it is called before the
@@ -110,4 +110,12 @@ export function onTailnetStatus(cb: (s: TailnetStatus) => void, onReady?: () => 
 /** `sync-conflict`: both sides changed a file; a conflict copy was saved. */
 export function onSyncConflict(cb: (c: SyncConflict) => void): () => void {
   return subscribe<SyncConflict>("sync-conflict", cb);
+}
+
+/**
+ * `update-progress`: where `update_install` is (`waitingSync` -> `downloading` (with bytes) -> `installing`).
+ * `onReady`: the subscription is in place; call `update_install` only after it, or `waitingSync` is lost.
+ */
+export function onUpdateProgress(cb: (p: UpdateProgress) => void, onReady?: () => void): () => void {
+  return subscribe<UpdateProgress>("update-progress", cb, onReady);
 }

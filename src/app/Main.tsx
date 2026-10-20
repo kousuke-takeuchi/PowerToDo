@@ -11,6 +11,7 @@ import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
+import { UpdateDialog } from "../views/UpdateDialog";
 import type { ExpandApi } from "../views/ProjectView";
 import { LabelDetailView } from "../views/LabelDetailView";
 import { LabelsView } from "../views/LabelsView";
@@ -33,10 +34,12 @@ import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
 import { useSaveErrors } from "./useSaveStatus";
-import { formatSynced, syncErrorText, targetName } from "./syncText";
+import { formatSynced, syncErrorText, syncPausedText, targetName } from "./syncText";
 import { useSync } from "./useSync";
 import type { SyncConflicts } from "./useSyncConflicts";
 import { useSettingsPanes } from "./useSettingsPanes";
+import { useUpdates } from "./useUpdates";
+import type { UpdateOffer } from "./useUpdates";
 
 type Nav = SidebarProps["active"];
 type Flash = { text: string; tone: "error" | "info" };
@@ -68,6 +71,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // 同期しない) は、「今すぐ同期」しても動かない
   const syncClickable = syncState === "error" && !syncStatus?.suspect && !syncStatus?.authRejected;
   const syncError = syncErrorText(syncStatus, syncClickable);
+  const syncPaused = syncPausedText(syncStatus);
   // 同期のエラーの帯は閉じられる。エラーが続く間は同じ文言を出し直さず、直って別のエラーが起きたらまた出す。
   const [dismissedSyncError, setDismissedSyncError] = useState<string | null>(null);
   useEffect(() => {
@@ -197,6 +201,12 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [pendingOpen, view, current, p.error]);
   const openCross = (t: Task) => openTaskAt(t.project, t.no);
   const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current, setFlash });
+  // アプリの更新: 起動 5 秒後の確認、更新ダイアログ、設定の「アップデート」ペイン
+  // クイック追加 / 検索が開いているあいだ、自動で見つかった更新は出さずに待つ (入力を奪わない)
+  const updates = useUpdates({ hold: qa.open || searchOpen });
+  // 閉じるアニメーションのあいだも文言を保つため、最後に見つかった版を覚えておく
+  const shownOffer = useRef<UpdateOffer | null>(null);
+  if (updates.offer) shownOffer.current = updates.offer;
 
   // リマインダーの帯と、通知 / トレイ由来のイベント (open-task / open-quick-add / window-shown)。
   const reminders = useReminders({
@@ -207,15 +217,16 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     openTask: (project, no) => openTaskAt(project, no, true),
   });
   // イベントの購読は 1 回だけにして、呼ぶ先は毎描画の最新を参照する
-  const wired = useRef({ openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
-  wired.current = { openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask };
+  const wired = useRef({ updateOpen: !!updates.offer, openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
+  wired.current = { updateOpen: !!updates.offer, openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask };
   useEffect(() => {
     const offs = [
       onOpenTask((project, no) => {
         wired.current.removeTask(project, no); // 通知から開いたタスクの帯は要らない
         wired.current.openTaskAt(project, no, true);
       }),
-      onOpenQuickAdd(() => wired.current.openQuickAdd()),
+      // 更新ダイアログが開いているあいだは開かない (トレイから押されても、後ろの画面は操作できない)
+      onOpenQuickAdd(() => !wired.current.updateOpen && wired.current.openQuickAdd()),
       // 通知のボタン (完了) が失敗した (保留中のプロジェクトなど)。Rust 側がウィンドウを出してから送る
       onNotificationError((text) => setFlash({ text, tone: "error" })),
       // 隠れている間に変わった分 (Excel での編集、発火したリマインダー) を取り直す
@@ -256,7 +267,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     setOpenNo,
     openNo,
     expandApi,
-    enabled: !qa.open && !searchOpen && !settingsOpen,
+    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer,
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
@@ -347,6 +358,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       syncDetail={syncStatus?.message}
       syncOffText="同期オフ"
       syncErrorText={syncError}
+      syncPausedText={syncPaused}
       onSyncClick={syncClickable ? () => void sync.syncNow(true) : undefined}
       displayName={displayName}
       onNavigate={navigate}
@@ -652,7 +664,30 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         accountPane={settingsPanes.account}
         notificationsPane={{ ...settingsPanes.notifications, trayError: app.trayError }}
         datetimePane={settingsPanes.datetime}
+        updatesPane={{
+          status: updates.status,
+          checking: updates.checking,
+          upToDate: updates.upToDate,
+          error: updates.error,
+          onToggleAutoCheck: (v) => void updates.setAutoCheck(v),
+          onCheck: () => void updates.check(true),
+          onOpenReleasePage: () => void updates.openReleasePage(),
+        }}
       />
+      {/* 設定の上に重ねる (後に置くので Esc も先にこちらへ届く) */}
+      {shownOffer.current && updates.status && (
+        <UpdateDialog
+          open={!!updates.offer}
+          currentVersion={updates.status.currentVersion}
+          version={shownOffer.current.version}
+          notes={shownOffer.current.notes}
+          installing={updates.installing}
+          progress={updates.progress}
+          error={updates.installError}
+          onInstall={() => void updates.install()}
+          onClose={updates.later}
+        />
+      )}
     </>
   );
 
@@ -667,6 +702,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         syncDetail: syncStatus?.message,
         syncOffText: "同期オフ",
         syncErrorText: syncError,
+        syncPausedText: syncPaused,
         onSyncClick: syncClickable ? () => void sync.syncNow(true) : undefined,
         onExpand: () => setDrawer(true),
         onAddTask: openQuickAdd,

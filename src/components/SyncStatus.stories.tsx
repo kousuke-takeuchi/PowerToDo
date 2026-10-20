@@ -39,6 +39,17 @@ export const ErrorTexts: Story = {
   ),
 };
 
+/** アプリの更新の準備中 (Main が `pausedText` で渡す): どの状態でも同じ文言で、クリックできない。 */
+export const Paused: Story = {
+  args: { state: "synced" },
+  render: () => (
+    <div style={{ width: 248, display: "flex", flexDirection: "column", gap: 4, padding: 24 }}>
+      <SyncStatus state="synced" lastSyncedAt="09:41" pausedText="更新の準備中" onClick={() => undefined} />
+      <SyncStatus state="syncing" pausedText="更新の準備中" />
+    </div>
+  ),
+};
+
 export const Playground: Story = {
   args: { state: "synced", lastSyncedAt: "09:41", compact: false },
   argTypes: { state: { control: "inline-radio", options: states } },

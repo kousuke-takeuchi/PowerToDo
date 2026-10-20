@@ -42,6 +42,11 @@ export function syncErrorText(status: SyncStatusDto | null, clickable: boolean):
   return clickable ? undefined : "同期エラー";
 }
 
+/** アプリの更新の準備で同期を止めているあいだ、サイドバーに出す文言 (クリックできない)。止めていなければ undefined。 */
+export function syncPausedText(status: SyncStatusDto | null): string | undefined {
+  return status?.paused ? "更新の準備中" : undefined;
+}
+
 /** 同期先の名前 (確認ダイアログや「戻す」の文言用)。 */
 export function targetName(b: SyncBackend | undefined): string {
   return b === "gdrive" ? "Google Drive" : "NAS";

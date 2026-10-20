@@ -99,6 +99,35 @@ pub struct AppSettings {
     /// data folder. The NAS password is in the OS keychain, never in this file.
     #[serde(default, skip_serializing_if = "SyncSettings::is_default")]
     pub sync: SyncSettings,
+    /// Whether the app looks for a new version by itself. Per device. Left out of the file
+    /// while it is the default.
+    #[serde(default, skip_serializing_if = "UpdateSettings::is_default")]
+    pub updates: UpdateSettings,
+}
+
+/// The update part of `settings.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettings {
+    /// Check for a new version 5 s after launch. On unless the user turned it off.
+    #[serde(default = "yes")]
+    pub auto_check: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        UpdateSettings { auto_check: true }
+    }
+}
+
+impl UpdateSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// Which sync target is chosen. An unknown value (a newer version's) reads as `None`: the sync
@@ -261,6 +290,7 @@ mod tests {
                 nas_user: Some("たろう".into()),
                 google_email: Some("user@example.com".into()),
             },
+            ..AppSettings::default()
         };
         s.save(dir.path()).unwrap();
         let v: serde_json::Value = serde_json::from_str(
