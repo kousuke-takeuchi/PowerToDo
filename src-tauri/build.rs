@@ -42,7 +42,11 @@ fn link_ios_tailnet() {
     }
     // aarch64-apple-ios-sim has target_abi = "sim"; the device target has "".
     let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
-    let target = if sim { "aarch64-apple-ios-sim" } else { "aarch64-apple-ios" };
+    let target = if sim {
+        "aarch64-apple-ios-sim"
+    } else {
+        "aarch64-apple-ios"
+    };
     let dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
         .join("binaries")
         .join("ios")
