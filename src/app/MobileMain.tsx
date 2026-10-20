@@ -326,7 +326,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
           />
         )}
       </AnimatePresence>
-      <BottomSheet open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
+      <BottomSheet fill open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
         <ReminderSheet value={qa.reminders} onChange={setReminders} />
       </BottomSheet>
       <BottomSheet
