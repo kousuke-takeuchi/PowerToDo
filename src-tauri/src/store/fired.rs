@@ -87,6 +87,10 @@ pub struct ScheduledEntry {
     pub at: NaiveDateTime,
     /// The notification id the OS knows it by (`scheduler::notification_id`).
     pub id: i32,
+    /// Fingerprint of the title and body the OS was given (`scheduler::content_hash`), so an
+    /// edit of the task text re-registers it. Old files have 0, which re-registers once.
+    #[serde(default)]
+    pub content: u32,
 }
 
 /// The contents of `fired.json`. Times are local and keep their seconds (chrono's own serde
@@ -525,6 +529,7 @@ mod tests {
             key: key("p", no, "-0m"),
             at: dt(at),
             id,
+            content: 0,
         };
         f.scheduled = vec![
             entry(1, "2026-10-13T09:00", 1),
@@ -544,11 +549,15 @@ mod tests {
         let old = r#"{"dataDir":"/d","lastSeen":"2026-10-13T09:00:00","entries":[],"pending":[]}"#;
         let f: Fired = serde_json::from_str(old).unwrap();
         assert!(f.scheduled.is_empty());
+        let older = r#"{"scheduled":[{"key":{"project":"p","no":1,"code":"-0m"},"at":"2026-10-13T09:00:00","id":3}]}"#;
+        let f2: Fired = serde_json::from_str(older).unwrap();
+        assert_eq!(f2.scheduled[0].content, 0);
         let mut f = f;
         f.scheduled.push(ScheduledEntry {
             key: key("p", 1, "-0m"),
             at: dt("2026-10-13T09:00"),
             id: 7,
+            content: 5,
         });
         let back: Fired = serde_json::from_str(&serde_json::to_string(&f).unwrap()).unwrap();
         assert_eq!(back, f);

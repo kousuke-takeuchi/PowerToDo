@@ -176,6 +176,31 @@ fn timestamp_in<Tz: TimeZone>(tz: &Tz, at: NaiveDateTime) -> Option<i64> {
         .map(|d| d.timestamp())
 }
 
+/// FNV-1a 32 bit over the title and body a scheduled notification shows.
+fn content_hash(item: &ReminderItem) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in item
+        .title
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(notification_body(item, 1).bytes())
+    {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// The app was away since the last look (no look yet, or a gap of more than two periods):
+/// what the OS scheduled meanwhile has been delivered. Decided from the data, not from the order
+/// of the resume event and the 30 s timer.
+fn was_away(last_seen: Option<NaiveDateTime>, now: NaiveDateTime) -> bool {
+    match last_seen {
+        None => true,
+        Some(t) => now - t > Duration::from_std(PERIOD * 2).unwrap_or(Duration::seconds(60)),
+    }
+}
+
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))] // iOS only; tested everywhere
 fn scheduled_entries(plan: &[Planned]) -> Vec<ScheduledEntry> {
     plan.iter()
@@ -183,6 +208,7 @@ fn scheduled_entries(plan: &[Planned]) -> Vec<ScheduledEntry> {
             key: ReminderKey::of(&p.item),
             at: p.item.at,
             id: p.id,
+            content: content_hash(&p.item),
         })
         .collect()
 }
@@ -194,7 +220,7 @@ fn is_scheduled(scheduled: &[ScheduledEntry], plan: &[Planned]) -> bool {
         && scheduled
             .iter()
             .zip(plan)
-            .all(|(s, p)| s.id == p.id && s.at == p.item.at)
+            .all(|(s, p)| s.id == p.id && s.at == p.item.at && s.content == content_hash(&p.item))
 }
 
 /// The missed reminders that passed while the app was not running: after `last_seen` (the
@@ -498,7 +524,7 @@ fn tick(app: &AppHandle, look: Look) -> bool {
         fired.bind(&data_dir);
         let switched = std::mem::take(&mut fired.rebound);
         // iOS: the OS delivered what was scheduled while the app was stopped or away.
-        if cfg!(target_os = "ios") && look != Look::Regular {
+        if cfg!(target_os = "ios") && (look != Look::Regular || was_away(fired.last_seen, now)) {
             fired.mark_passed_scheduled(now);
         }
         let outcome = apply(&mut fired, &tasks, &settings, now, startup || switched);
@@ -1375,6 +1401,39 @@ mod tests {
         let mut e = extras("/data", "2026-10-13T09:00");
         e.insert("no".into(), Value::from(7));
         assert_eq!(action_target(&e).unwrap().key.no, 7);
+    }
+
+    #[test]
+    fn a_gap_since_the_last_look_means_the_app_was_away() {
+        let now = dt("2026-10-13T09:10");
+        assert!(was_away(None, now));
+        assert!(!was_away(Some(now - Duration::seconds(30)), now));
+        assert!(!was_away(Some(now - Duration::seconds(60)), now));
+        assert!(was_away(Some(now - Duration::seconds(61)), now));
+        assert!(was_away(Some(now - Duration::hours(3)), now));
+    }
+
+    #[test]
+    fn an_edited_title_needs_a_new_schedule() {
+        let at = dt("2026-10-14T10:00");
+        let mk = |title: &str, due: Option<NaiveDate>| Planned {
+            id: 5,
+            item: ReminderItem {
+                project: "p".into(),
+                no: 1,
+                title: title.into(),
+                code: "-0m".into(),
+                at,
+                due,
+                due_time: None,
+            },
+        };
+        let before = vec![mk("old", None)];
+        let entries = scheduled_entries(&before);
+        assert!(is_scheduled(&entries, &before));
+        assert!(!is_scheduled(&entries, &[mk("new", None)]));
+        let d = NaiveDate::from_ymd_opt(2026, 10, 14);
+        assert!(!is_scheduled(&entries, &[mk("old", d)]));
     }
 
     #[test]
