@@ -79,6 +79,83 @@ impl SecretStore for KeyringStore {
     }
 }
 
+/// The iOS keychain, through `keyring_core` and the protected data store of
+/// `apple-native-keyring-store` (spec section 3.5): items stay on this device (the store is
+/// not the iCloud one, and each item is `AfterFirstUnlockThisDeviceOnly`, so a sync right
+/// after the app comes back can read it while the phone is locked again).
+///
+/// The protected store works only in a signed app with a provisioning profile (its module
+/// documentation); elsewhere (the unsigned simulator build) the calls fail and the caller falls
+/// back to [`MemoryStore`] the same way as for a broken desktop keychain.
+#[cfg(target_os = "ios")]
+#[derive(Debug)]
+pub struct AppleStore {
+    _private: (),
+}
+
+/// `kSecAttrAccessible` of every item (apple-native-keyring-store 1.0.2 `src/protected.rs`,
+/// `determine_access_policy`).
+#[cfg(target_os = "ios")]
+const ACCESS_POLICY: &str = "after-first-unlock-this-device-only";
+
+#[cfg(target_os = "ios")]
+impl AppleStore {
+    /// Makes the protected store keyring-core's default store (keyring-core 1.0.1
+    /// `set_default_store`, meant to be called once at start-up).
+    pub fn new() -> SecretResult<Self> {
+        let store = apple_native_keyring_store::protected::Store::new()
+            .map_err(|e| apple_keychain_error(&e))?;
+        keyring_core::set_default_store(store);
+        Ok(AppleStore { _private: () })
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn apple_keychain_error(e: &keyring_core::Error) -> SecretError {
+    use keyring_core::Error;
+    SecretError(match e {
+        Error::NoDefaultStore => "このシステムにはキーチェーンがありません".to_string(),
+        Error::NoStorageAccess(_) => {
+            format!("キーチェーンを使えません (ロックされていませんか): {e}")
+        }
+        Error::BadEncoding(_) | Error::BadDataFormat(..) => {
+            format!("キーチェーンの値を読めません: {e}")
+        }
+        _ => format!("キーチェーンを使えません: {e}"),
+    })
+}
+
+#[cfg(target_os = "ios")]
+fn apple_entry(service: &str, account: &str) -> SecretResult<keyring_core::Entry> {
+    let modifiers = std::collections::HashMap::from([("access-policy", ACCESS_POLICY)]);
+    keyring_core::Entry::new_with_modifiers(service, account, &modifiers)
+        .map_err(|e| apple_keychain_error(&e))
+}
+
+#[cfg(target_os = "ios")]
+impl SecretStore for AppleStore {
+    fn get(&self, service: &str, account: &str) -> SecretResult<Option<String>> {
+        match apple_entry(service, account)?.get_password() {
+            Ok(p) => Ok(Some(p)),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(e) => Err(apple_keychain_error(&e)),
+        }
+    }
+
+    fn set(&self, service: &str, account: &str, secret: &str) -> SecretResult<()> {
+        apple_entry(service, account)?
+            .set_password(secret)
+            .map_err(|e| apple_keychain_error(&e))
+    }
+
+    fn delete(&self, service: &str, account: &str) -> SecretResult<()> {
+        match apple_entry(service, account)?.delete_credential() {
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(e) => Err(apple_keychain_error(&e)),
+        }
+    }
+}
+
 /// Secrets held in memory only: gone when the app quits.
 #[derive(Debug, Default)]
 pub struct MemoryStore {

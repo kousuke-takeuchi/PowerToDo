@@ -70,3 +70,7 @@ keyring = { version = "4.2", features = ["v1"] }
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"
+# iOS keychain (`sync::secrets::AppleStore`): keyring 4.2 `v1` does not build for iOS, whose
+# apple-native-keyring-store needs `protected` there.
+keyring-core = "1"
+apple-native-keyring-store = { version = "1", features = ["protected"] }

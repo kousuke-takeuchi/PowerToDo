@@ -252,8 +252,17 @@ impl SyncRuntime {
     pub fn new() -> Self {
         #[cfg(desktop)]
         let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
-        // No keychain on iOS yet (Task 4 replaces this).
-        #[cfg(mobile)]
+        // The iOS keychain; without it (an unsigned build) the secrets live in memory and the
+        // UI says so (`Secrets` reports `persistent() == false`).
+        #[cfg(target_os = "ios")]
+        let store: Arc<dyn SecretStore> = match crate::sync::secrets::AppleStore::new() {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                eprintln!("iOS keychain unavailable: {e}");
+                Arc::new(MemoryStore::new())
+            }
+        };
+        #[cfg(all(mobile, not(target_os = "ios")))]
         let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
         Self::with_secrets(Secrets::new(store))
     }
