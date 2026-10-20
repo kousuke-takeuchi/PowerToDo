@@ -47,6 +47,13 @@ if [ "$mode" = device ]; then
   export XCODE_XCCONFIG_FILE
 fi
 
+# The Go tailnet library (src-tauri/build.rs links it into the Rust staticlib).
+if [ "$mode" = sim ]; then
+  "$root/scripts/build-tailnet-ios.sh" aarch64-apple-ios-sim
+else
+  "$root/scripts/build-tailnet-ios.sh" aarch64-apple-ios
+fi
+
 mkdir -p "$work/stub"
 printf '#!/bin/sh\necho "stub open: $*" >&2\n' > "$work/stub/open"
 chmod +x "$work/stub/open"

@@ -11,6 +11,7 @@ fn main() {
         std::env::var("TARGET").expect("cargo sets TARGET for build scripts")
     );
     embed_google_oauth();
+    link_ios_tailnet();
     if is_windows_msvc() {
         // tauri-build puts its manifest (Common Controls v6) into a resource that is linked into
         // the app binary only (`cargo:rustc-link-arg-bins`). The lib's test binary then loads the
@@ -28,6 +29,36 @@ fn main() {
     } else {
         tauri_build::build()
     }
+}
+
+/// Links the tsnet c-archive (`scripts/build-tailnet-ios.sh <target>`) into the iOS app and sets
+/// `cfg(tailnet_ffi)`. The archive is bundled into the staticlib (`libapp.a`) that Xcode links.
+/// Without the archive nothing is linked and the cfg stays unset, so `cargo check` for iOS passes
+/// without a Go toolchain (CI); the app then has no Tailscale.
+fn link_ios_tailnet() {
+    println!("cargo:rustc-check-cfg=cfg(tailnet_ffi)");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    // aarch64-apple-ios-sim has target_abi = "sim"; the device target has "".
+    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let target = if sim { "aarch64-apple-ios-sim" } else { "aarch64-apple-ios" };
+    let dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
+        .join("binaries")
+        .join("ios")
+        .join(target);
+    let lib = dir.join("libtailnet.a");
+    println!("cargo:rerun-if-changed={}", lib.display());
+    if !lib.exists() {
+        println!(
+            "cargo:warning={} is missing (run scripts/build-tailnet-ios.sh {target}): Tailscale is not in this build",
+            lib.display()
+        );
+        return;
+    }
+    println!("cargo:rustc-link-search=native={}", dir.display());
+    println!("cargo:rustc-link-lib=static=tailnet");
+    println!("cargo:rustc-cfg=tailnet_ffi");
 }
 
 fn is_windows_msvc() -> bool {
