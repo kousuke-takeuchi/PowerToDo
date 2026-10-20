@@ -11,7 +11,38 @@ fn main() {
         std::env::var("TARGET").expect("cargo sets TARGET for build scripts")
     );
     embed_google_oauth();
-    tauri_build::build()
+    if is_windows_msvc() {
+        // tauri-build puts its manifest (Common Controls v6) into a resource that is linked into
+        // the app binary only (`cargo:rustc-link-arg-bins`). The lib's test binary then loads the
+        // old comctl32 and dies at start with STATUS_ENTRYPOINT_NOT_FOUND once the tests build a
+        // `tauri::test` mock app (`commands::update`). Same workaround as the tauri crate's own
+        // build.rs (`embed_manifest_for_tests`): the linker embeds the same manifest into every
+        // binary, and tauri-build adds none of its own (two would be a duplicate resource).
+        embed_windows_manifest();
+        let attributes = tauri_build::Attributes::new()
+            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+        if let Err(error) = tauri_build::try_build(attributes) {
+            println!("{error:#}");
+            std::process::exit(1);
+        }
+    } else {
+        tauri_build::build()
+    }
+}
+
+fn is_windows_msvc() -> bool {
+    std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+}
+
+/// `windows-app-manifest.xml` is tauri-build's default manifest (tauri-build 2.7.2
+/// `src/windows-app-manifest.xml`), unchanged.
+fn embed_windows_manifest() {
+    let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
+        .join("windows-app-manifest.xml");
+    println!("cargo:rerun-if-changed={}", manifest.display());
+    println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
 }
 
 /// Embeds the Google OAuth client (spec section 5) from `POWERTODO_GOOGLE_OAUTH_JSON`, else from
