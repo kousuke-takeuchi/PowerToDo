@@ -1,0 +1,18 @@
+[package]
+name = "tauri-plugin-powertodo-ios"
+version = "0.1.0"
+description = "iOS-only helpers for PowerToDo: network path changes and the login sheet. Does nothing on desktop."
+authors = ["you"]
+edition = "2024"
+build = "build.rs"
+links = "tauri-plugin-powertodo-ios"
+publish = false
+
+[dependencies]
+tauri = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

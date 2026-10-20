@@ -897,6 +897,60 @@ pub fn prepare_run(app: &AppHandle) -> bool {
     }
 }
 
+/// Whether the proxy URL the engine's backend was built with may be out of date: the listener
+/// came back on another address. Then the backend is built again (`connect_nas`), because the
+/// old one still points at the dead address and `prepare_run` would find the new listener alive.
+#[cfg_attr(desktop, allow(dead_code))]
+fn proxy_url_changed(before: Option<&str>, after: Option<&str>) -> bool {
+    before != after
+}
+
+/// The last network report (`on_network_changed` only reacts to a change).
+static LAST_PATH: Mutex<Option<tauri_plugin_powertodo_ios::PathInfo>> = Mutex::new(None);
+
+/// Tells the node the network may have changed. When that leaves the proxy on another address,
+/// the backend is built again. `before` / `after` bracket the call.
+#[cfg(mobile)]
+fn rebind_node(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(tailnet) = state.sync_rt.current_tailnet() else {
+        return;
+    };
+    let before = tailnet.proxy_url();
+    tailnet.rebind();
+    let after = tailnet.proxy_url();
+    if proxy_url_changed(before.as_deref(), after.as_deref()) {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move { connect_nas(&handle, None).await });
+    }
+}
+
+/// The app came to the front (spec 3.3, 3.4): look for external changes, tell the node, and
+/// sync (with the offline retries). Runs off the calling thread.
+pub fn on_resumed(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        super::scan_external(&handle);
+        #[cfg(mobile)]
+        rebind_node(&handle);
+        handle.state::<AppState>().sync.network_changed();
+    });
+}
+
+/// The network path changed (`NWPathMonitor`). The first report and a repeat of the last one
+/// do nothing.
+pub fn on_network_changed(app: &AppHandle, info: &tauri_plugin_powertodo_ios::PathInfo) {
+    if !tauri_plugin_powertodo_ios::path_changed(&LAST_PATH, info) {
+        return;
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(mobile)]
+        rebind_node(&handle);
+        handle.state::<AppState>().sync.network_changed();
+    });
+}
+
 /// The engine's name for a chosen target (`None` for no sync).
 fn backend_kind(target: SyncBackend) -> Option<BackendKind> {
     match target {
@@ -1753,6 +1807,17 @@ mod tests {
     }
 
     // ---- before each run ----
+
+    #[test]
+    fn a_proxy_on_another_address_after_a_resume_rebuilds_the_backend() {
+        let a = "socks5h://u:p@127.0.0.1:1111";
+        let b = "socks5h://u:p@127.0.0.1:2222";
+        assert!(proxy_url_changed(Some(a), Some(b)));
+        assert!(proxy_url_changed(Some(a), None));
+        assert!(proxy_url_changed(None, Some(b)));
+        assert!(!proxy_url_changed(Some(a), Some(a)));
+        assert!(!proxy_url_changed(None, None));
+    }
 
     #[test]
     fn prepare_run_reopens_the_proxy_before_the_run() {

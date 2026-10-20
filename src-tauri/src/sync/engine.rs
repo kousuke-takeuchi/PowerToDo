@@ -2254,8 +2254,7 @@ mod tests {
 
     impl StorageBackend for Flaky {
         fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
-            self.lists
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if self.offline.load(std::sync::atomic::Ordering::SeqCst) {
                 return Box::pin(async { Err(BackendError::Offline("down".into())) });
             }
