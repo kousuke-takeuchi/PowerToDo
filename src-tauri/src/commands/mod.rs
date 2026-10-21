@@ -2297,7 +2297,15 @@ mod tests {
 
         // The returned no is the task just added, not an older one.
         let out = quick_add_in(&mut store, "二つ目", "仕事", d("2026-10-14")).unwrap();
-        assert_eq!(out.view.tasks.iter().find(|t| t.no == out.no).unwrap().title, "二つ目");
+        assert_eq!(
+            out.view
+                .tasks
+                .iter()
+                .find(|t| t.no == out.no)
+                .unwrap()
+                .title,
+            "二つ目"
+        );
 
         let out = quick_add_in(&mut store, "資料 #受信トレイ p1", "仕事", d("2026-10-14")).unwrap();
         assert_eq!(out.view.project.name, "受信トレイ");
