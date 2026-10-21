@@ -1,10 +1,21 @@
+import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { Banners } from "../../app/Banners";
+import { SaveBanner } from "../../app/SaveBanner";
+import { googleLoggedIn, nasConnected, syncStatuses, tailnets } from "../../mock/sync";
 import { TODAY, projects, sections, tasks } from "../../mock/data";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
 import { MobileTaskDetail } from "../../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../../views/mobile/MobileToday";
+import type { Task } from "../../types/model";
 import { MobileUpcoming } from "../../views/mobile/MobileUpcoming";
+import { BottomSheet } from "../../views/mobile/BottomSheet";
+import { DateSheet } from "../../views/mobile/DateSheet";
+import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
+import { SheetFrame } from "../../views/mobile/SheetFrame";
+import { insertToken } from "../../app/quickAddInsert";
+import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -73,4 +84,244 @@ export const M06: Story = {
 export const M07: Story = {
   name: "M-07 設定",
   render: () => <MobileSettings />,
+};
+
+// ---- Phase 6: 実データ (live) で動かす画面。チェックは task.progress を書き換えて呼び出し側が持つ。fill は実機と同じ 100dvh / セーフエリア ----
+function useTasks(initial: Task[]) {
+  const [list, setList] = useState(initial);
+  const toggle = (t: Task, done: boolean) => setList((cur) => cur.map((x) => (x.no === t.no ? { ...x, progress: done ? 100 : 0 } : x)));
+  return { list, toggle };
+}
+
+function LiveProject() {
+  const { list, toggle } = useTasks(shopping);
+  return <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+}
+
+export const M01Live: Story = {
+  name: "M-01 データ入り (fill)",
+  render: () => <LiveProject />,
+};
+
+function LiveTodayNoOverdue() {
+  const { list, toggle } = useTasks([...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]);
+  return <MobileToday live fill overdue={[]} todays={list} today={TODAY} onToggleDone={toggle} />;
+}
+
+export const M04NoOverdue: Story = {
+  name: "M-04 期限切れなし",
+  render: () => <LiveTodayNoOverdue />,
+};
+
+// 残る帯 (保存失敗) は header の下に流れ、一覧はその分だけ下がる (上の行が隠れない)
+export const M01Banner: Story = {
+  name: "M-01 帯つき (fill)",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView
+          live
+          fill
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          today={TODAY}
+          onToggleDone={toggle}
+          banner={<SaveBanner message="保存できませんでした" onRetry={() => undefined} />}
+        />
+      );
+    };
+    return <Live />;
+  },
+};
+
+// ---- Phase 6 Task 10: 長押しメニューと日付のシート (実データの画面に重ねた状態) ----
+function LiveWithSheet({ kind }: { kind: "menu" | "date" }) {
+  const { list, toggle } = useTasks(shopping);
+  const task = shopping[0];
+  const close = () => undefined;
+  return (
+    <MobileProjectView
+      live
+      fill
+      project="買い物"
+      tasks={list}
+      sections={sections}
+      today={TODAY}
+      onToggleDone={toggle}
+      onSwipeDate={() => undefined}
+      onTaskMenu={() => undefined}
+      overlay={
+        <BottomSheet open title={kind === "menu" ? task.title : "日付"} onClose={close}>
+          {kind === "menu" ? (
+            <TaskMenuSheet task={task} onDate={close} onPriority={close} onMove={close} onDelete={close} onClose={close} />
+          ) : (
+            <DateSheet value={task.due} time={task.dueTime} today={TODAY} onChange={close} onClose={close} />
+          )}
+        </BottomSheet>
+      }
+    />
+  );
+}
+
+export const M01Menu: Story = {
+  name: "M-01 長押しメニュー (fill)",
+  render: () => <LiveWithSheet kind="menu" />,
+};
+
+export const M01DateSheet: Story = {
+  name: "M-01 日付のシート (fill)",
+  render: () => <LiveWithSheet kind="date" />,
+};
+
+// ---- Task 11: 入力中のクイック追加 / 編集できる詳細 ----
+function TypingQuickAdd() {
+  const [text, setText] = useState("牛乳");
+  // 実機は parse_quick_add の結果から作る。Story は「明日」だけ日付として色を付ける。
+  const i = text.indexOf("明日");
+  const tokens = i < 0 ? [{ text }] : [{ text: text.slice(0, i) }, { text: "明日", kind: "date" as const }, ...(text.slice(i + 2) ? [{ text: text.slice(i + 2) }] : [])];
+  return (
+    <SheetFrame>
+      <MobileQuickAddSheet tokens={tokens} text={text} onTextChange={setText} onSubmit={() => undefined} onInsert={(k) => setText(insertToken(text, k))} />
+    </SheetFrame>
+  );
+}
+
+export const M02Typing: Story = {
+  name: "M-02 入力中 (ツールバーで日付を足した)",
+  render: () => <TypingQuickAdd />,
+};
+
+export const M03DateSheet: Story = {
+  name: "M-03 日付のシートを開いた",
+  render: () => (
+    <MobileTaskDetail
+      task={{ ...tasks[0], labels: ["食品", "急ぎ"], reminders: ["-30m"], note: "近所のスーパーで。卵は 10 個入り。" }}
+      subtasks={byNo(4, 5, 7)}
+      project={projects.find((p) => p.name === "買い物")!}
+      section="今週"
+      onChange={() => undefined}
+      initialSheet="date"
+    />
+  ),
+};
+
+// ---- Phase 6 Task 12: 設定 (同期 / 通知 / 表示名 / ファイル)、同期の帯、引っ張って更新 ----
+const noop = () => undefined;
+const syncPane = {
+  settings: nasConnected,
+  status: syncStatuses.synced,
+  tailnet: tailnets.running,
+  onChangeBackend: noop,
+  onSyncNow: noop,
+  onDisconnect: noop,
+};
+const dataDirHint = "「ファイル」アプリの「このiPhone内 → PowerToDo」にあります。Excel で直した内容は、アプリに戻ると反映されます";
+
+function LiveSettings({ permission }: { permission: "granted" | "denied" | "prompt" }) {
+  const [enabled, setEnabled] = useState(true);
+  const [name, setName] = useState("たろう");
+  return (
+    <MobileSettings
+      sync={syncPane}
+      notifications={{ enabled, permission }}
+      onToggleNotifications={setEnabled}
+      onRequestPermission={noop}
+      displayName={name}
+      onDisplayName={async (v) => {
+        setName(v);
+        return true;
+      }}
+      dataDirHint={dataDirHint}
+      headerSync="synced"
+      onHeaderSync={noop}
+      onBack={noop}
+    />
+  );
+}
+
+export const M07Nas: Story = {
+  name: "M-07 NAS 接続済み",
+  render: () => <LiveSettings permission="granted" />,
+};
+
+export const M07Denied: Story = {
+  name: "M-07 通知が拒否されている",
+  render: () => <LiveSettings permission="denied" />,
+};
+
+export const M07Google: Story = {
+  name: "M-07 Google Drive 接続済み",
+  render: () => (
+    <MobileSettings
+      sync={{ ...syncPane, settings: googleLoggedIn, status: syncStatuses.googleAuthRejected, tailnet: null, onGoogleLogin: async () => true }}
+      notifications={{ enabled: true, permission: "prompt" }}
+      onRequestPermission={noop}
+      dataDirHint={dataDirHint}
+      headerSync="error"
+      onHeaderSync={noop}
+      onBack={noop}
+    />
+  ),
+};
+
+export const M01Conflict: Story = {
+  name: "M-01 競合の帯",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView
+          live
+          fill
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          today={TODAY}
+          onToggleDone={toggle}
+          sync="synced"
+          onSync={noop}
+          banner={
+            <Banners
+              narrow
+              reminders={{ items: [], today: TODAY, onDone: noop, onSnooze: noop, onOpen: noop, onDismiss: noop, onDismissAll: noop }}
+              saveErrors={{}}
+              onRetrySave={noop}
+              readFailures={{ failures: {}, dismiss: noop } as never}
+              held={[]}
+              heldFileName={(p) => `${p}.xlsx`}
+              onResolve={noop}
+              invalidCount={0}
+              onReveal={noop}
+              onReload={noop}
+              notice={null}
+              onClearNotice={noop}
+              flash={null}
+              onClearFlash={noop}
+              sync={{
+                conflicts: [{ file: "買い物.xlsx", conflictFile: "買い物 (競合 iPhone 2026-10-20 09-41).xlsx" }],
+                onOpenConflict: noop,
+                onDismissConflict: noop,
+              }}
+            />
+          }
+        />
+      );
+    };
+    return <Live />;
+  },
+};
+
+export const M01Refreshing: Story = {
+  name: "M-01 引っ張って更新中",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} sync="syncing" onSync={noop} refreshing />
+      );
+    };
+    return <Live />;
+  },
 };

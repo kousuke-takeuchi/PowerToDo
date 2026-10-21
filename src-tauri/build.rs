@@ -11,6 +11,8 @@ fn main() {
         std::env::var("TARGET").expect("cargo sets TARGET for build scripts")
     );
     embed_google_oauth();
+    embed_google_ios_oauth();
+    link_ios_tailnet();
     if is_windows_msvc() {
         // tauri-build puts its manifest (Common Controls v6) into a resource that is linked into
         // the app binary only (`cargo:rustc-link-arg-bins`). The lib's test binary then loads the
@@ -27,6 +29,68 @@ fn main() {
         }
     } else {
         tauri_build::build()
+    }
+}
+
+/// Links the tsnet c-archive (`scripts/build-tailnet-ios.sh <target>`) into the iOS app and sets
+/// `cfg(tailnet_ffi)`. The archive is bundled into the staticlib (`libapp.a`) that Xcode links.
+/// Without the archive nothing is linked and the cfg stays unset, so `cargo check` for iOS passes
+/// without a Go toolchain (CI); the app then has no Tailscale.
+fn link_ios_tailnet() {
+    println!("cargo:rustc-check-cfg=cfg(tailnet_ffi)");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    // aarch64-apple-ios-sim has target_abi = "sim"; the device target has "".
+    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let target = if sim {
+        "aarch64-apple-ios-sim"
+    } else {
+        "aarch64-apple-ios"
+    };
+    let dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
+        .join("binaries")
+        .join("ios")
+        .join(target);
+    let lib = dir.join("libtailnet.a");
+    println!("cargo:rerun-if-changed={}", lib.display());
+    if !lib.exists() {
+        println!(
+            "cargo:warning={} is missing (run scripts/build-tailnet-ios.sh {target}): Tailscale is not in this build",
+            lib.display()
+        );
+        return;
+    }
+    println!("cargo:rustc-link-search=native={}", dir.display());
+    println!("cargo:rustc-link-lib=static=tailnet");
+    println!("cargo:rustc-cfg=tailnet_ffi");
+}
+
+/// Embeds the Google OAuth client of the iOS app (an installed-app client of type iOS: a client
+/// id, no secret) from `POWERTODO_GOOGLE_IOS_OAUTH_PLIST`, else from `google-oauth-ios.plist`
+/// next to this file. Only for iOS targets; the desktop json is not read for iOS. Without the
+/// file nothing is embedded and the build passes: Google Drive is then unavailable. Only the
+/// `cargo:` lines are printed, never the value.
+fn embed_google_ios_oauth() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    println!("cargo:rerun-if-env-changed=POWERTODO_GOOGLE_IOS_OAUTH_PLIST");
+    let path = match std::env::var_os("POWERTODO_GOOGLE_IOS_OAUTH_PLIST") {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
+            .join("google-oauth-ios.plist"),
+    };
+    // Not watched while absent (see `embed_google_oauth`).
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    println!("cargo:rerun-if-changed={}", path.display());
+    match build_oauth::parse_google_ios_plist(&text) {
+        Ok(id) => println!("cargo:rustc-env=POWERTODO_GOOGLE_IOS_CLIENT_ID={id}"),
+        Err(why) => println!(
+            "cargo:warning=the Google iOS OAuth plist is unusable ({why}); Google Drive sync is disabled in this build"
+        ),
     }
 }
 
@@ -49,7 +113,12 @@ fn embed_windows_manifest() {
 /// `google-oauth.json` next to this file. Without the file nothing is embedded and the build
 /// still passes (CI): `sync::oauth::client()` is then `None`. Only the `cargo:` lines below
 /// are printed, never a value from the file, and a malformed file only produces a warning.
+/// Not for iOS targets: the desktop client has a secret that must not reach the iOS binary
+/// (see `embed_google_ios_oauth`).
 fn embed_google_oauth() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
+        return;
+    }
     println!("cargo:rerun-if-env-changed=POWERTODO_GOOGLE_OAUTH_JSON");
     let path = match std::env::var_os("POWERTODO_GOOGLE_OAUTH_JSON") {
         Some(p) if !p.is_empty() => PathBuf::from(p),

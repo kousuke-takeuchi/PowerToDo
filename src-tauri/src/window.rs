@@ -15,6 +15,8 @@ pub fn show_main_window(app: &AppHandle) {
             if let Err(e) = window.show() {
                 eprintln!("could not show the main window: {e}");
             }
+            // `unminimize` is cfg(desktop).
+            #[cfg(desktop)]
             if let Err(e) = window.unminimize() {
                 eprintln!("could not restore the main window: {e}");
             }

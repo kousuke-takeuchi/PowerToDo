@@ -28,7 +28,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Notify;
 
 use super::{AppState, TauriSyncHost};
@@ -37,13 +36,20 @@ use crate::store::paths::{AppSettings, SyncBackend, SyncSettings};
 use crate::sync::backend::{BackendError, StorageBackend};
 use crate::sync::gdrive::GoogleDriveBackend;
 use crate::sync::oauth::{GoogleOAuth, OAuthError, TokenSource, Tokens};
-use crate::sync::secrets::{
-    GOOGLE_SERVICE, KeyringStore, MemoryStore, NAS_SERVICE, SecretResult, SecretStore,
-};
+#[cfg(desktop)]
+use crate::sync::secrets::KeyringStore;
+use crate::sync::secrets::{GOOGLE_SERVICE, MemoryStore, NAS_SERVICE, SecretResult, SecretStore};
 use crate::sync::state::BackendKind;
-use crate::sync::tailnet::{
-    self, RESOLVE_TIMEOUT, Tailnet, TailnetError, TailnetState, TailnetStatusView,
-};
+#[cfg(desktop)]
+use crate::sync::tailnet::Tailnet;
+use crate::sync::tailnet::{self, RESOLVE_TIMEOUT, TailnetError, TailnetState, TailnetStatusView};
+#[cfg(all(mobile, tailnet_ffi))]
+use crate::sync::tailnet_inproc::FfiApi;
+#[cfg(all(mobile, not(tailnet_ffi)))]
+use crate::sync::tailnet_inproc::NoApi;
+use crate::sync::tailnet_inproc::ProxyCheck;
+#[cfg(mobile)]
+use crate::sync::tailnet_inproc::{IOS_HOSTNAME, InProcTailnet, TnApi};
 use crate::sync::webdav::{NasUrlError, WebDavBackend, resolve_nas_url};
 use crate::sync::{PlanMode, RunOutcome, SyncReason, SyncStatusView};
 
@@ -202,7 +208,7 @@ impl Secrets {
 /// What the NAS sync keeps next to the engine: the sidecar, the secrets, and the bookkeeping
 /// that decides when the engine gets a backend.
 pub struct SyncRuntime {
-    tailnet: Mutex<Option<Arc<Tailnet>>>,
+    tailnet: Mutex<Option<Arc<TailnetHandle>>>,
     /// Why the sidecar could not be started (binary missing, no permission); `None` otherwise.
     start_error: Mutex<Option<String>>,
     secrets: Arc<Secrets>,
@@ -245,7 +251,23 @@ impl Drop for LoginSlot<'_> {
 
 impl SyncRuntime {
     pub fn new() -> Self {
-        Self::with_secrets(Secrets::new(Arc::new(KeyringStore)))
+        #[cfg(desktop)]
+        let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+        // The iOS keychain. `Store::new` practically always succeeds; on an unsigned build the
+        // first `AppleStore::set` fails (-34018), and `Secrets` then keeps the secret in memory
+        // and reports `persistent() == false`, which the UI shows. If the store could not even
+        // be created, every call fails the same way (`UnavailableStore`).
+        #[cfg(target_os = "ios")]
+        let store: Arc<dyn SecretStore> = match crate::sync::secrets::AppleStore::new() {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                eprintln!("iOS keychain unavailable: {e}");
+                Arc::new(crate::sync::secrets::UnavailableStore(e.0))
+            }
+        };
+        #[cfg(all(mobile, not(target_os = "ios")))]
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        Self::with_secrets(Secrets::new(store))
     }
 
     fn with_secrets(secrets: Secrets) -> Self {
@@ -303,7 +325,7 @@ impl SyncRuntime {
         seq.is_none_or(|s| self.seq.load(Ordering::SeqCst) == s)
     }
 
-    fn current_tailnet(&self) -> Option<Arc<Tailnet>> {
+    fn current_tailnet(&self) -> Option<Arc<TailnetHandle>> {
         lock(&self.tailnet).clone()
     }
 
@@ -367,7 +389,12 @@ struct DtoFacts {
 }
 
 fn google_available() -> bool {
-    option_env!("POWERTODO_GOOGLE_CLIENT_ID").is_some()
+    if cfg!(target_os = "ios") {
+        // The iOS client has no secret: only its id is embedded.
+        crate::sync::oauth::ios_client_id().is_some()
+    } else {
+        option_env!("POWERTODO_GOOGLE_CLIENT_ID").is_some()
+    }
 }
 
 fn settings_dto(s: &SyncSettings, facts: DtoFacts) -> SyncSettingsDto {
@@ -581,12 +608,59 @@ fn tailnet_view(state: Option<TailnetState>, start_error: Option<String>) -> Tai
 
 // ---- sidecar ----
 
-/// The running sidecar, started when there is none. Blocking.
-fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
+/// The Tailscale node of this platform: the desktop sidecar process, or on mobile the node
+/// linked into the app. Both have the same methods.
+#[cfg(desktop)]
+type TailnetHandle = Tailnet;
+#[cfg(mobile)]
+type TailnetHandle = InProcTailnet;
+
+/// Starts this platform's node. `on_status` runs on a background thread (no call into the
+/// handle from it).
+#[cfg(desktop)]
+fn start_node(
+    app_data_dir: &Path,
+    on_status: impl Fn(TailnetStatusView) + Send + 'static,
+) -> Result<TailnetHandle, TailnetError> {
+    Tailnet::start(
+        tailnet::sidecar_path(),
+        tailnet::state_dir(app_data_dir),
+        tailnet::default_hostname(),
+        on_status,
+    )
+}
+
+/// Mobile: the c-archive when this build has it (`cfg(tailnet_ffi)`, set by `build.rs`), else a
+/// stand-in whose start fails with a clear reason.
+#[cfg(mobile)]
+fn start_node(
+    app_data_dir: &Path,
+    on_status: impl Fn(TailnetStatusView) + Send + 'static,
+) -> Result<TailnetHandle, TailnetError> {
+    #[cfg(tailnet_ffi)]
+    let api: Arc<dyn TnApi> = Arc::new(FfiApi);
+    #[cfg(not(tailnet_ffi))]
+    let api: Arc<dyn TnApi> = Arc::new(NoApi);
+    InProcTailnet::start(
+        api,
+        tailnet::state_dir(app_data_dir),
+        IOS_HOSTNAME,
+        on_status,
+    )
+}
+
+#[cfg(desktop)]
+const START_ERROR: &str =
+    "Tailscale を起動できません (powertodo-tailnet が見つからないか、実行できません)";
+#[cfg(mobile)]
+const START_ERROR: &str = "Tailscale を起動できません";
+
+/// The running node, started when there is none. Blocking.
+fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<TailnetHandle>> {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     let mut slot = lock(&rt.tailnet);
-    // A sidecar that gave up (`failed`) is replaced, so asking again is a retry (spec 4.1).
+    // A node that gave up (`failed`) is replaced, so asking again is a retry (spec 4.1).
     if let Some(t) = slot.as_ref() {
         if !needs_restart(&t.state()) {
             return Ok(Arc::clone(t));
@@ -596,12 +670,9 @@ fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
         }
     }
     let cb_app = app.clone();
-    let started = Tailnet::start(
-        tailnet::sidecar_path(),
-        tailnet::state_dir(state.app_data_dir()),
-        tailnet::default_hostname(),
-        move |view| on_tailnet_status(&cb_app, view),
-    );
+    let started = start_node(state.app_data_dir(), move |view| {
+        on_tailnet_status(&cb_app, view)
+    });
     match started {
         Ok(t) => {
             *lock(&rt.start_error) = None;
@@ -610,10 +681,8 @@ fn ensure_tailnet(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
             Ok(t)
         }
         Err(e) => {
-            eprintln!("could not start the Tailscale sidecar: {e}");
-            let reason =
-                "Tailscale を起動できません (powertodo-tailnet が見つからないか、実行できません)"
-                    .to_string();
+            eprintln!("could not start Tailscale: {e}");
+            let reason = START_ERROR.to_string();
             *lock(&rt.start_error) = Some(reason.clone());
             drop(slot);
             let _ = app.emit("tailnet-status", tailnet_view(None, Some(reason.clone())));
@@ -642,7 +711,7 @@ fn stop_sidecar(app: &AppHandle) {
 
 /// 「再試行」: ends a stuck or failed sidecar and starts a new one. The state folder (the
 /// Tailscale login) is kept; `tailnet_reset` is the one that deletes it. Blocking.
-fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<Tailnet>> {
+fn restart_sidecar(app: &AppHandle) -> AppResult<Arc<TailnetHandle>> {
     let state = app.state::<AppState>();
     let rt = &state.sync_rt;
     rt.note_tailnet_state(false);
@@ -666,12 +735,14 @@ pub fn shutdown(app: &AppHandle) {
 
 /// Before an app update is installed: ends the sidecar (on Windows the installer replaces files
 /// the sidecar's process holds open). Blocking.
+#[cfg(desktop)]
 pub fn stop_for_update(app: &AppHandle) {
     stop_sidecar(app);
 }
 
 /// The update failed and the app goes on: starts the sidecar again under the same conditions as
 /// at launch (the engine gets its backend when the sidecar reports `running`). Blocking.
+#[cfg(desktop)]
 pub fn restart_after_failed_update(app: &AppHandle) {
     start_if_logged_in(app);
 }
@@ -713,7 +784,7 @@ fn report_unreachable(app: &AppHandle, message: &str) {
 /// The WebDAV backend for typed or saved details. Asks the sidecar where the NAS is (a host
 /// outside the tailnet is refused) and goes through its proxy. Blocking.
 fn build_webdav(
-    tailnet: &Tailnet,
+    tailnet: &TailnetHandle,
     url: &str,
     user: &str,
     password: &str,
@@ -789,6 +860,100 @@ async fn connect_nas(app: &AppHandle, seq: Option<u64>) {
         Err(e) if rt.is_current(seq) => report_unreachable(app, &e.to_string()),
         Err(_) => {}
     }
+}
+
+/// Whether the run may go ahead after the proxy check (spec 3.2). Only a listener reopened on a
+/// new address needs a new backend first: the old one still points at the dead address, and
+/// `set_backend` asks for a run once the new one is attached. `Unavailable` runs on: the run
+/// fails as offline and the screen says so.
+#[cfg_attr(desktop, allow(dead_code))]
+fn proxy_decision(check: ProxyCheck, old: Option<&str>, new: Option<&str>) -> bool {
+    !(check == ProxyCheck::Reopened && old != new)
+}
+
+/// Before every normal sync run: when the target is the NAS through the in-process tailnet,
+/// check the proxy (iOS takes the sockets of a suspended app). `false` means this run waits for a
+/// rebuilt backend (started here). The only blocking call is the 500 ms connect to 127.0.0.1.
+/// The desktop sidecar is a separate process and needs no check.
+pub fn prepare_run(app: &AppHandle) -> bool {
+    #[cfg(mobile)]
+    {
+        let state = app.state::<AppState>();
+        if state.lock_settings().sync.backend != SyncBackend::Nas {
+            return true;
+        }
+        let Some(tailnet) = state.sync_rt.current_tailnet() else {
+            return true;
+        };
+        let old = tailnet.proxy_url();
+        let check = tailnet.ensure_proxy();
+        let new = tailnet.proxy_url();
+        let go = proxy_decision(check, old.as_deref(), new.as_deref());
+        if !go {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move { connect_nas(&handle, None).await });
+        }
+        go
+    }
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        true
+    }
+}
+
+/// Whether the proxy URL the engine's backend was built with may be out of date: the listener
+/// came back on another address. Then the backend is built again (`connect_nas`), because the
+/// old one still points at the dead address and `prepare_run` would find the new listener alive.
+#[cfg_attr(desktop, allow(dead_code))]
+fn proxy_url_changed(before: Option<&str>, after: Option<&str>) -> bool {
+    before != after
+}
+
+/// The last network report (`on_network_changed` only reacts to a change).
+static LAST_PATH: Mutex<Option<tauri_plugin_powertodo_ios::PathInfo>> = Mutex::new(None);
+
+/// Tells the node the network may have changed. When that leaves the proxy on another address,
+/// the backend is built again. `before` / `after` bracket the call.
+#[cfg(mobile)]
+fn rebind_node(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(tailnet) = state.sync_rt.current_tailnet() else {
+        return;
+    };
+    let before = tailnet.proxy_url();
+    tailnet.rebind();
+    let after = tailnet.proxy_url();
+    if proxy_url_changed(before.as_deref(), after.as_deref()) {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move { connect_nas(&handle, None).await });
+    }
+}
+
+/// The app came to the front (spec 3.3, 3.4): look for external changes, tell the node, and
+/// sync (with the offline retries). Runs off the calling thread.
+pub fn on_resumed(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        super::scan_external(&handle);
+        #[cfg(mobile)]
+        rebind_node(&handle);
+        handle.state::<AppState>().sync.network_changed();
+    });
+}
+
+/// The network path changed (`NWPathMonitor`). The first report and a repeat of the last one
+/// do nothing.
+pub fn on_network_changed(app: &AppHandle, info: &tauri_plugin_powertodo_ios::PathInfo) {
+    if !tauri_plugin_powertodo_ios::path_changed(&LAST_PATH, info) {
+        return;
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(mobile)]
+        rebind_node(&handle);
+        handle.state::<AppState>().sync.network_changed();
+    });
 }
 
 /// The engine's name for a chosen target (`None` for no sync).
@@ -941,6 +1106,7 @@ fn drive_backend(tokens: Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>>
 /// that fails (or the browser cannot be opened) the reason is kept in `failure` and the login
 /// is cancelled, so it does not wait five minutes for a page nobody sees. The URL itself is
 /// never kept or logged: it carries `state` and `code_challenge`.
+#[cfg(not(target_os = "ios"))]
 fn guarded_opener(
     cancel: Arc<Notify>,
     failure: Arc<Mutex<Option<String>>>,
@@ -1083,6 +1249,7 @@ async fn finish_login<C: Ctx>(
 
 /// The Google login: the browser round trip (no lock held: it takes minutes), then
 /// [`finish_login`]. `Denied` and a cancel are ends, not failures.
+#[cfg(not(target_os = "ios"))]
 async fn google_login_flow<C: Ctx>(
     ctx: &C,
     oauth: &GoogleOAuth,
@@ -1091,7 +1258,18 @@ async fn google_login_flow<C: Ctx>(
     make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
 ) -> AppResult<LoginEnd> {
     require_gdrive(ctx.app_state())?;
-    let tokens = match oauth.login(open_url, cancel).await {
+    let result = oauth.login(open_url, cancel).await;
+    complete_login(ctx, oauth, result, make_backend).await
+}
+
+/// What follows the round trip, on every platform.
+async fn complete_login<C: Ctx>(
+    ctx: &C,
+    oauth: &GoogleOAuth,
+    result: Result<Tokens, OAuthError>,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
+) -> AppResult<LoginEnd> {
+    let tokens = match result {
         Ok(tokens) => tokens,
         Err(OAuthError::Cancelled) => return Ok(LoginEnd::Cancelled),
         Err(OAuthError::Denied) => return Ok(LoginEnd::Denied),
@@ -1099,6 +1277,50 @@ async fn google_login_flow<C: Ctx>(
     };
     finish_login(ctx, oauth, tokens, make_backend).await?;
     Ok(LoginEnd::Done)
+}
+
+/// The Google login on iOS: the system login sheet instead of the browser and the loopback
+/// port. `open` shows the authorization URL and returns the URL the sheet ended on.
+#[cfg(target_os = "ios")]
+async fn google_login_ios_flow<C: Ctx, Fut>(
+    ctx: &C,
+    oauth: &GoogleOAuth,
+    redirect_uri: &str,
+    open: impl FnOnce(String) -> Fut + Send,
+    cancel: impl Future<Output = ()> + Send,
+    make_backend: impl FnOnce(Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>> + Send,
+) -> AppResult<LoginEnd>
+where
+    Fut: Future<Output = Result<String, OAuthError>> + Send,
+{
+    require_gdrive(ctx.app_state())?;
+    let result = oauth.login_with_redirect(redirect_uri, open, cancel).await;
+    complete_login(ctx, oauth, result, make_backend).await
+}
+
+/// Shows `url` in the system login sheet (only when it is Google's) and returns the URL the
+/// sheet ended on. The sheet blocks its thread until it closes, so it runs on the blocking
+/// pool, never on the main thread.
+#[cfg(target_os = "ios")]
+async fn present_login_sheet(
+    app: AppHandle,
+    url: String,
+    scheme: String,
+) -> Result<String, OAuthError> {
+    use tauri_plugin_powertodo_ios::{Error as SheetError, PowerToDoIosExt};
+    if !url.starts_with(GOOGLE_AUTH_URL_PREFIX) {
+        return Err(OAuthError::Other(
+            "Google のログイン用のアドレスを確かめられないため、ログイン画面を開きませんでした"
+                .into(),
+        ));
+    }
+    let joined =
+        tokio::task::spawn_blocking(move || app.powertodo_ios().authenticate(&url, &scheme)).await;
+    match joined {
+        Ok(Ok(callback)) => Ok(callback),
+        Ok(Err(SheetError::Cancelled)) => Err(OAuthError::Cancelled),
+        _ => Err(OAuthError::Other("ログイン画面を開けませんでした".into())),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1392,7 +1614,7 @@ fn check_preconditions(
     url: &str,
     user: &str,
     password: &str,
-) -> AppResult<(NasTarget, String, Arc<Tailnet>)> {
+) -> AppResult<(NasTarget, String, Arc<TailnetHandle>)> {
     let (target, user) = validate_nas_input(url, user, password)?;
     require_nas(state)?;
     let tailnet = state
@@ -1584,30 +1806,66 @@ pub async fn google_login(app: AppHandle) -> AppResult<GoogleLoginDto> {
         });
     };
     let cancel = Arc::clone(&slot.cancel);
-    let failure = Arc::new(Mutex::new(None));
-    let opener_app = app.clone();
-    let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |url| {
-        opener_app
-            .opener()
-            .open_url(url, None::<&str>)
-            .map_err(|_| "ブラウザを開けませんでした".to_string())
-    });
-    let end = google_login_flow(
-        &app,
-        &oauth,
-        open,
+    #[cfg(target_os = "ios")]
+    {
+        let end = google_login_ios(&app, &oauth, cancel).await;
+        drop(slot);
+        Ok(GoogleLoginDto {
+            outcome: end?.name(),
+        })
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let failure = Arc::new(Mutex::new(None));
+        let opener_app = app.clone();
+        let open = guarded_opener(Arc::clone(&cancel), Arc::clone(&failure), move |url| {
+            crate::platform::open_url(&opener_app, url)
+                .map_err(|_| "ブラウザを開けませんでした".to_string())
+        });
+        let end = google_login_flow(
+            &app,
+            &oauth,
+            open,
+            async move { cancel.notified().await },
+            drive_backend,
+        )
+        .await;
+        drop(slot);
+        // The browser could not be opened: the cancel above ended the wait; say why.
+        if let Some(message) = lock(&failure).take() {
+            return Err(AppError::Io { message });
+        }
+        Ok(GoogleLoginDto {
+            outcome: end?.name(),
+        })
+    }
+}
+
+/// The iOS half of `google_login`: the redirect is the reversed client id, whose scheme is what
+/// the login sheet watches for.
+#[cfg(target_os = "ios")]
+async fn google_login_ios(
+    app: &AppHandle,
+    oauth: &GoogleOAuth,
+    cancel: Arc<Notify>,
+) -> AppResult<LoginEnd> {
+    let unavailable = || AppError::Invalid {
+        message: GOOGLE_UNAVAILABLE.into(),
+    };
+    let redirect = crate::sync::oauth::ios_client_id()
+        .and_then(crate::sync::oauth::ios_redirect_uri)
+        .ok_or_else(unavailable)?;
+    let scheme = redirect.split(':').next().unwrap_or_default().to_string();
+    let sheet_app = app.clone();
+    google_login_ios_flow(
+        app,
+        oauth,
+        &redirect,
+        move |url| present_login_sheet(sheet_app, url, scheme),
         async move { cancel.notified().await },
         drive_backend,
     )
-    .await;
-    drop(slot);
-    // The browser could not be opened: the cancel above ended the wait; say why.
-    if let Some(message) = lock(&failure).take() {
-        return Err(AppError::Io { message });
-    }
-    Ok(GoogleLoginDto {
-        outcome: end?.name(),
-    })
+    .await
 }
 
 /// 「キャンセル」 while `google_login` waits for the browser. Nothing to do when none waits.
@@ -1646,6 +1904,34 @@ mod tests {
             Err(e) => panic!("expected an invalid error, got {e:?}"),
             Ok(_) => panic!("expected an error"),
         }
+    }
+
+    // ---- before each run ----
+
+    #[test]
+    fn a_proxy_on_another_address_after_a_resume_rebuilds_the_backend() {
+        let a = "socks5h://u:p@127.0.0.1:1111";
+        let b = "socks5h://u:p@127.0.0.1:2222";
+        assert!(proxy_url_changed(Some(a), Some(b)));
+        assert!(proxy_url_changed(Some(a), None));
+        assert!(proxy_url_changed(None, Some(b)));
+        assert!(!proxy_url_changed(Some(a), Some(a)));
+        assert!(!proxy_url_changed(None, None));
+    }
+
+    #[test]
+    fn prepare_run_reopens_the_proxy_before_the_run() {
+        let a = Some("socks5h://u:p@127.0.0.1:1111");
+        let b = Some("socks5h://u:p@127.0.0.1:2222");
+        // A reopened listener with a new URL: the backend is rebuilt and this run waits for it.
+        assert!(!proxy_decision(ProxyCheck::Reopened, a, b));
+        assert!(!proxy_decision(ProxyCheck::Reopened, None, b));
+        // Same URL: the backend's proxy still works.
+        assert!(proxy_decision(ProxyCheck::Reopened, a, a));
+        assert!(proxy_decision(ProxyCheck::Alive, a, a));
+        assert!(proxy_decision(ProxyCheck::Alive, a, b));
+        // No proxy: the run goes and fails offline, which the screen shows.
+        assert!(proxy_decision(ProxyCheck::Unavailable, a, None));
     }
 
     // ---- NAS input ----
@@ -2627,6 +2913,15 @@ mod tests {
             kc.broken.store(false, Ordering::SeqCst);
             assert!(secrets.set(GOOGLE_SERVICE, EMAIL, "token2"));
             assert!(secrets.persistent_for(GOOGLE_SERVICE) && secrets.persistent());
+        }
+
+        #[test]
+        fn an_unavailable_store_keeps_secrets_in_memory_and_not_persistent() {
+            use crate::sync::secrets::UnavailableStore;
+            let secrets = Secrets::new(Arc::new(UnavailableStore("no keychain".into())));
+            assert!(!secrets.set(NAS_SERVICE, "u@nas", "pw"));
+            assert!(!secrets.persistent_for(NAS_SERVICE));
+            assert_eq!(secrets.get(NAS_SERVICE, "u@nas").as_deref(), Some("pw"));
         }
 
         #[tokio::test]

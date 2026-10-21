@@ -5,6 +5,8 @@ pub mod platform;
 pub mod scheduler;
 pub mod store;
 pub mod sync;
+// `tauri::tray` exists only with cfg(desktop).
+#[cfg(desktop)]
 pub mod tray;
 pub mod window;
 
@@ -92,6 +94,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Network changes and the login sheet on iOS; does nothing elsewhere.
+        .plugin(tauri_plugin_powertodo_ios::init())
         .setup(|app| {
             let dir = platform::app_data_dir(app.handle())?;
             app.manage(AppState::new(dir));
@@ -100,6 +104,17 @@ pub fn run() {
             scheduler::register(app.handle());
             scheduler::start(app.handle().clone());
             commands::start_sync(app.handle());
+            #[cfg(mobile)]
+            {
+                use tauri_plugin_powertodo_ios::PowerToDoIosExt;
+                let handle = app.handle().clone();
+                if let Err(e) = app.powertodo_ios().on_path_change(move |info| {
+                    commands::sync::on_network_changed(&handle, &info);
+                }) {
+                    eprintln!("network monitor: {e}");
+                }
+            }
+            #[cfg(desktop)]
             tray::setup(app.handle());
             Ok(())
         })
@@ -107,6 +122,7 @@ pub fn run() {
             commands::app_state,
             commands::set_data_dir,
             commands::watch_status,
+            commands::platform_info,
             commands::pick_folder,
             commands::reveal_data_dir,
             commands::retry_save,
@@ -173,7 +189,35 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|handle, event| match event {
+    // tao reports one `Resumed` right after launch (seen in the simulator): the start-up sync
+    // covers it. Later ones are returns from the background.
+    #[cfg(mobile)]
+    let launched = std::sync::atomic::AtomicBool::new(false);
+    app.run(move |handle, event| match event {
+        // iOS: the app came back to the front (`applicationWillEnterForeground`; tao reports it
+        // as a window event). `RunEvent::Resumed` is the event loop waking up, not this.
+        #[cfg(mobile)]
+        tauri::RunEvent::WindowEvent {
+            event: tauri::WindowEvent::Resumed,
+            ..
+        } => {
+            if launched.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                commands::sync::on_resumed(handle);
+                scheduler::on_resumed(handle);
+            }
+        }
+        // iOS: going to the background. Nothing is closed (spec 3.4): the proxy is checked on
+        // the next run; the edits are written now because the process may be stopped.
+        #[cfg(mobile)]
+        tauri::RunEvent::WindowEvent {
+            event: tauri::WindowEvent::Suspended,
+            ..
+        } => {
+            if let Some(state) = handle.try_state::<AppState>() {
+                state.flush_all();
+            }
+            scheduler::on_suspended(handle);
+        }
         // Quitting (Cmd+Q, or the last window closing) must not drop an external change the
         // user has not decided about: keep running and let the UI ask. The `quit` command exits
         // with a code, which is let through.
@@ -191,6 +235,7 @@ pub fn run() {
         // Closing the main window hides it (kept in the tray / Dock) unless the user turned that
         // off; then it ends the app, after asking about held projects while the page can still
         // ask. See `tray::close_policy`.
+        #[cfg(desktop)]
         tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { api, .. },

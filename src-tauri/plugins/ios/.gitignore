@@ -1,0 +1,10 @@
+/.tauri
+/target
+/ios/.build
+/ios/Packages
+/ios/*.xcodeproj
+/ios/xcuserdata
+/ios/Package.resolved
+/ios/.swiftpm
+.DS_Store
+/Cargo.lock

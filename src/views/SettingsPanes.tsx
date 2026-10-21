@@ -1,9 +1,10 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { isImeKey } from "../app/keys";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import { TextField } from "../components/TextField";
+import { NarrowContext } from "../components/NarrowContext";
 import { hintStyle, labelStyle } from "./SyncFields";
 
 /** 設定ダイアログの右側に並べる部品 (ラベル + 内容)。 */
@@ -17,9 +18,15 @@ export function Section({ label, children }: { label: string; children: React.Re
 }
 
 export const Desc = ({ children }: { children: React.ReactNode }) => <div style={hintStyle}>{children}</div>;
-export const Row = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>{children}</div>
-);
+export const Row = ({ children }: { children: React.ReactNode }) => {
+  const narrow = useContext(NarrowContext);
+  return narrow ? (
+    // 縦に並べると、flex の stretch でボタンが全幅になる
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>{children}</div>
+  ) : (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>{children}</div>
+  );
+};
 const ErrorText = ({ children }: { children: React.ReactNode }) => (
   <div role="alert" style={{ ...hintStyle, color: "var(--color-danger)" }}>
     {children}
@@ -73,6 +80,7 @@ export type AccountPaneProps = {
 export function AccountPane({ displayName = SAMPLE_NAME, onSaveDisplayName, busy = false, error }: AccountPaneProps) {
   const [name, setName] = useState(displayName);
   const [saved, setSaved] = useState(false);
+  const narrow = useContext(NarrowContext);
 
   useEffect(() => setName(displayName), [displayName]);
 
@@ -98,13 +106,14 @@ export function AccountPane({ displayName = SAMPLE_NAME, onSaveDisplayName, busy
       <Section label="表示名">
         <TextField
           value={name}
+          fontSize={narrow ? 16 : undefined}
           ariaLabel="表示名"
           onChange={(v) => {
             setName(v);
             setSaved(false);
           }}
         />
-        <Desc>サイドバーのアカウント欄に表示されます。</Desc>
+        <Desc>{narrow ? "ドロワーのアカウント欄に表示されます。" : "サイドバーのアカウント欄に表示されます。"}</Desc>
         <Row>
           <Button type="submit" disabled={!dirty || busy}>
             保存

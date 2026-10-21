@@ -7,6 +7,7 @@ import { Segmented } from "../components/Segmented";
 import type { SyncState } from "../components/SyncStatus";
 import type { SyncBackend, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
 import { Desc, Row, Section } from "./SettingsPanes";
+import { NarrowContext } from "../components/NarrowContext";
 import { NasFields, hintStyle } from "./SyncFields";
 
 /** 実行中の操作 (一度に一つ)。 */
@@ -70,6 +71,8 @@ export type SyncPaneProps = TailnetActions & {
   /** 待っているログインのキャンセル。`busy` の間も押せる。 */
   onGoogleCancel?: () => void;
   onGoogleLogout?: () => void;
+  /** 縦長の幅 (iPhone): ボタンを縦に並べて全幅にし、同期先の名前を短くする。デスクトップは渡さない。 */
+  narrow?: boolean;
 };
 
 const PASSWORD_NOT_SAVED = "パスワードを保存できません (再起動するまで有効)";
@@ -548,12 +551,13 @@ export function SyncPane(props: SyncPaneProps) {
     onGoogleLogin,
     onGoogleCancel,
     onGoogleLogout,
+    narrow = false,
     ...tailnetActions
   } = props;
   const googleReady = !!settings?.googleAvailable;
   const options = [
     { value: "gdrive" as const, label: "Google Drive", disabled: !googleReady },
-    { value: "nas" as const, label: "Synology NAS (WebDAV)" },
+    { value: "nas" as const, label: narrow ? "NAS" : "Synology NAS (WebDAV)" },
     { value: "none" as const, label: "同期しない" },
   ];
 
@@ -635,7 +639,7 @@ export function SyncPane(props: SyncPaneProps) {
   }
 
   return (
-    <>
+    <NarrowContext.Provider value={narrow}>
       <Section label="同期先">
         <Segmented
           options={options}
@@ -655,6 +659,6 @@ export function SyncPane(props: SyncPaneProps) {
           {error}
         </div>
       )}
-    </>
+    </NarrowContext.Provider>
   );
 }

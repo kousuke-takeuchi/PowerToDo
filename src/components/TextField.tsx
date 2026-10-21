@@ -11,9 +11,11 @@ export type TextFieldProps = {
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   onCompositionStart?: () => void;
   onCompositionEnd?: () => void;
+  /** 文字の大きさ (px、既定 14)。iOS は 16 未満の入力欄にフォーカスすると拡大するので、モバイルのシートでは 16。 */
+  fontSize?: number;
 };
 
-export function TextField({ value, placeholder, onChange, type = "text", readOnly, ariaLabel, autoFocus, onKeyDown, onCompositionStart, onCompositionEnd }: TextFieldProps) {
+export function TextField({ value, placeholder, onChange, type = "text", readOnly, ariaLabel, autoFocus, onKeyDown, onCompositionStart, onCompositionEnd, fontSize = 14 }: TextFieldProps) {
   return (
     <input
       type={type}
@@ -37,7 +39,7 @@ export function TextField({ value, placeholder, onChange, type = "text", readOnl
         background: "transparent",
         color: "var(--color-text-primary)",
         fontFamily: "var(--font-body)",
-        fontSize: 14,
+        fontSize,
         lineHeight: "20px",
       }}
     />
