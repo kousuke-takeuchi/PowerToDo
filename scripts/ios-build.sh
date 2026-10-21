@@ -3,7 +3,8 @@
 #
 #   scripts/ios-build.sh sim <simulator UDID>   debug build for the arm64 simulator, installed and launched
 #   scripts/ios-build.sh device                 release build for a device (signed; see below)
-#   scripts/ios-build.sh archive                (added with the release task)
+#   scripts/ios-build.sh archive                signed release archive + an App Store Connect .ipa
+#                                               ($TMPDIR/powertodo-ios/export); uploading is a separate step (README)
 #
 # Why not `tauri ios build --target aarch64-sim` alone: the Tauri CLI (cargo-mobile2 0.22.5
 # `validate_sdk`) refuses to build for the simulator unless a simulator runtime >= the SDK
@@ -27,7 +28,7 @@ apple=$root/src-tauri/gen/apple
 case $mode in
   sim) udid=${2:?usage: ios-build.sh sim <simulator UDID>} ;;
   device) ;;
-  archive) echo "archive is not implemented yet" >&2; exit 2 ;;
+  archive) ;;
   *) echo "usage: ios-build.sh sim <UDID> | device | archive" >&2; exit 2 ;;
 esac
 
@@ -38,7 +39,7 @@ case $(file -b "$cli") in
   *) echo "$cli is not an arm64 binary (node/cargo under Rosetta?); install an arm64 cargo-tauri or set CARGO_TAURI" >&2; exit 1 ;;
 esac
 
-if [ "$mode" = device ]; then
+if [ "$mode" = device ] || [ "$mode" = archive ]; then
   : "${XCODE_XCCONFIG_FILE:=$apple/Signing.xcconfig}"
   if [ ! -f "$XCODE_XCCONFIG_FILE" ]; then
     echo "$XCODE_XCCONFIG_FILE is missing: copy Signing.example.xcconfig to Signing.xcconfig and write your Team ID in it" >&2
@@ -96,6 +97,21 @@ if [ "$mode" = sim ]; then
   xcrun simctl bootstatus "$udid" -b >/dev/null
   xcrun simctl install "$udid" "$app"
   xcrun simctl launch "$udid" app.powertodo
+elif [ "$mode" = archive ]; then
+  # The version is project.yml's CFBundleShortVersionString / CFBundleVersion: raise
+  # CFBundleVersion before every upload (App Store Connect refuses a build number twice).
+  rm -rf "$work/PowerToDo.xcarchive" "$work/export"
+  xcodebuild -project "$apple/powertodo.xcodeproj" -scheme powertodo_iOS \
+    -configuration release -destination 'generic/platform=iOS' \
+    -derivedDataPath "$work/dd-archive" -archivePath "$work/PowerToDo.xcarchive" \
+    -allowProvisioningUpdates archive > "$work/xcodebuild-archive.log" 2>&1 \
+    || { grep -E 'error:|error\[' "$work/xcodebuild-archive.log" | head -20 >&2; echo "xcodebuild archive failed; see $work/xcodebuild-archive.log" >&2; exit 1; }
+  xcodebuild -exportArchive -archivePath "$work/PowerToDo.xcarchive" \
+    -exportOptionsPlist "$apple/ExportOptions.plist" -exportPath "$work/export" \
+    -allowProvisioningUpdates > "$work/xcodebuild-export.log" 2>&1 \
+    || { grep -E 'error:' "$work/xcodebuild-export.log" | head -20 >&2; echo "export failed; see $work/xcodebuild-export.log" >&2; exit 1; }
+  echo "archived $work/PowerToDo.xcarchive"
+  echo "exported $(ls "$work"/export/*.ipa)"
 else
   xcodebuild -project "$apple/powertodo.xcodeproj" -scheme powertodo_iOS \
     -sdk iphoneos -configuration release -destination 'generic/platform=iOS' \

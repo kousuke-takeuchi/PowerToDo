@@ -55,7 +55,13 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
+        # Raise before every TestFlight upload (App Store Connect refuses a build number twice).
         CFBundleVersion: "0.1.0"
+        # Same keys as src-tauri/Info.ios.plist (the Tauri CLI merges that file at build time);
+        # kept here too so that regenerating the project with xcodegen does not drop them.
+        NSLocalNetworkUsageDescription: 家の NAS と直接つないで同期を速くするために使います。
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
     entitlements:
       path: powertodo_iOS/powertodo_iOS.entitlements
     scheme:

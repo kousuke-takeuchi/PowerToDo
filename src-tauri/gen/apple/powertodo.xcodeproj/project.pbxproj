@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		11A7CB49DEA1FE12E6719345 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 18BB4F221EB605F0E8DA6FDF /* PrivacyInfo.xcprivacy */; };
 		206A325E5B869B6CD8AA4A26 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E5A7B0D3615BEF774BDD7499 /* MetalKit.framework */; };
 		2597D990D68C649D8EA194D3 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2DDED481ACCF1124D9F26177 /* WebKit.framework */; };
 		5CAB5552378A59C5C0952841 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9780521343ACA11BCF344B20 /* Security.framework */; };
@@ -25,6 +26,7 @@
 		086279C6B0520534FC317CBB /* ids.rs */ = {isa = PBXFileReference; path = ids.rs; sourceTree = "<group>"; };
 		093D6799A988680D13DEF6B6 /* watcher.rs */ = {isa = PBXFileReference; path = watcher.rs; sourceTree = "<group>"; };
 		0992EBF15E0741E75875DB40 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		18BB4F221EB605F0E8DA6FDF /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		1E65B3A2BF90321447BD2DB0 /* secrets.rs */ = {isa = PBXFileReference; path = secrets.rs; sourceTree = "<group>"; };
 		21BC80F06738DAFF497C64AA /* dates.rs */ = {isa = PBXFileReference; path = dates.rs; sourceTree = "<group>"; };
 		283E3CACE368AA092A61D4C3 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
@@ -39,6 +41,7 @@
 		3F01BE6C951AC3FABE13912E /* oauth.rs */ = {isa = PBXFileReference; path = oauth.rs; sourceTree = "<group>"; };
 		4188349AD153FE07BC750BC3 /* project_store.rs */ = {isa = PBXFileReference; path = project_store.rs; sourceTree = "<group>"; };
 		46F18B667A69BF6191388B12 /* tls.rs */ = {isa = PBXFileReference; path = tls.rs; sourceTree = "<group>"; };
+		47D96DE9A0DE47B98CE528F2 /* tailnet_inproc.rs */ = {isa = PBXFileReference; path = tailnet_inproc.rs; sourceTree = "<group>"; };
 		4B96E74577A3E0B55A3DC1AE /* powertodo_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = powertodo_iOS.entitlements; sourceTree = "<group>"; };
 		4BAD31226FE8EE9AE2FA22D8 /* external.rs */ = {isa = PBXFileReference; path = external.rs; sourceTree = "<group>"; };
 		50C9CB57894612461C1EDF01 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
@@ -72,6 +75,7 @@
 		DDC77123A5F9DC26C0102103 /* gdrive.rs */ = {isa = PBXFileReference; path = gdrive.rs; sourceTree = "<group>"; };
 		DE08261DF8D80B26854BC801 /* recurrence.rs */ = {isa = PBXFileReference; path = recurrence.rs; sourceTree = "<group>"; };
 		DF4560997C9CAD6C6005839E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E2968D4D4902AD6BA42153FB /* update.rs */ = {isa = PBXFileReference; path = update.rs; sourceTree = "<group>"; };
 		E5A7B0D3615BEF774BDD7499 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		E87B2792AC3A92F76DC8B1B0 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		E900E3B90B3DE14919F552FC /* fired.rs */ = {isa = PBXFileReference; path = fired.rs; sourceTree = "<group>"; };
@@ -122,6 +126,7 @@
 				35668FFF61231C3CC2C54E8D /* mod.rs */,
 				FAAEA7CB90E75961BAE09584 /* saver.rs */,
 				79B38957C824CDF2D9732021 /* sync.rs */,
+				E2968D4D4902AD6BA42153FB /* update.rs */,
 			);
 			path = commands;
 			sourceTree = "<group>";
@@ -139,6 +144,7 @@
 			children = (
 				DF4560997C9CAD6C6005839E /* Info.plist */,
 				4B96E74577A3E0B55A3DC1AE /* powertodo_iOS.entitlements */,
+				18BB4F221EB605F0E8DA6FDF /* PrivacyInfo.xcprivacy */,
 			);
 			path = powertodo_iOS;
 			sourceTree = "<group>";
@@ -192,6 +198,7 @@
 				3F01BE6C951AC3FABE13912E /* oauth.rs */,
 				1E65B3A2BF90321447BD2DB0 /* secrets.rs */,
 				CD2B5B222A03107A1028ACC0 /* state.rs */,
+				47D96DE9A0DE47B98CE528F2 /* tailnet_inproc.rs */,
 				7AF646E7053C125C07A4BC09 /* tailnet.rs */,
 				46F18B667A69BF6191388B12 /* tls.rs */,
 				F17B91B7CD045BED683C5934 /* webdav.rs */,
@@ -276,7 +283,7 @@
 			path = store;
 			sourceTree = "<group>";
 		};
-		"TEMP_324E4BAC-011B-4469-A89C-EE1EB3728FCF" /* arm64 */ = {
+		"TEMP_541C2258-3C2E-4764-B7ED-310EDD76DD63" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -343,6 +350,7 @@
 			files = (
 				73CAE5480E8A2941EDAE4CB0 /* Assets.xcassets in Resources */,
 				D52BAB188F4EEA65A4B4CAB3 /* LaunchScreen.storyboard in Resources */,
+				11A7CB49DEA1FE12E6719345 /* PrivacyInfo.xcprivacy in Resources */,
 				B0894B372F780CD6CA975EE5 /* assets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
