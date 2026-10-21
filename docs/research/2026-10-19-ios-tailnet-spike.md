@@ -331,3 +331,17 @@ xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer 
 - 回線の変化: 原因が「つなぎ直しに時間がかかる」か「tsnet が回線の変化に気づかない」かは未確定。どちらでも効くように、iOS の回線監視 (`NWPathMonitor`) で変化を検知したら tailnet に知らせる (または node を作り直す)。そのうえで同期は少し待ってから再試行する。
 - 受け口: 背面に回ったとき (`Suspended`) ではなく、実際に一時停止するときだけ閉じる。通信の直前に受け口が閉じていれば開き直す。
 - 長い背面のあとの一時的な `failed`: 少し待って自動で再試行し、すぐにエラー表示にしない。
+
+## 本番 (Phase 6) で試作から変えた点 (2026-10-21)
+
+- Go: `tailnet/mobile/` の別パッケージとシンボリックリンクをやめ、同じ `package main` をビルドタグ (`mobile_ios.go` / `main.go`) で分けた。SOCKS5 は `proxy.go` の `proxyServer` にまとめ、閉じたあと前と同じポートで開き直すのを先に試す。`tn_rebind` (netmon の `InjectEvent`) を足した
+- Rust: 試作の `tailnet_ios.rs` (グローバルの 1 ノード、`tlog!`) の代わりに `sync/tailnet_inproc.rs` の `InProcTailnet`。C API を `TnApi` の裏に置き、デスクトップのテストで偽物に差し替えて確かめる。起動・停止・受け口の操作は 1 つのロックで順番に行う (Go 側の停止と再起動が重なる問題を避ける)。`tn_start` に失敗したときに残る `failed` を、次の起動の前に捨てる
+- 受け口は背面に回っても閉じない。同期の直前 (`SyncHost::before_run`) に 127.0.0.1 への接続で生存を確かめ、死んでいれば開き直し、URL が変われば WebDAV のバックエンドを作り直す (コントロールセンターの問題への対策)
+- 前面・背面は `RunEvent::WindowEvent { Resumed / Suspended }` で受ける。起動直後の `Resumed` は 1 回無視する (試作で 2 回の open になった原因)
+- 回線の変化は Swift プラグイン (`src-tauri/plugins/ios`) の `NWPathMonitor` で受け、`tn_rebind` と 30 秒の再試行の窓 (5 秒後・15 秒後) につなぐ。シミュレーターで Mac の Wi-Fi を切って戻すと `pathChanged` が届くことを確かめた (実機の Wi-Fi → モバイル回線は未確認)
+- 状態フォルダは `<アプリのデータ>/tailscale` (デスクトップと同じ判定を使う)。試作の `Library/Application Support/tailnet` のログインは引き継がない
+- データフォルダは `Documents` に固定 (試作は `Application Support/PowerToDo`)。「ファイル」アプリから見える
+- 試作用の画面とコマンド (`src/spike/`、`commands/spike.rs`、`POWERTODO_SPIKE_AUTOTEST`、`POWERTODO_IOS_NO_TAILNET`) は入れていない
+
+### シミュレーターでの注意
+通知の許可を求める画面に答えないまま確かめを終えると、そのシミュレーターはアプリを消して入れ直しても (`simctl privacy reset all` のあとも)、起動のたびに同じ画面を出し続けた。リマインダーが無いのに許可を求められたら、まず使ったことのないシミュレーターで確かめる (Phase 6 の実装中に、これを不具合と取り違えかけた)
