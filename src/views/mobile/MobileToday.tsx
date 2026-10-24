@@ -57,7 +57,7 @@ export function MobileToday({ overdue, todays, today, live, fill, sync, onToggle
     />
     );
     return live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={t.no} onComplete={() => toggle(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+      <SwipeRow key={t.no} onComplete={() => toggle(t)} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
         {r}
       </SwipeRow>
     ) : (

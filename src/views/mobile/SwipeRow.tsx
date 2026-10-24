@@ -1,13 +1,15 @@
 import type React from "react";
 import { useRef } from "react";
-import { Calendar, Check } from "lucide-react";
+import { Calendar, Check, RotateCcw } from "lucide-react";
 import { useLongPress, useSwipe } from "../../app/useGestures";
 import { EASE_CSS, useMotionTiming } from "../../motion";
 
 export type SwipeRowProps = {
   children: React.ReactNode;
-  /** 右へスワイプして離した (完了)。 */
+  /** 右へスワイプして離した (完了。done の行は未完了に戻す)。 */
   onComplete?: () => void;
+  /** 終わったタスクの行: 右の下地を「未完了に戻す」にする (右へのスワイプは完了の切り替え)。 */
+  done?: boolean;
   /** 左へスワイプして離した (日付のシートを開く)。 */
   onDate?: () => void;
   /** 500 ms の長押し (メニューを開く)。 */
@@ -37,7 +39,7 @@ const panel: React.CSSProperties = {
  * 行は user-select: none / -webkit-touch-callout: none (文字選択のメニューを出さない)、touch-action: pan-y (縦はスクロールに任せる)。
  * 長押しの後と横に動かした後に来る click は捨てる (行を開かない)。
  */
-export function SwipeRow({ children, onComplete, onDate, onLongPress, disabled, initialOffset }: SwipeRowProps) {
+export function SwipeRow({ children, onComplete, done, onDate, onLongPress, disabled, initialOffset }: SwipeRowProps) {
   const { reduced } = useMotionTiming();
   const swallow = useRef(false);
   // 長押しが発火したあとのスワイプは捨てる (メニューが開いているのに完了 / 日付が動かない)
@@ -105,9 +107,9 @@ export function SwipeRow({ children, onComplete, onDate, onLongPress, disabled, 
     >
       {/* 下地は戻るあいだも見えるよう、最後に動かした向きのまま残す (静止時は行が覆う) */}
       {side === "right" ? (
-        <div aria-hidden style={{ ...panel, left: 0, right: 0, background: "var(--color-success)" }}>
-          <Check size={16} />
-          <span>完了</span>
+        <div aria-hidden style={{ ...panel, left: 0, right: 0, background: done ? "var(--color-text-secondary)" : "var(--color-success)" }}>
+          {done ? <RotateCcw size={16} /> : <Check size={16} />}
+          <span>{done ? "未完了に戻す" : "完了"}</span>
         </div>
       ) : side === "left" ? (
         <div aria-hidden style={{ ...panel, left: 0, right: 0, justifyContent: "flex-end", background: "var(--color-accent)" }}>

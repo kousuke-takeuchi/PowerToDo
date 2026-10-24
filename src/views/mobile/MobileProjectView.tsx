@@ -152,7 +152,7 @@ export function MobileProjectView({
   /** live のとき、行をスワイプ / 長押しのラッパーで包む。 */
   const swipeable = (t: Task, row: React.ReactNode): React.ReactNode =>
     live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={t.no} onComplete={() => toggle(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+      <SwipeRow key={t.no} onComplete={() => toggle(t)} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
         {row}
       </SwipeRow>
     ) : (
