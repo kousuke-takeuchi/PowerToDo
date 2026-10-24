@@ -632,6 +632,7 @@ fn reschedule_with(app: &AppHandle, tasks: &[Task], settings: &Settings, data_di
     };
 
     let notification = app.notification();
+    let mut plan = plan;
     if !plan.is_empty() {
         let mut permission = notification.permission_state();
         if matches!(
@@ -641,8 +642,11 @@ fn reschedule_with(app: &AppHandle, tasks: &[Task], settings: &Settings, data_di
             permission = notification.request_permission();
         }
         if !matches!(permission, Ok(PermissionState::Granted)) {
-            // Denied (or unknown): nothing to register. The settings screen explains.
-            return;
+            // Denied (or unknown): nothing to register (the settings screen explains). What was
+            // scheduled while it was allowed is cancelled and forgotten below, so a later resume
+            // does not record those reminders as delivered (`mark_passed_scheduled`) when the
+            // OS never showed them; they reach the in-app banner instead.
+            plan.clear();
         }
     }
     if !old_ids.is_empty()
