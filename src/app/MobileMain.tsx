@@ -159,11 +159,14 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       .then((d) => {
         if (!cancelled) setAllLabels(d.labels);
       })
-      .catch(() => undefined);
+      // 読めなかったことを知らせる (シートの「ラベルがありません」は、本当に無いときだけの文言)
+      .catch((e) => {
+        if (!cancelled) showError(e);
+      });
     return () => {
       cancelled = true;
     };
-  }, [detailOpen]);
+  }, [detailOpen, showError]);
 
   // ---- 行の操作 (スワイプ / 長押しのシート)。開いているプロジェクトの行は useProject、横断ビューの行は cross (操作のあと refreshAll) ----
   const closeSheet = () => setSheet(null);
