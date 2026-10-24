@@ -45,3 +45,6 @@ storybook-static/
 
 # Google OAuth client (Desktop app). Never commit; see src-tauri/google-oauth.example.json
 src-tauri/google-oauth.json
+
+# Google OAuth client for the iOS app (client id only). Never commit; see src-tauri/google-oauth-ios.example.plist
+src-tauri/google-oauth-ios.plist

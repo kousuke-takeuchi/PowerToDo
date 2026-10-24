@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { errorMessage } from "../api/client";
+import { api, errorMessage } from "../api/client";
 import type { QuickAddResult } from "../types/model";
 import { spansToTokens } from "./quickAddTokens";
 import type { useProject } from "./useProject";
 
 type Flash = { text: string; tone: "error" | "info" };
-type QuickAddState = { open: boolean; text: string; busy: boolean; error?: string; parsed?: { text: string; result: QuickAddResult } };
+type QuickAddState = { open: boolean; text: string; busy: boolean; error?: string; /** クイック追加の構文に無いので別に選ぶ。追加が成功したあと updateTask で付ける。 */ reminders: string[]; parsed?: { text: string; result: QuickAddResult } };
 
-const QA_CLOSED: QuickAddState = { open: false, text: "", busy: false };
+const QA_CLOSED: QuickAddState = { open: false, text: "", busy: false, reminders: [] };
 
 /** クイック追加ダイアログの状態・プレビュー (parse_quick_add)・送信。 */
 export function useQuickAdd({
@@ -42,11 +42,22 @@ export function useQuickAdd({
     };
   }, [qa.open, qa.text, p.parseQuickAdd]);
 
+  const setReminders = (reminders: string[]) => setQa((s) => ({ ...s, reminders }));
+
   const submit = async (text: string) => {
     setQa((s) => ({ ...s, busy: true, error: undefined }));
     try {
       const out = await p.quickAdd(text);
+      const reminders = qa.reminders;
       setQa(QA_CLOSED);
+      if (reminders.length > 0) {
+        // 追加は済んでいる。リマインダーだけ失敗したら知らせる (タスクは残る)。
+        const ok =
+          out.view.project.name === p.view?.project.name
+            ? await p.updateTask(out.no, { reminders })
+            : await api.updateTask(out.view.project.name, out.no, { reminders }).then(() => true, () => false);
+        if (!ok) setFlash({ text: "タスクは追加しましたが、リマインダーを付けられませんでした", tone: "error" });
+      }
       if (out.view.project.name !== current) setFlash({ text: `「${out.view.project.name}」に追加しました`, tone: "info" });
     } catch (e) {
       setQa((s) => ({ ...s, busy: false, error: errorMessage(e) }));
@@ -58,5 +69,5 @@ export function useQuickAdd({
   const tokens = parsed ? spansToTokens(qa.text, parsed.spans) : qa.text ? [{ text: qa.text }] : [];
   const qaProject = parsed?.project ?? current;
 
-  return { qa, openQuickAdd, closeQuickAdd, setText, submit, tokens, qaProject };
+  return { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject };
 }

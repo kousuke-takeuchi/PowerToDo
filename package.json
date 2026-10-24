@@ -11,6 +11,7 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "check:stories": "node scripts/check-stories.mjs",
+    "test:web": "node --test 'src/**/*.test.ts'",
     "build:tailnet": "node scripts/build-tailnet.mjs"
   },
   "dependencies": {

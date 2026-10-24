@@ -148,9 +148,9 @@
 
 ## 6. iPhone での Google ログイン
 - iOS 用の OAuth クライアント (Google Cloud の同じプロジェクト、種類 iOS、Bundle ID `app.powertodo`)。クライアントシークレットは無い
-- リダイレクトは `com.googleusercontent.apps.<クライアント ID の数字部分>:/oauthredirect`。Info.plist の URL スキームに登録する
+- リダイレクトは `com.googleusercontent.apps.<クライアント ID の数字部分>:/oauthredirect`。Info.plist の URL スキームへの登録は要らない (`callbackURLScheme` で足りる。§9 の決定ログ)
 - ログイン画面は `ASWebAuthenticationSession` で開く (§3.3 の Swift プラグインに入れる)。戻ってきた URL を Rust に渡し、PKCE と `state` の確認、コードの交換、トークンの扱いは Phase 4 の `oauth.rs` を使う (ループバックの受け口の代わりにこの URL を受け取る経路を足す。秘密が無いときはトークン交換で送らない)
-- クライアント ID は、デスクトップと同じく git 管理外のファイルからビルド時に埋め込む (`POWERTODO_GOOGLE_IOS_OAUTH_PLIST` = Google からダウンロードした plist のパス、無ければ `src-tauri/google-oauth-ios.plist`)。URL スキームも同じ値から作る (`Info.plist` へはビルド時に書く。値はコミットしない)
+- クライアント ID は、デスクトップと同じく git 管理外のファイルからビルド時に埋め込む (`POWERTODO_GOOGLE_IOS_OAUTH_PLIST` = Google からダウンロードした plist のパス、無ければ `src-tauri/google-oauth-ios.plist`)。リダイレクトの URL もこの値から作る (値はコミットしない)
 - 無ければ「このビルドでは Google Drive を使えません」(デスクトップと同じ)
 - Drive の同期 (`gdrive.rs`) はデスクトップと同じ
 
@@ -203,3 +203,21 @@
 | 2026-10-20 | iOS では URL を `app.opener()` で開く | 自由関数 `open_url` が iOS で `os error 2` (試作で確認) |
 | 2026-10-20 | iOS の CI はコンパイル確認だけ。署名・アップロードは手元 | 署名の秘密を CI に置かない。所有者 1 人の内部テスト |
 | 2026-10-20 | Google ログインは `ASWebAuthenticationSession` (Safari + ディープリンクではなく) | アプリ内で完結し、戻りの URL を確実に受け取れる。回線監視と同じ Swift プラグインに入れる |
+| 2026-10-20 | iOS の Tailscale の状態フォルダは `<アプリのデータ>/tailscale` (デスクトップと同じ `tailnet::state_dir`)。試作の `Library/Application Support/tailnet` とは別で、試作でログインした状態は引き継がない。作成時にバックアップから除外する | `has_tailnet_login` (起動時にログイン済みかの判定) を共有するため。復元した別の端末にノード鍵が複製されないようにする |
+| 2026-10-20 | iOS のデータフォルダ (`Documents`) の絶対パスがアプリの更新・再インストールで変わったら (保存した `dataDir` も今のも `…/Containers/Data/Application/<id>/Documents`)、`sync.json` と `fired.json` の `dataDir` を新しいパスに書き換えて引き継ぐ。それ以外のフォルダの組み合わせは今までどおり新規 | iOS はコンテナの UUID を保証しない。引き継がないと更新のたびに同期の基準の記録が消え、競合コピーや全件アップロードになり、通知も再発火する。iOS にフォルダ選択はないので、パスの変化は利用者の選択ではない |
+| 2026-10-20 | iOS の Info.plist に URL スキーム (`CFBundleURLTypes`) は登録しない。`GoogleOAuth.xcconfig` も作らない。§6 の「URL スキームに登録する」「`Info.plist` へはビルド時に書く」は取り下げ | `ASWebAuthenticationSession` の `callbackURLScheme` は Info.plist への登録が要らない (Xcode 27 SDK の `ASWebAuthenticationSession.h:47-48` で確認)。アプリが受けるのはシートが返す URL だけ |
+| 2026-10-21 | Go の iOS 用ライブラリは `tailnet/mobile/` の別パッケージではなく、同じ `package main` をビルドタグ (`//go:build ios` / `!ios`) で分ける。共有する処理は `send` を引数に取る形で `shared.go` に置く | シンボリックリンクを避け、デスクトップのサイドカーと処理を共有する。サイドカーの出力は変えない |
+| 2026-10-21 | `tn_rebind` は tsnet の `Sys().NetMon.GetOK()` で取った netmon の `InjectEvent()` (ノードは作り直さない)。受け口は前と同じポートで開き直すのを先に試す | tailscale.com v1.104.1 `tsnet/tsnet.go:2285`、`net/netmon/netmon.go:544`。同じポートなら WebDAV のバックエンドを作り直さずに済む |
+| 2026-10-21 | iOS の前面・背面は `RunEvent::WindowEvent { Resumed / Suspended }` で受ける。起動直後の 1 回目の `Resumed` は無視する | `RunEvent::Resumed` はイベントループの再開で前面とは別 (tauri-runtime-wry)。tao は起動直後にも `Resumed` を出す |
+| 2026-10-21 | 前面に戻ったときと回線の変化でも 30 秒の再試行の窓を開く (5 秒後・15 秒後の 2 回) | 仕様 §3.3 のとおり。長い背面のあとの一時的な失敗もここで拾う |
+| 2026-10-21 | 通知の extra はすべての OS で文字列にそろえる。操作ボタンの `no` は文字列でも数値でも読む | tauri-plugin-notification 2.7.0 の iOS 側は `extra: [String: String]` (`NotificationPlugin.swift:69`)。数値だと予約そのものが失敗する。デスクトップの通知センターに残る古い通知のため数値も読む |
+| 2026-10-21 | iOS ではアプリから通知を出さない (OS の予約に任せる)。アプリ内の帯は前面の確認 (30 秒ごと) で出す | 予約と二重にしないため |
+| 2026-10-21 | 予約の登録し直しは、30 秒ごとの確認で予約の中身 (id・時刻・タイトルと本文の指紋) を比べ、違えば消して登録し直す。背面に回るときにも 1 回確認する | 仕様 §5 の個々のきっかけ (編集・同期・起動・復帰・許可の変化) をまとめて満たす。タイトルの編集も指紋で拾う |
+| 2026-10-21 | 「アプリが離れていた」は、前回の確認から 2 周期 (60 秒) 以上空いたかで決め、そのときに予約済みで時刻を過ぎたものを発火済みにする | 背面からの復帰の合図と 30 秒の確認の順番に頼らない。OS が出した通知を帯で二重に出さない |
+| 2026-10-21 | クイック追加のツールバーの「リマインダー」は `!` を足さず、リマインダーのシートで選んで、追加の直後に `updateTask` で付ける。`quick_add` の結果に新しいタスクの `no` を足す | クイック追加の構文にリマインダーは無い (`domain/quick_add.rs`)。`no` は追加のたびに既存の最大より大きい (`next_no_for` と `high_water`) |
+| 2026-10-21 | 日付のシートでは、カレンダーの時刻・繰り返しの行と早見の行を出さない (早見の 5 行はシート側に 1 回だけ)。繰り返しはタスク詳細で編集する | シートにはタスクの繰り返しが渡らず、既定の表示が誤解を招く。早見の計算は `src/views/quickDates.ts` で共有 |
+| 2026-10-21 | 帯はヘッダーと一覧の間に流して置く (重ねない)。帯の領域は画面の 40% まで、超えたらスクロール | 重ねると一覧の先頭の行が帯の下に隠れて触れなくなる |
+| 2026-10-21 | 引っ張って更新は touch イベント (passive) で測る。`touchcancel` はそこまでの引きで離したものとして扱う | iOS の touch はネイティブのスクロールが始まると `pointercancel` になり、pointer イベントでは引きが離すところまで届かない |
+| 2026-10-21 | プライバシーマニフェストの申告: ファイルの時刻 (C617.1: `stat` / `fstat` / `fstatat` / `lstat`、`NSFileModificationDate`)、起動からの時間 (35F9.1: `mach_absolute_time`)、ディスクの空き (E174.1: `fstatfs` / `fstatvfs`)。`UserDefaults` は使っていない。データ収集・トラッキングはなし | シミュレーター用のデバッグビルドの未解決シンボル (`nm -u PowerToDo.debug.dylib`) から。理由コードは Apple の "Describing use of required reason API" の分類。最初のアップロードで App Store Connect の検査に通るかを確かめる |
+| 2026-10-21 | Xcode のプロジェクトは `xcodegen generate` で `project.yml` から作り直す。Info.plist の 3 つの鍵 (ローカルネットワークの説明、`UIFileSharingEnabled`、`LSSupportsOpeningDocumentsInPlace`) は `Info.ios.plist` と `project.yml` の両方に書く | `Info.ios.plist` はビルド時に Tauri CLI が混ぜるが、xcodegen で作り直すと `Info.plist` から消える |
+| 2026-10-21 | TestFlight 用の書き出しは `scripts/ios-build.sh archive` (署名つきの archive と `app-store-connect` の .ipa)。アップロードは手で行う (README) | Apple ID や API キーをスクリプトに置かない |

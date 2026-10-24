@@ -1,0 +1,6 @@
+// Copy to Signing.xcconfig (git-ignored) and put your Apple team ID in it.
+// Used through XCODE_XCCONFIG_FILE (see scripts/ios-build.sh), so the team ID never
+// reaches project.yml / project.pbxproj. Do not set APPLE_DEVELOPMENT_TEAM or
+// bundle.iOS.developmentTeam: the Tauri CLI writes that value into project.pbxproj.
+DEVELOPMENT_TEAM = <your team id>
+CODE_SIGN_STYLE = Automatic

@@ -12,6 +12,7 @@ pub mod oauth;
 pub mod secrets;
 pub mod state;
 pub mod tailnet;
+pub mod tailnet_inproc;
 pub mod tls;
 pub mod webdav;
 

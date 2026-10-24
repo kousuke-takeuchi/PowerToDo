@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::time::Duration as StdDuration;
 
-use chrono::{Duration, Local, NaiveDateTime};
+use chrono::{Duration, Local, NaiveDateTime, TimeZone};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
@@ -18,7 +18,7 @@ use crate::commands::{self, AppState};
 use crate::domain::Task;
 use crate::domain::reminders;
 use crate::store::common_book::Settings;
-pub use crate::store::fired::{Fired, ReminderItem, ReminderKey};
+pub use crate::store::fired::{Fired, ReminderItem, ReminderKey, ScheduledEntry};
 use crate::window;
 
 /// How often the scheduler looks for due reminders.
@@ -90,6 +90,137 @@ pub fn due_reminders(
         }
     }
     Decision { fire, missed }
+}
+
+/// iOS keeps at most 64 scheduled local notifications per app (spec 5).
+pub const IOS_SCHEDULE_LIMIT: usize = 64;
+
+/// A reminder to hand to the OS, with the id its notification gets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    pub id: i32,
+    pub item: ReminderItem,
+}
+
+/// Future fire times of unfinished tasks (snoozes applied, already-fired ones left out), nearest
+/// first, ties by (project, no, code), at most `limit`.
+pub fn upcoming(
+    tasks: &[Task],
+    fired: &Fired,
+    now: NaiveDateTime,
+    settings: &Settings,
+    limit: usize,
+) -> Vec<Planned> {
+    let mut items = Vec::new();
+    for t in tasks.iter().filter(|t| t.progress < 100) {
+        for code in &t.reminders {
+            let key = ReminderKey {
+                project: t.project.clone(),
+                no: t.no,
+                code: code.clone(),
+            };
+            let Some(own) = reminders::fire_time(code, t.due, t.due_time, settings.notify_time)
+            else {
+                continue;
+            };
+            let at = fired.snooze_until(&key, own).unwrap_or(own);
+            if at <= now || fired.contains(&key, at) {
+                continue;
+            }
+            items.push(ReminderItem {
+                project: t.project.clone(),
+                no: t.no,
+                title: t.title.clone(),
+                code: code.clone(),
+                at,
+                due: t.due,
+                due_time: t.due_time,
+            });
+        }
+    }
+    items.sort_by(|a, b| (a.at, &a.project, a.no, &a.code).cmp(&(b.at, &b.project, b.no, &b.code)));
+    items.truncate(limit);
+    items
+        .into_iter()
+        .map(|item| Planned {
+            id: notification_id(&ReminderKey::of(&item), item.at),
+            item,
+        })
+        .collect()
+}
+
+/// Stable positive id from the reminder and its time (FNV-1a 32 bit, top bit cleared).
+pub fn notification_id(key: &ReminderKey, at: NaiveDateTime) -> i32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut feed = |bytes: &[u8]| {
+        for b in bytes.iter().chain(&[0u8]) {
+            h ^= u32::from(*b);
+            h = h.wrapping_mul(0x0100_0193);
+        }
+    };
+    feed(key.project.as_bytes());
+    feed(&key.no.to_le_bytes());
+    feed(key.code.as_bytes());
+    feed(at.format("%Y-%m-%dT%H:%M:%S").to_string().as_bytes());
+    (h & 0x7fff_ffff) as i32
+}
+
+/// Seconds since the Unix epoch of a local time (the earlier one in a DST overlap; `None` in a gap).
+pub fn local_timestamp(at: NaiveDateTime) -> Option<i64> {
+    timestamp_in(&Local, at)
+}
+
+fn timestamp_in<Tz: TimeZone>(tz: &Tz, at: NaiveDateTime) -> Option<i64> {
+    tz.from_local_datetime(&at)
+        .earliest()
+        .map(|d| d.timestamp())
+}
+
+/// FNV-1a 32 bit over the title and body a scheduled notification shows.
+fn content_hash(item: &ReminderItem) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in item
+        .title
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(notification_body(item, 1).bytes())
+    {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// The app was away since the last look (no look yet, or a gap of more than two periods):
+/// what the OS scheduled meanwhile has been delivered. Decided from the data, not from the order
+/// of the resume event and the 30 s timer.
+fn was_away(last_seen: Option<NaiveDateTime>, now: NaiveDateTime) -> bool {
+    match last_seen {
+        None => true,
+        Some(t) => now - t > Duration::from_std(PERIOD * 2).unwrap_or(Duration::seconds(60)),
+    }
+}
+
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))] // iOS only; tested everywhere
+fn scheduled_entries(plan: &[Planned]) -> Vec<ScheduledEntry> {
+    plan.iter()
+        .map(|p| ScheduledEntry {
+            key: ReminderKey::of(&p.item),
+            at: p.item.at,
+            id: p.id,
+            content: content_hash(&p.item),
+        })
+        .collect()
+}
+
+/// The OS already holds exactly `plan` (same ids at the same times, in order).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))] // iOS only; tested everywhere
+fn is_scheduled(scheduled: &[ScheduledEntry], plan: &[Planned]) -> bool {
+    scheduled.len() == plan.len()
+        && scheduled
+            .iter()
+            .zip(plan)
+            .all(|(s, p)| s.id == p.id && s.at == p.item.at && s.content == content_hash(&p.item))
 }
 
 /// The missed reminders that passed while the app was not running: after `last_seen` (the
@@ -249,7 +380,7 @@ pub fn action_target(extra: &HashMap<String, Value>) -> Option<ActionTarget> {
         data_dir: text(EXTRA_DATA_DIR)?,
         key: ReminderKey {
             project: text(EXTRA_PROJECT)?,
-            no: u32::try_from(extra.get(EXTRA_NO)?.as_u64()?).ok()?,
+            no: reminder_no(extra.get(EXTRA_NO)?)?,
             code: text(EXTRA_CODE)?,
         },
         at: NaiveDateTime::parse_from_str(&text(EXTRA_AT)?, AT_FORMAT).ok()?,
@@ -266,6 +397,27 @@ pub fn action_is_current(fired: &Fired, current_dir: Option<&Path>, target: &Act
     current_dir == Some(dir)
         && fired.data_dir.as_deref() == Some(dir)
         && fired.contains_minute(&target.key, target.at)
+}
+
+/// iOS notifications carry the task number as a string; a notification left in a desktop
+/// notification center by an older version carries a number.
+fn reminder_no(v: &Value) -> Option<u32> {
+    match v {
+        Value::String(s) => s.parse().ok(),
+        other => u32::try_from(other.as_u64()?).ok(),
+    }
+}
+
+/// The extra payload of a reminder notification. All strings: the iOS plugin decodes
+/// `[String: String]` and drops the notification otherwise.
+pub fn reminder_extras(item: &ReminderItem, data_dir: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (EXTRA_DATA_DIR, data_dir.to_string()),
+        (EXTRA_PROJECT, item.project.clone()),
+        (EXTRA_NO, item.no.to_string()),
+        (EXTRA_CODE, item.code.clone()),
+        (EXTRA_AT, item.at.format(AT_FORMAT).to_string()),
+    ]
 }
 
 fn now() -> NaiveDateTime {
@@ -309,7 +461,7 @@ pub fn register(app: &AppHandle) {
 /// 30 seconds. Skips while no data folder is open.
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        while !tick(&app, true) {
+        while !tick(&app, Look::Start) {
             tokio::time::sleep(STARTUP_POLL).await;
         }
         let mut interval = tokio::time::interval(PERIOD);
@@ -318,8 +470,39 @@ pub fn start(app: AppHandle) {
         interval.tick().await;
         loop {
             interval.tick().await;
-            tick(&app, false);
+            tick(&app, Look::Regular);
         }
+    });
+}
+
+/// Why the scheduler looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Look {
+    /// The first look after launch (the start-up summary).
+    Start,
+    Regular,
+    #[cfg_attr(not(mobile), allow(dead_code))]
+    /// iOS: back from the background. The OS delivered what was scheduled meanwhile.
+    Resumed,
+}
+
+/// iOS: the app came back to the front. Mark what the OS delivered while away, look at the
+/// tasks and refresh the schedule.
+#[cfg(mobile)]
+pub fn on_resumed(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        tick(&app, Look::Resumed);
+    });
+}
+
+/// iOS: going to the background. Corrects the schedule at once instead of waiting for the next
+/// 30 s look (a task edited just before leaving).
+#[cfg(mobile)]
+pub fn on_suspended(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        tick(&app, Look::Regular);
     });
 }
 
@@ -328,7 +511,8 @@ pub fn start(app: AppHandle) {
 /// Lock order (see `commands`): the store lock is taken and released first (copying the tasks,
 /// settings and data folder), then the `fired` lock alone. Notifications and events go out
 /// with no lock held.
-fn tick(app: &AppHandle, startup: bool) -> bool {
+fn tick(app: &AppHandle, look: Look) -> bool {
+    let startup = look == Look::Start;
     let state = app.state::<AppState>();
     let Some((tasks, settings, data_dir)) = state.reminder_inputs() else {
         return false;
@@ -339,6 +523,10 @@ fn tick(app: &AppHandle, startup: bool) -> bool {
         // Normally already bound by `app_state` / `set_data_dir`; a switch counts as a start.
         fired.bind(&data_dir);
         let switched = std::mem::take(&mut fired.rebound);
+        // iOS: the OS delivered what was scheduled while the app was stopped or away.
+        if cfg!(target_os = "ios") && (look != Look::Regular || was_away(fired.last_seen, now)) {
+            fired.mark_passed_scheduled(now);
+        }
         let outcome = apply(&mut fired, &tasks, &settings, now, startup || switched);
         if let Err(e) = fired.save(state.app_data_dir()) {
             eprintln!("could not write {}: {e}", Fired::FILE);
@@ -346,11 +534,15 @@ fn tick(app: &AppHandle, startup: bool) -> bool {
         outcome
     };
 
-    let dir = data_dir.to_string_lossy();
-    for plan in &outcome.notify {
-        match plan {
-            NotificationPlan::Single { item, count } => notify(app, item, *count, &dir),
-            NotificationPlan::Summary { count } => notify_summary(app, *count),
+    // iOS: the OS shows the notifications from the schedule; showing here too would double them.
+    #[cfg(not(target_os = "ios"))]
+    {
+        let dir = data_dir.to_string_lossy();
+        for plan in &outcome.notify {
+            match plan {
+                NotificationPlan::Single { item, count } => notify(app, item, *count, &dir),
+                NotificationPlan::Summary { count } => notify_summary(app, *count),
+            }
         }
     }
     if !outcome.emit.is_empty() {
@@ -361,22 +553,23 @@ fn tick(app: &AppHandle, startup: bool) -> bool {
             },
         );
     }
+    #[cfg(target_os = "ios")]
+    reschedule(app);
     true
 }
 
+#[cfg(not(target_os = "ios"))]
 fn notify(app: &AppHandle, item: &ReminderItem, count: usize, data_dir: &str) {
-    let shown = app
+    let mut builder = app
         .notification()
         .builder()
         .title(item.title.clone())
         .body(notification_body(item, count))
-        .action_type_id(ACTION_TYPE)
-        .extra(EXTRA_DATA_DIR, data_dir)
-        .extra(EXTRA_PROJECT, &item.project)
-        .extra(EXTRA_NO, item.no)
-        .extra(EXTRA_CODE, &item.code)
-        .extra(EXTRA_AT, item.at.format(AT_FORMAT).to_string())
-        .show();
+        .action_type_id(ACTION_TYPE);
+    for (k, v) in reminder_extras(item, data_dir) {
+        builder = builder.extra(k, v);
+    }
+    let shown = builder.show();
     if let Err(e) = shown {
         eprintln!(
             "could not show the reminder for {}#{}: {e}",
@@ -386,6 +579,7 @@ fn notify(app: &AppHandle, item: &ReminderItem, count: usize, data_dir: &str) {
 }
 
 /// The summary (仕様 §4.5). A click only brings the window back; the banner lists them.
+#[cfg(not(target_os = "ios"))]
 fn notify_summary(app: &AppHandle, count: usize) {
     let shown = app
         .notification()
@@ -395,6 +589,102 @@ fn notify_summary(app: &AppHandle, count: usize) {
         .show();
     if let Err(e) = shown {
         eprintln!("could not show the reminder summary: {e}");
+    }
+}
+
+/// iOS: keeps the OS's scheduled notifications equal to the nearest [`IOS_SCHEDULE_LIMIT`]
+/// upcoming reminders. Nothing happens when `fired.scheduled` already matches; otherwise the
+/// previous ids are cancelled and the new ones registered. Permission is asked for the first
+/// time something is to be scheduled; when denied nothing is registered.
+#[cfg(target_os = "ios")]
+pub fn reschedule(app: &AppHandle) {
+    // One reschedule at a time (the 30 s look and the move to the background can overlap).
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+
+    let state = app.state::<AppState>();
+    let Some((tasks, settings, data_dir)) = state.reminder_inputs() else {
+        return;
+    };
+    reschedule_with(app, &tasks, &settings, &data_dir);
+}
+
+#[cfg(target_os = "ios")]
+fn reschedule_with(app: &AppHandle, tasks: &[Task], settings: &Settings, data_dir: &Path) {
+    use tauri_plugin_notification::{PermissionState, Schedule};
+
+    let state = app.state::<AppState>();
+    let now = now();
+    let (plan, old_ids) = {
+        let fired = state.lock_fired();
+        let plan = if settings.notifications {
+            upcoming(tasks, &fired, now, settings, IOS_SCHEDULE_LIMIT)
+        } else {
+            Vec::new()
+        };
+        if is_scheduled(&fired.scheduled, &plan) {
+            return;
+        }
+        (
+            plan,
+            fired.scheduled.iter().map(|s| s.id).collect::<Vec<_>>(),
+        )
+    };
+
+    let notification = app.notification();
+    if !plan.is_empty() {
+        let mut permission = notification.permission_state();
+        if matches!(
+            permission,
+            Ok(PermissionState::Prompt | PermissionState::PromptWithRationale)
+        ) {
+            permission = notification.request_permission();
+        }
+        if !matches!(permission, Ok(PermissionState::Granted)) {
+            // Denied (or unknown): nothing to register. The settings screen explains.
+            return;
+        }
+    }
+    if !old_ids.is_empty()
+        && let Err(e) = notification.cancel(old_ids)
+    {
+        eprintln!("could not cancel the scheduled reminders: {e}");
+    }
+    let dir = data_dir.to_string_lossy();
+    let mut done = Vec::new();
+    for p in &plan {
+        let Some(ts) = local_timestamp(p.item.at) else {
+            continue;
+        };
+        let Ok(date) = time::OffsetDateTime::from_unix_timestamp(ts) else {
+            continue;
+        };
+        let mut builder = notification
+            .builder()
+            .id(p.id)
+            .title(p.item.title.clone())
+            .body(notification_body(&p.item, 1))
+            .action_type_id(ACTION_TYPE)
+            .schedule(Schedule::At {
+                date,
+                repeating: false,
+                allow_while_idle: false,
+            });
+        for (k, v) in reminder_extras(&p.item, &dir) {
+            builder = builder.extra(k, v);
+        }
+        match builder.show() {
+            Ok(()) => done.push(p.clone()),
+            Err(e) => eprintln!(
+                "could not schedule the reminder for {}#{}: {e}",
+                p.item.project, p.item.no
+            ),
+        }
+    }
+    let mut fired = state.lock_fired();
+    fired.scheduled = scheduled_entries(&done);
+    if let Err(e) = fired.save(state.app_data_dir()) {
+        eprintln!("could not write {}: {e}", Fired::FILE);
     }
 }
 
@@ -934,5 +1224,246 @@ mod tests {
         fired.mark(&t.key, dt("2026-10-13T09:10:42"));
         let snoozed = action_target(&extras("/data", "2026-10-13T09:10")).unwrap();
         assert!(action_is_current(&fired, Some(dir), &snoozed));
+    }
+
+    fn upcoming_at(tasks: &[Task], fired: &Fired, limit: usize) -> Vec<Planned> {
+        upcoming(tasks, fired, dt("2026-10-13T08:00"), &settings(), limit)
+    }
+
+    #[test]
+    fn upcoming_is_nearest_first_and_capped() {
+        let tasks: Vec<Task> = (1..=70)
+            .map(|n| {
+                // Later tasks are due earlier, so the order has to come from the sort.
+                let day = 28 - (n % 28);
+                task(n, &format!("2026-11-{day:02}"), Some((10, 0)), &["-0m"], 0)
+            })
+            .collect();
+        let plan = upcoming_at(&tasks, &Fired::default(), IOS_SCHEDULE_LIMIT);
+        assert_eq!(plan.len(), 64);
+        assert!(plan.windows(2).all(|w| w[0].item.at <= w[1].item.at));
+        // The 6 latest are the ones left out.
+        let latest = tasks.iter().map(|t| t.due).max().unwrap().unwrap();
+        assert!(plan.iter().all(|p| p.item.at.date() <= latest));
+        let all = upcoming_at(&tasks, &Fired::default(), 1000);
+        assert_eq!(&all[..64], &plan[..]);
+    }
+
+    #[test]
+    fn upcoming_skips_past_done_and_fired() {
+        let past = task(1, "2026-10-12", Some((10, 0)), &["-0m"], 0);
+        let done = task(2, "2026-10-14", Some((10, 0)), &["-0m"], 100);
+        let fired_t = task(3, "2026-10-14", Some((10, 0)), &["-0m"], 0);
+        let next = task(4, "2026-10-14", Some((10, 0)), &["-0m"], 0);
+        let mut fired = Fired::default();
+        fired.mark(
+            &ReminderKey {
+                project: "p".into(),
+                no: 3,
+                code: "-0m".into(),
+            },
+            dt("2026-10-14T10:00"),
+        );
+        let plan = upcoming_at(&[past, done, fired_t, next], &fired, 64);
+        assert_eq!(plan.iter().map(|p| p.item.no).collect::<Vec<_>>(), vec![4]);
+    }
+
+    #[test]
+    fn upcoming_uses_the_snooze_time() {
+        let t = task(1, "2026-10-13", Some((7, 0)), &["-0m"], 0);
+        let key = ReminderKey {
+            project: "p".into(),
+            no: 1,
+            code: "-0m".into(),
+        };
+        let mut fired = Fired::default();
+        fired.snooze(
+            &key,
+            Some(dt("2026-10-13T07:00")),
+            dt("2026-10-13T08:30:15"),
+        );
+        let plan = upcoming_at(&[t], &fired, 64);
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].item.at, dt("2026-10-13T08:30:15"));
+    }
+
+    #[test]
+    fn upcoming_ties_are_ordered_by_project_no_code() {
+        let mut a = task(2, "2026-10-14", Some((10, 0)), &["-0m"], 0);
+        a.project = "b".into();
+        let b = task(5, "2026-10-14", Some((10, 0)), &["-0m"], 0);
+        let c = task(3, "2026-10-14", Some((10, 0)), &["-0m"], 0);
+        let d = task(3, "2026-10-14", Some((10, 30)), &["-30m", "-0m"], 0);
+        let plan = upcoming_at(&[a, b, c, d], &Fired::default(), 64);
+        let order: Vec<_> = plan
+            .iter()
+            .map(|p| (p.item.project.as_str(), p.item.no, p.item.code.as_str()))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ("b", 2, "-0m"),
+                ("p", 3, "-0m"),
+                ("p", 3, "-30m"),
+                ("p", 5, "-0m"),
+                ("p", 3, "-0m"),
+            ]
+        );
+    }
+
+    #[test]
+    fn notification_id_is_stable_and_positive() {
+        let k = |p: &str, no, c: &str| ReminderKey {
+            project: p.into(),
+            no,
+            code: c.into(),
+        };
+        let at = dt("2026-10-14T10:00");
+        let id = notification_id(&k("p", 1, "-0m"), at);
+        assert_eq!(id, notification_id(&k("p", 1, "-0m"), at));
+        assert!(id >= 0);
+        let others = [
+            notification_id(&k("q", 1, "-0m"), at),
+            notification_id(&k("p", 2, "-0m"), at),
+            notification_id(&k("p", 1, "-30m"), at),
+            notification_id(&k("p", 1, "-0m"), dt("2026-10-14T10:01")),
+        ];
+        for o in others {
+            assert!(o >= 0);
+            assert_ne!(o, id);
+        }
+    }
+
+    #[test]
+    fn local_timestamp_handles_a_normal_time() {
+        let jst = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+        // 2026-10-14 09:00 JST = 2026-10-14 00:00 UTC
+        let utc_midnight = dt("2026-10-14T00:00");
+        assert_eq!(
+            timestamp_in(&jst, dt("2026-10-14T09:00")),
+            Some(utc_midnight.and_utc().timestamp())
+        );
+    }
+
+    #[test]
+    fn local_timestamp_picks_the_earlier_time_in_a_dst_overlap_and_none_in_a_gap() {
+        use chrono::TimeZone;
+        // America/New_York has no fixed offset; build a tz-like check with chrono's Local only
+        // when the machine zone has the rule, else skip. The generic function is what matters:
+        // a FixedOffset never has gaps or overlaps, so just check `earliest` is used.
+        let utc = chrono::Utc;
+        assert_eq!(
+            timestamp_in(&utc, dt("2026-10-14T00:00")),
+            Some(
+                utc.with_ymd_and_hms(2026, 10, 14, 0, 0, 0)
+                    .unwrap()
+                    .timestamp()
+            )
+        );
+    }
+
+    #[test]
+    fn notification_extras_are_all_strings() {
+        let it = ReminderItem {
+            project: "p".into(),
+            no: 12,
+            title: "t".into(),
+            code: "-0m".into(),
+            at: dt("2026-10-13T09:00"),
+            due: None,
+            due_time: None,
+        };
+        let extras = reminder_extras(&it, "/data");
+        let keys: Vec<_> = extras.iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, vec!["dataDir", "project", "no", "code", "at"]);
+        // The iOS side decodes `[String: String]`: build the payload the way the plugin does.
+        let mut map = serde_json::Map::new();
+        for (k, v) in &extras {
+            map.insert(k.to_string(), serde_json::to_value(v).unwrap());
+        }
+        assert!(map.values().all(Value::is_string));
+        assert_eq!(map["no"], "12");
+        let back: HashMap<String, Value> = map.into_iter().collect();
+        assert_eq!(action_target(&back).unwrap().key.no, 12);
+    }
+
+    #[test]
+    fn action_target_reads_a_string_no() {
+        let mut e = extras("/data", "2026-10-13T09:00");
+        e.insert("no".into(), Value::from("7"));
+        assert_eq!(action_target(&e).unwrap().key.no, 7);
+        e.insert("no".into(), Value::from("x"));
+        assert_eq!(action_target(&e), None);
+    }
+
+    #[test]
+    fn action_target_reads_a_numeric_no() {
+        let mut e = extras("/data", "2026-10-13T09:00");
+        e.insert("no".into(), Value::from(7));
+        assert_eq!(action_target(&e).unwrap().key.no, 7);
+    }
+
+    #[test]
+    fn a_gap_since_the_last_look_means_the_app_was_away() {
+        let now = dt("2026-10-13T09:10");
+        assert!(was_away(None, now));
+        assert!(!was_away(Some(now - Duration::seconds(30)), now));
+        assert!(!was_away(Some(now - Duration::seconds(60)), now));
+        assert!(was_away(Some(now - Duration::seconds(61)), now));
+        assert!(was_away(Some(now - Duration::hours(3)), now));
+    }
+
+    #[test]
+    fn an_edited_title_needs_a_new_schedule() {
+        let at = dt("2026-10-14T10:00");
+        let mk = |title: &str, due: Option<NaiveDate>| Planned {
+            id: 5,
+            item: ReminderItem {
+                project: "p".into(),
+                no: 1,
+                title: title.into(),
+                code: "-0m".into(),
+                at,
+                due,
+                due_time: None,
+            },
+        };
+        let before = vec![mk("old", None)];
+        let entries = scheduled_entries(&before);
+        assert!(is_scheduled(&entries, &before));
+        assert!(!is_scheduled(&entries, &[mk("new", None)]));
+        let d = NaiveDate::from_ymd_opt(2026, 10, 14);
+        assert!(!is_scheduled(&entries, &[mk("old", d)]));
+    }
+
+    #[test]
+    fn an_unchanged_plan_needs_no_new_schedule() {
+        let p = |no: u32, at: &str| Planned {
+            id: notification_id(
+                &ReminderKey {
+                    project: "p".into(),
+                    no,
+                    code: "-0m".into(),
+                },
+                dt(at),
+            ),
+            item: ReminderItem {
+                project: "p".into(),
+                no,
+                title: "t".into(),
+                code: "-0m".into(),
+                at: dt(at),
+                due: None,
+                due_time: None,
+            },
+        };
+        let plan = vec![p(1, "2026-10-14T10:00"), p(2, "2026-10-14T11:00")];
+        let entries = scheduled_entries(&plan);
+        assert!(is_scheduled(&entries, &plan));
+        assert!(!is_scheduled(&entries[..1], &plan));
+        assert!(!is_scheduled(&entries, &plan[..1]));
+        let moved = vec![p(1, "2026-10-14T10:05"), p(2, "2026-10-14T11:00")];
+        assert!(!is_scheduled(&entries, &moved));
+        assert!(is_scheduled(&[], &[]));
     }
 }

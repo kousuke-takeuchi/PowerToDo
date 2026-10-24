@@ -1,5 +1,8 @@
+import { useContext } from "react";
 import { TriangleAlert } from "lucide-react";
 import { Button } from "../components/Button";
+import { NarrowContext } from "../components/NarrowContext";
+import { BannerActions, bandNarrow } from "./BannerActions";
 
 export type FixBannerProps = {
   message?: string;
@@ -13,6 +16,7 @@ export function FixBanner({
   onOpenExcel,
   onReload,
 }: FixBannerProps) {
+  const narrow = useContext(NarrowContext);
   return (
     <div
       role="alert"
@@ -24,20 +28,23 @@ export function FixBanner({
         background: "var(--color-accent-soft)",
         boxShadow: "inset 0 -1px 0 var(--color-border)",
         fontFamily: "var(--font-body)",
+        ...bandNarrow(narrow),
       }}
     >
       <span style={{ display: "inline-flex", color: "var(--color-accent)", flex: "0 0 auto" }}>
         <TriangleAlert size={18} />
       </span>
       <span style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>{message}</span>
-      {onReload && (
-        <Button variant="secondary" onClick={onReload}>
-          再読み込み
+      <BannerActions>
+        {onReload && (
+          <Button variant="secondary" onClick={onReload}>
+            再読み込み
+          </Button>
+        )}
+        <Button variant="secondary" onClick={onOpenExcel}>
+          Excel で開く
         </Button>
-      )}
-      <Button variant="secondary" onClick={onOpenExcel}>
-        Excel で開く
-      </Button>
+      </BannerActions>
     </div>
   );
 }

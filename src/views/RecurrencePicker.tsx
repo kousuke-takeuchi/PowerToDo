@@ -14,6 +14,8 @@ export type RecurrencePickerProps = {
   valueLabel?: string;
   /** 渡すと、入力が 300ms 止まったところで呼んで解釈結果をプレビューし、Enter で選択する。無ければ従来どおり。 */
   onParse?: (text: string) => Promise<RecurrenceParse>;
+  /** 入力欄の文字の大きさ (px)。モバイルのシートは 16 (iOS の拡大を避ける)。省略すると 14。 */
+  fontSize?: number;
 };
 
 const PARSE_DELAY_MS = 300;
@@ -33,7 +35,7 @@ export function recurrenceLabel(rrule?: string): string {
 }
 
 /** D-07b: 繰り返しポップオーバーの中身。選択は内部状態、適用 / 解除は onChange で通知する。 */
-export function RecurrencePicker({ value, onChange, valueLabel, onParse }: RecurrencePickerProps) {
+export function RecurrencePicker({ value, onChange, valueLabel, onParse, fontSize }: RecurrencePickerProps) {
   const [rrule, setRrule] = useState<string | undefined>(value);
   const [rruleLabel, setRruleLabel] = useState<string | undefined>(value ? valueLabel : undefined);
   const [typed, setTyped] = useState<string | null>(null);
@@ -87,6 +89,7 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse }: Recur
   return (
     <PopoverShell label="繰り返し" gap="var(--space-2)">
       <TextField
+        fontSize={fontSize}
         value={typed ?? current}
         placeholder="繰り返しを入力"
         onChange={setTyped}

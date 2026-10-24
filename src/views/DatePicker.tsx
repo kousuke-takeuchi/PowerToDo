@@ -4,6 +4,7 @@ import { Ban, Calendar, CalendarPlus, ChevronLeft, ChevronRight, Circle, Clock3,
 import { TextField } from "../components/TextField";
 import { TODAY, addDays, dateLabel, weekdayIndex, weekdayShort } from "../mock/data";
 import { PopRow, PopoverShell } from "./PopoverShell";
+import { quickDates } from "./quickDates";
 
 export type DatePickerProps = {
   value?: string;
@@ -16,6 +17,10 @@ export type DatePickerProps = {
   today?: string;
   /** 日付だけを選ばせる (時刻と繰り返しの行を出さない)。タスクに紐づかない場面 (期限切れの再スケジュール) 用。 */
   dateOnly?: boolean;
+  /** 今日 / 明日 / 今週末 / 来週 / 日付なし の早見の行を出さない (モバイルの DateSheet が別に出す)。 */
+  hideQuickPicks?: boolean;
+  /** 時刻と繰り返しの行を出さない (値は変えず、日付だけ選ばせる)。 */
+  hideTimeRepeat?: boolean;
 };
 
 const WEEKDAY_HEAD = ["月", "火", "水", "木", "金", "土", "日"] as const;
@@ -44,7 +49,7 @@ const shiftMonth = (ymd: string, delta: number) => {
 };
 
 /** D-07: 日付ポップオーバーの中身。選択状態は内部で持ち、onChange で通知する。 */
-export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY, dateOnly }: DatePickerProps) {
+export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY, dateOnly, hideQuickPicks, hideTimeRepeat }: DatePickerProps) {
   const [date, setDate] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
   const [month, setMonth] = useState(monthStart(value ?? today));
@@ -58,11 +63,12 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
   };
 
   const derived = date ? `${dateLabel(date, today)?.label ?? date}${time ? ` ${time}` : ""}` : "";
-  const nextSaturday = addDays(today, (6 - weekdayIndex(today) + 7) % 7 || 7);
-  const nextMonday = addDays(today, ((1 - weekdayIndex(today) + 7) % 7) || 7);
+  const q = quickDates(today);
+  const nextSaturday = q.weekend;
+  const nextMonday = q.nextWeek;
   const picks: { key: string; icon: React.ReactNode; color: string; label: string; value: string; date?: string }[] = [
     { key: "today", icon: <Calendar size={16} />, color: "var(--color-success)", label: "今日", value: weekdayShort(today), date: today },
-    { key: "tomorrow", icon: <Sun size={16} />, color: "var(--color-priority-2)", label: "明日", value: weekdayShort(addDays(today, 1)), date: addDays(today, 1) },
+    { key: "tomorrow", icon: <Sun size={16} />, color: "var(--color-priority-2)", label: "明日", value: weekdayShort(q.tomorrow), date: q.tomorrow },
     { key: "weekend", icon: <Sofa size={16} />, color: "var(--color-priority-3)", label: "今週末", value: weekdayShort(nextSaturday), date: nextSaturday },
     {
       key: "nextweek",
@@ -81,6 +87,7 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
   return (
     <PopoverShell label="日付">
       <TextField value={typed ?? derived} placeholder="日付を入力" onChange={setTyped} />
+      {!hideQuickPicks && (
       <div style={{ display: "flex", flexDirection: "column" }}>
         {picks.map((p) => (
           <PopRow key={p.key} icon={p.icon} iconColor={p.color} onClick={() => select(p.date)} ariaLabel={p.label}>
@@ -89,6 +96,7 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
           </PopRow>
         ))}
       </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={small("var(--color-text-primary)", 600)}>{`${y}年${m}月`}</span>
@@ -147,7 +155,7 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
           </div>
         ))}
       </div>
-      {!dateOnly && (
+      {!dateOnly && !hideTimeRepeat && (
         <>
           <PopRow icon={<Clock3 size={16} />} borderTop>
             <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>時刻</span>

@@ -280,6 +280,66 @@ Drive の挙動
 - Go 側のテストは `cd tailnet && go test ./...`
 - `cargo build` の前にサイドカーが要る (`tauri-build` が存在を確かめる)。CI も同じ順に実行する
 
+## iPhone 版 (Phase 6)
+
+デスクトップと同じ Rust の中身と React の画面を Tauri の iOS ターゲットでビルドする。所有者の iPhone に TestFlight (内部テスト) で入れる。iPad は iPhone の画面がそのまま拡大されて動く。
+
+### 前提 (この Mac)
+
+- Xcode (27 で確認)。シミュレーターのランタイム (iOS 26.5 で確認)
+- arm64 の `cargo tauri` (tauri-cli 2.12.2): `cargo install tauri-cli --version 2.12.2 --locked`。この Mac の Node は Rosetta (x86_64) で動くので、`npm run tauri ios ...` は使わない (x86_64 のシミュレーター向けを作ってしまう)。別の場所に入れたときは環境変数 `CARGO_TAURI` にパスを入れる
+- Rust の iOS ターゲット: `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
+- Go (`/opt/homebrew/bin/go`)。Tailscale を iOS 用ライブラリ (`libtailnet.a`) にビルドする (`scripts/build-tailnet-ios.sh`、ビルドのスクリプトが自動で呼ぶ)
+- Xcode のプロジェクトは `src-tauri/gen/apple/project.yml` から作る。作り直すときは `cd src-tauri/gen/apple && xcodegen generate` (`brew install xcodegen`)
+
+### 署名 (Team ID)
+
+```sh
+cp src-tauri/gen/apple/Signing.example.xcconfig src-tauri/gen/apple/Signing.xcconfig
+# Signing.xcconfig の DEVELOPMENT_TEAM に Team ID を書く (このファイルは git 管理外)
+```
+
+Team ID は `Signing.xcconfig` にだけ書く。`APPLE_DEVELOPMENT_TEAM` や `tauri.conf.json` の `bundle.iOS.developmentTeam` は使わない (Tauri CLI が `project.pbxproj` に書き込み、コミットされてしまう)。Xcode に Apple ID でサインインしておく (自動署名)。
+
+### ビルドと起動
+
+- シミュレーター: `scripts/ios-build.sh sim <シミュレーターの UDID>` (`xcrun simctl list devices available` で UDID を調べる)。ビルドして入れて起動する
+- 実機: `scripts/ios-build.sh device` → `xcrun devicectl list devices` で UDID を調べ、`xcrun devicectl device install app --device <UDID> "$TMPDIR/powertodo-ios/dd-device/Build/Products/release-iphoneos/PowerToDo.app"`。iPhone で「デベロッパモード」を有効にしておく
+- TestFlight: 下記
+
+### TestFlight
+
+1. `src-tauri/gen/apple/project.yml` の `CFBundleVersion` を上げる (アップロードのたびに増やす。同じ番号は受け付けられない)。`CFBundleShortVersionString` は見える版
+2. `scripts/ios-build.sh archive`。`$TMPDIR/powertodo-ios/PowerToDo.xcarchive` と、App Store Connect 用の `.ipa` (`$TMPDIR/powertodo-ios/export/`) ができる
+3. アップロード: Xcode の Organizer (Window → Organizer) で archive を選んで「Distribute App」→「App Store Connect」、または `xcrun altool --upload-app -f <ipa> -t ios --apiKey <キー ID> --apiIssuer <Issuer ID>` (API キーは App Store Connect の「ユーザとアクセス」→「キー」で作る。キーをリポジトリに置かない)
+4. App Store Connect の TestFlight で、ビルドの処理が終わったら内部テスターに配る (外部テスターは審査が要るので使わない)
+5. 最初のアップロードで、暗号の輸出規制の質問に答える (WireGuard と TLS を使う)
+
+プライバシーマニフェスト (`src-tauri/gen/apple/powertodo_iOS/PrivacyInfo.xcprivacy`) を同梱している。申告の中身と理由は仕様 §9。
+
+### Google ログイン (iPhone)
+
+デスクトップとは別に、iOS 用の OAuth クライアントが要る。
+1. Google Cloud の同じプロジェクトで OAuth クライアントを作る。種類は「iOS」、Bundle ID は `app.powertodo`
+2. ダウンロードした plist を `src-tauri/google-oauth-ios.plist` として置く (git 管理外。雛形は `src-tauri/google-oauth-ios.example.plist`)。別の場所に置くときは環境変数 `POWERTODO_GOOGLE_IOS_OAUTH_PLIST` にパスを入れる
+3. iOS のビルドはこの plist のクライアント ID だけを埋め込む (シークレットは無い)。デスクトップ用の `google-oauth.json` は iOS のビルドでは読まない。plist が無いビルドでは「このビルドでは Google Drive を使えません」と出る
+
+ログイン画面はアプリの中のシート (`ASWebAuthenticationSession`) で開く。Info.plist に URL スキームの登録は要らない。
+
+### 所有者の作業
+
+1. App Store Connect に PowerToDo を登録する (Bundle ID `app.powertodo`)。TestFlight の内部テスターに自分を入れる
+2. Google Cloud に iOS 用の OAuth クライアントを作り、plist を上の場所に置く
+3. 最初のアップロードで、暗号の輸出規制の質問に答える
+
+### iPhone での動き
+
+- データは「ファイル」アプリの「このiPhone内 → PowerToDo」にある (保存先を選ぶ画面は無い)。iPhone の Excel で直した内容は、アプリに戻ったときと同期の前に取り込む (未保存の編集があるプロジェクトはデスクトップと同じく保留して選ばせる)
+- 同期は起動時、前面に戻ったとき、保存の 5 秒後、前面にいる間の 5 分ごと、一覧を引っ張ったとき、ヘッダーの同期アイコンを押したとき。背面では同期しない
+- NAS へは、アプリの中の Tailscale (ホスト名 `powertodo-ios`) でつなぐ。Tailscale のアプリは要らない。Wi-Fi とモバイル回線が切り替わった直後に失敗した同期は、5 秒後と 15 秒後にもう一度試す
+- パスワードと Google のトークンは、この端末のキーチェーンにだけ置く (iCloud に同期しない)
+- リマインダーは、近い順に 64 件を iOS の予約通知に登録する。アプリを閉じていても時刻に届く。通知の許可は、初めてリマインダーを登録するとき (または設定で通知をオンにしたとき) に聞く
+
 ## UI の確認 (Storybook)
 
 pen の画面を React コンポーネントで再現し、Storybook で実際に触って操作性を確認する。

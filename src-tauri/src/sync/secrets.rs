@@ -27,15 +27,24 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, service: &str, account: &str) -> SecretResult<()>;
 }
 
-/// The OS keychain, through `keyring::v1::Entry`.
+/// The OS keychain, through `keyring::v1::Entry`. Desktop only (see Cargo.toml).
 ///
 /// The calls are synchronous and may block (the Linux Secret Service, an unlock prompt):
 /// callers on an async runtime must run them in `spawn_blocking`.
+#[cfg(desktop)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringStore;
 
-fn keychain_error(e: &keyring::v1::Error) -> SecretError {
-    use keyring::v1::Error;
+/// The keychain error type of the target: `keyring::v1::Error` is a re-export of
+/// `keyring_core::Error`, so both name the same enum.
+#[cfg(desktop)]
+type KeychainError = keyring::v1::Error;
+#[cfg(target_os = "ios")]
+type KeychainError = keyring_core::Error;
+
+#[cfg(any(desktop, target_os = "ios"))]
+fn keychain_error(e: &KeychainError) -> SecretError {
+    use KeychainError as Error;
     SecretError(match e {
         Error::NoDefaultStore => "このシステムにはキーチェーンがありません".to_string(),
         Error::NoStorageAccess(_) => {
@@ -48,10 +57,12 @@ fn keychain_error(e: &keyring::v1::Error) -> SecretError {
     })
 }
 
+#[cfg(desktop)]
 fn entry(service: &str, account: &str) -> SecretResult<keyring::v1::Entry> {
     keyring::v1::Entry::new(service, account).map_err(|e| keychain_error(&e))
 }
 
+#[cfg(desktop)]
 impl SecretStore for KeyringStore {
     fn get(&self, service: &str, account: &str) -> SecretResult<Option<String>> {
         match entry(service, account)?.get_password() {
@@ -72,6 +83,91 @@ impl SecretStore for KeyringStore {
             Ok(()) | Err(keyring::v1::Error::NoEntry) => Ok(()),
             Err(e) => Err(keychain_error(&e)),
         }
+    }
+}
+
+/// The iOS keychain, through `keyring_core` and the protected data store of
+/// `apple-native-keyring-store` (spec section 3.5): items stay on this device (the store is
+/// not the iCloud one, and each item is `AfterFirstUnlockThisDeviceOnly`, so a sync right
+/// after the app comes back can read it while the phone is locked again).
+///
+/// The protected store works only in a signed app with a provisioning profile (its module
+/// documentation). In an unsigned build `Store::new` still succeeds, but `set` fails with
+/// -34018 (missing entitlement); `Secrets` then keeps the secret in memory and reports it as not
+/// persistent, the same as for a broken desktop keychain.
+#[cfg(target_os = "ios")]
+#[derive(Debug)]
+pub struct AppleStore {
+    _private: (),
+}
+
+/// `kSecAttrAccessible` of every item (apple-native-keyring-store 1.0.2 `src/protected.rs`,
+/// `determine_access_policy`).
+#[cfg(target_os = "ios")]
+const ACCESS_POLICY: &str = "after-first-unlock-this-device-only";
+
+#[cfg(target_os = "ios")]
+impl AppleStore {
+    /// Makes the protected store keyring-core's default store (keyring-core 1.0.1
+    /// `set_default_store`, meant to be called once at start-up).
+    pub fn new() -> SecretResult<Self> {
+        let store =
+            apple_native_keyring_store::protected::Store::new().map_err(|e| keychain_error(&e))?;
+        keyring_core::set_default_store(store);
+        Ok(AppleStore { _private: () })
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn apple_entry(service: &str, account: &str) -> SecretResult<keyring_core::Entry> {
+    let modifiers = std::collections::HashMap::from([("access-policy", ACCESS_POLICY)]);
+    keyring_core::Entry::new_with_modifiers(service, account, &modifiers)
+        .map_err(|e| keychain_error(&e))
+}
+
+#[cfg(target_os = "ios")]
+impl SecretStore for AppleStore {
+    fn get(&self, service: &str, account: &str) -> SecretResult<Option<String>> {
+        match apple_entry(service, account)?.get_password() {
+            Ok(p) => Ok(Some(p)),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(e) => Err(keychain_error(&e)),
+        }
+    }
+
+    fn set(&self, service: &str, account: &str, secret: &str) -> SecretResult<()> {
+        apple_entry(service, account)?
+            .set_password(secret)
+            .map_err(|e| keychain_error(&e))
+    }
+
+    fn delete(&self, service: &str, account: &str) -> SecretResult<()> {
+        match apple_entry(service, account)?.delete_credential() {
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(e) => Err(keychain_error(&e)),
+        }
+    }
+}
+
+/// A store that cannot be used: every call fails with the reason. Behind `Secrets` this makes
+/// the secrets live in memory only and be reported as not persistent (unlike a [`MemoryStore`]
+/// primary, whose `set` never fails and so would hide that).
+#[cfg(any(target_os = "ios", test))]
+#[derive(Debug)]
+pub struct UnavailableStore(pub String);
+
+#[cfg(any(target_os = "ios", test))]
+impl SecretStore for UnavailableStore {
+    fn get(&self, _service: &str, _account: &str) -> SecretResult<Option<String>> {
+        Err(SecretError(self.0.clone()))
+    }
+
+    fn set(&self, _service: &str, _account: &str, _secret: &str) -> SecretResult<()> {
+        Err(SecretError(self.0.clone()))
+    }
+
+    fn delete(&self, _service: &str, _account: &str) -> SecretResult<()> {
+        Err(SecretError(self.0.clone()))
     }
 }
 
@@ -151,6 +247,7 @@ mod tests {
         );
     }
 
+    #[cfg(desktop)]
     #[test]
     fn keychain_errors_have_a_message_for_the_user() {
         use keyring::v1::Error;
@@ -163,6 +260,7 @@ mod tests {
 
     /// Needs a real keychain (and may ask the user to unlock it): run by hand with
     /// `cargo test -- --ignored keyring_store`.
+    #[cfg(desktop)]
     #[test]
     #[ignore = "uses the OS keychain"]
     fn keyring_store_round_trips() {

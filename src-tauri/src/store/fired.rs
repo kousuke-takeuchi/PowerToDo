@@ -38,7 +38,7 @@ pub struct ReminderItem {
 }
 
 /// One reminder of one task: a task can carry several codes.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ReminderKey {
     pub project: String,
     pub no: u32,
@@ -78,6 +78,21 @@ impl FiredEntry {
     }
 }
 
+/// A reminder registered with the OS as a scheduled local notification (iOS, 仕様 §5). The OS
+/// delivers it while the app is away; [`Fired::mark_passed_scheduled`] then records it as fired.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledEntry {
+    pub key: ReminderKey,
+    pub at: NaiveDateTime,
+    /// The notification id the OS knows it by (`scheduler::notification_id`).
+    pub id: i32,
+    /// Fingerprint of the title and body the OS was given (`scheduler::content_hash`), so an
+    /// edit of the task text re-registers it. Old files have 0, which re-registers once.
+    #[serde(default)]
+    pub content: u32,
+}
+
 /// The contents of `fired.json`. Times are local and keep their seconds (chrono's own serde
 /// format), so a snooze to `now + 10 min` matches itself after a restart.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +111,10 @@ pub struct Fired {
     /// Fired reminders the UI has not taken yet (`pending_reminders`).
     #[serde(default)]
     pub pending: Vec<ReminderItem>,
+    /// iOS: the reminders handed to the OS to fire at their time (empty elsewhere). Old files
+    /// have none.
+    #[serde(default)]
+    pub scheduled: Vec<ScheduledEntry>,
     /// Set by [`Fired::bind`] when the folder changed; the scheduler takes it and treats its
     /// next look as a start (one summary instead of a notification per task). Not saved.
     #[serde(skip)]
@@ -182,6 +201,20 @@ impl Fired {
                 snooze_until: None,
             });
         }
+    }
+
+    /// The OS delivers a scheduled reminder at its time even while the app is not running, so
+    /// the ones whose time has come are recorded as fired and dropped from `scheduled`. Returns
+    /// how many.
+    pub fn mark_passed_scheduled(&mut self, now: NaiveDateTime) -> usize {
+        let (passed, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.scheduled)
+            .into_iter()
+            .partition(|s| s.at <= now);
+        self.scheduled = waiting;
+        for s in &passed {
+            self.mark(&s.key, s.at);
+        }
+        passed.len()
     }
 
     /// Fire `key` again at `until` instead of at its own time. `fire_at` is the reminder's
@@ -487,5 +520,46 @@ mod tests {
         );
         // The due date moved without the records being forgotten.
         assert_eq!(f.snooze_until(&k, dt("2026-10-14T15:00")), None);
+    }
+
+    #[test]
+    fn mark_passed_scheduled_marks_only_passed_ones() {
+        let mut f = Fired::default();
+        let entry = |no, at: &str, id| ScheduledEntry {
+            key: key("p", no, "-0m"),
+            at: dt(at),
+            id,
+            content: 0,
+        };
+        f.scheduled = vec![
+            entry(1, "2026-10-13T09:00", 1),
+            entry(2, "2026-10-13T10:00", 2),
+            entry(3, "2026-10-13T11:00", 3),
+        ];
+        assert_eq!(f.mark_passed_scheduled(dt("2026-10-13T10:00")), 2);
+        assert!(f.contains(&key("p", 1, "-0m"), dt("2026-10-13T09:00")));
+        assert!(f.contains(&key("p", 2, "-0m"), dt("2026-10-13T10:00")));
+        assert!(!f.contains(&key("p", 3, "-0m"), dt("2026-10-13T11:00")));
+        assert_eq!(f.scheduled, vec![entry(3, "2026-10-13T11:00", 3)]);
+        assert_eq!(f.mark_passed_scheduled(dt("2026-10-13T10:30")), 0);
+    }
+
+    #[test]
+    fn old_fired_json_without_scheduled_still_loads() {
+        let old = r#"{"dataDir":"/d","lastSeen":"2026-10-13T09:00:00","entries":[],"pending":[]}"#;
+        let f: Fired = serde_json::from_str(old).unwrap();
+        assert!(f.scheduled.is_empty());
+        let older = r#"{"scheduled":[{"key":{"project":"p","no":1,"code":"-0m"},"at":"2026-10-13T09:00:00","id":3}]}"#;
+        let f2: Fired = serde_json::from_str(older).unwrap();
+        assert_eq!(f2.scheduled[0].content, 0);
+        let mut f = f;
+        f.scheduled.push(ScheduledEntry {
+            key: key("p", 1, "-0m"),
+            at: dt("2026-10-13T09:00"),
+            id: 7,
+            content: 5,
+        });
+        let back: Fired = serde_json::from_str(&serde_json::to_string(&f).unwrap()).unwrap();
+        assert_eq!(back, f);
     }
 }

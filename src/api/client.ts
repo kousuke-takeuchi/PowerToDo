@@ -12,6 +12,7 @@ import type {
   MoveOutcome,
   NotificationPermission,
   PendingRemindersDto,
+  PlatformInfo,
   ProjectSummary,
   ProjectView,
   QuickAddOutcome,
@@ -38,6 +39,8 @@ import type {
 
 /** Typed wrapper over Tauri `invoke`. Command names and argument keys follow src-tauri/src/commands/mod.rs (camelCase of the Rust params). */
 export const api = {
+  /** The OS the app runs on (Rust `platform_info`). */
+  platformInfo: () => invoke<PlatformInfo>("platform_info"),
   appState: () => invoke<AppStateDto>("app_state"),
   setDataDir: (path: string) => invoke<AppStateDto>("set_data_dir", { path }),
   /** Why watching the data folder could not start, or null while it runs. */

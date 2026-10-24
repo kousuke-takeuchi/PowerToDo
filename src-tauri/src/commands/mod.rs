@@ -31,7 +31,10 @@ use crate::store::external::{FileKind, Verdict, classify_path, fingerprint, verd
 use crate::store::fired::{Fired, ReminderItem, ReminderKey};
 use crate::store::paths::{AppSettings, Paths};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
-use crate::store::watcher::{self, Watcher};
+#[cfg(desktop)]
+use crate::store::watcher;
+use crate::store::watcher::Watcher;
+use crate::sync::state::SyncState;
 use crate::sync::{SyncEngine, SyncHost, SyncReason, SyncStatusView};
 
 use saver::{COMMON_KEY, SaveSink, SaveStatus, Saver};
@@ -344,6 +347,8 @@ pub struct AppStateDto {
 pub struct QuickAddOutcome {
     pub parsed: QuickAddResult,
     pub view: ProjectView,
+    /// Number of the task just added (new numbers are above every existing one, so it is the highest in `view`).
+    pub no: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -674,6 +679,20 @@ impl SyncHost for TauriSyncHost {
             .state::<AppState>()
             .update_fired(|f| f.forget_project(project));
     }
+
+    /// iOS: take in edits made in Excel, then check the tailnet proxy. A run that has to wait for
+    /// a rebuilt backend is asked again by `set_backend`. Desktop watches the folder instead.
+    fn before_run(&self) -> bool {
+        #[cfg(target_os = "ios")]
+        {
+            scan_external(&self.app);
+            sync::prepare_run(&self.app)
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            true
+        }
+    }
 }
 
 /// Starts the sync engine's task (one per app; see `SyncEngine::run_loop`). It stays idle until
@@ -768,6 +787,13 @@ fn mutate_structure<T>(
 
 /// Reads `settings.json` and opens the data folder it names, if the store is not open yet.
 pub fn startup(state: &AppState) -> AppResult<AppStateDto> {
+    startup_in(state, None)
+}
+
+/// [`startup`] with a data folder the platform fixes (iOS: `Documents`; there is no folder
+/// picker). A missing or different `dataDir` in `settings.json` (the spike's folder) is replaced
+/// by it. `None` on desktop.
+pub fn startup_in(state: &AppState, fixed_dir: Option<&Path>) -> AppResult<AppStateDto> {
     let mut store = state.lock_store();
     if store.is_some() {
         return Ok(state_dto(store.as_ref(), None));
@@ -782,6 +808,15 @@ pub fn startup(state: &AppState) -> AppResult<AppStateDto> {
     };
     let data_dir = loaded.data_dir.clone();
     *state.lock_settings() = loaded;
+    if let Some(fixed) = fixed_dir
+        && data_dir.as_deref() != Some(fixed)
+    {
+        drop(store);
+        if let Some(old) = data_dir.as_deref() {
+            migrate_moved_container(&state.app_data_dir, &mut state.lock_fired(), old, fixed);
+        }
+        return switch_data_dir(state, &fixed.to_string_lossy());
+    }
     let Some(dir) = data_dir else {
         return Ok(state_dto(None, None));
     };
@@ -796,6 +831,54 @@ pub fn startup(state: &AppState) -> AppResult<AppStateDto> {
         )),
         Err(e) => Err(e),
     }
+}
+
+/// `<...>/Containers/Data/Application/<id>/Documents`: the data folder iOS gives the app.
+fn is_container_documents(path: &Path) -> bool {
+    let parts: Vec<_> = path.components().rev().take(5).collect();
+    let name = |i: usize| parts.get(i).and_then(|c| c.as_os_str().to_str());
+    name(0) == Some("Documents")
+        && name(1).is_some_and(|id| !id.is_empty())
+        && name(2) == Some("Application")
+        && name(3) == Some("Data")
+        && name(4) == Some("Containers")
+}
+
+/// iOS does not keep the app container's path across updates and reinstalls. When the saved data
+/// folder and the current one are both container `Documents` folders (the container moved: iOS
+/// has no folder picker, so it is not a choice), the records tied to the folder by its absolute
+/// path follow it: `sync.json` (else the first sync after an update plans without its base) and
+/// `fired.json` (else reminders fire again). Any other pair of folders is left alone, so those
+/// records still start fresh. `true` when something was rewritten. Write failures are logged.
+pub fn migrate_moved_container(
+    app_data_dir: &Path,
+    fired: &mut Fired,
+    old: &Path,
+    new: &Path,
+) -> bool {
+    if old == new || !is_container_documents(old) || !is_container_documents(new) {
+        return false;
+    }
+    let mut changed = false;
+    let sync_path = app_data_dir.join(SyncState::FILE);
+    if let Ok(text) = std::fs::read_to_string(&sync_path)
+        && let Ok(mut sync) = serde_json::from_str::<SyncState>(&text)
+        && sync.data_dir == old
+    {
+        sync.data_dir = new.to_path_buf();
+        match sync.save(app_data_dir) {
+            Ok(()) => changed = true,
+            Err(e) => eprintln!("could not write {}: {e}", SyncState::FILE),
+        }
+    }
+    if fired.data_dir.as_deref() == Some(old) {
+        fired.data_dir = Some(new.to_path_buf());
+        match fired.save(app_data_dir) {
+            Ok(()) => changed = true,
+            Err(e) => eprintln!("could not write {}: {e}", Fired::FILE),
+        }
+    }
+    changed
 }
 
 /// Opens (creating if needed) `path` as the data folder and remembers it in `settings.json`.
@@ -1009,8 +1092,51 @@ fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
     });
 }
 
+/// Everything a scan has to look at (仕様 §3.7): the common workbook, every `*.xlsx` directly in
+/// the data folder, and the projects the store knows (to find the ones that vanished). No
+/// duplicates; `archive/` is not entered. `apply_fs_batch` decides what each path means.
+pub fn scan_paths(store: &ProjectStore) -> Vec<PathBuf> {
+    let paths = store.paths();
+    let mut found = BTreeSet::new();
+    found.insert(paths.common());
+    if let Ok(entries) = std::fs::read_dir(&paths.data_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let name = entry.file_name();
+            let is_xlsx = path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("xlsx"));
+            if is_xlsx && !name.to_string_lossy().starts_with("~$") && path.is_file() {
+                found.insert(path);
+            }
+        }
+    }
+    for p in store.summaries() {
+        if let Ok(path) = paths.project(&p.name) {
+            found.insert(path);
+        }
+    }
+    found.into_iter().collect()
+}
+
+/// Looks for edits made outside the app (Excel on the phone) and treats them like a watcher
+/// batch. Called on resume and before each sync run, instead of a file watcher (iOS).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub fn scan_external(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let paths = {
+        let guard = state.lock_store();
+        match guard.as_ref() {
+            Some(store) => scan_paths(store),
+            None => return,
+        }
+    };
+    handle_fs_batch(app, paths);
+}
+
 /// Starts (or restarts) watching the open data folder, replacing the previous watcher. Without
 /// an open store, or when watching cannot start, no watcher is left running.
+#[cfg(desktop)]
 fn start_watching(app: &AppHandle, state: &AppState) {
     let dir = state
         .lock_store()
@@ -1076,25 +1202,33 @@ pub fn quick_add_in(
         reminders: Vec::new(),
     };
     let view = store.add_task(&project, input)?;
-    Ok(QuickAddOutcome { parsed, view })
+    let no = view.tasks.iter().map(|t| t.no).max().unwrap_or(0);
+    Ok(QuickAddOutcome { parsed, view, no })
 }
 
 // ---- commands: app and data folder ----
 
 #[tauri::command]
 pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStateDto> {
+    #[cfg(target_os = "ios")]
+    let dto = startup_in(state.inner(), Some(&platform::ios_data_dir(&app)?))?;
+    #[cfg(not(target_os = "ios"))]
     let dto = startup(state.inner())?;
     state.bind_fired_to_store();
     schedule_dirty(&app, state.inner());
     // The store is open now (the sync plans only against an opened store).
     state.sync.request(SyncReason::Startup);
-    let watching = state
-        .watcher
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some();
-    if !watching {
-        start_watching(&app, state.inner());
+    // iOS has no file watcher: external edits are looked for on resume and before each sync run.
+    #[cfg(desktop)]
+    {
+        let watching = state
+            .watcher
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        if !watching {
+            start_watching(&app, state.inner());
+        }
     }
     Ok(AppStateDto {
         watch_error: state.watch_error(),
@@ -1114,6 +1248,7 @@ pub async fn set_data_dir(
     schedule_dirty(&app, state.inner());
     // `sync.json` belongs to the old folder; the new one starts from fresh records.
     state.sync.request(SyncReason::Settings);
+    #[cfg(desktop)]
     start_watching(&app, state.inner());
     Ok(AppStateDto {
         watch_error: state.watch_error(),
@@ -1134,9 +1269,15 @@ pub async fn pick_folder(app: AppHandle) -> AppResult<Option<String>> {
 }
 
 #[tauri::command]
-pub async fn reveal_data_dir(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn reveal_data_dir(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     let dir = with_store(state.inner(), |s| Ok(s.paths().data_dir.clone()))?;
-    platform::reveal_path(&dir)
+    platform::reveal_path(&app, &dir)
+}
+
+/// The OS the app runs on (the page hides what iPhone cannot do).
+#[tauri::command]
+pub fn platform_info() -> platform::PlatformInfo {
+    platform::PlatformInfo::current()
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -2152,6 +2293,19 @@ mod tests {
         assert_eq!(out.view.tasks.len(), 1);
         assert_eq!(out.view.tasks[0].title, "牛乳を買う");
         assert_eq!(out.view.tasks[0].due, Some(d("2026-10-15")));
+        assert_eq!(out.no, out.view.tasks[0].no);
+
+        // The returned no is the task just added, not an older one.
+        let out = quick_add_in(&mut store, "二つ目", "仕事", d("2026-10-14")).unwrap();
+        assert_eq!(
+            out.view
+                .tasks
+                .iter()
+                .find(|t| t.no == out.no)
+                .unwrap()
+                .title,
+            "二つ目"
+        );
 
         let out = quick_add_in(&mut store, "資料 #受信トレイ p1", "仕事", d("2026-10-14")).unwrap();
         assert_eq!(out.view.project.name, "受信トレイ");
@@ -2415,6 +2569,153 @@ mod tests {
         );
         assert!(out.is_empty(), "{out:?}");
         assert!(cancelled.is_empty());
+    }
+
+    fn scan(store: &mut ProjectStore, busy: bool) -> (BatchOutcome, Vec<String>) {
+        let paths = scan_paths(store);
+        run_batch(store, busy, &paths)
+    }
+
+    #[test]
+    fn scan_paths_lists_files_on_disk_and_known_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("残る", "#e44").unwrap();
+        store.create_project("消える", "#e44").unwrap();
+        std::fs::remove_file(tmp.path().join("消える.xlsx")).unwrap();
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |_| {});
+        std::fs::copy(tmp.path().join("残る.xlsx"), tmp.path().join("新しい.xlsx")).unwrap();
+        std::fs::copy(tmp.path().join("残る.xlsx"), tmp.path().join("~$残る.xlsx")).unwrap();
+        std::fs::create_dir(tmp.path().join("archive")).unwrap();
+        std::fs::copy(
+            tmp.path().join("残る.xlsx"),
+            tmp.path().join("archive").join("古い.xlsx"),
+        )
+        .unwrap();
+        let got: BTreeSet<PathBuf> = scan_paths(&store).into_iter().collect();
+        let list = scan_paths(&store);
+        assert_eq!(list.len(), got.len(), "no duplicates: {list:?}");
+        for name in ["_PowerToDo", "受信トレイ", "残る", "消える", "新しい"] {
+            assert!(
+                got.contains(&tmp.path().join(format!("{name}.xlsx"))),
+                "{name}"
+            );
+        }
+        assert!(
+            !got.iter()
+                .any(|p| p.starts_with(tmp.path().join("archive")))
+        );
+        // Applied as a batch the scan finds the gone and the new project.
+        let (out, _) = run_batch(&mut store, false, &list);
+        assert!(out.projects_changed);
+        assert!(out.failures.is_empty());
+    }
+
+    #[test]
+    fn ios_scan_reloads_an_external_edit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let (out, _) = scan(&mut store, false);
+        assert_eq!(out.reloaded, vec![INBOX.to_string()]);
+        assert_eq!(titles(&store, INBOX), vec!["Excel で追加".to_string()]);
+    }
+
+    #[test]
+    fn ios_scan_holds_a_dirty_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "未保存", INBOX, d("2026-10-14")).unwrap();
+        excel_saves(tmp.path(), "受信トレイ.xlsx", |o| {
+            quick_add_in(o, "Excel で追加", INBOX, d("2026-10-14")).unwrap();
+        });
+        let (out, cancelled) = scan(&mut store, false);
+        assert_eq!(out.held, vec![INBOX.to_string()]);
+        assert_eq!(cancelled, vec![INBOX.to_string()]);
+        assert_eq!(titles(&store, INBOX), vec!["未保存".to_string()]);
+    }
+
+    #[test]
+    fn ios_scan_ignores_own_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        quick_add_in(&mut store, "自分", INBOX, d("2026-10-14")).unwrap();
+        store.save(INBOX).unwrap();
+        store.save_common().unwrap();
+        let (out, cancelled) = scan(&mut store, false);
+        assert!(out.is_empty(), "{out:?}");
+        assert!(cancelled.is_empty());
+    }
+
+    fn container(root: &Path, id: &str) -> PathBuf {
+        root.join("Containers/Data/Application")
+            .join(id)
+            .join("Documents")
+    }
+
+    #[test]
+    fn a_moved_container_keeps_the_sync_and_fired_records() {
+        use crate::sync::state::{BackendKind, FileRecord};
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let old = container(tmp.path(), "AAAA");
+        let new = container(tmp.path(), "BBBB");
+        let mut state = SyncState::new(&old, BackendKind::Nas, "http://nas:5005/powertodo/");
+        state.files.insert(
+            "受信トレイ.xlsx".into(),
+            FileRecord {
+                remote_id: "id".into(),
+                remote_version: "v1".into(),
+                remote_modified: fixed_now(),
+                local_hash: "h".into(),
+            },
+        );
+        state.save(&app).unwrap();
+        let mut fired = Fired {
+            data_dir: Some(old.clone()),
+            last_seen: Some(fixed_now()),
+            ..Fired::default()
+        };
+        fired.save(&app).unwrap();
+        assert!(migrate_moved_container(&app, &mut fired, &old, &new));
+        let loaded = SyncState::load(&app, &new, BackendKind::Nas, "http://nas:5005/powertodo/");
+        assert_eq!(loaded.files, state.files);
+        assert_eq!(fired.data_dir.as_deref(), Some(new.as_path()));
+        assert_eq!(Fired::load(&app).data_dir.as_deref(), Some(new.as_path()));
+        // Binding to the new folder keeps the records instead of dropping them.
+        assert!(!fired.bind(&new));
+    }
+
+    #[test]
+    fn other_folders_are_not_migrated() {
+        use crate::sync::state::BackendKind;
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let new = container(tmp.path(), "BBBB");
+        for old in [tmp.path().join("Documents"), tmp.path().join("elsewhere")] {
+            let state = SyncState::new(&old, BackendKind::Nas, "r");
+            state.save(&app).unwrap();
+            let mut fired = Fired {
+                data_dir: Some(old.clone()),
+                ..Fired::default()
+            };
+            assert!(!migrate_moved_container(&app, &mut fired, &old, &new));
+            assert_eq!(fired.data_dir.as_deref(), Some(old.as_path()));
+            assert!(
+                SyncState::load(&app, &new, BackendKind::Nas, "r")
+                    .files
+                    .is_empty()
+            );
+            // Compare the parsed path: in the JSON text a Windows path has its `\` escaped.
+            let raw = std::fs::read_to_string(app.join(SyncState::FILE)).unwrap();
+            let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(saved["dataDir"].as_str(), Some(&*old.to_string_lossy()));
+        }
+        // The same folder is not a move either.
+        let mut fired = Fired::default();
+        assert!(!migrate_moved_container(&app, &mut fired, &new, &new));
     }
 
     #[test]

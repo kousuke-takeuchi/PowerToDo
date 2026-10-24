@@ -27,3 +27,28 @@ pub fn parse_google_oauth(json: &str) -> Result<(String, String), &'static str> 
     };
     Ok((field("client_id")?, field("client_secret")?))
 }
+
+/// The `CLIENT_ID` of the plist Google offers for an iOS client (`GoogleService-Info`-style
+/// property list: `<key>CLIENT_ID</key><string>...</string>`). Only that one pair is read, so
+/// no plist crate is needed. Like [`parse_google_oauth`], failures are fixed texts.
+pub fn parse_google_ios_plist(text: &str) -> Result<String, &'static str> {
+    const KEY: &str = "<key>CLIENT_ID</key>";
+    let after = &text[text.find(KEY).ok_or("no CLIENT_ID key")? + KEY.len()..];
+    let after = after.trim_start();
+    let body = after
+        .strip_prefix("<string>")
+        .ok_or("CLIENT_ID is not a string")?;
+    let value = body
+        .split_once("</string>")
+        .ok_or("CLIENT_ID is not closed")?
+        .0
+        .trim();
+    if value.is_empty() {
+        return Err("CLIENT_ID is empty");
+    }
+    // The value goes into a `cargo:rustc-env=` line: it must stay on one line.
+    if value.chars().any(char::is_control) {
+        return Err("CLIENT_ID contains a control character");
+    }
+    Ok(value.to_string())
+}

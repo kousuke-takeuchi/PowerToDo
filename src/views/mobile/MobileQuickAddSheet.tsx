@@ -1,24 +1,58 @@
 import type React from "react";
+import { useRef } from "react";
 import { motion, useIsPresent } from "motion/react";
 import { ArrowUp, Bell, Calendar, Flag, Folder, Tag } from "lucide-react";
+import { isImeKey } from "../../app/keys";
 import { useEscLayer } from "../../app/layers";
+import { reminderLabel } from "../ReminderPicker";
+import type { InsertKind } from "../../app/quickAddInsert";
 import { useMotionTiming } from "../../motion";
+import { useKeyboardInset } from "./useKeyboardInset";
 import type { QuickAddToken } from "../QuickAddDialog";
 
 export type MobileQuickAddSheetProps = {
   tokens: QuickAddToken[];
   onClose?: () => void;
+  /** 実機用: 入力欄 (16px) を出し、キーボードの上にシートを置く (visualViewport)。省略すると Story の見た目 (入力欄なし、キーボード領域 291)。 */
+  fill?: boolean;
+  text?: string;
+  onTextChange?: (text: string) => void;
+  /** Enter または送信ボタン。空 / busy の間は呼ばない。 */
+  onSubmit?: (text: string) => void;
+  busy?: boolean;
+  error?: string;
+  /** ツールバー (日付 / 優先度 / ラベル / リマインダー) が押されたとき。入力欄の末尾に語を足すのは呼び出し側。 */
+  onInsert?: (kind: InsertKind) => void;
+  /** リマインダー (クイック追加の構文に無い): 選んだコード。ボタンは onPickReminder で別のシートを開く。 */
+  reminders?: string[];
+  onPickReminder?: () => void;
 };
 
 const tokenColor = { date: "var(--color-success)", priority: "var(--color-priority-1)", project: "var(--color-priority-3)", label: "var(--color-text-secondary)" } as const;
 
-function ToolbarIcon({ icon: Icon, label, color = "var(--color-text-secondary)" }: { icon: React.ComponentType<{ size?: number }>; label: string; color?: string }) {
+function ToolbarIcon({
+  icon: Icon,
+  label,
+  color = "var(--color-text-secondary)",
+  onClick,
+  size = 32,
+}: {
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  color?: string;
+  onClick?: () => void;
+  /** タップ領域。実機は 44 pt。 */
+  size?: number;
+}) {
   return (
     <button
       type="button"
       aria-label={label}
+      onClick={onClick}
+      // 押してもキーボードを閉じない (入力欄のフォーカスを保つ)
+      onMouseDown={(e) => e.preventDefault()}
       className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-      style={{ width: 32, height: 32, display: "grid", placeItems: "center", padding: 0, border: 0, borderRadius: 6, color, cursor: "pointer", flex: "0 0 auto" }}
+      style={{ width: size, height: size, display: "grid", placeItems: "center", padding: 0, border: 0, borderRadius: 6, color, cursor: "pointer", flex: "0 0 auto" }}
     >
       <Icon size={18} />
     </button>
@@ -31,7 +65,18 @@ function ToolbarIcon({ icon: Icon, label, color = "var(--color-text-secondary)" 
  * シートの下端 = キーボードの上端なので、シートは常に全体が見える。保存はしない。
  * scrim は pointerEvents: "auto" (MobileShell の overlay ラッパーは "none")。
  */
-export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProps) {
+export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange, onSubmit, busy, error, onInsert, reminders = [], onPickReminder }: MobileQuickAddSheetProps) {
+  const live = onTextChange !== undefined;
+  const ts = live ? 44 : 32;
+  const inset = useKeyboardInset(!!fill);
+  const input = useRef<HTMLInputElement>(null);
+  const submit = () => {
+    if (live && onSubmit && !busy && (text ?? "").trim()) onSubmit(text ?? "");
+  };
+  const insert = (kind: InsertKind) => {
+    onInsert?.(kind);
+    input.current?.focus();
+  };
   // 閉じるアニメーション中は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
   useEscLayer(useIsPresent(), () => onClose?.());
   // シートとキーボード領域は下からせり上がる (250ms)。scrim は 150ms でフェード。reduced motion では動かさない。
@@ -58,6 +103,9 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
         background: "var(--color-scrim)",
         pointerEvents: "auto",
         fontFamily: "var(--font-body)",
+        // 実機: キーボードの高さぶん持ち上げる。キーボードが無いときはセーフエリアぶん空ける。
+        paddingBottom: fill ? (inset > 0 ? inset : "env(safe-area-inset-bottom)") : undefined,
+        boxSizing: "border-box",
       }}
     >
       <motion.div
@@ -76,7 +124,61 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
           flex: "0 0 auto",
         }}
       >
-        <div role="group" aria-label="タスク名" style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: 16, lineHeight: "23px" }}>
+        {live && (
+          <input
+            ref={input}
+            aria-label="タスク名"
+            placeholder="タスク名 (例: 牛乳 明日 p1)"
+            value={text ?? ""}
+            autoFocus
+            enterKeyHint="send"
+            onChange={(e) => onTextChange?.(e.target.value)}
+            onKeyDown={(e) => {
+              // 日本語変換を確定する Enter では送信しない (keys.ts)
+              if (e.key === "Enter" && !isImeKey(e)) submit();
+            }}
+            className="placeholder:text-[var(--color-text-muted)]"
+            style={{
+              boxSizing: "border-box",
+              width: "100%",
+              height: 28,
+              padding: 0,
+              border: 0,
+              outline: "none",
+              background: "transparent",
+              fontFamily: "var(--font-body)",
+              fontSize: 16, // 16px 未満だと iOS が拡大する
+              lineHeight: "24px",
+              color: "var(--color-text-primary)",
+            }}
+          />
+        )}
+        {live && tokens.some((t) => t.kind) && (
+          <div role="group" aria-label="解釈" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px" }}>
+            {tokens
+              .filter((t) => t.kind)
+              .map((t, i) => (
+                <span key={i} style={{ padding: "1px 6px", borderRadius: 4, background: "var(--color-bg-hover)", color: tokenColor[t.kind!] }}>
+                  {t.text}
+                </span>
+              ))}
+          </div>
+        )}
+        {live && reminders.length > 0 && (
+          <div role="group" aria-label="リマインダー" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px" }}>
+            {reminders.map((c) => (
+              <span key={c} style={{ padding: "1px 6px", borderRadius: 4, background: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}>
+                {reminderLabel(c)}
+              </span>
+            ))}
+          </div>
+        )}
+        {live && error && (
+          <div role="alert" style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-danger)" }}>
+            {error}
+          </div>
+        )}
+        {!live && <div role="group" aria-label="タスク名" style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: 16, lineHeight: "23px" }}>
           {tokens.map((t, i) =>
             t.kind ? (
               <span key={i} style={{ padding: "1px 4px", borderRadius: 4, whiteSpace: "pre", background: "var(--color-bg-hover)", color: tokenColor[t.kind] }}>
@@ -89,8 +191,8 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
             ),
           )}
           <span aria-hidden style={{ width: 2, height: 20, background: "var(--color-text-primary)", flex: "0 0 auto" }} />
-        </div>
-        <input
+        </div>}
+        {!live && <input
           aria-label="説明"
           placeholder="説明"
           className="placeholder:text-[var(--color-text-muted)]"
@@ -107,18 +209,31 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
             lineHeight: "20px",
             color: "var(--color-text-primary)",
           }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <ToolbarIcon icon={Calendar} label="期限" color={of("date") ? "var(--color-success)" : undefined} />
-          <ToolbarIcon icon={Flag} label="優先度" color={of("priority") ? "var(--color-priority-1)" : undefined} />
-          <ToolbarIcon icon={Bell} label="リマインダー" />
-          <ToolbarIcon icon={Tag} label="ラベル" />
-          <ToolbarIcon icon={Folder} label="プロジェクト" />
+        />}
+        <div style={{ display: "flex", alignItems: "center", gap: live ? 0 : "var(--space-2)" }}>
+          <ToolbarIcon icon={Calendar} label="期限" size={ts} color={of("date") ? "var(--color-success)" : undefined} onClick={live ? () => insert("date") : undefined} />
+          <ToolbarIcon icon={Flag} label="優先度" size={ts} color={of("priority") ? "var(--color-priority-1)" : undefined} onClick={live ? () => insert("priority") : undefined} />
+          {live ? (
+            <>
+              <ToolbarIcon icon={Tag} label="ラベル" size={ts} onClick={() => insert("label")} />
+              <ToolbarIcon icon={Bell} label="リマインダー" size={ts} color={reminders.length > 0 ? "var(--color-success)" : undefined} onClick={onPickReminder} />
+            </>
+          ) : (
+            <>
+              <ToolbarIcon icon={Bell} label="リマインダー" />
+              <ToolbarIcon icon={Tag} label="ラベル" />
+            </>
+          )}
+          <ToolbarIcon icon={Folder} label="プロジェクト" size={ts} />
           <div style={{ flex: 1 }} />
           <button
             type="button"
             aria-label="送信"
+            onClick={live ? submit : undefined}
+            onMouseDown={(e) => e.preventDefault()}
+            disabled={live && (busy || !(text ?? "").trim())}
             style={{
+              opacity: live && (busy || !(text ?? "").trim()) ? 0.4 : 1,
               width: 36,
               height: 36,
               display: "grid",
@@ -136,8 +251,8 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
           </button>
         </div>
       </motion.div>
-      {/* OS のキーボードの代わり。pen の Keyboard (291pt)。色はこのモックだけの固定値 (トークンにしない)。 */}
-      <motion.div
+      {/* OS のキーボードの代わり。pen の Keyboard (291pt)。色はこのモックだけの固定値 (トークンにしない)。実機 (fill) では出さない。 */}
+      {!fill && <motion.div
         aria-hidden
         {...slide}
         style={{
@@ -152,7 +267,7 @@ export function MobileQuickAddSheet({ tokens, onClose }: MobileQuickAddSheetProp
         }}
       >
         キーボード領域 (291pt)
-      </motion.div>
+      </motion.div>}
     </motion.div>
   );
 }

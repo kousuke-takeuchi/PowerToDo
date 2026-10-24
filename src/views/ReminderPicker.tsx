@@ -23,6 +23,9 @@ const OPTIONS = [
 /** 候補に並べるもの (pen の順)。 */
 const CANDIDATES = ["-10m", "-60m", "-1d", "-1w"];
 
+/** 選べるリマインダーのコード (モバイルのシートが全部を並べる)。 */
+export const REMINDER_CODES: readonly string[] = OPTIONS.map((o) => o.code);
+
 const optionOf = (code: string) => OPTIONS.find((o) => o.code === code);
 
 /** 1 件分の表示文言 (M-03 の「リマインダー」行など。"-30m" → "30 分前")。 */

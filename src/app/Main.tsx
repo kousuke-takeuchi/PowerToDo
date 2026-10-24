@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
 import { onNotificationError, onOpenQuickAdd, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
-import type { Counts } from "../mock/data";
-import type { AppStateDto, CountsDto, ProjectSummary, Task } from "../types/model";
+import type { AppStateDto, Task } from "../types/model";
 import { useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
 import { ProjectView } from "../views/ProjectView";
@@ -23,13 +22,13 @@ import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
 import { Banners } from "./Banners";
 import { setEscFallback, useEscLayer } from "./layers";
-import { useCrossView } from "./useCrossView";
 import { useCrossViews } from "./useCrossViews";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useProject } from "./useProject";
 import { useRowFocus } from "./useRowFocus";
 import { PALETTE, useProjectActions } from "./useProjectActions";
 import { useQuickAdd } from "./useQuickAdd";
+import { useSummaries } from "./useSummaries";
 import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
 import { useSearchDialog } from "./useSearchDialog";
@@ -55,8 +54,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
 
   const [nav, setNav] = useState<Nav>({ kind: "inbox" });
-  const [summaries, setSummaries] = useState<ProjectSummary[]>(app.projects);
-  const [displayName, setDisplayName] = useState<string | undefined>();
   const [openNo, setOpenNo] = useState<number | null>(null);
   // 通知 / 帯から開いたタスク: プロジェクトが読み込まれたら、そのタスクがあるか一度だけ確かめる
   const [pendingOpen, setPendingOpen] = useState<{ project: string; no: number } | null>(null);
@@ -90,30 +87,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const expandApi = useRef<ExpandApi | null>(null);
   const { searchOpen, setSearchOpen, search, searchSel, setSearchSel } = useSearchDialog();
 
-  // サイドバーの「今日」の件数 (期限が今日以前の未完了。project-changed / 保存完了でも更新される)。
-  const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
-  const refreshCounts = countsData.refresh;
-
-  const refreshSummaries = useCallback(async () => {
-    refreshCounts();
-    try {
-      setSummaries(await api.listProjects());
-    } catch {
-      // サイドバーの件数が古いままになるだけ。次の操作でまた更新する。
-    }
-  }, [refreshCounts]);
-
-  const loadDisplayName = useCallback(() => {
-    api
-      .settings()
-      .then((s) => setDisplayName(s.displayName || undefined))
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    void refreshSummaries();
-    loadDisplayName();
-  }, [refreshSummaries, loadDisplayName]);
+  // プロジェクト一覧・「今日」の件数・表示名 (モバイルと共有: useSummaries)
+  const { summaries, displayName, setDisplayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
   // 受信トレイ / プロジェクトの画面だけがタスク詳細・要修正の帯を持つ。今日 / 近日 / ラベル詳細 / フィルターとラベルは
   // 横断ビュー (useProject は受信トレイを読み続ける)。
@@ -341,12 +316,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       void ext.refresh();
     }
   };
-
-  const counts: Counts = useMemo(() => {
-    const byName = Object.fromEntries(summaries.map((s) => [s.name, s.taskCount]));
-    const inbox = summaries.find((s) => s.inbox);
-    return { ...byName, inbox: inbox?.taskCount ?? 0, today: countsData.data?.today ?? 0 };
-  }, [summaries, countsData.data]);
 
   const sidebar = (
     <Sidebar
