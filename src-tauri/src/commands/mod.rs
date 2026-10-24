@@ -2708,8 +2708,10 @@ mod tests {
                     .files
                     .is_empty()
             );
+            // Compare the parsed path: in the JSON text a Windows path has its `\` escaped.
             let raw = std::fs::read_to_string(app.join(SyncState::FILE)).unwrap();
-            assert!(raw.contains(&*old.to_string_lossy()));
+            let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(saved["dataDir"].as_str(), Some(&*old.to_string_lossy()));
         }
         // The same folder is not a move either.
         let mut fired = Fired::default();
