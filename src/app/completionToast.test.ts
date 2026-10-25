@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { completedOf, merge, toastText, undoOf } from "./completionToast.ts";
+import { completedOf, merge, nextNotice, noticeText, toastText, undoOf } from "./completionToast.ts";
 
 test("merge_counts_and_keeps_every_entry", () => {
   let s = merge(null, { project: "仕事", no: 1 });
@@ -40,4 +40,14 @@ test("undoOf_last_occurrence_reopens_and_restores_the_rule", () => {
 
 test("completedOf_plain_has_no_before", () => {
   assert.equal(completedOf({ project: "仕事", no: 3, reminders: [] }).before, undefined);
+});
+
+test("completions_add_up_and_a_note_replaces_them", () => {
+  let n = nextNotice(null, { done: { project: "仕事", no: 1 } });
+  n = nextNotice(n, { done: { project: "仕事", no: 2 } });
+  assert.equal(noticeText(n), "2 件のタスクを完了しました");
+  n = nextNotice(n, { text: "タスクを複製しました", action: "元に戻す", id: 1 });
+  assert.equal(noticeText(n), "タスクを複製しました");
+  n = nextNotice(n, { done: { project: "仕事", no: 3 } });
+  assert.equal(noticeText(n), "1 件のタスクを完了しました");
 });
