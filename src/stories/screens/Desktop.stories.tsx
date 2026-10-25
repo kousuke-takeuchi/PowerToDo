@@ -7,6 +7,7 @@ import { PanelLeftOpen } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Toast } from "../../components/Toast";
 import { RowActions, type RowActionsApi } from "../../app/rowActions";
+import { DragProvider, type DropResult } from "../../app/drag/DragContext";
 import { DeleteTaskDialog } from "../../views/DeleteTaskDialog";
 import { countDescendants } from "../../views/deleteMessage";
 import { AppShell } from "../../views/AppShell";
@@ -260,6 +261,39 @@ function RowActionsScreen() {
 export const D01RowActions: Story = {
   name: "D-01 行の操作 (操作)",
   render: () => <RowActionsScreen />,
+};
+
+// 操作確認用 (spec ③): ドラッグの本体を DragProvider でつなぎ、drop をローカル state に反映する。ハンドルは Task 4 以降で行に付く。
+function DragScreen() {
+  const [list, setList] = useState<Task[]>(shopping);
+  const [secs, setSecs] = useState(sections);
+  const onDrop = (r: DropResult) => {
+    if (r.kind === "place") {
+      const { section, parent, before } = r.placement;
+      setList((cur) => {
+        const moved = { ...r.source.task, category: section, parentNo: parent ?? undefined };
+        const sibs = cur.filter((t) => t.no !== moved.no && t.category === section && (t.parentNo ?? null) === parent).sort((a, b) => a.order - b.order);
+        const at = before === null ? sibs.length : Math.max(0, sibs.findIndex((t) => t.no === before));
+        const ordered = [...sibs.slice(0, at), moved, ...sibs.slice(at)];
+        const orderOf = new Map(ordered.map((t, i) => [t.no, i]));
+        return cur.map((t) => (t.no === moved.no ? { ...moved, order: orderOf.get(moved.no)! } : orderOf.has(t.no) ? { ...t, order: orderOf.get(t.no)! } : t));
+      });
+    } else if (r.kind === "sections") {
+      setSecs((cur) => cur.map((s) => (s.project === r.project ? { ...s, order: r.names.indexOf(s.name) } : s)));
+    }
+  };
+  return (
+    <DragProvider onDrop={onDrop}>
+      <AppShell sidebar={sidebar} syncState="synced">
+        <ProjectView project="買い物" tasks={list} sections={secs} initialExpanded={[1]} />
+      </AppShell>
+    </DragProvider>
+  );
+}
+
+export const D01Drag: Story = {
+  name: "D-01 ドラッグ (操作)",
+  render: () => <DragScreen />,
 };
 
 // D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
