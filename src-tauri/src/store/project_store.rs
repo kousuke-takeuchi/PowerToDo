@@ -1526,6 +1526,14 @@ impl ProjectStore {
         for (i, (p, no)) in keys.iter().enumerate() {
             by_project.entry(p.clone()).or_default().push((*no, i + 1));
         }
+        // Validate every key in every project before writing any, so a bad key leaves
+        // no project half-ordered.
+        for (p, list) in &by_project {
+            let book = self.ok_book(p)?;
+            for (no, _) in list {
+                find_task(book, *no)?;
+            }
+        }
         let stamp = today.format("%Y-%m-%d").to_string();
         for (p, list) in &by_project {
             self.mutate(p, |book, _| {
@@ -2889,6 +2897,30 @@ mod tests {
         let v = e.store.view(INBOX).unwrap();
         assert_eq!(task(&v, 2).extra[TODAY_ORDER], "2026-10-25:1");
         assert_eq!(task(&v, 1).extra[TODAY_ORDER], "2026-10-25:2");
+    }
+
+    #[test]
+    fn set_today_order_missing_key_changes_nothing() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.save(INBOX).unwrap();
+        for p in e.store.dirty_projects() {
+            e.store.save(&p).unwrap();
+        }
+        assert!(e.store.dirty_projects().is_empty());
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let cases = [
+            vec![(INBOX.to_string(), 1), (INBOX.to_string(), 99)],
+            vec![(INBOX.to_string(), 1), ("仕事".to_string(), 99)],
+            vec![(INBOX.to_string(), 1), ("無い".to_string(), 1)],
+        ];
+        for keys in cases {
+            assert!(e.store.set_today_order(today, &keys).is_err());
+            let v = e.store.view(INBOX).unwrap();
+            assert!(!task(&v, 1).extra.contains_key(TODAY_ORDER), "{keys:?}");
+            assert!(e.store.dirty_projects().is_empty(), "{keys:?}");
+        }
     }
 
     #[test]
