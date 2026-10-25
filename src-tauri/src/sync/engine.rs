@@ -58,6 +58,15 @@ pub fn network_retry_delay(
 /// Resident sync spec 4.1: how often the target's listing is compared with the last one.
 pub const REMOTE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Name to version of the sync targets in `files`.
+fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
+    files
+        .iter()
+        .filter(|f| is_sync_target(&f.name))
+        .map(|f| (f.name.clone(), f.version.clone()))
+        .collect()
+}
+
 /// The target's state as far as the sync cares: the sync targets' names and versions, in name
 /// order, hashed. Files that are not sync targets (conflict copies, temporaries) are left out,
 /// and so are the ids and times (a version changes whenever the content does).
@@ -899,7 +908,11 @@ impl SyncEngine {
             match &listed {
                 Ok(files) => {
                     let now = remote_fingerprint(files);
-                    let changed = inner.remote_seen.as_ref().is_some_and(|seen| *seen != now);
+                    // Also a run when nothing was seen yet or the last run was offline: the
+                    // target answers again, and the start-up run or an edit made offline is
+                    // still waiting (desktops get no network change event).
+                    let changed = inner.remote_seen.as_ref().is_none_or(|seen| *seen != now)
+                        || inner.status.state == SyncPhase::Offline;
                     inner.remote_seen = Some(now);
                     Some(changed)
                 }
@@ -1053,6 +1066,7 @@ impl SyncEngine {
             }
         };
         self.see_remote(generation, &remote);
+        let listed = versions(&remote);
 
         // (4) The plan.
         let mut state = SyncState::load(
@@ -1146,13 +1160,30 @@ impl SyncEngine {
         }
         // What this run sent changed the target: look again, so the next look of
         // `check_remote` does not take our own uploads for someone else's change. A failure
-        // only leaves the older fingerprint (the next look then asks for one more run).
+        // only leaves the older fingerprint (the next look then asks for one more run), and so
+        // does a file this run did not touch that changed meanwhile (another device's upload,
+        // which this run never planned).
         if (!report.uploaded.is_empty()
             || !report.archived_remote.is_empty()
             || !report.conflicts.is_empty())
             && let Ok(files) = target.backend.list().await
         {
-            self.see_remote(generation, &files);
+            let touched: BTreeSet<&str> = report
+                .uploaded
+                .iter()
+                .chain(&report.archived_remote)
+                .map(String::as_str)
+                .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
+                .collect();
+            let now = versions(&files);
+            let others_changed = listed
+                .keys()
+                .chain(now.keys())
+                .filter(|name| !touched.contains(name.as_str()))
+                .any(|name| listed.get(name) != now.get(name));
+            if !others_changed {
+                self.see_remote(generation, &files);
+            }
         }
         report.outcome = RunOutcome::Done;
         let problems = report.problems();
@@ -2552,6 +2583,95 @@ mod tests {
             "a failed look does not change the status"
         );
         assert!(!a.engine.auth_rejected());
+    }
+
+    #[tokio::test]
+    async fn first_successful_look_after_an_offline_start_asks_for_a_run() {
+        let remote = backend();
+        let flaky = Flaky::new(&remote);
+        let a = Pc::with_backend(flaky.clone(), None);
+        a.engine.take_due(Instant::now());
+        assert_eq!(a.sync().await.outcome, RunOutcome::Offline);
+        a.engine.take_due(Instant::now());
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+        assert!(a.engine.next_due().is_some());
+    }
+
+    #[tokio::test]
+    async fn look_after_an_offline_run_asks_for_a_run() {
+        let remote = backend();
+        let flaky = Flaky::new(&remote);
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let a = Pc::with_backend(flaky.clone(), None);
+        settled(&a).await;
+        // An edit made offline: its run fails, the target itself did not change.
+        flaky
+            .offline
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        a.create("仕事");
+        assert_eq!(a.sync().await.outcome, RunOutcome::Offline);
+        a.engine.take_due(Instant::now());
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    /// The second `list()` (the look again after own uploads) first lets another device upload.
+    struct Sneak {
+        inner: Arc<MemoryBackend>,
+        lists: std::sync::atomic::AtomicUsize,
+        at: usize,
+    }
+
+    impl StorageBackend for Sneak {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            Box::pin(async move {
+                let n = self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if n == self.at {
+                    self.inner.upload("他.xlsx", None, b"x".to_vec()).await?;
+                }
+                self.inner.list().await
+            })
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+    }
+
+    #[tokio::test]
+    async fn another_devices_upload_during_a_run_is_not_taken_as_seen() {
+        let remote = backend();
+        let sneak = Arc::new(Sneak {
+            inner: remote.clone(),
+            lists: Default::default(),
+            // 1: the first run's listing, 2: its look again after the first uploads,
+            // 3: the second run's listing, 4: its look again.
+            at: 4,
+        });
+        let a = Pc::with_backend(sneak.clone(), None);
+        settled(&a).await;
+        a.create("仕事");
+        let r = settled(&a).await;
+        assert!(!r.uploaded.is_empty(), "{r:?}");
+        assert_eq!(sneak.lists.load(std::sync::atomic::Ordering::SeqCst), 4);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
     }
 
     /// `list()` waits until released (to switch the target in the middle of a look).
