@@ -928,11 +928,13 @@ impl SyncEngine {
         };
         // A run may start while this one lists; it lists for itself, and its own fingerprint wins.
         drop(_free);
+        // Comments that cannot be listed leave them out, as the run does (its fingerprint then
+        // has the workbooks alone too).
         let listed = match backend.list().await {
-            Ok(files) => backend
-                .list_comments()
-                .await
-                .map(|c| with_comments(files, c.as_deref().unwrap_or_default())),
+            Ok(files) => Ok(match backend.list_comments().await {
+                Ok(c) => with_comments(files, c.as_deref().unwrap_or_default()),
+                Err(_) => files,
+            }),
             Err(e) => Err(e),
         };
         let changed = {
@@ -1115,9 +1117,7 @@ impl SyncEngine {
             Some(c) => with_comments(remote.clone(), c.as_deref().unwrap_or_default()),
             None => remote.clone(),
         };
-        if remote_comments.is_some() {
-            self.see_remote(generation, &seen);
-        }
+        self.see_remote(generation, &seen);
         let listed = versions(&seen);
 
         // (4) The plan.
@@ -1204,6 +1204,7 @@ impl SyncEngine {
                     &mut state,
                     &mut report,
                     rc,
+                    is_retry,
                 )
                 .await
             {
@@ -1397,6 +1398,7 @@ impl SyncEngine {
         state: &mut SyncState,
         report: &mut SyncReport,
         remote: Option<Vec<RemoteFile>>,
+        is_retry: bool,
     ) -> Result<(), BackendError> {
         if remote.is_none() || !dir.is_dir() {
             state.files.retain(|k, _| !is_comment_key(k));
@@ -1523,9 +1525,16 @@ impl SyncEngine {
                         changed.push(name);
                     }
                 }
-                Err(BackendError::Precondition) => {
+                // Like a workbook: retried once at once, then left to the schedule.
+                Err(BackendError::Precondition) if !is_retry => {
                     report.deferred.push(name);
                     report.rerun = true;
+                }
+                Err(BackendError::Precondition) => {
+                    let m = format!(
+                        "「{name}」は同期先でも更新され続けているため同期できませんでした (次の同期でもう一度試します)"
+                    );
+                    report.failed.push((name, m));
                 }
                 Err(e @ (BackendError::Auth | BackendError::Offline(_))) => return Err(e),
                 Err(e) => report.failed.push((name.clone(), failure_text(&name, e))),
@@ -2906,6 +2915,48 @@ mod tests {
         assert_eq!(sorted(said(&a, "仕事", 1)), names(&["A", "BB", "CCC"]));
     }
 
+    /// A target whose comments folder cannot be listed.
+    struct CommentsUnlisted(Arc<MemoryBackend>);
+
+    impl StorageBackend for CommentsUnlisted {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.0.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.0.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.0.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.0.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+            Box::pin(async { Err(BackendError::Other("壊れた一覧".into())) })
+        }
+    }
+
+    /// The workbooks are still watched while the comments cannot be listed, and a run that
+    /// leaves the comments out still settles the 30-second look.
+    #[tokio::test]
+    async fn remote_check_works_while_comments_cannot_be_listed() {
+        let remote = backend();
+        let (_a, b) = two_pcs(&remote).await;
+        let c = Pc::with_backend(Arc::new(CommentsUnlisted(remote.clone())), None);
+        settled(&c).await;
+        c.engine.check_remote().await;
+        settled(&c).await;
+        assert_eq!(c.engine.check_remote().await, CheckOutcome::Unchanged);
+        b.add("仕事", "見積もりを送る");
+        b.sync().await;
+        assert_eq!(c.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
     #[tokio::test]
     async fn renumbered_task_keeps_its_comments() {
         let remote = backend_at("2100-01-01T00:00:00");
@@ -3790,6 +3841,57 @@ mod tests {
         tokio::time::sleep(INTERVAL).await;
         assert_eq!(count(&stale), after_retry * 2);
         task.abort();
+    }
+
+    /// Every comment upload meets another PC's write.
+    struct StaleComments(Arc<MemoryBackend>);
+
+    impl StorageBackend for StaleComments {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.0.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.0.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.0.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.0.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+            self.0.list_comments()
+        }
+        fn upload_comment<'a>(
+            &'a self,
+            _name: &'a str,
+            _existing: Option<&'a RemoteFile>,
+            _bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            Box::pin(async { Err(BackendError::Precondition) })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_retry_run_does_not_ask_for_another_comments_retry() {
+        let remote = backend();
+        let a = Pc::with_backend(Arc::new(StaleComments(remote.clone())), None);
+        a.add(INBOX, "牛乳を買う");
+        say(&a, INBOX, 1, "x");
+        let r = a.sync().await;
+        assert!(r.rerun, "{r:?}");
+        let r = a
+            .engine
+            .run(a.host.as_ref(), PlanMode::Normal, true, None)
+            .await;
+        assert!(!r.rerun, "{r:?}");
+        let name = format!("{INBOX}.1.jsonl");
+        assert!(r.failed.iter().any(|(n, _)| *n == name), "{r:?}");
     }
 
     #[tokio::test]
