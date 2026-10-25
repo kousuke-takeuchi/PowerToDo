@@ -1985,6 +1985,23 @@ pub async fn update_settings(
     })
 }
 
+#[tauri::command]
+pub async fn view_options(state: State<'_, AppState>) -> AppResult<BTreeMap<String, String>> {
+    with_store(state.inner(), |s| Ok(s.view_options()))
+}
+
+#[tauri::command]
+pub async fn set_view_option(
+    key: String,
+    value: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    mutate(&app, state.inner(), &[], true, |s| {
+        s.set_view_option(&key, &value)
+    })
+}
+
 // ---- commands: reminders and the window (仕様 §4.4, §6) ----
 
 #[derive(Debug, Clone, Serialize)]

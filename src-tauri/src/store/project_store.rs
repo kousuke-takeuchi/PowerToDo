@@ -718,6 +718,7 @@ impl ProjectStore {
         if let Some(h) = self.high_water.remove(name) {
             self.high_water.insert(new_name.to_string(), h);
         }
+        self.follow_view_option(super::view_options::PROJECT, name, Some(new_name));
         self.common_dirty = true;
         self.save_common_unless_held();
         Ok(self.summary(&self.common.projects[idx]))
@@ -763,6 +764,7 @@ impl ProjectStore {
         self.high_water.remove(name);
         self.last_written.remove(name);
         self.held.remove(name);
+        self.follow_view_option(super::view_options::PROJECT, name, None);
         self.common_dirty = true;
         self.save_common_unless_held();
         Ok(())
