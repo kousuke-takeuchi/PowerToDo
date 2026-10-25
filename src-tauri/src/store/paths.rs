@@ -43,6 +43,11 @@ impl Paths {
     pub fn archive_dir(&self) -> PathBuf {
         self.data_dir.join("archive")
     }
+
+    /// `_comments/`: the comment files of every task (spec ① §3.1).
+    pub fn comments_dir(&self) -> PathBuf {
+        self.data_dir.join(crate::store::comments::DIR)
+    }
 }
 
 pub fn validate_project_name(name: &str) -> AppResult<()> {

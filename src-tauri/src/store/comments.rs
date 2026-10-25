@@ -2,8 +2,14 @@
 //! A line is an event (add / edit / delete); files are only appended to, and two sides merge by line id.
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
+
+use crate::error::AppResult;
+use crate::store::paths::{Paths, write_atomic};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -123,6 +129,132 @@ pub fn to_line(line: &Line) -> String {
     serde_json::to_string(line).expect("a Line always serializes") + "\n"
 }
 
+// ---- files (spec ① §3.1, §3.5) ----
+
+fn path(paths: &Paths, project: &str, no: u32) -> PathBuf {
+    paths.comments_dir().join(file_name(project, no))
+}
+
+/// The file's text; a missing file is empty.
+fn read_text(path: &Path) -> AppResult<String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// The comments of one task (a missing file has none).
+pub fn read(paths: &Paths, project: &str, no: u32) -> AppResult<Vec<Comment>> {
+    Ok(view(&parse(&read_text(&path(paths, project, no))?)))
+}
+
+/// Appends one line (creates `_comments/` and the file when needed) and flushes it to disk.
+pub fn append(paths: &Paths, project: &str, no: u32, line: &Line) -> AppResult<()> {
+    std::fs::create_dir_all(paths.comments_dir())?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path(paths, project, no))?;
+    f.write_all(to_line(line).as_bytes())?;
+    f.sync_all()?;
+    Ok(())
+}
+
+/// The comment files of `_comments/` as (project, No., path).
+fn files(paths: &Paths) -> AppResult<Vec<(String, u32, PathBuf)>> {
+    let entries = match std::fs::read_dir(paths.comments_dir()) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let Ok(name) = e.file_name().into_string() else {
+            continue;
+        };
+        if let Some((project, no)) = parse_file_name(&name) {
+            out.push((project, no, e.path()));
+        }
+    }
+    Ok(out)
+}
+
+/// Visible comments per task No. of `project` (tasks without comments are left out).
+pub fn counts(paths: &Paths, project: &str) -> AppResult<BTreeMap<u32, u32>> {
+    let mut out = BTreeMap::new();
+    for (pj, no, p) in files(paths)? {
+        if pj != project {
+            continue;
+        }
+        let n = view(&parse(&read_text(&p)?)).len() as u32;
+        if n > 0 {
+            out.insert(no, n);
+        }
+    }
+    Ok(out)
+}
+
+/// A renamed project: its comment files take the new name.
+pub fn rename_project(paths: &Paths, from: &str, to: &str) -> AppResult<()> {
+    for (pj, no, p) in files(paths)? {
+        if pj == from {
+            move_file(paths, &p, &path(paths, to, no))?;
+        }
+    }
+    Ok(())
+}
+
+/// Moves one task's comments (`Some(no)`) or a whole project's into `archive/` as `<stem> (<YYYYMMDD-HHMM>).jsonl`.
+pub fn archive(paths: &Paths, project: &str, no: Option<u32>, now: NaiveDateTime) -> AppResult<()> {
+    let tag = now.format("%Y%m%d-%H%M").to_string();
+    for (pj, n, p) in files(paths)? {
+        if pj != project || no.is_some_and(|x| x != n) {
+            continue;
+        }
+        let dir = paths.archive_dir();
+        std::fs::create_dir_all(&dir)?;
+        let stem = format!("{pj}.{n}");
+        let mut k = 1;
+        let dest = loop {
+            let name = if k == 1 {
+                format!("{stem} ({tag}).jsonl")
+            } else {
+                format!("{stem} ({tag}-{k}).jsonl")
+            };
+            let d = dir.join(name);
+            if !d.exists() {
+                break d;
+            }
+            k += 1;
+        };
+        std::fs::rename(&p, dest)?;
+    }
+    Ok(())
+}
+
+/// A task that got another project or No.: its comments follow, merged into the target's when that exists.
+pub fn move_task(paths: &Paths, from: (&str, u32), to: (&str, u32)) -> AppResult<()> {
+    let src = path(paths, from.0, from.1);
+    if !src.exists() {
+        return Ok(());
+    }
+    move_file(paths, &src, &path(paths, to.0, to.1))
+}
+
+/// Moves `src` to `dest`; when `dest` exists, `dest` gets the merged lines of both.
+fn move_file(paths: &Paths, src: &Path, dest: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(paths.comments_dir())?;
+    if dest.exists() {
+        let merged = merge(&read_text(dest)?, &read_text(src)?);
+        write_atomic(dest, merged.as_bytes())?;
+        std::fs::remove_file(src)?;
+    } else {
+        std::fs::rename(src, dest)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,5 +363,104 @@ mod tests {
         let y = new_id(2_000);
         assert!(x < y);
         assert_ne!(new_id(1_000), new_id(1_000));
+    }
+
+    // ---- files ----
+
+    fn paths() -> (tempfile::TempDir, Paths) {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = Paths::new(tmp.path());
+        (tmp, p)
+    }
+
+    fn at() -> NaiveDateTime {
+        NaiveDateTime::parse_from_str("2026-10-25T21:04:00", "%Y-%m-%dT%H:%M:%S").unwrap()
+    }
+
+    #[test]
+    fn append_then_read() {
+        let (_t, p) = paths();
+        append(&p, "仕事", 12, &add("0001", "a")).unwrap();
+        append(&p, "仕事", 12, &add("0002", "b")).unwrap();
+        let got: Vec<String> = read(&p, "仕事", 12)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.text)
+            .collect();
+        assert_eq!(got, ["a", "b"]);
+    }
+
+    #[test]
+    fn read_missing_is_empty() {
+        let (_t, p) = paths();
+        assert!(read(&p, "仕事", 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn counts_skip_deleted() {
+        let (_t, p) = paths();
+        append(&p, "仕事", 12, &add("0001", "a")).unwrap();
+        append(&p, "仕事", 12, &add("0002", "b")).unwrap();
+        let del = Line {
+            id: "0003".into(),
+            op: Op::Delete,
+            target: Some("0001".into()),
+            at: "t".into(),
+            author: "たろう".into(),
+            text: None,
+        };
+        append(&p, "仕事", 12, &del).unwrap();
+        append(&p, "仕事2", 1, &add("0004", "c")).unwrap();
+        assert_eq!(counts(&p, "仕事").unwrap(), BTreeMap::from([(12, 1)]));
+    }
+
+    #[test]
+    fn rename_project_moves_its_files_only() {
+        let (_t, p) = paths();
+        for (pj, no) in [("仕事", 1), ("仕事", 2), ("仕事2", 1)] {
+            append(&p, pj, no, &add("0001", "a")).unwrap();
+        }
+        rename_project(&p, "仕事", "業務").unwrap();
+        let d = p.comments_dir();
+        assert!(d.join("業務.1.jsonl").exists() && d.join("業務.2.jsonl").exists());
+        assert!(!d.join("仕事.1.jsonl").exists());
+        assert!(d.join("仕事2.1.jsonl").exists());
+    }
+
+    #[test]
+    fn archive_one_task_and_a_project() {
+        let (_t, p) = paths();
+        for no in [1, 2] {
+            append(&p, "仕事", no, &add("0001", "a")).unwrap();
+        }
+        archive(&p, "仕事", Some(1), at()).unwrap();
+        assert!(!p.comments_dir().join("仕事.1.jsonl").exists());
+        assert!(
+            p.archive_dir()
+                .join("仕事.1 (20261025-2104).jsonl")
+                .exists()
+        );
+        archive(&p, "仕事", None, at()).unwrap();
+        assert!(!p.comments_dir().join("仕事.2.jsonl").exists());
+        assert!(
+            p.archive_dir()
+                .join("仕事.2 (20261025-2104).jsonl")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn move_task_merges_into_an_existing_target() {
+        let (_t, p) = paths();
+        append(&p, "仕事", 1, &add("0001", "a")).unwrap();
+        append(&p, "買い物", 5, &add("0002", "b")).unwrap();
+        move_task(&p, ("仕事", 1), ("買い物", 5)).unwrap();
+        assert!(!p.comments_dir().join("仕事.1.jsonl").exists());
+        assert_eq!(read(&p, "買い物", 5).unwrap().len(), 2);
+        move_task(&p, ("仕事", 9), ("買い物", 6)).unwrap();
+        assert!(
+            !p.comments_dir().join("買い物.6.jsonl").exists(),
+            "nothing to move"
+        );
     }
 }
