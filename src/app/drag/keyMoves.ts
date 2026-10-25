@@ -39,11 +39,19 @@ export function siblingMove(
   return at(t, sections, dir < 0 ? s[j].no : (s[j + 1]?.no ?? null));
 }
 
-/** Ctrl+] : the last subtask of the sibling above. Null at the top or past three levels. */
-export function indentMove(tasks: Task[], no: number, sections: readonly string[]): Placement | null {
+/**
+ * Ctrl+] : the last subtask of the sibling above. Null at the top or past three levels.
+ * `shown`: the rows the 表示 filter leaves on screen (spec ⑤); the task nests under the nearest shown sibling above.
+ */
+export function indentMove(
+  tasks: Task[],
+  no: number,
+  sections: readonly string[],
+  shown: (t: Task) => boolean = () => true,
+): Placement | null {
   const t = tasks.find((x) => x.no === no);
   if (!t || hidden(t)) return null;
-  const s = siblingsOf(tasks, t, sections);
+  const s = siblingsOf(tasks, t, sections).filter((x) => x.no === no || shown(x));
   const above = s[s.findIndex((x) => x.no === no) - 1];
   if (!above || depthOf(tasks, above) + 1 + heightOf(tasks, no) > 2) return null;
   return at(t, sections, null, above.no);

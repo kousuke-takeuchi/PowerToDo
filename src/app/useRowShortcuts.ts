@@ -125,7 +125,7 @@ export function useRowShortcuts({
           : k === "down"
             ? siblingMove(tasks, t.no, 1, sections, shown)
             : k === "indent"
-              ? indentMove(tasks, t.no, sections)
+              ? indentMove(tasks, t.no, sections, shown)
               : outdentMove(tasks, t.no, sections);
       if (to) screenMove(p.moveWithin(t.no, to));
       return;

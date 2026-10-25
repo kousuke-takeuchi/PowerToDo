@@ -67,6 +67,14 @@ test("sibling_moves_skip_rows_the_filter_hides", () => {
   assert.equal(siblingMove(ts, 4, 1, none, shown), null);
 });
 
+test("indent_nests_under_the_nearest_shown_sibling_above", () => {
+  // Filter P1: 2 is hidden. Ctrl+] on 3 nests under 1, not under the hidden 2; with no shown sibling above, nothing.
+  const ts = [{ ...t(1, 1), priority: 1 as const }, t(2, 2), { ...t(3, 3), priority: 1 as const }];
+  const shown = (x: Task) => x.priority === 1;
+  assert.deepEqual(indentMove(ts, 3, none, shown), { section: null, parent: 1, before: null });
+  assert.equal(indentMove([t(2, 2), { ...t(3, 3), priority: 1 as const }], 3, none, shown), null);
+});
+
 test("today_moves_skip_rows_the_filter_hides", () => {
   const a = { ...t(1, 1), priority: 1 as const };
   const b = t(2, 2);
