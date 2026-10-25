@@ -1417,6 +1417,9 @@ impl ProjectStore {
                 check_section(book, s)?;
             }
             find_task(book, no)?;
+            // A カテゴリ typed in Excel that is no section shows among the unsectioned rows:
+            // it counts as unsectioned here too (the moved subtree then takes `section`).
+            let section_of = |c: &Option<String>| c.clone().filter(|c| book.sections.contains(c));
             let moved: BTreeSet<u32> = subtree(book, no)
                 .into_iter()
                 .map(|i| book.tasks[i].no)
@@ -1445,7 +1448,7 @@ impl ProjectStore {
                     return Err(invalid("自分のサブタスクの下には動かせません"));
                 }
                 let parent = &book.tasks[find_task(book, p)?];
-                if parent.category != section {
+                if section_of(&parent.category) != section {
                     return Err(invalid("親と同じセクションにしか動かせません"));
                 }
                 if depth_of(book, p) + 1 + height > 2 {
@@ -1457,7 +1460,7 @@ impl ProjectStore {
                 .filter(|&k| {
                     k != i
                         && !moved.contains(&book.tasks[k].no)
-                        && book.tasks[k].category == section
+                        && section_of(&book.tasks[k].category) == section
                         && book.tasks[k].parent_no == to.parent
                 })
                 .collect();
@@ -2865,6 +2868,73 @@ mod tests {
             .move_within(INBOX, 1, place(Some("後で"), None, None))
             .unwrap();
         assert_eq!(task(&v, 2).category.as_deref(), Some("後で"));
+    }
+
+    /// A, B, C unsectioned; B's カテゴリ is a name typed in Excel that is no section.
+    fn env_with_stray_category() -> Env {
+        let mut e = env();
+        e.store.add_section(INBOX, "後で").unwrap();
+        for t in ["A", "B", "C"] {
+            e.store.add_task(INBOX, input(t)).unwrap();
+        }
+        e.store
+            .mutate(INBOX, |book, _| {
+                let i = find_task(book, 2)?;
+                book.tasks[i].category = Some("迷子".into());
+                Ok(())
+            })
+            .unwrap();
+        e
+    }
+
+    /// Unsectioned, in screen order: the stray B counts as unsectioned (it is shown there).
+    fn unsectioned_titles(v: &ProjectView) -> Vec<String> {
+        let mut ts: Vec<&Task> = v
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.parent_no.is_none()
+                    && t.category
+                        .as_deref()
+                        .is_none_or(|c| !v.sections.iter().any(|s| s.name == c))
+            })
+            .collect();
+        ts.sort_by_key(|t| (t.order, t.no));
+        ts.iter().map(|t| t.title.clone()).collect()
+    }
+
+    #[test]
+    fn move_within_treats_an_unknown_category_as_unsectioned() {
+        // Right before the stray task.
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 3, place(None, None, Some(2)))
+            .unwrap();
+        assert_eq!(unsectioned_titles(&v), ["A", "C", "B"]);
+        // Right after it (at the end, the stray task among the siblings).
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 1, place(None, None, None))
+            .unwrap();
+        assert_eq!(unsectioned_titles(&v), ["B", "C", "A"]);
+        // Onto it: a subtask of the stray task.
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 3, place(None, Some(2), None))
+            .unwrap();
+        assert_eq!(task(&v, 3).parent_no, Some(2));
+        assert_eq!(task(&v, 3).category, None);
+        // The stray task itself among the unsectioned: it takes the placement's section.
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 2, place(None, None, Some(1)))
+            .unwrap();
+        assert_eq!(unsectioned_titles(&v), ["B", "A", "C"]);
+        assert_eq!(task(&v, 2).category, None);
     }
 
     #[test]

@@ -376,7 +376,8 @@ export function ProjectView({
                 "data-no": t.no,
                 "data-depth": indent,
                 "data-parent": t.parentNo ?? "",
-                "data-section": t.category ?? "",
+                // A カテゴリ that is no section (typed in Excel) shows unsectioned: drop as unsectioned too.
+                "data-section": t.category !== null && sectionNames.has(t.category) ? t.category : "",
               }
             : {})}
         >

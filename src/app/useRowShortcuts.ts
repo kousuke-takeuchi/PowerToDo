@@ -100,7 +100,15 @@ export function useRowShortcuts({
       let root: Task | undefined = t;
       while (root?.parentNo !== undefined) root = tasks.find((x) => x.no === root!.parentNo);
       if (!root || root.progress === 100) return;
-      const to = k === "up" ? siblingMove(tasks, t.no, -1) : k === "down" ? siblingMove(tasks, t.no, 1) : k === "indent" ? indentMove(tasks, t.no) : outdentMove(tasks, t.no);
+      const sections = (p.view?.sections ?? []).map((s) => s.name);
+      const to =
+        k === "up"
+          ? siblingMove(tasks, t.no, -1, sections)
+          : k === "down"
+            ? siblingMove(tasks, t.no, 1, sections)
+            : k === "indent"
+              ? indentMove(tasks, t.no, sections)
+              : outdentMove(tasks, t.no, sections);
       if (to) screenMove(p.moveWithin(t.no, to));
       return;
     }
