@@ -107,6 +107,16 @@ pub fn is_sync_target(name: &str) -> bool {
     name == COMMON_FILE || adoptable_stem(Path::new(name)).is_some()
 }
 
+/// Records of comment files are kept in `sync.json` under this prefix plus the file name, and the
+/// 30 s check lists them under it too (spec ① §3.4). The xlsx pass leaves these keys alone.
+pub const COMMENT_KEY_PREFIX: &str = "_comments/";
+
+/// `true` for `_comments/<project>.<No>.jsonl`.
+pub fn is_comment_key(name: &str) -> bool {
+    name.strip_prefix(COMMENT_KEY_PREFIX)
+        .is_some_and(|leaf| crate::store::comments::parse_file_name(leaf).is_some())
+}
+
 /// The name of the conflict copy of `name`: `受信トレイ (競合 2026-10-16 0930).xlsx`.
 pub fn conflict_name(name: &str, at: NaiveDateTime) -> String {
     let stem = match name.len().checked_sub(5) {

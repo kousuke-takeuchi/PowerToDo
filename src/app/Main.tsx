@@ -24,6 +24,7 @@ import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDialog } from "../views/TaskDialog";
 import { afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
+import { CommentCounts, useCommentCounts, useDialogComments } from "./useComments";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
@@ -367,6 +368,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   const qaColor = summaries.find((s) => s.name === qaProject)?.color;
+  // Comment counts of the projects whose rows are on screen (spec ① §3.3).
+  const shownProjects = useMemo(() => visibleKeys.map((k) => parseKey(k).project), [visibleKeys]);
+  const commentCounts = useCommentCounts(shownProjects);
   const projectColors = useMemo(() => Object.fromEntries(summaries.map((s) => [s.name, s.color])), [summaries]);
 
   // ---- タスクの詳細ダイアログ (spec ① §2) ----
@@ -381,6 +385,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const dlgView = target === "none" ? null : src.view;
   const dlgTask = dialog && dlgView && dlgView.project.name === dialog.project ? dlgView.tasks.find((t) => t.no === dialog.no) : undefined;
   const dlgKey = dialog ? `${dialog.project}/${dialog.no}` : null;
+  const dlgComments = useDialogComments(dialog, showError);
   const { prev, next } = dlgKey ? neighbors(visibleKeys, dlgKey) : {};
   /** Shows the task with row key `k` in the dialog (and focuses its row), or closes the dialog. */
   const goDialog = (k?: string | null) => {
@@ -501,6 +506,12 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
               .catch(showError);
           }}
           allLabels={allLabels}
+          comments={dlgComments.comments}
+          commentsFailed={dlgComments.failed}
+          me={displayName}
+          onAddComment={dlgComments.add}
+          onEditComment={dlgComments.edit}
+          onDeleteComment={dlgComments.remove}
         />
       </motion.div>
     ) : null;
@@ -806,6 +817,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
 
   return (
     <ProjectColors.Provider value={projectColors}>
+    <CommentCounts.Provider value={commentCounts}>
     <AppShell
       width={width}
       fill
@@ -841,6 +853,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     >
       {body}
     </AppShell>
+    </CommentCounts.Provider>
     </ProjectColors.Provider>
   );
 }

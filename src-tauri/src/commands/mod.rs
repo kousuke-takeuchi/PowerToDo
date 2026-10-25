@@ -3,6 +3,7 @@
 //! (start-up, quick add) live in plain functions so they can be tested without Tauri.
 
 pub mod autostart;
+pub mod comments;
 pub mod saver;
 pub mod sync;
 pub mod update;
@@ -668,6 +669,10 @@ impl SyncHost for TauriSyncHost {
                 conflict_file: conflict_file.to_string(),
             },
         );
+    }
+
+    fn comments_changed(&self, files: &[String]) {
+        comments::emit_comments_changed(&self.app, files.to_vec());
     }
 
     fn projects_reloaded(&self, names: &[String]) {

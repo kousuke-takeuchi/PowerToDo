@@ -26,7 +26,8 @@ use super::base::BaseStore;
 use super::merge::{Merged, merge_files};
 use super::state::{BackendKind, FileRecord, SyncState};
 use super::{
-    Action, LocalFile, PlanMode, Side, conflict_name, fold, is_sync_target, plan, sha256_hex,
+    Action, COMMENT_KEY_PREFIX, LocalFile, PlanMode, Side, conflict_name, decide, fold,
+    is_comment_key, is_sync_target, plan, sha256_hex,
 };
 use crate::error::AppError;
 use crate::store::common_book::COMMON_FILE;
@@ -64,9 +65,18 @@ pub const REMOTE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
     files
         .iter()
-        .filter(|f| is_sync_target(&f.name))
+        .filter(|f| is_sync_target(&f.name) || is_comment_key(&f.name))
         .map(|f| (f.name.clone(), f.version.clone()))
         .collect()
+}
+
+/// `files` (the root's listing) plus the comment files, named `_comments/<leaf>` as their records are.
+fn with_comments(mut files: Vec<RemoteFile>, comments: &[RemoteFile]) -> Vec<RemoteFile> {
+    files.extend(comments.iter().map(|f| RemoteFile {
+        name: format!("{COMMENT_KEY_PREFIX}{}", f.name),
+        ..f.clone()
+    }));
+    files
 }
 
 /// The target's state as far as the sync cares: the sync targets' names and versions, in name
@@ -75,7 +85,7 @@ fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
 pub fn remote_fingerprint(files: &[RemoteFile]) -> String {
     let mut pairs: Vec<(&str, &str)> = files
         .iter()
-        .filter(|f| is_sync_target(&f.name))
+        .filter(|f| is_sync_target(&f.name) || is_comment_key(&f.name))
         .map(|f| (f.name.as_str(), f.version.as_str()))
         .collect();
     pairs.sort_unstable();
@@ -206,6 +216,9 @@ pub trait SyncHost: Send + Sync {
     /// A sync merge gave local tasks of `project` new Nos, `(old, new)`: what this machine keeps
     /// per task No. (fired reminders) follows them.
     fn tasks_renumbered(&self, _project: &str, _moves: &[(u32, u32)]) {}
+
+    /// Comment files (leaf names) a run wrote here: the screens showing them read them again.
+    fn comments_changed(&self, _files: &[String]) {}
     /// Right before a normal run: bring the app up to date with the disk and the network (iOS:
     /// external edits, the proxy). `false` skips the run; the request that made it due is spent
     /// (whatever changed asks again). Blocking; the loop calls it off the async threads.
@@ -248,6 +261,8 @@ pub struct SyncReport {
     pub conflicts: Vec<(String, String)>,
     /// Both sides changed and were merged task by task (no conflict copy).
     pub merged: Vec<String>,
+    /// Comment files (leaf names) this run uploaded, downloaded, merged or archived (spec ① §3.4).
+    pub comments: Vec<String>,
     /// Left alone from the start: unsaved, held, being saved or unreadable.
     pub skipped: Vec<String>,
     /// Changed (or got unsaved edits) while the run was going; tried again next time.
@@ -913,7 +928,15 @@ impl SyncEngine {
         };
         // A run may start while this one lists; it lists for itself, and its own fingerprint wins.
         drop(_free);
-        let listed = backend.list().await;
+        // Comments that cannot be listed leave them out, as the run does (its fingerprint then
+        // has the workbooks alone too).
+        let listed = match backend.list().await {
+            Ok(files) => Ok(match backend.list_comments().await {
+                Ok(c) => with_comments(files, c.as_deref().unwrap_or_default()),
+                Err(_) => files,
+            }),
+            Err(e) => Err(e),
+        };
         let changed = {
             let mut inner = self.lock();
             if inner.generation != generation {
@@ -1079,8 +1102,23 @@ impl SyncEngine {
                 return report;
             }
         };
-        self.see_remote(generation, &remote);
-        let listed = versions(&remote);
+        // The comment files are listed with the rest, so the fingerprint covers them; a failure only
+        // leaves the comments out of this run.
+        let remote_comments = match target.backend.list_comments().await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                report
+                    .failed
+                    .push((comments_dir_label(), failure_text(&comments_dir_label(), e)));
+                None
+            }
+        };
+        let seen = match &remote_comments {
+            Some(c) => with_comments(remote.clone(), c.as_deref().unwrap_or_default()),
+            None => remote.clone(),
+        };
+        self.see_remote(generation, &seen);
+        let listed = versions(&seen);
 
         // (4) The plan.
         let mut state = SyncState::load(
@@ -1117,6 +1155,7 @@ impl SyncEngine {
 
         report.skipped = skip.iter().filter(|n| is_sync_target(n)).cloned().collect();
         let records = state.files.clone();
+        let comments_dir = data_dir.join(crate::store::comments::DIR);
         let mut run = Run {
             engine: self,
             host,
@@ -1155,6 +1194,28 @@ impl SyncEngine {
             }
         }
 
+        // (6b) The comment files (spec ① §3.4), after the workbooks.
+        if let Some(rc) = remote_comments {
+            match self
+                .sync_comments(
+                    host,
+                    &target.backend,
+                    &comments_dir,
+                    &mut state,
+                    &mut report,
+                    rc,
+                    is_retry,
+                )
+                .await
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    report.outcome = self.backend_failed(host, generation, target.kind, &e);
+                    return report;
+                }
+            }
+        }
+
         // (7) Done.
         if mode != PlanMode::Normal {
             // Records are rebuilt from what the mirror copied; names it left for later keep
@@ -1164,7 +1225,9 @@ impl SyncEngine {
                 .chain(report.left_over())
                 .map(|n| fold(n))
                 .collect();
-            state.files.retain(|name, _| keep.contains(&fold(name)));
+            state
+                .files
+                .retain(|name, _| is_comment_key(name) || keep.contains(&fold(name)));
         }
         let now = self.now();
         state.last_sync = Some(now);
@@ -1181,14 +1244,23 @@ impl SyncEngine {
         if (!report.uploaded.is_empty()
             || !report.merged.is_empty()
             || !report.archived_remote.is_empty()
-            || !report.conflicts.is_empty())
+            || !report.conflicts.is_empty()
+            || !report.comments.is_empty())
             && let Ok(files) = target.backend.list().await
+            && let Ok(comment_files) = target.backend.list_comments().await
         {
+            let files = with_comments(files, comment_files.as_deref().unwrap_or_default());
+            let comment_keys: Vec<String> = report
+                .comments
+                .iter()
+                .map(|n| format!("{COMMENT_KEY_PREFIX}{n}"))
+                .collect();
             let touched: BTreeSet<&str> = report
                 .uploaded
                 .iter()
                 .chain(&report.merged)
                 .chain(&report.archived_remote)
+                .chain(&comment_keys)
                 .map(String::as_str)
                 .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
                 .collect();
@@ -1269,6 +1341,250 @@ fn is_busy(store: &ProjectStore, saving: &BTreeSet<String>, key: &str) -> bool {
     dirty || store.is_held(key) || saving.contains(key)
 }
 
+/// How the comments folder is named in messages.
+fn comments_dir_label() -> String {
+    format!("{}/", crate::store::comments::DIR)
+}
+
+/// The comment files in `dir` (`_comments/`), leaf names; a missing folder has none. Unreadable
+/// files are left out (they come back next time).
+fn list_comment_files(dir: &Path) -> std::io::Result<Vec<LocalFile>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if crate::store::comments::parse_file_name(&name).is_none() {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        if let Ok((bytes, mtime)) = std::fs::read(&path).and_then(|b| Ok((b, meta.modified()?))) {
+            files.push(LocalFile {
+                name,
+                hash: sha256_hex(&bytes),
+                modified: DateTime::<Local>::from(mtime).naive_local(),
+            });
+        }
+    }
+    Ok(files)
+}
+
+impl SyncEngine {
+    /// The comments pass (spec ① §3.4): each comment file is decided like a workbook (`decide`),
+    /// but both sides' changes are merged by line id (no conflict copy, no base), and nothing goes
+    /// through the store. Records live in `state` under `_comments/<leaf>`. A file that fails is
+    /// reported and left for the next run; refused credentials or no network stop the run.
+    ///
+    /// `remote` is `None` when the target has no `_comments` folder. A side without that folder
+    /// (archiving leaves it, so it was wiped or never made) is not read as every comment deleted:
+    /// the records are dropped and the other side fills it again.
+    #[allow(clippy::too_many_arguments)]
+    async fn sync_comments(
+        &self,
+        host: &dyn SyncHost,
+        backend: &Arc<dyn StorageBackend>,
+        dir: &Path,
+        state: &mut SyncState,
+        report: &mut SyncReport,
+        remote: Option<Vec<RemoteFile>>,
+        is_retry: bool,
+    ) -> Result<(), BackendError> {
+        if remote.is_none() || !dir.is_dir() {
+            state.files.retain(|k, _| !is_comment_key(k));
+        }
+        let remote = remote.unwrap_or_default();
+        let local = match list_comment_files(dir) {
+            Ok(l) => l,
+            Err(e) => {
+                report
+                    .failed
+                    .push((comments_dir_label(), failure_text(&comments_dir_label(), e)));
+                return Ok(());
+            }
+        };
+        let key = |leaf: &str| format!("{COMMENT_KEY_PREFIX}{leaf}");
+        let locals: BTreeMap<String, &LocalFile> =
+            local.iter().map(|f| (f.name.clone(), f)).collect();
+        let remotes: BTreeMap<String, &RemoteFile> =
+            remote.iter().map(|f| (f.name.clone(), f)).collect();
+        let mut names: BTreeSet<String> = locals.keys().chain(remotes.keys()).cloned().collect();
+        names.extend(
+            state
+                .files
+                .keys()
+                .filter_map(|k| k.strip_prefix(COMMENT_KEY_PREFIX).map(str::to_string)),
+        );
+        // Projects whose workbook waits for the next run: their comments wait too, or they would
+        // attach to whatever task holds that No. before the merge renumbers it.
+        let waiting: BTreeSet<String> = report
+            .left_over()
+            .filter_map(|n| n.strip_suffix(".xlsx").map(str::to_string))
+            .collect();
+        let mut changed = Vec::new();
+        for name in names {
+            if crate::store::comments::parse_file_name(&name)
+                .is_some_and(|(project, _)| waiting.contains(&project))
+            {
+                report.deferred.push(name);
+                continue;
+            }
+            let l = locals.get(&name).copied();
+            let r = remotes.get(&name).copied();
+            let record = state.files.get(&key(&name)).cloned();
+            let Some(action) = decide(&name, l, r, record.as_ref(), false) else {
+                // Gone from both sides: the record means nothing any more.
+                if l.is_none() && r.is_none() {
+                    state.files.remove(&key(&name));
+                }
+                continue;
+            };
+            let path = dir.join(&name);
+            // Ok(Some(local_changed)) for a change, Ok(None) for nothing to report.
+            let result: Result<Option<bool>, BackendError> = async {
+                match action {
+                    Action::Upload(_) => {
+                        let bytes =
+                            std::fs::read(&path).map_err(|e| BackendError::Other(e.to_string()))?;
+                        let hash = sha256_hex(&bytes);
+                        let f = backend.upload_comment(&name, r, bytes).await?;
+                        put_record(state, key(&name), &f, hash);
+                        Ok(Some(false))
+                    }
+                    Action::Download(_) => {
+                        let r = r.expect("a download has a remote file");
+                        let bytes = backend.download(r).await?;
+                        write_comments(host, &path, &bytes)
+                            .map_err(|e| BackendError::Other(e.to_string()))?;
+                        put_record(state, key(&name), r, sha256_hex(&bytes));
+                        Ok(Some(true))
+                    }
+                    Action::Conflict { .. } => {
+                        let r = r.expect("a conflict has a remote file");
+                        let theirs = backend.download(r).await?;
+                        let ours =
+                            std::fs::read(&path).map_err(|e| BackendError::Other(e.to_string()))?;
+                        let merged = crate::store::comments::merge(
+                            &String::from_utf8_lossy(&ours),
+                            &String::from_utf8_lossy(&theirs),
+                        )
+                        .into_bytes();
+                        let hash = sha256_hex(&merged);
+                        let f = backend
+                            .upload_comment(&name, Some(r), merged.clone())
+                            .await?;
+                        write_comments(host, &path, &merged)
+                            .map_err(|e| BackendError::Other(e.to_string()))?;
+                        put_record(state, key(&name), &f, hash);
+                        Ok(Some(true))
+                    }
+                    Action::ArchiveRemote(_) => {
+                        backend
+                            .archive_comment(r.expect("an archive has a remote file"))
+                            .await?;
+                        state.files.remove(&key(&name));
+                        Ok(Some(false))
+                    }
+                    Action::ArchiveLocal(_) => {
+                        if let Some((project, no)) = crate::store::comments::parse_file_name(&name)
+                        {
+                            let paths =
+                                crate::store::paths::Paths::new(dir.parent().unwrap_or(dir));
+                            crate::store::comments::archive(&paths, &project, Some(no), self.now())
+                                .map_err(|e| BackendError::Other(e.to_string()))?;
+                        }
+                        state.files.remove(&key(&name));
+                        Ok(Some(true))
+                    }
+                    Action::Record(_) => {
+                        // Both sides hold the same content: only the record is written (not a change).
+                        if let (Some(l), Some(r)) = (l, r) {
+                            put_record(state, key(&name), r, l.hash.clone());
+                        }
+                        Ok(None)
+                    }
+                    _ => Ok(None),
+                }
+            }
+            .await;
+            match result {
+                Ok(None) => {}
+                Ok(Some(local_changed)) => {
+                    report.comments.push(name.clone());
+                    if local_changed {
+                        changed.push(name);
+                    }
+                }
+                // Like a workbook: retried once at once, then left to the schedule.
+                Err(BackendError::Precondition) if !is_retry => {
+                    report.deferred.push(name);
+                    report.rerun = true;
+                }
+                Err(BackendError::Precondition) => {
+                    let m = format!(
+                        "「{name}」は同期先でも更新され続けているため同期できませんでした (次の同期でもう一度試します)"
+                    );
+                    report.failed.push((name, m));
+                }
+                Err(e @ (BackendError::Auth | BackendError::Offline(_))) => return Err(e),
+                Err(e) => report.failed.push((name.clone(), failure_text(&name, e))),
+            }
+        }
+        if !changed.is_empty() {
+            host.comments_changed(&changed);
+        }
+        Ok(())
+    }
+}
+
+/// Writes a comment file from the remote side, under the store lock (the app appends under it
+/// too): what is on disk now is merged in, so a comment written while the run was away is kept.
+/// The record keeps the remote content's hash, so a kept local line is uploaded next run.
+fn write_comments(
+    host: &dyn SyncHost,
+    path: &Path,
+    incoming: &[u8],
+) -> crate::error::AppResult<()> {
+    let _store = host.lock_store();
+    let bytes = match std::fs::read(path) {
+        Ok(current) if current == incoming => return Ok(()),
+        Ok(current) => crate::store::comments::merge(
+            &String::from_utf8_lossy(&current),
+            &String::from_utf8_lossy(incoming),
+        )
+        .into_bytes(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => incoming.to_vec(),
+        Err(e) => return Err(e.into()),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::store::paths::write_atomic(path, &bytes)
+}
+
+fn put_record(state: &mut SyncState, key: String, remote: &RemoteFile, local_hash: String) {
+    state.files.insert(
+        key,
+        FileRecord {
+            remote_id: remote.id.clone(),
+            remote_version: remote.version.clone(),
+            remote_modified: remote.modified,
+            local_hash,
+        },
+    );
+}
+
 /// The sync targets in the data folder with their hash and modification time. A file that
 /// cannot be read goes into `skip` (left out of the listing it would read as deleted). An error
 /// while listing the folder itself fails the whole listing: it must be complete.
@@ -1323,7 +1639,10 @@ fn drop_gone_records(
         .chain(skip.iter().map(|n| fold(n)))
         .collect();
     let before = state.files.len();
-    state.files.retain(|name, _| present.contains(&fold(name)));
+    // Comment records belong to the comments pass, which drops its own.
+    state
+        .files
+        .retain(|name, _| is_comment_key(name) || present.contains(&fold(name)));
     state.files.len() != before
 }
 
@@ -1855,6 +2174,21 @@ impl Run<'_> {
                 self.write_local(name, staged, Some(&planned), false)?;
                 if !merged.renumbered.is_empty() {
                     self.host.tasks_renumbered(&key, &merged.renumbered);
+                    // Their comment files follow (spec ① §3.5); the comments pass of this run uploads
+                    // them under the new No. The highest No. first, so a move never lands on a file
+                    // another move still has to take away.
+                    // Under the store lock: the app appends comments under it.
+                    let _store = self.host.lock_store();
+                    let paths = crate::store::paths::Paths::new(&self.data_dir);
+                    let mut moves = merged.renumbered.clone();
+                    moves.sort_by_key(|m| std::cmp::Reverse(m.0));
+                    for (old, new) in moves {
+                        if let Err(e) =
+                            crate::store::comments::move_task(&paths, (&key, old), (&key, new))
+                        {
+                            eprintln!("comment files of {key} {old} did not follow to {new}: {e}");
+                        }
+                    }
                 }
                 self.record(name, &uploaded, hash)?;
                 self.report.merged.push(name.to_string());
@@ -2170,6 +2504,7 @@ mod tests {
             && r.failed.is_empty()
             && r.clashes.is_empty()
             && r.merged.is_empty()
+            && r.comments.is_empty()
     }
 
     /// A with a project 仕事, synced; B joined (its fresh inbox and common workbook became
@@ -2363,6 +2698,338 @@ mod tests {
             remote.get(INBOX_FILE).unwrap(),
             remote_before,
             "nothing uploaded"
+        );
+    }
+
+    // ---- comments (spec ① §3.4) ----
+
+    fn say(pc: &Pc, project: &str, no: u32, text: &str) {
+        use crate::store::comments::{Line, Op, append, new_id};
+        let line = Line {
+            id: new_id(text.len() as u64),
+            op: Op::Add,
+            target: None,
+            at: "2026-10-25T21:00:00+09:00".into(),
+            author: "たろう".into(),
+            text: Some(text.into()),
+        };
+        append(&Paths::new(&pc.data), project, no, &line).unwrap();
+    }
+
+    fn said(pc: &Pc, project: &str, no: u32) -> Vec<String> {
+        crate::store::comments::read(&Paths::new(&pc.data), project, no)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.text)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn comment_reaches_the_other_pc() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        say(&a, "仕事", 1, "見積もりを送った");
+        let r = a.sync().await;
+        assert_eq!(r.comments, ["仕事.1.jsonl"], "{r:?}");
+        let r = b.sync().await;
+        assert_eq!(r.comments, ["仕事.1.jsonl"], "{r:?}");
+        assert_eq!(said(&b, "仕事", 1), ["見積もりを送った"]);
+        assert!(idle(&a.sync().await) && idle(&b.sync().await));
+    }
+
+    #[tokio::test]
+    async fn comments_on_both_pcs_are_merged() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        say(&a, "仕事", 1, "A");
+        say(&b, "仕事", 1, "BB");
+        a.sync().await;
+        b.sync().await;
+        a.sync().await;
+        assert_eq!(sorted(said(&a, "仕事", 1)), names(&["A", "BB"]));
+        assert_eq!(sorted(said(&b, "仕事", 1)), names(&["A", "BB"]));
+        assert!(b.events().iter().all(|e| !matches!(e, Event::Conflict(..))));
+    }
+
+    #[tokio::test]
+    async fn deleted_comment_file_is_archived_remotely() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        say(&a, "仕事", 1, "x");
+        a.sync().await;
+        b.sync().await;
+        crate::store::comments::archive(&Paths::new(&a.data), "仕事", Some(1), dt(NOW)).unwrap();
+        a.sync().await;
+        assert_eq!(remote.list_comments().await.unwrap(), Some(Vec::new()));
+        b.sync().await;
+        assert!(said(&b, "仕事", 1).is_empty());
+    }
+
+    /// A `_comments` folder that is gone (not emptied: archiving leaves it) is not taken as every
+    /// comment deleted; it is filled again from the other side.
+    #[tokio::test]
+    async fn a_wiped_local_comments_folder_is_filled_again() {
+        let remote = backend();
+        let (a, _b) = two_pcs(&remote).await;
+        say(&a, "仕事", 1, "x");
+        say(&a, "仕事", 2, "yy");
+        a.sync().await;
+        fs::remove_dir_all(a.data.join(crate::store::comments::DIR)).unwrap();
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert_eq!(remote.list_comments().await.unwrap().unwrap().len(), 2);
+        assert_eq!(said(&a, "仕事", 1), ["x"]);
+        assert_eq!(said(&a, "仕事", 2), ["yy"]);
+    }
+
+    #[tokio::test]
+    async fn a_wiped_remote_comments_folder_is_filled_again() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        say(&a, "仕事", 1, "x");
+        say(&a, "仕事", 2, "yy");
+        a.sync().await;
+        b.sync().await;
+        remote.wipe_comments();
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert_eq!(said(&a, "仕事", 1), ["x"]);
+        assert_eq!(remote.list_comments().await.unwrap().unwrap().len(), 2);
+        b.sync().await;
+        assert_eq!(said(&b, "仕事", 2), ["yy"]);
+    }
+
+    #[tokio::test]
+    async fn remote_check_sees_a_new_comment() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        settled(&a).await;
+        a.engine.check_remote().await;
+        settled(&a).await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+        say(&b, "仕事", 1, "x");
+        b.sync().await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    /// A backend whose next comment download (or upload) first appends a comment on this PC: the
+    /// app writing one while the run is between reading the file and writing the new copy.
+    struct AppendDuringDownload {
+        inner: Arc<MemoryBackend>,
+        on_download: Mutex<Option<(PathBuf, &'static str)>>,
+        on_upload: Mutex<Option<(PathBuf, &'static str)>>,
+    }
+
+    /// Appends the pending comment (to 仕事 No. 1 in that data folder), once.
+    fn append_now(pending: &Mutex<Option<(PathBuf, &'static str)>>) {
+        if let Some((data, text)) = pending.lock().unwrap().take() {
+            let line = crate::store::comments::Line {
+                id: crate::store::comments::new_id(text.len() as u64),
+                op: crate::store::comments::Op::Add,
+                target: None,
+                at: "2026-10-25T21:00:00+09:00".into(),
+                author: "たろう".into(),
+                text: Some(text.into()),
+            };
+            crate::store::comments::append(&Paths::new(&data), "仕事", 1, &line).unwrap();
+        }
+    }
+
+    impl StorageBackend for AppendDuringDownload {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.inner.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            if file.name.ends_with(".jsonl") {
+                append_now(&self.on_download);
+            }
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+            self.inner.list_comments()
+        }
+        fn upload_comment<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            append_now(&self.on_upload);
+            self.inner.upload_comment(name, existing, bytes)
+        }
+        fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.archive_comment(file)
+        }
+    }
+
+    async fn pc_appending_during_download(
+        remote: &Arc<MemoryBackend>,
+    ) -> (Pc, Pc, Arc<AppendDuringDownload>) {
+        let (a, _) = two_pcs(remote).await;
+        let wrapper = Arc::new(AppendDuringDownload {
+            inner: remote.clone(),
+            on_download: Mutex::new(None),
+            on_upload: Mutex::new(None),
+        });
+        let b = Pc::with_backend(wrapper.clone(), None);
+        assert_eq!(b.sync().await.outcome, RunOutcome::Done);
+        (a, b, wrapper)
+    }
+
+    #[tokio::test]
+    async fn comment_written_during_a_download_is_kept() {
+        let remote = backend();
+        let (a, b, wrapper) = pc_appending_during_download(&remote).await;
+        say(&a, "仕事", 1, "A");
+        a.sync().await;
+        *wrapper.on_download.lock().unwrap() = Some((b.data.clone(), "BB"));
+        b.sync().await;
+        assert_eq!(sorted(said(&b, "仕事", 1)), names(&["A", "BB"]));
+        b.sync().await;
+        a.sync().await;
+        assert_eq!(sorted(said(&a, "仕事", 1)), names(&["A", "BB"]));
+    }
+
+    #[tokio::test]
+    async fn comment_written_during_a_merge_is_kept() {
+        let remote = backend();
+        let (a, b, wrapper) = pc_appending_during_download(&remote).await;
+        say(&a, "仕事", 1, "A");
+        say(&b, "仕事", 1, "BB");
+        a.sync().await;
+        *wrapper.on_upload.lock().unwrap() = Some((b.data.clone(), "CCC"));
+        b.sync().await;
+        assert_eq!(sorted(said(&b, "仕事", 1)), names(&["A", "BB", "CCC"]));
+        b.sync().await;
+        a.sync().await;
+        assert_eq!(sorted(said(&a, "仕事", 1)), names(&["A", "BB", "CCC"]));
+    }
+
+    /// A target whose comments folder cannot be listed.
+    struct CommentsUnlisted(Arc<MemoryBackend>);
+
+    impl StorageBackend for CommentsUnlisted {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.0.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.0.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.0.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.0.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+            Box::pin(async { Err(BackendError::Other("壊れた一覧".into())) })
+        }
+    }
+
+    /// The workbooks are still watched while the comments cannot be listed, and a run that
+    /// leaves the comments out still settles the 30-second look.
+    #[tokio::test]
+    async fn remote_check_works_while_comments_cannot_be_listed() {
+        let remote = backend();
+        let (_a, b) = two_pcs(&remote).await;
+        let c = Pc::with_backend(Arc::new(CommentsUnlisted(remote.clone())), None);
+        settled(&c).await;
+        c.engine.check_remote().await;
+        settled(&c).await;
+        assert_eq!(c.engine.check_remote().await, CheckOutcome::Unchanged);
+        b.add("仕事", "見積もりを送る");
+        b.sync().await;
+        assert_eq!(c.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    #[tokio::test]
+    async fn renumbered_task_keeps_its_comments() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        say(&a, INBOX, 2, "Aのコメント");
+        b.add(INBOX, "Bの変更");
+        say(&b, INBOX, 2, "Bのコメント");
+        a.sync().await;
+        let r = b.sync().await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        // B's task (and its comment) moved to No. 3; No. 2 is A's task with A's comment.
+        assert_eq!(said(&b, INBOX, 3), ["Bのコメント"]);
+        assert_eq!(said(&b, INBOX, 2), ["Aのコメント"]);
+        a.sync().await;
+        assert_eq!(said(&a, INBOX, 3), ["Bのコメント"]);
+        assert_eq!(said(&a, INBOX, 2), ["Aのコメント"]);
+    }
+
+    /// The comments of a project wait while its workbook waits: synced now they would attach to
+    /// whatever task holds that No. before the merge renumbers it.
+    #[tokio::test]
+    async fn comments_wait_for_their_workbook() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        say(&a, INBOX, 2, "Aのコメント");
+        b.add(INBOX, "Bの変更");
+        say(&b, INBOX, 2, "Bのコメント");
+        a.sync().await;
+        b.host.saving.lock().unwrap().insert(INBOX.to_string());
+        let r = b.sync().await;
+        assert!(r.deferred.contains(&format!("{INBOX}.2.jsonl")), "{r:?}");
+        assert_eq!(said(&b, INBOX, 2), ["Bのコメント"]);
+        b.host.saving.lock().unwrap().clear();
+        b.sync().await;
+        assert_eq!(said(&b, INBOX, 3), ["Bのコメント"]);
+        assert_eq!(said(&b, INBOX, 2), ["Aのコメント"]);
+    }
+
+    /// A rename reaches the other PC as an archive of the old project and a new one (a sync cannot
+    /// tell a rename from a delete plus an add). A comment written there on the old project before
+    /// it synced goes to that PC's `archive/` with the project: kept, not attached to the new name.
+    #[tokio::test]
+    async fn rename_then_comment_on_other_pc() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        a.with(|s| {
+            s.rename_project("仕事", "業務").unwrap();
+            s.save("業務").unwrap();
+            s.save_common().unwrap();
+        });
+        a.sync().await;
+        say(&b, "仕事", 1, "Bのコメント");
+        let r = b.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert!(said(&b, "仕事", 1).is_empty());
+        assert!(
+            b.archive_names()
+                .iter()
+                .any(|n| n.starts_with("仕事.1 (") && n.ends_with(".jsonl")),
+            "{:?}",
+            b.archive_names()
+        );
+        assert!(
+            remote
+                .list_comments()
+                .await
+                .unwrap()
+                .unwrap_or_default()
+                .iter()
+                .all(|f| !f.name.starts_with("仕事."))
         );
     }
 
@@ -3175,6 +3842,57 @@ mod tests {
         tokio::time::sleep(INTERVAL).await;
         assert_eq!(count(&stale), after_retry * 2);
         task.abort();
+    }
+
+    /// Every comment upload meets another PC's write.
+    struct StaleComments(Arc<MemoryBackend>);
+
+    impl StorageBackend for StaleComments {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.0.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.0.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.0.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.0.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+            self.0.list_comments()
+        }
+        fn upload_comment<'a>(
+            &'a self,
+            _name: &'a str,
+            _existing: Option<&'a RemoteFile>,
+            _bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            Box::pin(async { Err(BackendError::Precondition) })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_retry_run_does_not_ask_for_another_comments_retry() {
+        let remote = backend();
+        let a = Pc::with_backend(Arc::new(StaleComments(remote.clone())), None);
+        a.add(INBOX, "牛乳を買う");
+        say(&a, INBOX, 1, "x");
+        let r = a.sync().await;
+        assert!(r.rerun, "{r:?}");
+        let r = a
+            .engine
+            .run(a.host.as_ref(), PlanMode::Normal, true, None)
+            .await;
+        assert!(!r.rerun, "{r:?}");
+        let name = format!("{INBOX}.1.jsonl");
+        assert!(r.failed.iter().any(|(n, _)| *n == name), "{r:?}");
     }
 
     #[tokio::test]

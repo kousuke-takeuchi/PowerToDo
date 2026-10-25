@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Serialize;
 
+use super::comments;
 use super::common_book::{COMMON_FILE, CommonBook, Settings, read_common_book, write_common_book};
 use super::external::{Fingerprint, Verdict, fingerprint, verdict};
 pub(crate) use super::paths::CONFLICT_MARK;
@@ -282,6 +283,14 @@ pub fn stage_download(data_dir: &Path, name: &str, bytes: &[u8]) -> AppResult<St
         name: name.to_string(),
         tmp,
     })
+}
+
+/// Comment files follow a task or project change after that change happened (spec ① §3.5). A failure must not undo
+/// the change: the comment file stays where it is (it can be moved back by hand) and the failure is logged.
+fn comments_follow(result: AppResult<()>) {
+    if let Err(e) = result {
+        eprintln!("comment files did not follow: {e}");
+    }
 }
 
 /// `<dir>/<stem> (<tag>).xlsx`, or `<stem> (<tag>-2).xlsx`, `-3`, … when that name is taken.
@@ -647,6 +656,7 @@ impl ProjectStore {
         if old_path.exists() {
             std::fs::rename(&old_path, &new_path)?;
         }
+        comments_follow(comments::rename_project(&self.paths, name, new_name));
         // The renamed file is the same file: carry over what we know about it.
         self.last_written.remove(name);
         self.record_written(new_name, &new_path);
@@ -715,6 +725,7 @@ impl ProjectStore {
         {
             self.move_to_archive(&path, name)?;
         }
+        comments_follow(comments::archive(&self.paths, name, None, self.now()));
         self.common.projects.retain(|p| p.name != name);
         self.common.project_extra.remove(name);
         self.books.remove(name);
@@ -856,6 +867,7 @@ impl ProjectStore {
         if path.exists() {
             self.move_to_archive(&path, &key)?;
         }
+        comments_follow(comments::archive(&self.paths, &key, None, self.now()));
         Ok(())
     }
 
@@ -1173,6 +1185,7 @@ impl ProjectStore {
 
     /// Deletes the task and all of its descendants.
     pub fn delete_task(&mut self, project: &str, no: u32) -> AppResult<ProjectView> {
+        let mut removed = BTreeSet::new();
         self.mutate(project, |book, _| {
             find_task(book, no)?;
             let gone: BTreeSet<u32> = subtree(book, no)
@@ -1180,8 +1193,12 @@ impl ProjectStore {
                 .map(|i| book.tasks[i].no)
                 .collect();
             book.tasks.retain(|t| !gone.contains(&t.no));
+            removed = gone;
             Ok(())
         })?;
+        for n in removed {
+            comments_follow(comments::archive(&self.paths, project, Some(n), self.now()));
+        }
         self.view(project)
     }
 
@@ -1274,6 +1291,13 @@ impl ProjectStore {
         }
         self.touch(project);
         self.touch(to_project);
+        for (old, new) in &renumber {
+            comments_follow(comments::move_task(
+                &self.paths,
+                (project, *old),
+                (to_project, *new),
+            ));
+        }
         Ok((self.view(project)?, self.view(to_project)?))
     }
 
@@ -3154,5 +3178,95 @@ mod tests {
             assert_eq!(adoptable_stem(Path::new(name)), None, "{name}");
         }
         assert_eq!(file_key("仕事.XLSX"), None);
+    }
+
+    // ---- comments follow tasks and projects (spec ① §3.5) ----
+
+    fn comment(e: &Env, project: &str, no: u32) {
+        let line = crate::store::comments::Line {
+            id: crate::store::comments::new_id(1),
+            op: crate::store::comments::Op::Add,
+            target: None,
+            at: "2026-10-25T21:00:00+09:00".into(),
+            author: "たろう".into(),
+            text: Some("メモ".into()),
+        };
+        crate::store::comments::append(&Paths::new(e.data()), project, no, &line).unwrap();
+    }
+
+    fn has_comments(e: &Env, project: &str, no: u32) -> bool {
+        Paths::new(e.data())
+            .comments_dir()
+            .join(crate::store::comments::file_name(project, no))
+            .exists()
+    }
+
+    fn archived_comments(e: &Env) -> usize {
+        std::fs::read_dir(Paths::new(e.data()).archive_dir())
+            .map(|d| {
+                d.flatten()
+                    .filter(|x| x.file_name().to_string_lossy().ends_with(".jsonl"))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn rename_project_renames_comment_files() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.add_task("仕事", input("a")).unwrap();
+        comment(&e, "仕事", 1);
+        e.store.rename_project("仕事", "業務").unwrap();
+        assert!(has_comments(&e, "業務", 1));
+        assert!(!has_comments(&e, "仕事", 1));
+    }
+
+    #[test]
+    fn delete_project_archives_comment_files() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.add_task("仕事", input("a")).unwrap();
+        e.store.save("仕事").unwrap();
+        comment(&e, "仕事", 1);
+        e.store.delete_project("仕事").unwrap();
+        assert!(!has_comments(&e, "仕事", 1));
+        assert_eq!(archived_comments(&e), 1);
+    }
+
+    #[test]
+    fn delete_task_archives_comments() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.add_task("仕事", input("a")).unwrap();
+        e.store.add_task("仕事", child_of("b", 1)).unwrap();
+        e.store.add_task("仕事", input("c")).unwrap();
+        for no in [1, 2, 3] {
+            comment(&e, "仕事", no);
+        }
+        e.store.delete_task("仕事", 1).unwrap();
+        assert!(!has_comments(&e, "仕事", 1));
+        assert!(
+            !has_comments(&e, "仕事", 2),
+            "the subtask's comments go too"
+        );
+        assert!(has_comments(&e, "仕事", 3));
+        assert_eq!(archived_comments(&e), 2);
+    }
+
+    #[test]
+    fn move_task_moves_comments_with_the_new_numbers() {
+        let mut e = env();
+        e.store.create_project("A", "c").unwrap();
+        e.store.create_project("B", "c").unwrap();
+        e.store.add_task("B", input("b1")).unwrap();
+        e.store.add_task("A", input("a1")).unwrap();
+        e.store.add_task("A", child_of("a2", 1)).unwrap();
+        comment(&e, "A", 1);
+        comment(&e, "A", 2);
+        let (_, to) = e.store.move_task("A", 1, "B", None).unwrap();
+        assert_eq!(nos(&to), vec![1, 2, 3]);
+        assert!(has_comments(&e, "B", 2) && has_comments(&e, "B", 3));
+        assert!(!has_comments(&e, "A", 1) && !has_comments(&e, "A", 2));
     }
 }

@@ -77,7 +77,40 @@ pub trait StorageBackend: Send + Sync {
     fn root_identity(&self) -> Option<String> {
         None
     }
+
+    // ---- the `_comments` folder (spec ① §3.4). Names are the leaf names (`仕事.12.jsonl`). ----
+
+    /// The `*.jsonl` files directly in `_comments/`, `None` when the target has no such folder (it
+    /// is made on the first upload and stays, so a missing one was never made or was wiped).
+    /// Complete or `Err`, like [`StorageBackend::list`].
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// [`StorageBackend::upload`] inside `_comments/` (the folder is created when needed).
+    fn upload_comment<'a>(
+        &'a self,
+        _name: &'a str,
+        _existing: Option<&'a RemoteFile>,
+        _bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async {
+            Err(BackendError::Other(
+                "この同期先はコメントを扱えません".into(),
+            ))
+        })
+    }
+    /// [`StorageBackend::move_to_archive`] for a file of `_comments/`.
+    fn archive_comment<'a>(&'a self, _file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async {
+            Err(BackendError::Other(
+                "この同期先はコメントを扱えません".into(),
+            ))
+        })
+    }
 }
+
+/// Where comment files live inside the target, as a name prefix of [`MemoryBackend`] entries.
+const COMMENTS_PREFIX: &str = "_comments/";
 
 struct Entry {
     name: String,
@@ -120,6 +153,8 @@ struct Inner {
     files: BTreeMap<String, Entry>,
     /// `(name, bytes)` of what was moved to `archive/`, oldest first.
     archive: Vec<(String, Vec<u8>)>,
+    /// The `_comments` folder exists (made by the first comment upload).
+    comments_folder: bool,
 }
 
 /// An in-memory remote for tests. `version` is the SHA-256 of the content (or, with
@@ -161,6 +196,15 @@ impl MemoryBackend {
     /// the remote as if another PC had written them, so the precondition fails.
     pub fn race_upload(&self, name: &str, bytes: &[u8]) {
         self.lock().races.insert(name.to_string(), bytes.to_vec());
+    }
+
+    /// Someone deletes the `_comments` folder on the target (its files are gone, not archived).
+    pub fn wipe_comments(&self) {
+        let mut inner = self.lock();
+        inner
+            .files
+            .retain(|_, e| !e.name.starts_with(COMMENTS_PREFIX));
+        inner.comments_folder = false;
     }
 
     /// Ends every injected failure.
@@ -336,6 +380,62 @@ impl StorageBackend for MemoryBackend {
                 .ok_or_else(|| BackendError::Other(format!("{} が見つかりません", file.name)))?;
             inner.archive.push((entry.name, entry.bytes));
             Ok(())
+        })
+    }
+
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(async move {
+            let inner = self.lock();
+            if let Some(f) = inner.list_failure {
+                return Err(f.error());
+            }
+            if !inner.comments_folder {
+                return Ok(None);
+            }
+            let mut files: Vec<RemoteFile> = inner
+                .files
+                .iter()
+                .filter_map(|(id, e)| {
+                    let leaf = e.name.strip_prefix(COMMENTS_PREFIX)?;
+                    leaf.ends_with(".jsonl").then(|| RemoteFile {
+                        name: leaf.to_string(),
+                        ..Self::remote_file(id, e)
+                    })
+                })
+                .collect();
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(Some(files))
+        })
+    }
+
+    fn upload_comment<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            let full = format!("{COMMENTS_PREFIX}{name}");
+            let existing = existing.map(|f| RemoteFile {
+                name: full.clone(),
+                ..f.clone()
+            });
+            let f = self.upload(&full, existing.as_ref(), bytes).await?;
+            self.lock().comments_folder = true;
+            Ok(RemoteFile {
+                name: name.to_string(),
+                ..f
+            })
+        })
+    }
+
+    fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async move {
+            let full = RemoteFile {
+                name: format!("{COMMENTS_PREFIX}{}", file.name),
+                ..file.clone()
+            };
+            self.move_to_archive(&full).await
         })
     }
 }
@@ -514,5 +614,45 @@ mod tests {
         b.clear_failures();
         assert_eq!(b.list().await.unwrap().len(), 2);
         assert_eq!(b.download(&files[0]).await.unwrap(), b"a");
+    }
+
+    #[tokio::test]
+    async fn comments_round_trip() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        let f = b
+            .upload_comment("仕事.1.jsonl", None, b"a\n".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(f.name, "仕事.1.jsonl");
+        let listed = b.list_comments().await.unwrap().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(b.download(&listed[0]).await.unwrap(), b"a\n");
+        let g = b
+            .upload_comment("仕事.1.jsonl", Some(&listed[0]), b"a\nb\n".to_vec())
+            .await
+            .unwrap();
+        assert!(matches!(
+            b.upload_comment("仕事.1.jsonl", Some(&listed[0]), b"x".to_vec())
+                .await,
+            Err(BackendError::Precondition)
+        ));
+        b.archive_comment(&g).await.unwrap();
+        // Archiving the last file leaves the folder.
+        assert_eq!(b.list_comments().await.unwrap(), Some(Vec::new()));
+    }
+
+    #[tokio::test]
+    async fn comments_are_not_in_list() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        b.upload_comment("仕事.1.jsonl", None, b"a\n".to_vec())
+            .await
+            .unwrap();
+        assert!(b.list().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_remote_comments_folder_is_none() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        assert_eq!(b.list_comments().await.unwrap(), None);
     }
 }

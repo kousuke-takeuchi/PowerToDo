@@ -12,6 +12,7 @@ import { Checkbox } from "../components/Checkbox";
 import { TaskRow } from "../components/TaskRow";
 import { TODAY, dateLabel } from "../mock/data";
 import type { Comment, Project, Task, TaskPatch } from "../types/model";
+import { CommentsSection } from "./CommentsSection";
 import { DatePicker } from "./DatePicker";
 import { LabelPicker } from "./LabelPicker";
 import { ProjectPicker } from "./ProjectPicker";
@@ -28,8 +29,18 @@ export type TaskDialogProps = {
   section?: string;
   initialPopover?: "date" | "recurrence" | "reminder" | "priority" | "project" | "labels";
   onClose?: () => void;
-  /** コメント一覧。task.no と同じ taskNo のものだけ表示する。 */
+  /** このタスクのコメント (古い順)。 */
   comments?: Comment[];
+  /** コメントを読み込めなかった。 */
+  commentsFailed?: boolean;
+  /** 今の表示名 (自分のコメントだけ編集・削除できる)。 */
+  me?: string;
+  /** 渡すと入力欄を出す。true で保存できた (入力欄を空にする)。 */
+  onAddComment?: (text: string) => Promise<boolean>;
+  onEditComment?: (id: string, text: string) => Promise<boolean>;
+  onDeleteComment?: (id: string) => void;
+  /** Stories: this comment starts in edit mode. */
+  initialCommentEdit?: string;
   // ---- 実アプリ用 (onChange を渡すと編集モード。無ければ Storybook と同じ、見た目だけのローカル挙動) ----
   /**
    * 編集の確定 (タイトル / 説明は blur・Enter、優先度・期限・繰り返し・リマインダーは選択時)。
@@ -155,6 +166,7 @@ export function TaskDialog({
   initialPopover,
   onClose,
   comments = [],
+  commentsFailed,
   onChange,
   onToggleDone,
   onDelete,
@@ -169,6 +181,11 @@ export function TaskDialog({
   projects,
   onMove,
   allLabels,
+  me,
+  onAddComment,
+  onEditComment,
+  onDeleteComment,
+  initialCommentEdit,
 }: TaskDialogProps) {
   const editable = onChange !== undefined;
   const [popover, setPopover] = useState<Popover | null>(initialPopover ?? null);
@@ -214,7 +231,6 @@ export function TaskDialog({
     if (v === (task.note ?? "")) setNoteDraft(task.note ?? "");
     else commit({ note: v === "" ? null : v }, () => setNoteDraft(taskRef.current.note ?? ""));
   };
-  const taskComments = comments.filter((c) => c.taskNo === task.no);
   // 編集モードでは、押した行の直下にポップオーバーを出す (パネル内の位置は行の offsetTop から)。Storybook は pen の座標のまま。
   const [anchorTop, setAnchorTop] = useState<number | null>(null);
   const toggle = (p: Popover, row?: HTMLElement) => {
@@ -423,20 +439,15 @@ export function TaskDialog({
         )}
       </div>
 
-      {taskComments.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-          <div style={heading}>コメント</div>
-          {taskComments.map((c, i) => (
-            <div key={i} style={{ display: "flex", gap: "var(--space-2)" }}>
-              <span aria-hidden style={{ width: 24, height: 24, borderRadius: 12, background: "var(--color-accent)", flex: "0 0 auto" }} />
-              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{`${c.author}  ${c.at}`}</span>
-                <span style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)" }}>{c.text}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <CommentsSection
+        comments={comments}
+        failed={commentsFailed}
+        me={me}
+        onAdd={onAddComment}
+        onEdit={onEditComment}
+        onDelete={onDeleteComment}
+        initialEditId={initialCommentEdit}
+      />
     </div>
   );
 

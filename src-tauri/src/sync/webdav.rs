@@ -22,6 +22,11 @@ use crate::store::project_store::archive_file_name;
 /// The port a NAS WebDAV (HTTP) server listens on when the URL has none (Synology's default).
 pub const DEFAULT_PORT: u16 = 5005;
 const ARCHIVE_DIR: &str = "archive";
+/// The comment files' folder in the target (spec ① §3.4).
+const COMMENTS_DIR: &str = "_comments";
+/// `COMMENTS_DIR` as the `dir` of `child_url`.
+const COMMENTS_SUB: &str = "_comments/";
+const COMMENTS_ID_PREFIX: &str = "_comments/";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// No byte for this long on a read (including waiting for the answer) ends the request.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
@@ -226,12 +231,21 @@ impl WebDavBackend {
     }
 
     fn file_url(&self, name: &str) -> Result<Url, BackendError> {
+        self.file_url_in("", name)
+    }
+
+    /// `name` in the folder `dir` (`""` = the root, else `"_comments/"`).
+    fn file_url_in(&self, dir: &str, name: &str) -> Result<Url, BackendError> {
         if !safe_name(name) {
             return Err(BackendError::Other(format!(
                 "使えないファイル名です: {name}"
             )));
         }
-        self.child_url("", name)
+        self.child_url(dir, name)
+    }
+
+    fn comments_url(&self) -> Url {
+        Url::parse(&format!("{}{COMMENTS_DIR}/", self.base)).expect("base plus a plain segment")
     }
 
     fn archive_url(&self) -> Url {
@@ -285,9 +299,9 @@ impl WebDavBackend {
         parse_multistatus(&text).map(Some)
     }
 
-    /// The properties of one file: `None` when it does not exist.
-    async fn stat(&self, name: &str) -> Result<Option<Entry>, BackendError> {
-        let entries = self.propfind(self.file_url(name)?, "0").await?;
+    /// The properties of one file of the folder `dir`: `None` when it does not exist.
+    async fn stat_in(&self, dir: &str, name: &str) -> Result<Option<Entry>, BackendError> {
+        let entries = self.propfind(self.file_url_in(dir, name)?, "0").await?;
         Ok(entries.and_then(|e| e.into_iter().next()))
     }
 
@@ -296,8 +310,28 @@ impl WebDavBackend {
             .propfind(self.base.clone(), "1")
             .await?
             .ok_or_else(folder_missing)?;
+        self.files_of(self.base.clone(), entries, ".xlsx")
+    }
+
+    /// The comment files, `None` when `_comments/` does not exist.
+    async fn list_comment_files(&self) -> Result<Option<Vec<RemoteFile>>, BackendError> {
+        let url = self.comments_url();
+        let Some(entries) = self.propfind(url.clone(), "1").await? else {
+            return Ok(None);
+        };
+        let files = self.files_of(url, entries, ".jsonl")?;
+        Ok(Some(files.into_iter().map(in_comments).collect()))
+    }
+
+    /// The files directly in the folder `url` whose name ends in `suffix`, from its PROPFIND entries.
+    fn files_of(
+        &self,
+        url: Url,
+        entries: Vec<Entry>,
+        suffix: &str,
+    ) -> Result<Vec<RemoteFile>, BackendError> {
         let folder = norm(
-            percent_decode_str(self.base.path())
+            percent_decode_str(url.path())
                 .decode_utf8()
                 .map_err(|_| unexpected_propfind())?
                 .trim_end_matches('/'),
@@ -311,7 +345,7 @@ impl WebDavBackend {
             // Only workbooks matter, and `is_sync_target` takes the exact lower-case `.xlsx`.
             // Checked before decoding so an oddly encoded file of another kind cannot fail
             // the whole listing.
-            if !raw.ends_with(".xlsx") {
+            if !raw.ends_with(suffix) {
                 continue;
             }
             let path = percent_decode_str(&raw)
@@ -347,14 +381,34 @@ impl WebDavBackend {
         existing: Option<&RemoteFile>,
         bytes: Vec<u8>,
     ) -> Result<RemoteFile, BackendError> {
-        let url = self.file_url(name)?;
+        self.upload_in("", name, existing, bytes).await
+    }
+
+    /// Makes the folder `url` (a folder that is already there is fine).
+    async fn make_folder(&self, url: Url) -> Result<(), BackendError> {
+        let made = self.send("MKCOL", url, &[], None).await?;
+        // 405: the folder is already there.
+        if made.status().as_u16() != 405 {
+            check_status(made)?;
+        }
+        Ok(())
+    }
+
+    async fn upload_in(
+        &self,
+        dir: &str,
+        name: &str,
+        existing: Option<&RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> Result<RemoteFile, BackendError> {
+        let url = self.file_url_in(dir, name)?;
         let mut headers = vec![("Content-Type", OCTET_STREAM)];
         match existing {
             // No etag to send: the version was made of the timestamp and the size. Look at the
             // file right before writing; a server that ignores `If-Match` cannot be helped, but
             // this is the best a bare listing allows.
             Some(e) if is_synthesized(&e.version) => {
-                let unchanged = self.stat(name).await?.is_some_and(|now| {
+                let unchanged = self.stat_in(dir, name).await?.is_some_and(|now| {
                     now.last_modified
                         .as_deref()
                         .is_some_and(|lm| synthesize(lm, now.length) == e.version)
@@ -377,7 +431,7 @@ impl WebDavBackend {
             // ones (`If-Match` then never matches). Look once: the same tag means the latter,
             // and the write goes out without the condition (the same small window as for a
             // server without etags).
-            let now = self.stat(name).await?.and_then(|n| n.etag);
+            let now = self.stat_in(dir, name).await?.and_then(|n| n.etag);
             if now.as_deref().map(normalize_etag) != Some(e.version.as_str()) {
                 return Err(BackendError::Precondition);
             }
@@ -389,26 +443,40 @@ impl WebDavBackend {
         }
         check_status(resp)?;
         let entry = self
-            .stat(name)
+            .stat_in(dir, name)
             .await?
             .ok_or_else(|| BackendError::Other(format!("「{name}」を書き込めませんでした")))?;
         remote_file(name, entry)
     }
 
     async fn archive_file(&self, file: &RemoteFile) -> Result<(), BackendError> {
-        let src = self.file_url(&file.name)?;
+        self.archive_in("", file).await
+    }
+
+    async fn archive_in(&self, folder: &str, file: &RemoteFile) -> Result<(), BackendError> {
+        let src = self.file_url_in(folder, &file.name)?;
         let dir = self.archive_url();
-        let made = self.send("MKCOL", dir.clone(), &[], None).await?;
-        // 405: the folder is already there.
-        if made.status().as_u16() != 405 {
-            check_status(made)?;
-        }
+        self.make_folder(dir.clone()).await?;
         // Never overwrite an earlier archived copy: `<stem> (<modified>).xlsx`, then `-2`, `-3`,
-        // ... like the local `archive/`.
-        let stem = file.name.strip_suffix(".xlsx").unwrap_or(&file.name);
+        // ... like the local `archive/` (a comment file keeps its `.jsonl`).
+        let (stem, ext) = match file.name.strip_suffix(".jsonl") {
+            Some(stem) => (stem, ".jsonl"),
+            None => (
+                file.name.strip_suffix(".xlsx").unwrap_or(&file.name),
+                ".xlsx",
+            ),
+        };
         let tag = file.modified.format("%Y-%m-%d %H%M").to_string();
         for n in 1..=MAX_ARCHIVE_NAMES {
-            let dest = format!("{dir}{}", encode_segment(&archive_file_name(stem, &tag, n)));
+            let archived = archive_file_name(stem, &tag, n);
+            let archived = match ext {
+                ".jsonl" => format!(
+                    "{}.jsonl",
+                    archived.strip_suffix(".xlsx").unwrap_or(&archived)
+                ),
+                _ => archived,
+            };
+            let dest = format!("{dir}{}", encode_segment(&archived));
             let moved = self
                 .send(
                     "MOVE",
@@ -477,7 +545,13 @@ impl StorageBackend for WebDavBackend {
 
     fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
         Box::pin(async move {
-            let url = self.file_url(&file.name)?;
+            // A comment file's id carries its folder (see `in_comments`).
+            let dir = if file.id.starts_with(COMMENTS_ID_PREFIX) {
+                COMMENTS_SUB
+            } else {
+                ""
+            };
+            let url = self.file_url_in(dir, &file.name)?;
             let resp = check_status(self.send("GET", url, &[], None).await?)?;
             resp.bytes().await.map(|b| b.to_vec()).map_err(transport)
         })
@@ -494,6 +568,36 @@ impl StorageBackend for WebDavBackend {
 
     fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
         Box::pin(self.archive_file(file))
+    }
+
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(self.list_comment_files())
+    }
+
+    fn upload_comment<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            self.make_folder(self.comments_url()).await?;
+            self.upload_in(COMMENTS_SUB, name, existing, bytes)
+                .await
+                .map(in_comments)
+        })
+    }
+
+    fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(self.archive_in(COMMENTS_SUB, file))
+    }
+}
+
+/// A file of `_comments/`: its id carries the folder, so `download` finds it.
+fn in_comments(f: RemoteFile) -> RemoteFile {
+    RemoteFile {
+        id: format!("{COMMENTS_ID_PREFIX}{}", f.name),
+        ..f
     }
 }
 
@@ -931,6 +1035,75 @@ mod tests {
         assert!(!is_synthesized(&files[0].version));
         assert!(!is_synthesized(&files[1].version));
         // `Upper.XLSX` and the badly encoded `.dat` are skipped, not fatal.
+    }
+
+    // --- the _comments folder (spec ① §3.4) ----------------------------------------------
+
+    #[tokio::test]
+    async fn comments_listing_of_a_missing_folder_is_none() {
+        let s = MockServer::start().await;
+        mount(&s, "PROPFIND", "/powertodo/_comments/", 404, "").await;
+        assert!(backend(&s).list_comments().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn comments_listing_reads_jsonl_files() {
+        let s = MockServer::start().await;
+        let body = multistatus(&[
+            collection_response("/powertodo/_comments/"),
+            file_response(
+                "/powertodo/_comments/%E4%BB%95%E4%BA%8B.12.jsonl",
+                Some("&quot;e1&quot;"),
+                LM,
+                40,
+            ),
+            file_response("/powertodo/_comments/notes.txt", None, LM, 1),
+        ]);
+        mount(&s, "PROPFIND", "/powertodo/_comments/", 207, &body).await;
+        let files = backend(&s).list_comments().await.unwrap().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "仕事.12.jsonl");
+        assert_eq!(files[0].id, "_comments/仕事.12.jsonl");
+    }
+
+    #[tokio::test]
+    async fn comment_upload_makes_the_folder_and_puts_inside_it() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/_comments/", 201, "").await;
+        mount(&s, "PUT", "/powertodo/_comments/a.1.jsonl", 201, "").await;
+        let stat = multistatus(&[file_response(
+            "/powertodo/_comments/a.1.jsonl",
+            Some("&quot;v1&quot;"),
+            LM,
+            3,
+        )]);
+        mount(&s, "PROPFIND", "/powertodo/_comments/a.1.jsonl", 207, &stat).await;
+        let f = backend(&s)
+            .upload_comment("a.1.jsonl", None, b"x\n".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(
+            (f.name.as_str(), f.id.as_str(), f.version.as_str()),
+            ("a.1.jsonl", "_comments/a.1.jsonl", "\"v1\"")
+        );
+        let reqs = requests(&s).await;
+        let put = reqs.iter().find(|r| r.method.as_str() == "PUT").unwrap();
+        assert_eq!(header_of(put, "if-none-match").as_deref(), Some("*"));
+        assert!(reqs.iter().any(|r| r.method.as_str() == "MKCOL"));
+    }
+
+    #[tokio::test]
+    async fn comment_download_reads_from_the_folder() {
+        let s = MockServer::start().await;
+        mount(&s, "GET", "/powertodo/_comments/a.1.jsonl", 200, "line\n").await;
+        let f = RemoteFile {
+            id: "_comments/a.1.jsonl".into(),
+            name: "a.1.jsonl".into(),
+            version: "v".into(),
+            modified: local(LM),
+            size: 5,
+        };
+        assert_eq!(backend(&s).download(&f).await.unwrap(), b"line\n");
     }
 
     #[tokio::test]

@@ -207,7 +207,17 @@ const detailTask = {
 };
 const detailProject = projects.find((p) => p.name === "買い物")!;
 
-function DetailScreen({ initialPopover, widthPx, layout }: { initialPopover?: TaskDialogProps["initialPopover"]; widthPx?: number; layout?: "wide" | "narrow" }) {
+function DetailScreen({
+  initialPopover,
+  widthPx,
+  layout,
+  initialCommentEdit,
+}: {
+  initialPopover?: TaskDialogProps["initialPopover"];
+  widthPx?: number;
+  layout?: "wide" | "narrow";
+  initialCommentEdit?: string;
+}) {
   // 行をクリックするとその行のダイアログを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
   const [openNo, setOpenNo] = useState<number | null>(detailTask.no);
   const shown = openNo === null ? undefined : openNo === detailTask.no ? detailTask : tasks.find((t) => t.no === openNo);
@@ -227,7 +237,12 @@ function DetailScreen({ initialPopover, widthPx, layout }: { initialPopover?: Ta
             subtasks={tasks.filter((t) => t.parentNo === shown.no)}
             project={detailProject}
             section={shown.category ?? undefined}
-            comments={comments}
+            comments={shown.no === detailTask.no ? comments : []}
+            me="たろう"
+            onAddComment={() => Promise.resolve(true)}
+            onEditComment={() => Promise.resolve(true)}
+            onDeleteComment={() => {}}
+            initialCommentEdit={initialCommentEdit}
             initialPopover={shown.no === detailTask.no ? initialPopover : undefined}
             layout={layout}
             onClose={() => setOpenNo(null)}
@@ -258,6 +273,11 @@ export const D03Project: Story = {
 export const D03Labels: Story = {
   name: "D-03 タスク詳細 (ラベルを選ぶ)",
   render: () => <DetailScreen initialPopover="labels" />,
+};
+
+export const D03c: Story = {
+  name: "D-03c コメントの編集",
+  render: () => <DetailScreen initialCommentEdit="c1" />,
 };
 
 export const D03b: Story = {
