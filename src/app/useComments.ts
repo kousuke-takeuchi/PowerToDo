@@ -1,7 +1,8 @@
-import { createContext, useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useEffect, useReducer, useState } from "react";
 import { api } from "../api/client";
 import { onCommentsChanged } from "../api/events";
 import type { Comment } from "../types/model";
+import { dialogCommentsReducer, initialDialogComments } from "./dialogComments";
 
 /** `${project}/${no}` -> number of comments, for the count on task rows (spec ① §3.3). Main provides it. */
 export const CommentCounts = createContext<Record<string, number>>({});
@@ -17,18 +18,25 @@ export function projectOfCommentFile(name: string): string | null {
   return m ? m[1] : null;
 }
 
-/** The comments of the task in the dialog, kept fresh on `comments-changed`; writes report errors through `onError`. */
+/**
+ * The comments of the task in the dialog, kept fresh on `comments-changed`. A reply that comes after
+ * the dialog moved to another task is dropped; a failed load sets `failed` (shown in the dialog), a
+ * failed write goes to `onError`.
+ */
 export function useDialogComments(dialog: { project: string; no: number } | null, onError: (e: unknown) => void) {
-  const [comments, setComments] = useState<Comment[]>([]);
+  const [state, dispatch] = useReducer(dialogCommentsReducer, initialDialogComments);
   const project = dialog?.project;
   const no = dialog?.no;
+  const key = project === undefined || no === undefined ? null : `${project}/${no}`;
+  useEffect(() => dispatch({ type: "show", key }), [key]);
   const load = useCallback(() => {
-    if (project === undefined || no === undefined) {
-      setComments([]);
-      return;
-    }
-    api.listComments(project, no).then(setComments, onError);
-  }, [project, no, onError]);
+    if (project === undefined || no === undefined) return;
+    const k = `${project}/${no}`;
+    api.listComments(project, no).then(
+      (comments) => dispatch({ type: "loaded", key: k, comments }),
+      () => dispatch({ type: "failed", key: k }),
+    );
+  }, [project, no]);
   useEffect(load, [load]);
   useEffect(
     () =>
@@ -37,10 +45,11 @@ export function useDialogComments(dialog: { project: string; no: number } | null
       }),
     [project, no, load],
   );
-  const run = (call: () => Promise<Comment[]>): Promise<boolean> =>
-    call().then(
-      (list) => {
-        setComments(list);
+  const run = (call: () => Promise<Comment[]>): Promise<boolean> => {
+    const k = key;
+    return call().then(
+      (comments) => {
+        if (k !== null) dispatch({ type: "loaded", key: k, comments });
         return true;
       },
       (e) => {
@@ -48,8 +57,10 @@ export function useDialogComments(dialog: { project: string; no: number } | null
         return false;
       },
     );
+  };
   return {
-    comments,
+    comments: state.comments,
+    failed: state.failed,
     add: (text: string) => (project === undefined || no === undefined ? Promise.resolve(false) : run(() => api.addComment(project, no, text))),
     edit: (id: string, text: string) =>
       project === undefined || no === undefined ? Promise.resolve(false) : run(() => api.editComment(project, no, id, text)),

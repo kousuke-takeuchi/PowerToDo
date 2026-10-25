@@ -31,6 +31,8 @@ export type TaskDialogProps = {
   onClose?: () => void;
   /** このタスクのコメント (古い順)。 */
   comments?: Comment[];
+  /** コメントを読み込めなかった。 */
+  commentsFailed?: boolean;
   /** 今の表示名 (自分のコメントだけ編集・削除できる)。 */
   me?: string;
   /** 渡すと入力欄を出す。true で保存できた (入力欄を空にする)。 */
@@ -164,6 +166,7 @@ export function TaskDialog({
   initialPopover,
   onClose,
   comments = [],
+  commentsFailed,
   onChange,
   onToggleDone,
   onDelete,
@@ -438,6 +441,7 @@ export function TaskDialog({
 
       <CommentsSection
         comments={comments}
+        failed={commentsFailed}
         me={me}
         onAdd={onAddComment}
         onEdit={onEditComment}

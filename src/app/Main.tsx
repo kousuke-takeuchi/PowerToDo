@@ -507,6 +507,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           }}
           allLabels={allLabels}
           comments={dlgComments.comments}
+          commentsFailed={dlgComments.failed}
           me={displayName}
           onAddComment={dlgComments.add}
           onEditComment={dlgComments.edit}

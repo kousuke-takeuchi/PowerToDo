@@ -44,6 +44,7 @@ export function commentTime(at: string): string {
  */
 export function CommentsSection({
   comments,
+  failed,
   me,
   onAdd,
   onEdit,
@@ -51,6 +52,8 @@ export function CommentsSection({
   initialEditId,
 }: {
   comments: Comment[];
+  /** The comments could not be read (spec ① §3.6). */
+  failed?: boolean;
   me?: string;
   /** Resolves true when saved (the input then clears). Without it there is no input (Storybook). */
   onAdd?: (text: string) => Promise<boolean>;
@@ -79,6 +82,7 @@ export function CommentsSection({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <div style={heading}>コメント</div>
+      {failed && <div style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-danger)" }}>コメントを読み込めませんでした</div>}
       {comments.map((c) => {
         const mine = me !== undefined && c.author === me;
         return (
