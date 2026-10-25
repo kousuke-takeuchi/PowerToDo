@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange } from "./arrange.ts";
+import { arrange, firstOccurrences } from "./arrange.ts";
 import { DEFAULTS } from "./viewOptions.ts";
 import type { Task } from "../../types/model.ts";
 
@@ -77,4 +77,15 @@ test("filters_apply_to_the_done_group_too", () => {
   const r = arrange([open, openP4, doneP4, doneP1], { ...DEFAULTS, prio: 1, done: true }, ctx);
   assert.deepEqual(titles(r), [["", ["open"]], ["完了", ["doneP1"]]]);
   assert.equal(r.hidden, 1);
+});
+
+test("first_occurrences_marks_only_the_first_row_of_a_task_in_label_groups", () => {
+  const both = t({ title: "両方", labels: ["急ぎ", "家"] });
+  const one = t({ title: "家だけ", labels: ["家"] });
+  const { groups } = arrange([both, one], { ...DEFAULTS, group: "label" }, ctx);
+  const first = firstOccurrences(groups);
+  assert.equal(first.size, 2);
+  assert.ok(first.has(`l:急ぎ/${both.project}/${both.no}`));
+  assert.ok(!first.has(`l:家/${both.project}/${both.no}`));
+  assert.ok(first.has(`l:家/${one.project}/${one.no}`));
 });

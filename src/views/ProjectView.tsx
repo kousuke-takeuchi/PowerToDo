@@ -14,6 +14,7 @@ import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { useView } from "../app/view/ViewOptionsContext";
+import { arrange, firstOccurrences } from "../app/view/arrange";
 import type { ViewOptions } from "../app/view/viewOptions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
@@ -92,6 +93,14 @@ export type ProjectViewProps = {
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
   onExpandApi?: (api: ExpandApi | null) => void;
+  /** 週の開始 (「今週」のフィルター)。既定は月曜。 */
+  weekStart?: "mon" | "sun";
+  /** ラベルのグループの並び順 (名前)。 */
+  labelOrder?: string[];
+  /** プロジェクトの並び順 (名前)。 */
+  projectOrder?: string[];
+  /** 自動の並び (並び替えかグループ) の間に持ち手を押した。restore は手動・グループなしに戻す。Main がお知らせを出す。 */
+  onReorderLocked?: (restore: () => void) => void;
 };
 
 type PreviewRect = { top: number; left: number; width: number; height: number };
@@ -218,6 +227,10 @@ export function ProjectView({
   initialView,
   onVisibleKeys,
   onExpandApi,
+  weekStart = "mon",
+  labelOrder = [],
+  projectOrder = [],
+  onReorderLocked,
 }: ProjectViewProps) {
   const [viewOptions, setViewOptions] = useView("project", project, initialView);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -228,7 +241,11 @@ export function ProjectView({
     () => new Set(sections.filter((s) => s.project === project && s.collapsed).map((s) => s.name)),
   );
   const [doneOverride, setDoneOverride] = useState<Map<number, boolean>>(() => new Map());
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [groupCollapsed, setGroupCollapsed] = useState<Set<string>>(() => new Set());
+  const showCompleted = viewOptions.done;
+  const sorted = viewOptions.sort !== "manual" || viewOptions.group !== "none";
+  const restoreManual = () => setViewOptions({ ...viewOptions, sort: "manual", dir: "asc", group: "none" });
+  const lockedToast = () => onReorderLocked?.(restoreManual);
   const [addTo, setAddTo] = useState<{ section: string | null } | null>(initialAddSection !== undefined ? { section: initialAddSection } : null);
   const [editNo, setEditNo] = useState<number | undefined>(initialEditNo);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
@@ -319,7 +336,7 @@ export function ProjectView({
   };
 
   /** `live`: false for the completed list (no data-row, no drag handle). */
-  const renderRow = (t: Task, indent: 0 | 1 | 2, live = true): React.ReactNode => {
+  const renderRow = (t: Task, indent: 0 | 1 | 2, live = true, rowKey: string | number = t.no, dup = false): React.ReactNode => {
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
     const invalid = state === "invalid" && !invalidRows && t.no === INVALID_TASK_NO;
@@ -340,7 +357,7 @@ export function ProjectView({
         rowProps={{
           title: invalid ? t.title + INVALID_SUFFIX : t.title,
           description: t.note,
-          focused: focusedKey === `${t.project}/${t.no}`,
+          focused: !dup && focusedKey === `${t.project}/${t.no}`,
           done: isDone(t),
           priority: t.priority,
           date: dateLabel(t.due, today),
@@ -358,12 +375,14 @@ export function ProjectView({
           onToggleExpand: () => setExpanded((s) => toggleSet(s, t.no)),
           onHandlePointerDown:
             live && drag
-              ? (e) =>
+              ? (e) => {
+                  if (sorted) lockedToast();
                   drag.start(
                     e,
                     { kind: "task", task: t, view: "project", depth: indent, height: heightOf(t.no), subtree: keysOf(t.no) },
                     <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
-                  )
+                  );
+                }
               : undefined,
           dragging:
             (drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
@@ -373,11 +392,11 @@ export function ProjectView({
       />
     );
     return (
-      <Collapse key={t.no} enterY={-8} duration={0.1}>
+      <Collapse key={rowKey} enterY={-8} duration={0.1}>
         {/* 追加された行のハイライト: accent-soft から透明へ 600ms。行の背面 (DOM で行より前) に置く。 */}
         <div
           style={{ position: "relative" }}
-          {...(live
+          {...(live && !dup
             ? {
                 "data-row": "",
                 "data-row-kind": "task",
@@ -459,7 +478,7 @@ export function ProjectView({
         <AnimatePresence initial={false}>
           {open && (
             <Collapse key="subtasks" duration={0}>
-              <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2, live))}</AnimatePresence>
+              <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2, live, k.no, dup))}</AnimatePresence>
               {indent === 0 && kids.length > 0 && (
                 <div style={{ marginLeft: 32 }}>
                   {formParent === t.no && rowCtx ? (
@@ -509,6 +528,26 @@ export function ProjectView({
   const sectionNames = new Set(projectSections.map((s) => s.name));
   const unsectioned = open.filter((t) => t.category === null || !sectionNames.has(t.category));
 
+  // 表示の設定 (spec ⑤ §3)。完了にした直後の行 (leaving) は未完了として並べ、元の Task に戻す。
+  const arrangeCtx = { today, weekStart, labelOrder, projectOrder };
+  const byNo = new Map(topLevel.map((t) => [t.no, t]));
+  const asOpen = (t: Task): Task => (leaving.has(t.no) ? { ...t, progress: 0 } : t);
+  const grouped = viewOptions.group !== "none";
+  const arrangedGroups = grouped ? arrange(topLevel.map(asOpen), viewOptions, arrangeCtx) : null;
+  const firstKeys = arrangedGroups ? firstOccurrences(arrangedGroups.groups) : new Set<string>();
+  const arrangeSection = (list: Task[]) => {
+    const r = arrange(list.map(asOpen), { ...viewOptions, group: "none", done: false }, arrangeCtx);
+    return { rows: (r.groups[0]?.rows ?? []).map((x) => byNo.get(x.task.no)!), hidden: r.hidden };
+  };
+  const unsectionedA = arrangeSection(unsectioned);
+  const sectionA = new Map(projectSections.map((s) => [s.name, arrangeSection(open.filter((t) => t.category === s.name))]));
+  const doneRows = grouped
+    ? []
+    : (arrange(completed, { ...viewOptions, group: "none", done: true }, arrangeCtx).groups.find((g) => g.key === "done")?.rows ?? []).map((x) => x.task);
+  const hiddenCount = arrangedGroups
+    ? arrangedGroups.hidden
+    : unsectionedA.hidden + [...sectionA.values()].reduce((n, a) => n + a.hidden, 0);
+
   // キーボードのフォーカス対象 = 画面に出ている行を表示順に (renderRow と同じ並び)。
   const rowKeys = (t: Task): string[] => [
     `${t.project}/${t.no}`,
@@ -516,10 +555,15 @@ export function ProjectView({
   ];
   const visibleKeys = (): string[] => {
     if (state === "empty" || state === "error") return [];
+    if (arrangedGroups) {
+      return arrangedGroups.groups.flatMap((g) =>
+        groupCollapsed.has(g.key) ? [] : g.rows.filter((r) => firstKeys.has(r.key)).flatMap((r) => rowKeys(r.task)),
+      );
+    }
     return [
-      ...unsectioned.flatMap(rowKeys),
-      ...projectSections.flatMap((s) => (collapsed.has(s.name) ? [] : open.filter((t) => t.category === s.name).flatMap(rowKeys))),
-      ...(showCompleted ? completed.flatMap(rowKeys) : []),
+      ...unsectionedA.rows.flatMap(rowKeys),
+      ...projectSections.flatMap((s) => (collapsed.has(s.name) ? [] : sectionA.get(s.name)!.rows.flatMap(rowKeys))),
+      ...(showCompleted ? doneRows.flatMap(rowKeys) : []),
     ];
   };
   useReportKeys(visibleKeys, onVisibleKeys);
@@ -631,7 +675,7 @@ export function ProjectView({
       return <ErrorState fileName={`${project}.xlsx`} detail={errorDetail} onRetry={onRetryLoad} onReveal={onRevealFile ?? (onRetryLoad ? undefined : noop)} />;
     }
     return (
-      <div ref={previewRef} data-drop-list="project" data-level0="0" data-section-list="" style={{ position: "relative" }}>
+      <div ref={previewRef} {...(sorted ? {} : { "data-drop-list": "project" })} data-level0="0" data-section-list="" style={{ position: "relative" }}>
         {(dragPreview || sectionDragPreview) && (
           <PreviewLayer
             listRef={previewRef}
@@ -651,18 +695,50 @@ export function ProjectView({
             <TaskRow title={invalidRowTitle(r)} done={false} priority={4} hideActions />
           </div>
         ))}
-        <AnimatePresence initial={false}>{unsectioned.map((t) => renderRow(t, 0))}</AnimatePresence>
+        {arrangedGroups ? (
+          <>
+            {arrangedGroups.groups.map((g) => {
+              const isCollapsed = groupCollapsed.has(g.key);
+              const isDoneGroup = g.key === "done";
+              return (
+                <section key={g.key}>
+                  <SectionHeader
+                    title={g.title}
+                    count={g.rows.filter((r) => !isDone(r.task)).length}
+                    collapsed={isCollapsed}
+                    onToggle={() => setGroupCollapsed((c) => toggleSet(c, g.key))}
+                  />
+                  <AnimatePresence initial={false}>
+                    {!isCollapsed && (
+                      <Collapse key="body" duration={0}>
+                        <AnimatePresence initial={false}>
+                          {g.rows.map((r) => renderRow(byNo.get(r.task.no)!, 0, !isDoneGroup, r.key, !firstKeys.has(r.key)))}
+                        </AnimatePresence>
+                      </Collapse>
+                    )}
+                  </AnimatePresence>
+                </section>
+              );
+            })}
+            {addSlot(null)}
+          </>
+        ) : (
+          <>
+        <AnimatePresence initial={false}>{unsectionedA.rows.map((t) => renderRow(t, 0))}</AnimatePresence>
         {addSlot(null)}
         {projectSections.map((s) => {
-          const rows = open.filter((t) => t.category === s.name);
+          const rows = sectionA.get(s.name)!.rows;
           const isCollapsed = collapsed.has(s.name);
           return (
             <section key={s.name}>
-              <div data-row="" data-row-kind="header" data-section={s.name} data-drop-section={s.name}>
+              <div data-row="" data-row-kind="header" data-section={s.name} {...(sorted ? {} : { "data-drop-section": s.name })}>
               <SectionHeader
                 onHandlePointerDown={
                   drag
-                    ? (e) => drag.start(e, { kind: "section", project, name: s.name }, <div style={{ padding: "8px 12px", fontWeight: 700 }}>{s.name}</div>)
+                    ? (e) => {
+                        if (sorted) lockedToast();
+                        else drag.start(e, { kind: "section", project, name: s.name }, <div style={{ padding: "8px 12px", fontWeight: 700 }}>{s.name}</div>);
+                      }
                     : undefined
                 }
                 title={s.name}
@@ -701,11 +777,13 @@ export function ProjectView({
           );
         })}
         {addSectionSlot}
-        <AnimatePresence initial={false}>{showCompleted && completed.map((t) => renderRow(t, 0, false))}</AnimatePresence>
+        <AnimatePresence initial={false}>{showCompleted && doneRows.map((t) => renderRow(t, 0, false))}</AnimatePresence>
+          </>
+        )}
         <button
           type="button"
           aria-pressed={showCompleted}
-          onClick={() => setShowCompleted((v) => !v)}
+          onClick={() => setViewOptions({ ...viewOptions, done: !viewOptions.done })}
           style={{
             display: "block",
             padding: 0,
@@ -748,6 +826,11 @@ export function ProjectView({
           </div>
         )}
       </PageHeader>
+      {state === "normal" && hiddenCount > 0 && (
+        <div style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)", marginBottom: "var(--space-2)" }}>
+          {hiddenCount} 件を隠しています (フィルター)
+        </div>
+      )}
       {body()}
       {initialDeleteNo !== undefined &&
         (() => {

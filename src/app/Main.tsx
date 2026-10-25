@@ -45,6 +45,7 @@ import { useRowFocus } from "./useRowFocus";
 import { PALETTE, useProjectActions } from "./useProjectActions";
 import { useQuickAdd } from "./useQuickAdd";
 import { ViewOptionsCtx, useViewOptionsStore } from "./view/ViewOptionsContext";
+import { sanitize, viewKey } from "./view/viewOptions";
 import { useSummaries } from "./useSummaries";
 import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
@@ -235,6 +236,13 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     noteAction.current = run;
     setNotice((s) => nextNotice(s, { text, action, id: ++noteId.current }));
   };
+  // Spec ⑤ §5: a sorted or grouped project cannot be reordered; the toast offers the way back.
+  const projectViewKey = viewKey("project", current);
+  const projectViewOptions = sanitize("project", viewStore.get(projectViewKey));
+  const projectSorted = projectViewOptions.sort !== "manual" || projectViewOptions.group !== "none";
+  const reorderLocked = (restore: () => void) => note("手動の並び (グループなし) に戻すと並べ替えられます", "戻す", restore);
+  const restoreProjectView = () =>
+    viewStore.set(projectViewKey, { ...projectViewOptions, sort: "manual", dir: "asc", group: "none" });
   // ---- 行の操作 (spec ②): the inline editor, the row menu and date picker, the delete confirmation ----
   const [editing, setEditing] = useState<string | null>(null);
   const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
@@ -328,6 +336,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     onCompleted: completed,
     requestDelete: (t) => requestDelete(t),
     edit: setEditing,
+    projectSorted,
+    onReorderLocked: () => reorderLocked(restoreProjectView),
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
@@ -876,6 +886,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onRenameSection={(from, to) => void p.renameSection(from, to)}
         onRenameProject={current === app.inbox ? undefined : (name) => void renameProject(name)}
         onDeleteProject={current === app.inbox ? undefined : () => void deleteProject()}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
+        onReorderLocked={reorderLocked}
       />
     );
   }

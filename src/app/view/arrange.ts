@@ -3,14 +3,14 @@ import type { ViewOptions } from "./viewOptions";
 
 export type ArrangedRow = { key: string; task: Task };
 export type ArrangedGroup = { key: string; title: string; rows: ArrangedRow[] };
-type Ctx = { today: string; weekStart: "mon" | "sun"; labelOrder: string[]; projectOrder: string[] };
+export type ArrangeCtx = { today: string; weekStart: "mon" | "sun"; labelOrder: string[]; projectOrder: string[] };
 
 const DAY = 86_400_000;
 const num = (ymd: string) => Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)) / DAY;
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const dayTitle = (d: string) => `${+d.slice(5, 7)}月${+d.slice(8, 10)}日 · ${WEEKDAYS[new Date(num(d) * DAY).getUTCDay()]}曜日`;
 
-function dateOk(t: Task, f: ViewOptions["date"], c: Ctx): boolean {
+function dateOk(t: Task, f: ViewOptions["date"], c: ArrangeCtx): boolean {
   if (f === "all") return true;
   if (f === "none") return !t.due;
   if (!t.due) return false;
@@ -27,7 +27,7 @@ function dateOk(t: Task, f: ViewOptions["date"], c: Ctx): boolean {
   return true;
 }
 
-function createdOk(t: Task, f: ViewOptions["created"], c: Ctx): boolean {
+function createdOk(t: Task, f: ViewOptions["created"], c: ArrangeCtx): boolean {
   if (f === "all") return true;
   const d = num(t.createdAt.slice(0, 10)), today = num(c.today);
   return f === "today" ? d === today : d > today - (f === "7d" ? 7 : 30);
@@ -47,7 +47,7 @@ function compare(a: Task, b: Task, o: ViewOptions): number {
 }
 
 /** Spec ⑤ §3: filters, then sort (stable: ties keep the input = manual order), then groups. Top-level tasks only. */
-export function arrange(tasks: Task[], o: ViewOptions, c: Ctx): { groups: ArrangedGroup[]; hidden: number } {
+export function arrange(tasks: Task[], o: ViewOptions, c: ArrangeCtx): { groups: ArrangedGroup[]; hidden: number } {
   const top = tasks.filter((t) => t.parentNo === undefined);
   const done = top.filter((t) => t.progress === 100);
   const open = top.filter((t) => t.progress !== 100);
@@ -82,4 +82,18 @@ export function arrange(tasks: Task[], o: ViewOptions, c: Ctx): { groups: Arrang
   }
   if (o.done) add("done", "完了", done.filter(keep));
   return { groups, hidden };
+}
+
+/** The `ArrangedRow.key`s that are the first row of their task (`project/no`) across the groups. Only these carry `data-row`. */
+export function firstOccurrences(groups: ArrangedGroup[]): Set<string> {
+  const seen = new Set<string>();
+  const first = new Set<string>();
+  for (const g of groups)
+    for (const r of g.rows) {
+      const id = `${r.task.project}/${r.task.no}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      first.add(r.key);
+    }
+  return first;
 }

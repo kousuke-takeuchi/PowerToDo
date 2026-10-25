@@ -36,6 +36,8 @@ export function useRowShortcuts({
   onCompleted,
   requestDelete,
   edit,
+  projectSorted,
+  onReorderLocked,
 }: {
   /** Saves a key move and reloads the screen (the same as a drop). */
   afterMove: (p: Promise<unknown>) => void;
@@ -65,6 +67,10 @@ export function useRowShortcuts({
   requestDelete: (t: Task) => void;
   /** ⌘E: edit the row in place (spec ② §7). */
   edit: (key: string) => void;
+  /** The open project is sorted or grouped: its rows cannot be moved by key (spec ⑤ §5). */
+  projectSorted: boolean;
+  /** Shows the "back to manual order" toast. */
+  onReorderLocked: () => void;
 }) {
   // ---- キーボード操作 (shortcuts.ts)。フォーカス行のタスクは、いま出ているビューのデータから探す ----
   const focusedTask = (() => {
@@ -94,6 +100,10 @@ export function useRowShortcuts({
     const t = focusedTask;
     if (!t) return;
     if (onProjectScreen(t)) {
+      if (projectSorted) {
+        onReorderLocked();
+        return;
+      }
       const tasks = p.view?.tasks;
       if (!tasks) return;
       // A completed top-level task, and its subtasks, sit in the completed list: not movable.
