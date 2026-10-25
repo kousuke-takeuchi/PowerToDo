@@ -48,6 +48,7 @@ export function CommentsSection({
   onAdd,
   onEdit,
   onDelete,
+  initialEditId,
 }: {
   comments: Comment[];
   me?: string;
@@ -55,9 +56,14 @@ export function CommentsSection({
   onAdd?: (text: string) => Promise<boolean>;
   onEdit?: (id: string, text: string) => Promise<boolean>;
   onDelete?: (id: string) => void;
+  /** Stories: this comment starts in edit mode. */
+  initialEditId?: string;
 }) {
   const [draft, setDraft] = useState("");
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(() => {
+    const c = comments.find((x) => x.id === initialEditId);
+    return c ? { id: c.id, text: c.text } : null;
+  });
   const send = () => {
     const text = draft.trim();
     if (!text || !onAdd) return;

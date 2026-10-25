@@ -37,6 +37,8 @@ export type TaskDialogProps = {
   onAddComment?: (text: string) => Promise<boolean>;
   onEditComment?: (id: string, text: string) => Promise<boolean>;
   onDeleteComment?: (id: string) => void;
+  /** Stories: this comment starts in edit mode. */
+  initialCommentEdit?: string;
   // ---- 実アプリ用 (onChange を渡すと編集モード。無ければ Storybook と同じ、見た目だけのローカル挙動) ----
   /**
    * 編集の確定 (タイトル / 説明は blur・Enter、優先度・期限・繰り返し・リマインダーは選択時)。
@@ -180,6 +182,7 @@ export function TaskDialog({
   onAddComment,
   onEditComment,
   onDeleteComment,
+  initialCommentEdit,
 }: TaskDialogProps) {
   const editable = onChange !== undefined;
   const [popover, setPopover] = useState<Popover | null>(initialPopover ?? null);
@@ -433,7 +436,14 @@ export function TaskDialog({
         )}
       </div>
 
-      <CommentsSection comments={comments} me={me} onAdd={onAddComment} onEdit={onEditComment} onDelete={onDeleteComment} />
+      <CommentsSection
+        comments={comments}
+        me={me}
+        onAdd={onAddComment}
+        onEdit={onEditComment}
+        onDelete={onDeleteComment}
+        initialEditId={initialCommentEdit}
+      />
     </div>
   );
 
