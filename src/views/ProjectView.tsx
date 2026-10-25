@@ -1,5 +1,5 @@
 import type React from "react";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
@@ -66,6 +66,10 @@ export type ProjectViewProps = {
   focusedKey?: string;
   /** Main: the row (`project/no`) whose drop is being saved. Drawn faded, as while it is lifted. */
   movingKey?: string;
+  /** Stories: draw the drag card, red line or ring at fixed positions without the engine (D-01n/o/p). A targetNo with no row only dims the source (D-01r draws its own card over the sidebar). */
+  dragPreview?: { no: number; kind: "between" | "indent" | "onto"; targetNo: number };
+  /** Stories: this section is drawn as dragged, with the red line above the first other section (D-01q). */
+  sectionDragPreview?: string;
   /** Stories: draw this task's row as hovered (handle and actions shown). */
   hoverNo?: number;
   /** Stories: this task's row starts as the inline editor (D-01i). */
@@ -83,6 +87,77 @@ export type ProjectViewProps = {
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
   onExpandApi?: (api: ExpandApi | null) => void;
 };
+
+type PreviewRect = { top: number; left: number; width: number; height: number };
+const cardStyle = {
+  position: "absolute",
+  boxSizing: "border-box",
+  background: "var(--color-bg)",
+  borderRadius: 6,
+  boxShadow: "var(--shadow-popover)",
+  pointerEvents: "none",
+  zIndex: 5,
+} as const;
+
+/** Stories only (D-01n to D-01q): the card, red line and ring at fixed positions, measured from the rows. No engine. */
+function PreviewLayer({
+  listRef,
+  task,
+  dragPreview,
+  section,
+  firstOther,
+}: {
+  listRef: React.RefObject<HTMLDivElement | null>;
+  task?: Task;
+  dragPreview?: ProjectViewProps["dragPreview"];
+  section?: string;
+  firstOther?: string;
+}) {
+  const [rects, setRects] = useState<{ source?: PreviewRect; target?: PreviewRect; header?: PreviewRect }>({});
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const base = list.getBoundingClientRect();
+    const rel = (el: Element | null): PreviewRect | undefined => {
+      if (!el) return undefined;
+      const r = el.getBoundingClientRect();
+      return { top: r.top - base.top, left: r.left - base.left, width: r.width, height: r.height };
+    };
+    setRects({
+      source: dragPreview ? rel(list.querySelector(`[data-row][data-no="${dragPreview.no}"]`)) : undefined,
+      target: dragPreview ? rel(list.querySelector(`[data-row][data-no="${dragPreview.targetNo}"]`)) : undefined,
+      header: firstOther ? rel(list.querySelector(`[data-row-kind="header"][data-section="${firstOther}"]`)) : undefined,
+    });
+  }, [listRef, dragPreview, firstOther]);
+  const line = (top: number, left: number, width: number) => (
+    <div aria-hidden style={{ position: "absolute", top: top - 1, left, width, height: 2, background: "var(--color-accent)", pointerEvents: "none", zIndex: 6 }}>
+      <span style={{ position: "absolute", left: 0, top: -3, width: 8, height: 8, boxSizing: "border-box", borderRadius: 4, border: "2px solid var(--color-accent)", background: "var(--color-bg)" }} />
+    </div>
+  );
+  const { source, target, header } = rects;
+  return (
+    <>
+      {task && source && target && (
+        <div aria-hidden style={{ ...cardStyle, top: source.top + 14, left: source.left + 6, width: source.width - 12 }}>
+          <TaskRow title={task.title} done={false} priority={task.priority} hideActions />
+        </div>
+      )}
+      {dragPreview && target && dragPreview.kind === "between" && line(target.top + target.height, target.left, target.width)}
+      {dragPreview && target && dragPreview.kind === "indent" && line(target.top + target.height, target.left + 28, target.width - 28)}
+      {dragPreview && target && dragPreview.kind === "onto" && (
+        <div aria-hidden style={{ position: "absolute", top: target.top, left: target.left, width: target.width, height: target.height, borderRadius: 6, boxShadow: "inset 0 0 0 1px var(--color-accent)", pointerEvents: "none", zIndex: 6 }} />
+      )}
+      {section && header && (
+        <>
+          <div aria-hidden style={{ ...cardStyle, top: header.top + 14, left: header.left + 6, width: 280, padding: "8px 12px", fontWeight: 700, fontSize: 14, color: "var(--color-text-primary)" }}>
+            {section}
+          </div>
+          {line(header.top, header.left, header.width)}
+        </>
+      )}
+    </>
+  );
+}
 
 export type ExpandApi = { expand(no: number): void; collapse(no: number): void };
 
@@ -126,6 +201,8 @@ export function ProjectView({
   focusedKey,
   movingKey,
   hoverNo,
+  dragPreview,
+  sectionDragPreview,
   initialEditNo,
   initialAddSection,
   initialMenuNo,
@@ -134,6 +211,7 @@ export function ProjectView({
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
+  const previewRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [formParent, setFormParent] = useState<number | undefined>(initialFormParent);
   const [formOpenedByClick, setFormOpenedByClick] = useState(false);
@@ -280,7 +358,8 @@ export function ProjectView({
               : undefined,
           dragging:
             (drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
-            movingKey === `${project}/${t.no}`,
+            movingKey === `${project}/${t.no}` ||
+            dragPreview?.no === t.no,
         }}
       />
     );
@@ -542,7 +621,16 @@ export function ProjectView({
       return <ErrorState fileName={`${project}.xlsx`} detail={errorDetail} onRetry={onRetryLoad} onReveal={onRevealFile ?? (onRetryLoad ? undefined : noop)} />;
     }
     return (
-      <div data-drop-list="project" data-level0="0" data-section-list="" style={{ position: "relative" }}>
+      <div ref={previewRef} data-drop-list="project" data-level0="0" data-section-list="" style={{ position: "relative" }}>
+        {(dragPreview || sectionDragPreview) && (
+          <PreviewLayer
+            listRef={previewRef}
+            task={dragPreview ? tasks.find((t) => t.no === dragPreview.no) : undefined}
+            dragPreview={dragPreview}
+            section={sectionDragPreview}
+            firstOther={projectSections.find((x) => x.name !== sectionDragPreview)?.name}
+          />
+        )}
         {/* While a task is dragged, the gutter with the grips counts as part of the list (a pull straight up from the grip keeps its target). */}
         {drag?.active?.kind === "task" && <div aria-hidden style={{ position: "absolute", left: -48, top: 0, bottom: 0, width: 48 }} />}
         {showLongTitleRow && (

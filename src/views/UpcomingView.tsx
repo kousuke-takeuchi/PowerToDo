@@ -29,6 +29,8 @@ export type UpcomingViewProps = {
   focusedKey?: string;
   /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
+  /** Stories only: draw this day (YYYY-MM-DD) as the drop target (accent-soft highlight, D-05b). */
+  dropPreviewDay?: string;
 };
 
 /** upcoming_view が返せる最大日数 (Rust 側の上限)。 */
@@ -56,7 +58,7 @@ function dayTitle(ymd: string, today: string): string {
 }
 
 /** MonthSelect + WeekStrip (今日から 7 日) + 日付グループ。タスクのない日も見出し + AddTaskRow を出す。 */
-export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys }: UpcomingViewProps) {
+export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys, dropPreviewDay }: UpcomingViewProps) {
   const { reduced } = useMotionTiming();
   const [monthOpen, setMonthOpen] = useState(false);
   const monthRef = useRef<HTMLDivElement>(null);
@@ -169,7 +171,9 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
       />
       <div>
         {groups.map((ymd) => (
-          <section key={ymd} id={days ? `day-${ymd}` : undefined} data-drop-day={ymd < today ? undefined : ymd}>
+          <section key={ymd} id={days ? `day-${ymd}` : undefined} data-drop-day={ymd < today ? undefined : ymd}
+            style={dropPreviewDay === ymd ? { background: "var(--color-accent-soft)", borderRadius: 6 } : undefined}
+          >
             <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
             {rows(ymd, rowsOf(ymd))}
             <AddSlot defaults={{ due: ymd }} onAdd={onAddTask ? (title) => onAddTask(ymd, title) : undefined} />

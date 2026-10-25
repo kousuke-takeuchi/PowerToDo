@@ -41,6 +41,8 @@ export type SidebarProps = {
   onClose?: () => void;
   /** アカウント欄の表示名。既定は絵コンテのサンプル名。 */
   displayName?: string;
+  /** Stories only: draw this project as the drop target (accent-soft highlight, D-01r). */
+  dropPreview?: string;
 };
 
 const heading: React.CSSProperties = {
@@ -68,6 +70,7 @@ export function Sidebar({
   onCreateProject,
   onClose,
   displayName = "たろう",
+  dropPreview,
 }: SidebarProps) {
   // 選択行のハイライトだけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
   const [current, setCurrent] = useState(active);
@@ -232,7 +235,12 @@ export function Sidebar({
         )}
         <div data-project-list="" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {mine.map((p) => (
-            <div key={p.name} data-project-item={p.name} data-drop-project={p.name}>
+            <div
+              key={p.name}
+              data-project-item={p.name}
+              data-drop-project={p.name}
+              style={dropPreview === p.name ? { background: "var(--color-accent-soft)", borderRadius: 6 } : undefined}
+            >
               <ProjectItem
                 color={p.color}
                 label={p.name}
