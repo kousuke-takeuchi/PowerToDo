@@ -284,6 +284,26 @@ impl Fired {
         }
     }
 
+    /// Moves the records of a task that got a new No. in a sync merge: its old No. now belongs
+    /// to another device's task, whose reminders must still fire.
+    pub fn renumber_task(&mut self, project: &str, from: u32, to: u32) {
+        self.forget_task(project, to);
+        for e in self
+            .entries
+            .iter_mut()
+            .filter(|e| e.project == project && e.no == from)
+        {
+            e.no = to;
+        }
+        for i in self
+            .pending
+            .iter_mut()
+            .filter(|i| i.project == project && i.no == from)
+        {
+            i.no = to;
+        }
+    }
+
     /// Drops records of tasks that no longer exist (`keys` = every `(project, no)` there is).
     pub fn retain_existing(&mut self, keys: &BTreeSet<(String, u32)>) {
         let exists = |project: &str, no: u32| keys.contains(&(project.to_string(), no));
@@ -561,5 +581,20 @@ mod tests {
         });
         let back: Fired = serde_json::from_str(&serde_json::to_string(&f).unwrap()).unwrap();
         assert_eq!(back, f);
+    }
+
+    #[test]
+    fn renumber_task_moves_records() {
+        let key = |no| ReminderKey {
+            project: "仕事".into(),
+            no,
+            code: "-0m".into(),
+        };
+        let mut f = Fired::default();
+        let at = NaiveDateTime::default();
+        f.mark(&key(2), at);
+        f.renumber_task("仕事", 2, 4);
+        assert!(!f.contains(&key(2), at));
+        assert!(f.contains(&key(4), at));
     }
 }

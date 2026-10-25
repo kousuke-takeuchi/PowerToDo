@@ -6,8 +6,10 @@
 //! store is [`engine`].
 
 pub mod backend;
+pub mod base;
 pub mod engine;
 pub mod gdrive;
+pub mod merge;
 pub mod oauth;
 pub mod secrets;
 pub mod state;

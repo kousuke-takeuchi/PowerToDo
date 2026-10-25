@@ -22,6 +22,8 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use super::backend::{BackendError, RemoteFile, StorageBackend};
+use super::base::BaseStore;
+use super::merge::{Merged, merge_files};
 use super::state::{BackendKind, FileRecord, SyncState};
 use super::{
     Action, LocalFile, PlanMode, Side, conflict_name, fold, is_sync_target, plan, sha256_hex,
@@ -200,6 +202,10 @@ pub trait SyncHost: Send + Sync {
     /// The sync moved `project`'s file to `archive/` (deleted on the other side): forget its
     /// reminders, as `delete_project` does. Called without the store lock.
     fn project_archived(&self, project: &str);
+
+    /// A sync merge gave local tasks of `project` new Nos, `(old, new)`: what this machine keeps
+    /// per task No. (fired reminders) follows them.
+    fn tasks_renumbered(&self, _project: &str, _moves: &[(u32, u32)]) {}
     /// Right before a normal run: bring the app up to date with the disk and the network (iOS:
     /// external edits, the proxy). `false` skips the run; the request that made it due is spent
     /// (whatever changed asks again). Blocking; the loop calls it off the async threads.
@@ -240,6 +246,8 @@ pub struct SyncReport {
     pub archived_remote: Vec<String>,
     /// `(file, conflict copy)`.
     pub conflicts: Vec<(String, String)>,
+    /// Both sides changed and were merged task by task (no conflict copy).
+    pub merged: Vec<String>,
     /// Left alone from the start: unsaved, held, being saved or unreadable.
     pub skipped: Vec<String>,
     /// Changed (or got unsaved edits) while the run was going; tried again next time.
@@ -434,6 +442,11 @@ impl SyncEngine {
         Self::with_clock(app_data_dir, || Local::now().naive_local())
     }
 
+    /// The merge bases kept next to `sync.json` (task-level merge spec section 2).
+    pub fn base(&self) -> BaseStore {
+        BaseStore::new(&self.shared.app_data_dir)
+    }
+
     pub fn with_clock(
         app_data_dir: PathBuf,
         clock: impl Fn() -> NaiveDateTime + Send + Sync + 'static,
@@ -547,6 +560,7 @@ impl SyncEngine {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => eprintln!("could not remove {}: {e}", path.display()),
             }
+            self.base().clear();
             inner.target.is_some()
         };
         if on {
@@ -1158,12 +1172,14 @@ impl SyncEngine {
             report.outcome = RunOutcome::Interrupted;
             return report;
         }
+        self.base().retain(&state.files.keys().cloned().collect());
         // What this run sent changed the target: look again, so the next look of
         // `check_remote` does not take our own uploads for someone else's change. A failure
         // only leaves the older fingerprint (the next look then asks for one more run), and so
         // does a file this run did not touch that changed meanwhile (another device's upload,
         // which this run never planned).
         if (!report.uploaded.is_empty()
+            || !report.merged.is_empty()
             || !report.archived_remote.is_empty()
             || !report.conflicts.is_empty())
             && let Ok(files) = target.backend.list().await
@@ -1171,6 +1187,7 @@ impl SyncEngine {
             let touched: BTreeSet<&str> = report
                 .uploaded
                 .iter()
+                .chain(&report.merged)
                 .chain(&report.archived_remote)
                 .map(String::as_str)
                 .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
@@ -1536,6 +1553,7 @@ impl Run<'_> {
         remote: &RemoteFile,
         local_hash: String,
     ) -> Result<(), FileError> {
+        self.engine.base().keep(name, &self.data_dir, &local_hash);
         self.state.files.insert(
             name.to_string(),
             FileRecord {
@@ -1550,6 +1568,7 @@ impl Run<'_> {
     }
 
     fn forget(&mut self, name: &str) -> Result<(), FileError> {
+        self.engine.base().remove(name);
         self.state.files.remove(name);
         self.done.insert(name.to_string());
         self.save()
@@ -1749,6 +1768,44 @@ impl Run<'_> {
         }
     }
 
+    /// Task-level merge spec section 3: the base of `name`, when the plan saw its record and
+    /// the base still has the record's hash.
+    fn merge_base(&self, name: &str) -> Option<Vec<u8>> {
+        let record = self.records.get(name)?;
+        self.engine.base().get(name, &record.local_hash)
+    }
+
+    /// The merged content, or `None` (a conflict copy then) when the store could not load the
+    /// local file or one of the three contents cannot be merged.
+    fn merge(
+        &self,
+        name: &str,
+        key: &str,
+        base: &[u8],
+        local: &[u8],
+        remote: &[u8],
+        newer: Side,
+    ) -> Option<Merged> {
+        let (high_water, holidays) = {
+            let guard = self.host.lock_store();
+            let store = guard.as_ref()?;
+            if store.load_failed(key) {
+                return None;
+            }
+            (store.high_water(key), store.holidays())
+        };
+        let today = self.engine.now().date();
+        match merge_files(
+            name, base, local, remote, newer, high_water, &holidays, today,
+        ) {
+            Ok(m) => Some(m),
+            Err(why) => {
+                eprintln!("{name}: not merged, making a conflict copy: {why}");
+                None
+            }
+        }
+    }
+
     /// Both sides changed (spec section 3.3). The loser's content is kept as a conflict copy
     /// locally and remotely, then the winner is put on both sides. When the two contents are the
     /// same after all (an etag / md5 cannot tell), only the record is written. A fresh PC's
@@ -1769,6 +1826,40 @@ impl Run<'_> {
             self.record(name, &remote, planned)?;
             self.report.recorded.push(name.to_string());
             return Ok(());
+        }
+        // Task-level merge spec section 3: merge when possible, else a conflict copy.
+        if let Some(base) = self.merge_base(name) {
+            // The local file will be replaced: make sure it can be before merging or uploading
+            // (unsaved, being saved, open in Excel: next round).
+            {
+                let guard = self.host.lock_store();
+                let store = guard.as_ref().ok_or(FileError::Changed)?;
+                check_local(
+                    store,
+                    &self.host.saving_keys(),
+                    &self.data_dir,
+                    &key,
+                    name,
+                    Some(&planned),
+                )?;
+            }
+            if let Some(merged) = self.merge(name, &key, &base, &local_bytes, &remote_bytes, keep) {
+                let staged = stage(&self.data_dir, name, &merged.bytes)?;
+                let hash = sha256_hex(&merged.bytes);
+                // Up first: a refused upload leaves this side as it was, so the next run merges
+                // the same local content against the newer remote.
+                let uploaded = self
+                    .backend
+                    .upload(name, Some(&remote), merged.bytes)
+                    .await?;
+                self.write_local(name, staged, Some(&planned), false)?;
+                if !merged.renumbered.is_empty() {
+                    self.host.tasks_renumbered(&key, &merged.renumbered);
+                }
+                self.record(name, &uploaded, hash)?;
+                self.report.merged.push(name.to_string());
+                return Ok(());
+            }
         }
         let first_sync = !self.records.contains_key(name);
         let (keep, pristine) = {
@@ -1837,7 +1928,7 @@ impl Run<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{INBOX, TaskInput};
+    use crate::domain::{INBOX, TaskInput, TaskPatch};
     use crate::store::paths::Paths;
     use crate::store::project_book::read_project_book;
     use crate::sync::backend::{BoxFut, Failure, MemoryBackend};
@@ -1885,6 +1976,7 @@ mod tests {
         ListChanged(bool),
         /// With whether the store lock was free then.
         Archived(String, bool),
+        Renumbered(String, Vec<(u32, u32)>),
     }
 
     #[derive(Default)]
@@ -1927,6 +2019,9 @@ mod tests {
         fn project_archived(&self, project: &str) {
             let free = self.store.try_lock().is_ok();
             self.push(Event::Archived(project.into(), free));
+        }
+        fn tasks_renumbered(&self, project: &str, moves: &[(u32, u32)]) {
+            self.push(Event::Renumbered(project.into(), moves.to_vec()));
         }
     }
 
@@ -2074,6 +2169,7 @@ mod tests {
             && r.deferred.is_empty()
             && r.failed.is_empty()
             && r.clashes.is_empty()
+            && r.merged.is_empty()
     }
 
     /// A with a project 仕事, synced; B joined (its fresh inbox and common workbook became
@@ -2093,6 +2189,181 @@ mod tests {
         let r = b.sync().await;
         assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
         (a, b)
+    }
+
+    #[tokio::test]
+    async fn the_base_follows_the_records() {
+        let remote = backend();
+        let (a, _b) = two_pcs(&remote).await;
+        let base = BaseStore::new(&a.app);
+        let records = a.records();
+        assert!(!records.is_empty());
+        for (name, rec) in records {
+            assert_eq!(
+                base.get(&name, &rec.local_hash),
+                Some(a.file(&name)),
+                "{name}"
+            );
+        }
+        a.engine.reset_records();
+        assert!(
+            base.get(INBOX_FILE, &sha256_hex(&a.file(INBOX_FILE)))
+                .is_none()
+        );
+    }
+
+    fn edit_title(title: &str) -> TaskPatch {
+        TaskPatch {
+            title: Some(title.into()),
+            ..Default::default()
+        }
+    }
+
+    fn three(a: &str, b: &str, c: &str) -> Vec<String> {
+        sorted(names(&[a, b, c]))
+    }
+
+    #[tokio::test]
+    async fn two_pcs_adding_to_the_inbox_merge() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        assert_eq!(a.sync().await.uploaded, [INBOX_FILE]);
+        let r = b.sync().await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        assert!(r.conflicts.is_empty());
+        assert!(!b.events().iter().any(|e| matches!(e, Event::Conflict(..))));
+        assert_eq!(
+            sorted(b.titles(INBOX)),
+            three("牛乳を買う", "Aの変更", "Bの変更")
+        );
+        assert_eq!(b.file(INBOX_FILE), remote.get(INBOX_FILE).unwrap());
+        // Both added No. 2: A's (on the remote) keeps it, B's moved.
+        let moved = b.events().into_iter().find_map(|e| match e {
+            Event::Renumbered(p, m) => Some((p, m)),
+            _ => None,
+        });
+        assert_eq!(moved, Some((INBOX.to_string(), vec![(2, 3)])));
+        assert_eq!(a.sync().await.downloaded, [INBOX_FILE]);
+        assert_eq!(
+            sorted(a.titles(INBOX)),
+            three("牛乳を買う", "Aの変更", "Bの変更")
+        );
+        assert!(idle(&b.sync().await));
+        assert!(futures_names(&remote).iter().all(|n| !n.contains("競合")));
+    }
+
+    #[tokio::test]
+    async fn two_pcs_editing_different_tasks_merge() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "パン");
+        a.sync().await;
+        b.sync().await;
+        a.with(|s| {
+            s.update_task(INBOX, 1, edit_title("牛乳を2本")).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        b.with(|s| {
+            s.update_task(INBOX, 2, edit_title("食パン")).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        a.sync().await;
+        assert_eq!(b.sync().await.merged, [INBOX_FILE]);
+        assert_eq!(b.titles(INBOX), ["牛乳を2本", "食パン"]);
+    }
+
+    #[tokio::test]
+    async fn without_a_base_a_conflict_copy_is_made() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        a.sync().await;
+        b.engine.base().remove(INBOX_FILE);
+        let r = b.sync().await;
+        assert!(r.merged.is_empty());
+        assert_eq!(r.conflicts.len(), 1);
+        assert_eq!(b.titles(INBOX), ["牛乳を買う", "Aの変更"]);
+    }
+
+    #[tokio::test]
+    async fn merge_upload_refused_merges_again_next_run() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        a.sync().await;
+        // Another upload of A lands right before B's merged upload.
+        a.add(INBOX, "Aの2つ目");
+        remote.race_upload(INBOX_FILE, &a.file(INBOX_FILE));
+        let r = b.sync().await;
+        assert!(r.merged.is_empty(), "{r:?}");
+        let r = b.sync().await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        assert_eq!(
+            sorted(b.titles(INBOX)),
+            sorted(names(&["牛乳を買う", "Aの変更", "Aの2つ目", "Bの変更"]))
+        );
+        assert_eq!(b.file(INBOX_FILE), remote.get(INBOX_FILE).unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_refused_merge_upload_changes_nothing_locally() {
+        // Local files are newer than the remote (stamped NOW, in the past).
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        a.with(|s| {
+            s.update_task(INBOX, 1, edit_title("Y")).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        a.sync().await;
+        b.with(|s| {
+            let patch = TaskPatch {
+                note: Some(Some("スーパーで".into())),
+                ..Default::default()
+            };
+            s.update_task(INBOX, 1, patch).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        let before = b.file(INBOX_FILE);
+        // A renames again right before B's merged upload.
+        a.with(|s| {
+            s.update_task(INBOX, 1, edit_title("Z")).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        remote.race_upload(INBOX_FILE, &a.file(INBOX_FILE));
+        let r = b.sync().await;
+        assert!(r.merged.is_empty(), "{r:?}");
+        assert_eq!(
+            b.file(INBOX_FILE),
+            before,
+            "nothing installed before the upload"
+        );
+        let r = b.sync().await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        let task = b.with(|s| s.view(INBOX).unwrap().tasks[0].clone());
+        assert_eq!(task.title, "Z", "A's later rename is not lost");
+        assert_eq!(task.note.as_deref(), Some("スーパーで"));
+    }
+
+    #[tokio::test]
+    async fn a_busy_local_file_is_not_merged() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        a.sync().await;
+        let remote_before = remote.get(INBOX_FILE).unwrap();
+        b.host.saving.lock().unwrap().insert(INBOX.to_string());
+        let r = b.sync().await;
+        assert!(r.merged.is_empty(), "{r:?}");
+        assert_eq!(
+            remote.get(INBOX_FILE).unwrap(),
+            remote_before,
+            "nothing uploaded"
+        );
     }
 
     #[tokio::test]
@@ -2201,6 +2472,8 @@ mod tests {
         a.add(INBOX, "Aの変更");
         b.add(INBOX, "Bの変更");
         assert_eq!(a.sync().await.uploaded, [INBOX_FILE]);
+        // Without a base (e.g. the first conflict after updating the app) it is a conflict copy.
+        b.engine.base().remove(INBOX_FILE);
         // A copy of that name is already there: the new one gets a number.
         fs::write(
             b.data.join("受信トレイ (競合 2026-10-16 0930).xlsx"),
@@ -2238,6 +2511,7 @@ mod tests {
         a.add(INBOX, "Aの変更");
         b.add(INBOX, "Bの変更");
         a.sync().await;
+        b.engine.base().remove(INBOX_FILE);
         let r = b.sync().await;
         let copy = "受信トレイ (競合 2026-10-16 0930).xlsx".to_string();
         assert_eq!(r.conflicts, [(INBOX_FILE.to_string(), copy.clone())]);
@@ -2556,6 +2830,18 @@ mod tests {
         assert!(!r.uploaded.is_empty(), "{r:?}");
         assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
         assert_eq!(a.engine.next_due(), None);
+    }
+
+    #[tokio::test]
+    async fn own_merged_upload_is_not_a_remote_change() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        a.sync().await;
+        let r = settled(&b).await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        assert_eq!(b.engine.check_remote().await, CheckOutcome::Unchanged);
     }
 
     #[tokio::test]
@@ -3844,14 +4130,16 @@ mod tests {
         assert!(r.rerun);
         assert_eq!(remote.get(INBOX_FILE).unwrap(), theirs);
         assert_eq!(a.records()[INBOX_FILE], record);
-        // The rerun was asked for, and it plans a conflict: both contents survive.
+        // The rerun was asked for, and it merges: both contents survive in the one file.
         assert!(a.engine.take_due(Instant::now()));
         let r = a.sync().await;
-        let copy = "受信トレイ (競合 2026-10-16 0930).xlsx".to_string();
-        assert_eq!(r.conflicts, [(INBOX_FILE.to_string(), copy.clone())]);
-        assert_eq!(a.titles(INBOX), ["牛乳を買う", "Bの変更"]);
-        assert_eq!(titles_in(&a.file(&copy)), ["牛乳を買う", "Aの変更"]);
-        assert_eq!(remote.get(&copy).unwrap(), a.file(&copy));
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        assert!(r.conflicts.is_empty());
+        assert_eq!(
+            sorted(a.titles(INBOX)),
+            sorted(names(&["牛乳を買う", "Aの変更", "Bの変更"]))
+        );
+        assert_eq!(remote.get(INBOX_FILE).unwrap(), a.file(INBOX_FILE));
     }
 
     #[tokio::test]
