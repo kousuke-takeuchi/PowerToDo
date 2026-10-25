@@ -24,6 +24,7 @@ const priorityVar = {
  */
 export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel }: CheckboxProps) {
   const { reduced, t } = useMotionTiming();
+  const desktop = size === 18;
   const [scope, animate] = useAnimate<HTMLButtonElement>();
   const prev = useRef(checked);
   useEffect(() => {
@@ -45,15 +46,15 @@ export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel
       aria-checked={checked}
       aria-label={ariaLabel}
       onClick={() => onChange?.(!checked)}
-      className="group/check"
+      className={desktop ? "group/check" : undefined}
       style={{
         position: "relative",
         width: size,
         height: size,
         borderRadius: size / 2,
-        border: `2px solid ${color}`,
-        // Priority 1-3: a light fill of the ring's color (Todoist). Priority 4 has none.
-        background: !checked && priority < 4 ? `color-mix(in srgb, ${priorityVar[priority]} 10%, transparent)` : "transparent",
+        // Desktop (18, Todoist): a 2 px ring and, for priority 1-3, a light fill of its color. Mobile (20) keeps 1.5 px, no fill.
+        border: `${desktop ? 2 : 1.5}px solid ${color}`,
+        background: desktop && !checked && priority < 4 ? `color-mix(in srgb, ${priorityVar[priority]} 10%, transparent)` : "transparent",
         display: "grid",
         placeItems: "center",
         padding: 0,
@@ -70,7 +71,7 @@ export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel
         transition={fadeIn}
         style={{ position: "absolute", inset: 0, borderRadius: size / 2, background: "var(--color-success)" }}
       />
-      {!checked && (
+      {desktop && !checked && (
         // Hover preview of the check (Todoist): shown at once, no transition.
         <svg
           aria-hidden

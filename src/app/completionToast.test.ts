@@ -22,11 +22,20 @@ test("undoOf_plain_completes_false", () => {
 test("undoOf_recurring_restores_the_date", () => {
   const c = completedOf({ project: "仕事", no: 2, rrule: "FREQ=WEEKLY", due: "2026-10-25", dueTime: "09:00", reminders: ["-0m"] });
   assert.deepEqual(undoOf(c), {
-    kind: "update",
+    kind: "restore",
     project: "仕事",
     no: 2,
-    patch: { due: "2026-10-25", dueTime: "09:00", reminders: ["-0m"] },
+    patch: { due: "2026-10-25", dueTime: "09:00", reminders: ["-0m"], rrule: "FREQ=WEEKLY" },
   });
+});
+
+// The last occurrence (COUNT / UNTIL used up): complete_task drops the rule and marks the task done. Undo must reopen
+// it and put the rule back, not only the date.
+test("undoOf_last_occurrence_reopens_and_restores_the_rule", () => {
+  const c = completedOf({ project: "仕事", no: 5, rrule: "FREQ=DAILY;COUNT=1", due: "2026-10-25", reminders: [] });
+  const u = undoOf(c);
+  assert.equal(u.kind, "restore");
+  assert.equal(u.kind === "restore" && u.patch.rrule, "FREQ=DAILY;COUNT=1");
 });
 
 test("completedOf_plain_has_no_before", () => {

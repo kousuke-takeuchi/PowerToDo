@@ -223,7 +223,7 @@ export function MobileProjectView({
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
-              <SectionHeader title={s.name} count={rows.length} />
+              <SectionHeader mobile title={s.name} count={rows.length} />
               {rows.map(renderRow)}
             </section>
           );

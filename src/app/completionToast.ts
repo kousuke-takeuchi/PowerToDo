@@ -5,7 +5,7 @@
 export type Completed = {
   project: string;
   no: number;
-  before?: { due: string | null; dueTime: string | null; reminders: string[] };
+  before?: { due: string | null; dueTime: string | null; reminders: string[]; rrule: string };
 };
 export type ToastState = { entries: Completed[] };
 
@@ -19,17 +19,21 @@ export function toastText(state: ToastState): string {
   return `${state.entries.length} 件のタスクを完了しました`;
 }
 
+/**
+ * `restore`: reopen the task (harmless when it is open), then put the date, reminders and rule back. Completing a
+ * repeating task moves its date on; completing its last occurrence (COUNT / UNTIL used up) drops the rule and marks
+ * it done, so both steps are needed.
+ */
 export type Undo =
   | { kind: "complete"; project: string; no: number; done: false }
-  | { kind: "update"; project: string; no: number; patch: { due: string | null; dueTime: string | null; reminders: string[] } };
+  | { kind: "restore"; project: string; no: number; patch: { due: string | null; dueTime: string | null; reminders: string[]; rrule: string } };
 
-/** A repeating task never becomes done: complete_task moved its date on, so undo puts the old date back. */
 export function undoOf(c: Completed): Undo {
-  if (c.before) return { kind: "update", project: c.project, no: c.no, patch: { ...c.before } };
+  if (c.before) return { kind: "restore", project: c.project, no: c.no, patch: { ...c.before } };
   return { kind: "complete", project: c.project, no: c.no, done: false };
 }
 
 export function completedOf(t: { project: string; no: number; rrule?: string; due?: string; dueTime?: string; reminders: string[] }): Completed {
   if (!t.rrule) return { project: t.project, no: t.no };
-  return { project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null, reminders: [...t.reminders] } };
+  return { project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null, reminders: [...t.reminders], rrule: t.rrule } };
 }

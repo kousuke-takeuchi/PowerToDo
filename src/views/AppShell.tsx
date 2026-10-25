@@ -80,9 +80,16 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
         <div
           style={{
             width: "100%",
-            maxWidth: wide && !fullWidth ? 800 : undefined,
             boxSizing: "border-box",
-            padding: wide ? (fullWidth ? "8px 32px 40px" : panel ? "8px 24px 40px" : "8px 0 40px") : "8px 24px 16px 44px", // narrow: room on the left for the section and subtask chevrons
+            // Left room for what sits left of the column (section chevron -28, subtask chevron -24, drag handle -40):
+            // `main` scrolls, so it clips anything left of it. Once the 800 column fills `main`, keep 44 / 24 like narrow.
+            padding: wide
+              ? fullWidth
+                ? "8px 32px 40px"
+                : panel
+                  ? "8px 24px 40px 44px"
+                  : "8px max(24px, calc((100% - 800px) / 2)) 40px max(44px, calc((100% - 800px) / 2))"
+              : "8px 24px 16px 44px",
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-4)",

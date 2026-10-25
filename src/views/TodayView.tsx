@@ -122,7 +122,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
           </section>
         )}
         <section>
-          <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} showChevron={false} />
+          <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} count={todays.length} showChevron={false} />
           {rows("today", todays)}
           <AddSlot onAdd={onAddTask} />
         </section>

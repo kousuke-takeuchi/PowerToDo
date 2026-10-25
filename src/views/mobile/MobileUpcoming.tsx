@@ -63,7 +63,7 @@ export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, o
         />
         {days.map((ymd) => (
           <section key={ymd} data-day={ymd}>
-            <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
+            <SectionHeader mobile title={dayTitle(ymd, today)} showChevron={false} />
             {tasks
               .filter((t) => t.due === ymd)
               .sort((a, b) => a.no - b.no)
