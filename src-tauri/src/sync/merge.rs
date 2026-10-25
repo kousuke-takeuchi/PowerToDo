@@ -4,7 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::model::Task;
+use chrono::NaiveDate;
+
+use crate::domain::model::{Label, Project, Task};
+use crate::store::common_book::{CommonBook, Settings};
 use crate::store::project_book::ProjectBook;
 use crate::sync::Side;
 
@@ -214,10 +217,224 @@ pub fn merge_project(
     }
 }
 
+/// Rows keyed by name (projects, labels): the table of spec 4.1, `merge_row` for rows both
+/// sides kept. Ordered as `merge_names` orders the names.
+fn merge_rows<T: PartialEq + Clone>(
+    base: &[T],
+    local: &[T],
+    remote: &[T],
+    newer: Side,
+    name: impl Fn(&T) -> &str,
+    merge_row: impl Fn(&T, &T, &T) -> T,
+) -> Vec<T> {
+    let find = |v: &[T], n: &str| v.iter().find(|x| name(x) == n).cloned();
+    let names = |v: &[T]| v.iter().map(|x| name(x).to_string()).collect::<Vec<_>>();
+    let mut all = merge_names(&names(base), &names(local), &names(remote), newer);
+    // A row deleted on one side but edited on the other comes back (the edit wins).
+    for x in local.iter().chain(remote) {
+        let n = name(x);
+        if !all.iter().any(|a| a == n) && find(base, n).is_some_and(|b| b != *x) {
+            all.push(n.to_string());
+        }
+    }
+    all.into_iter()
+        .filter_map(
+            |n| match (find(base, &n), find(local, &n), find(remote, &n)) {
+                (Some(b), Some(l), Some(r)) => Some(merge_row(&b, &l, &r)),
+                (_, Some(l), None) => Some(l),
+                (_, None, Some(r)) => Some(r),
+                (None, Some(l), Some(r)) => Some(match newer {
+                    Side::Local => l,
+                    Side::Remote => r,
+                }),
+                _ => None,
+            },
+        )
+        .collect()
+}
+
+fn merge_settings(b: &Settings, l: &Settings, r: &Settings, newer: Side) -> Settings {
+    Settings {
+        display_name: pick(&b.display_name, &l.display_name, &r.display_name, newer),
+        week_start: pick(&b.week_start, &l.week_start, &r.week_start, newer),
+        timezone: pick(&b.timezone, &l.timezone, &r.timezone, newer),
+        default_reminder: pick(
+            &b.default_reminder,
+            &l.default_reminder,
+            &r.default_reminder,
+            newer,
+        ),
+        notify_time: pick(&b.notify_time, &l.notify_time, &r.notify_time, newer),
+        keep_in_tray: pick(&b.keep_in_tray, &l.keep_in_tray, &r.keep_in_tray, newer),
+        notifications: pick(&b.notifications, &l.notifications, &r.notifications, newer),
+    }
+}
+
+/// Keyed pairs (設定 rows this version does not know), in merged key order.
+fn merge_pairs(
+    base: &[(String, String)],
+    local: &[(String, String)],
+    remote: &[(String, String)],
+    newer: Side,
+) -> Vec<(String, String)> {
+    let map = |v: &[(String, String)]| v.iter().cloned().collect::<BTreeMap<_, _>>();
+    let keys = |v: &[(String, String)]| v.iter().map(|p| p.0.clone()).collect::<Vec<_>>();
+    let order = merge_names(&keys(base), &keys(local), &keys(remote), newer);
+    let merged = merge_extra(&map(base), &map(local), &map(remote), newer);
+    order
+        .into_iter()
+        .filter_map(|k| merged.get(&k).map(|v| (k.clone(), v.clone())))
+        .collect()
+}
+
+/// Unknown-column cells per project / label name.
+fn merge_extra_by_name(
+    base: &BTreeMap<String, BTreeMap<String, String>>,
+    local: &BTreeMap<String, BTreeMap<String, String>>,
+    remote: &BTreeMap<String, BTreeMap<String, String>>,
+    newer: Side,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let empty = BTreeMap::new();
+    let names: BTreeSet<&String> = base
+        .keys()
+        .chain(local.keys())
+        .chain(remote.keys())
+        .collect();
+    names
+        .into_iter()
+        .map(|n| {
+            let get =
+                |m: &BTreeMap<String, BTreeMap<String, String>>| m.get(n).unwrap_or(&empty).clone();
+            (
+                n.clone(),
+                merge_extra(&get(base), &get(local), &get(remote), newer),
+            )
+        })
+        .filter(|(_, v)| !v.is_empty())
+        .collect()
+}
+
+/// Spec 4.4. The three must have no `unparsed_holidays` (the caller checks).
+pub fn merge_common(
+    base: &CommonBook,
+    local: &CommonBook,
+    remote: &CommonBook,
+    newer: Side,
+) -> CommonBook {
+    let mut projects = merge_rows(
+        &base.projects,
+        &local.projects,
+        &remote.projects,
+        newer,
+        |p: &Project| p.name.as_str(),
+        |b, l, r| Project {
+            name: l.name.clone(),
+            color: pick(&b.color, &l.color, &r.color, newer),
+            order: pick(&b.order, &l.order, &r.order, newer),
+            favorite: pick(&b.favorite, &l.favorite, &r.favorite, newer),
+            inbox: pick(&b.inbox, &l.inbox, &r.inbox, newer),
+        },
+    );
+    // Only one inbox: the newer side's.
+    if projects.iter().filter(|p| p.inbox).count() > 1 {
+        let newer_book = match newer {
+            Side::Local => local,
+            Side::Remote => remote,
+        };
+        let keep = newer_book
+            .projects
+            .iter()
+            .find(|p| p.inbox)
+            .map(|p| p.name.clone());
+        for p in projects.iter_mut() {
+            p.inbox = Some(&p.name) == keep.as_ref();
+        }
+    }
+    let labels = merge_rows(
+        &base.labels,
+        &local.labels,
+        &remote.labels,
+        newer,
+        |x: &Label| x.name.as_str(),
+        |b, l, r| Label {
+            name: l.name.clone(),
+            color: pick(&b.color, &l.color, &r.color, newer),
+            order: pick(&b.order, &l.order, &r.order, newer),
+        },
+    );
+    let days = |v: &[NaiveDate]| v.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+    let mut holidays: Vec<NaiveDate> = merge_names(
+        &days(&base.holidays),
+        &days(&local.holidays),
+        &days(&remote.holidays),
+        newer,
+    )
+    .iter()
+    .filter_map(|d| d.parse().ok())
+    .collect();
+    holidays.sort();
+    holidays.dedup();
+    let by_day = |m: &BTreeMap<NaiveDate, String>| {
+        m.iter()
+            .map(|(d, n)| (d.to_string(), n.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let holiday_names = merge_extra(
+        &by_day(&base.holiday_names),
+        &by_day(&local.holiday_names),
+        &by_day(&remote.holiday_names),
+        newer,
+    )
+    .into_iter()
+    .filter_map(|(d, n)| d.parse::<NaiveDate>().ok().map(|d| (d, n)))
+    .filter(|(d, _)| holidays.contains(d))
+    .collect();
+    CommonBook {
+        projects,
+        labels,
+        holidays,
+        holiday_names,
+        unparsed_holidays: Vec::new(),
+        settings: merge_settings(&base.settings, &local.settings, &remote.settings, newer),
+        extra_settings: merge_pairs(
+            &base.extra_settings,
+            &local.extra_settings,
+            &remote.extra_settings,
+            newer,
+        ),
+        project_columns: merge_names(
+            &base.project_columns,
+            &local.project_columns,
+            &remote.project_columns,
+            newer,
+        ),
+        project_extra: merge_extra_by_name(
+            &base.project_extra,
+            &local.project_extra,
+            &remote.project_extra,
+            newer,
+        ),
+        label_columns: merge_names(
+            &base.label_columns,
+            &local.label_columns,
+            &remote.label_columns,
+            newer,
+        ),
+        label_extra: merge_extra_by_name(
+            &base.label_extra,
+            &local.label_extra,
+            &remote.label_extra,
+            newer,
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::model::Priority;
+    use crate::domain::model::{Label, Project};
+    use crate::store::common_book::CommonBook;
     use chrono::NaiveDateTime;
 
     fn task(no: u32, title: &str) -> Task {
@@ -417,5 +634,92 @@ mod tests {
         y.order = 1;
         let m = merge_project(&b, &book(vec![x]), &book(vec![y]), Side::Remote, 2);
         assert_eq!(titles(&m.book), [(2, "y".into()), (1, "x".into())]);
+    }
+
+    fn project(name: &str, inbox: bool) -> Project {
+        Project {
+            name: name.into(),
+            color: "var(--color-text-muted)".into(),
+            order: 0,
+            favorite: false,
+            inbox,
+        }
+    }
+
+    fn common(projects: Vec<Project>) -> CommonBook {
+        CommonBook {
+            projects,
+            ..CommonBook::new_default()
+        }
+    }
+
+    fn names_of(c: &CommonBook) -> Vec<String> {
+        c.projects.iter().map(|p| p.name.clone()).collect()
+    }
+
+    #[test]
+    fn projects_added_on_both_sides_are_kept() {
+        let b = common(vec![project("受信トレイ", true)]);
+        let l = common(vec![project("受信トレイ", true), project("仕事", false)]);
+        let r = common(vec![project("受信トレイ", true), project("家", false)]);
+        let m = merge_common(&b, &l, &r, Side::Remote);
+        assert_eq!(names_of(&m), s(&["受信トレイ", "家", "仕事"]));
+    }
+
+    #[test]
+    fn project_fields_merge_one_by_one() {
+        let b = common(vec![project("仕事", false)]);
+        let mut lp = project("仕事", false);
+        lp.favorite = true;
+        let mut rp = project("仕事", false);
+        rp.color = "red".into();
+        let m = merge_common(&b, &common(vec![lp]), &common(vec![rp]), Side::Local);
+        assert!(m.projects[0].favorite);
+        assert_eq!(m.projects[0].color, "red");
+    }
+
+    #[test]
+    fn one_inbox_after_merge() {
+        let b = common(vec![project("受信トレイ", true), project("仕事", false)]);
+        let l = common(vec![project("受信トレイ", false), project("仕事", true)]);
+        let r = common(vec![
+            project("受信トレイ", false),
+            project("仕事", false),
+            project("家", true),
+        ]);
+        let m = merge_common(&b, &l, &r, Side::Remote);
+        let inboxes: Vec<&str> = m
+            .projects
+            .iter()
+            .filter(|p| p.inbox)
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(inboxes, ["家"], "the newer side's inbox");
+    }
+
+    #[test]
+    fn labels_holidays_and_settings() {
+        let mut b = CommonBook::new_default();
+        b.labels = vec![Label {
+            name: "急ぎ".into(),
+            color: "red".into(),
+            order: 0,
+        }];
+        let mut l = b.clone();
+        l.labels.push(Label {
+            name: "家".into(),
+            color: "blue".into(),
+            order: 1,
+        });
+        l.holidays = vec![chrono::NaiveDate::from_ymd_opt(2026, 11, 3).unwrap()];
+        l.settings.display_name = "たろう".into();
+        let mut r = b.clone();
+        r.settings.keep_in_tray = !b.settings.keep_in_tray;
+        let m = merge_common(&b, &l, &r, Side::Remote);
+        let labels: Vec<&str> = m.labels.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(labels, ["急ぎ", "家"]);
+        assert_eq!(m.holidays, l.holidays);
+        assert_eq!(m.settings.display_name, "たろう");
+        assert_eq!(m.settings.keep_in_tray, r.settings.keep_in_tray);
     }
 }
