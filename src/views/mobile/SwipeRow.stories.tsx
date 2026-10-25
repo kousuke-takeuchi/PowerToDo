@@ -20,3 +20,8 @@ export const SwipingRight: Story = { name: "スワイプ中 右 (完了)", args:
 /** 左へ 98 動かした状態 (離すと日付のシート)。 */
 export const SwipingLeft: Story = { name: "スワイプ中 左 (日付)", args: { initialOffset: -98 } };
 export const Disabled: Story = { name: "無効", args: { disabled: true } };
+/** 終わったタスクを右へ 98 動かした状態 (離すと未完了に戻す)。 */
+export const SwipingRightDone: Story = {
+  name: "スワイプ中 右 (終わったタスク)",
+  args: { done: true, initialOffset: 98, children: <TaskRow variant="mobile" title="牛乳と卵を買う" done priority={1} /> },
+};

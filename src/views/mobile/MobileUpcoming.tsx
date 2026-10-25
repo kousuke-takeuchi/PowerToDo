@@ -70,7 +70,7 @@ export function MobileUpcoming({ tasks, today, live, fill, sync, onToggleDone, o
               .map((t) => {
                 const r = <TaskRow key={t.no} variant="mobile" title={t.title} done={isDone(t)} priority={live ? t.priority : 4} onToggleDone={() => toggle(t)} onClick={onOpenTask ? () => onOpenTask(t) : undefined} />;
                 return live && (onSwipeDate || onTaskMenu) ? (
-                  <SwipeRow key={t.no} onComplete={() => toggle(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+                  <SwipeRow key={t.no} onComplete={() => toggle(t)} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
                     {r}
                   </SwipeRow>
                 ) : (
