@@ -88,7 +88,7 @@ export function TaskRow(p: TaskRowProps) {
         display: "flex",
         gap: mobile ? "var(--space-3)" : 10,
         alignItems: "flex-start",
-        padding: mobile ? "10px 0" : "10px 0 9px",
+        padding: mobile ? "10px 0" : "12px 0 11px",
         // pen の stroke は内側 (高さに加算しない)。フォーカス行: モバイルは左に 2px の accent 枠、デスクトップは角の丸い薄い枠 (Todoist)。
         boxShadow: p.focused
           ? mobile
@@ -106,7 +106,7 @@ export function TaskRow(p: TaskRowProps) {
         <span
           aria-hidden
           className={p.showHandle || p.focused ? undefined : "opacity-0 group-hover:opacity-100"}
-          style={{ position: "absolute", left: -40, top: 12, display: "inline-flex", color: "var(--color-text-muted)" }}
+          style={{ position: "absolute", left: -40, top: 14, display: "inline-flex", color: "var(--color-text-muted)" }}
         >
           <GripVertical size={16} />
         </span>
@@ -123,7 +123,7 @@ export function TaskRow(p: TaskRowProps) {
           style={{
             position: "absolute",
             left: -24,
-            top: 12,
+            top: 14,
             width: 16,
             height: 16,
             padding: 0,
@@ -139,7 +139,7 @@ export function TaskRow(p: TaskRowProps) {
       <div style={{ display: "flex", flex: "0 0 auto" }} onClick={(e) => e.stopPropagation()}>
         <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} size={mobile ? 20 : 18} />
       </div>
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: mobile ? "var(--space-1)" : 2 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: mobile ? "var(--space-1)" : 0 }}>
         <div
           style={{
             fontSize: 14,
@@ -217,7 +217,7 @@ export function TaskRow(p: TaskRowProps) {
           style={{
             position: "absolute",
             right: 0,
-            top: 6,
+            top: 8,
             display: "flex",
             gap: "var(--space-1)",
             alignItems: "center",
