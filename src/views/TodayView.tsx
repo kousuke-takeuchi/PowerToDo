@@ -98,7 +98,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
   }
   const showOverdue = !hideOverdue && overdue.length > 0;
   const total = (showOverdue ? overdue.length : 0) + todays.length;
-  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today), focusedKey, onVisibleKeys });
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today), focusedKey, onVisibleKeys, dragView: "today" });
 
   return (
     <>
@@ -123,7 +123,9 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
         )}
         <section>
           <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} count={todays.length} showChevron={false} />
-          {rows("today", todays)}
+          <div data-drop-list="today" data-level0="0">
+            {rows("today", todays)}
+          </div>
           <AddSlot defaults={{ due: today }} onAdd={onAddTask} />
         </section>
       </div>

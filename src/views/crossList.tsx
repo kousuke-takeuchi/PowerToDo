@@ -2,11 +2,12 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
-import type { TaskRowProps } from "../components/TaskRow";
+import { TaskRow, type TaskRowProps } from "../components/TaskRow";
 import { Collapse } from "../motion";
 import type { Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { CommentCounts } from "../app/useComments";
+import { DragCtx } from "../app/drag/DragContext";
 import { RowActions } from "../app/rowActions";
 import { ActionRow } from "./ActionRow";
 import { SubtaskForm } from "./SubtaskForm";
@@ -129,13 +130,16 @@ export type CrossRowsOptions = {
   focusedKey?: string;
   /** 描画した行のキーを表示順に親へ知らせる (変わったときだけ呼ぶ。ビューが消えるときは [])。 */
   onVisibleKeys?: (keys: string[]) => void;
+  /** Which view the rows are dragged from (spec 3). Without it the rows have no drag handle. */
+  dragView?: "today" | "upcoming" | "label";
 };
 
 /**
  * 今日 / 近日 / ラベル詳細の行 (チェック・退場・開く) を作る。戻り値の `rows(group, list)` が、グループ `group` の
  * `list` を描画する要素にする。`onToggleDone` が無いときは従来どおりの素の TaskRow の並び (ラッパーなし)。
  */
-export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey, onVisibleKeys }: CrossRowsOptions) {
+export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey, onVisibleKeys, dragView }: CrossRowsOptions) {
+  const drag = useContext(DragCtx);
   const { isDone: fakeDone, toggle: fakeToggle } = useDone();
   const colors = useContext(ProjectColors);
   const commentCounts = useContext(CommentCounts);
@@ -175,15 +179,33 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
           focused: focusedKey === taskKey(t),
           onClick: onOpenTask ? () => onOpenTask(t) : undefined,
           onToggleDone: () => toggle(t, group, index),
+          // The overdue rows only go to the sidebar: as "label" they are no target for the Today order or the Upcoming days.
+          onHandlePointerDown:
+            drag && dragView
+              ? (e) =>
+                  drag.start(
+                    e,
+                    { kind: "task", task: t, view: group === "overdue" ? "label" : dragView, depth: 0, height: 0, subtree: new Set([taskKey(t)]) },
+                    <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
+                  )
+              : undefined,
+          dragging: drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === t.project,
         }}
       />
     );
-    return onToggleDone ? (
-      <Collapse key={taskKey(t)} enterY={-8} duration={0.1}>
+    const marked = dragView ? (
+      <div key={onToggleDone ? undefined : t.no} data-row="" data-row-kind="task" data-key={taskKey(t)} data-no={t.no} data-depth="0" data-parent="" data-section="">
         {el}
-      </Collapse>
+      </div>
     ) : (
       el
+    );
+    return onToggleDone ? (
+      <Collapse key={taskKey(t)} enterY={-8} duration={0.1}>
+        {marked}
+      </Collapse>
+    ) : (
+      marked
     );
   };
   return (group: string, list: Task[]) => {

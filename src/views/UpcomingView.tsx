@@ -71,7 +71,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
     days ? (days.find((d) => d.date === ymd)?.tasks ?? []) : open.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no);
 
   const allTasks = days ? days.flatMap((d) => d.tasks) : tasks;
-  const rows = useCrossRows({ tasks: allTasks, onToggleDone, onOpenTask, focusedKey, onVisibleKeys });
+  const rows = useCrossRows({ tasks: allTasks, onToggleDone, onOpenTask, focusedKey, onVisibleKeys, dragView: "upcoming" });
 
   const monthButton = (
     <button
@@ -169,7 +169,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
       />
       <div>
         {groups.map((ymd) => (
-          <section key={ymd} id={days ? `day-${ymd}` : undefined}>
+          <section key={ymd} id={days ? `day-${ymd}` : undefined} data-drop-day={ymd < today ? undefined : ymd}>
             <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
             {rows(ymd, rowsOf(ymd))}
             <AddSlot defaults={{ due: ymd }} onAdd={onAddTask ? (title) => onAddTask(ymd, title) : undefined} />

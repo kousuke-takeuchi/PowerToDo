@@ -267,8 +267,16 @@ export const D01RowActions: Story = {
 function DragScreen() {
   const [list, setList] = useState<Task[]>(shopping);
   const [secs, setSecs] = useState(sections);
+  const [projs, setProjs] = useState(projects);
+  // The last drops that left the project screen (a task onto a sidebar project, a project order), shown below the sidebar for the check.
+  const [log, setLog] = useState<string[]>([]);
   const onDrop = (r: DropResult) => {
-    if (r.kind === "place") {
+    if (r.kind === "project") {
+      if (r.project !== r.source.task.project) setLog((l) => [...l, `project:${r.source.task.no}->${r.project}`]);
+    } else if (r.kind === "projects") {
+      setProjs((cur) => r.names.map((n, i) => ({ ...cur.find((p) => p.name === n)!, order: i + 1 })).concat(cur.filter((p) => p.inbox)));
+      setLog((l) => [...l, `projects:${r.names.join(",")}`]);
+    } else if (r.kind === "place") {
       const { section, parent, before } = r.placement;
       setList((cur) => {
         const moved = { ...r.source.task, category: section, parentNo: parent ?? undefined };
@@ -284,8 +292,12 @@ function DragScreen() {
   };
   return (
     <DragProvider onDrop={onDrop}>
-      <AppShell sidebar={sidebar} syncState="synced">
+      <AppShell
+        sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projs} syncState="synced" lastSyncedAt="09:41" />}
+        syncState="synced"
+      >
         <ProjectView project="買い物" tasks={list} sections={secs} initialExpanded={[1]} />
+        <div data-testid="drag-log" style={{ position: "fixed", right: 8, bottom: 8, fontSize: 12, color: "var(--color-text-muted)" }}>{log.join(" | ")}</div>
       </AppShell>
     </DragProvider>
   );
@@ -454,9 +466,17 @@ export const D04: Story = {
 // 行は TodayView が 400ms だけ完了表示のまま残してから畳む。追加は受信トレイ・期限 = 今日、再スケジュールは期限切れ全件の期限を選んだ日にする。
 function TodayInteractive() {
   const [list, setList] = useState<Task[]>(() => withoutNo(15));
-  return navShell(
+  const [log, setLog] = useState<string[]>([]);
+  return (
+    <DragProvider
+      onDrop={(r) => {
+        if (r.kind === "today") setLog((l) => [...l, `today:before ${r.beforeKey}`]);
+        else if (r.kind === "project" && r.project !== r.source.task.project) setLog((l) => [...l, `project:${r.source.task.no}->${r.project}`]);
+      }}
+    >
+      {navShell(
     { kind: "today" },
-    <TodayView
+    <><div data-testid="drag-log" style={{ position: "fixed", right: 8, bottom: 8, fontSize: 12, color: "var(--color-text-muted)" }}>{log.join(" | ")}</div><TodayView
       tasks={list}
       today={TODAY}
       hiddenProjects={["読書"]}
@@ -482,7 +502,9 @@ function TodayInteractive() {
         ])
       }
       onReschedule={(due) => setList((cur) => cur.map((x) => (x.due !== undefined && x.due < TODAY ? { ...x, due } : x)))}
-    />,
+    /></>,
+      )}
+    </DragProvider>
   );
 }
 
@@ -514,7 +536,13 @@ function UpcomingInteractive() {
       tasks: list.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due === date).sort((a, b) => a.no - b.no),
     };
   });
-  return navShell(
+  return (
+    <DragProvider
+      onDrop={(r) => {
+        if (r.kind === "day") setList((cur) => cur.map((x) => (x.no === r.source.task.no ? { ...x, due: r.date } : x)));
+      }}
+    >
+      {navShell(
     { kind: "upcoming" },
     <UpcomingView
       tasks={list}
@@ -547,6 +575,8 @@ function UpcomingInteractive() {
         ])
       }
     />,
+      )}
+    </DragProvider>
   );
 }
 

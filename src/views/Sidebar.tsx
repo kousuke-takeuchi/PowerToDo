@@ -1,6 +1,7 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Bell, CalendarCheck, CalendarDays, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
+import { DragCtx } from "../app/drag/DragContext";
 import { isImeKey } from "../app/keys";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
@@ -88,6 +89,8 @@ export function Sidebar({
   useEscLayer(creating && onCreateProject !== undefined, closeCreate);
   const countOf = (name: string) => (c as Record<string, number>)[name];
   const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind || (kind === "labels" && current.kind === "label");
+  const drag = useContext(DragCtx);
+  const inboxName = projects.find((p) => p.inbox)?.name;
   const mine = projects.filter((p) => !p.inbox);
   const favorites = projects.filter((p) => p.favorite);
   return (
@@ -168,13 +171,15 @@ export function Sidebar({
 
       <nav aria-label="ナビゲーション" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <SidebarItem icon={Search} label="検索" onClick={onSearch} />
-        <SidebarItem
-          icon={Inbox}
-          label="受信トレイ"
-          count={c.inbox}
-          active={isActive("inbox")}
-          onClick={() => go({ kind: "inbox" })}
-        />
+        <div data-drop-project={inboxName}>
+          <SidebarItem
+            icon={Inbox}
+            label="受信トレイ"
+            count={c.inbox}
+            active={isActive("inbox")}
+            onClick={() => go({ kind: "inbox" })}
+          />
+        </div>
         <SidebarItem
           icon={CalendarCheck}
           label="今日"
@@ -195,7 +200,9 @@ export function Sidebar({
         <section style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={heading}>お気に入り</div>
           {favorites.map((p) => (
-            <ProjectItem key={p.name} color={p.color} label={p.name} count={countOf(p.name)} onClick={() => go({ kind: "project", name: p.name })} />
+            <div key={p.name} data-drop-project={p.name}>
+              <ProjectItem color={p.color} label={p.name} count={countOf(p.name)} onClick={() => go({ kind: "project", name: p.name })} />
+            </div>
           ))}
         </section>
       )}
@@ -223,16 +230,23 @@ export function Sidebar({
             <TextField value={newName} placeholder="プロジェクト名" onChange={setNewName} />
           </div>
         )}
-        {mine.map((p) => (
-          <ProjectItem
-            key={p.name}
-            color={p.color}
-            label={p.name}
-            count={countOf(p.name)}
-            active={current.kind === "project" && current.name === p.name}
-            onClick={() => go({ kind: "project", name: p.name })}
-          />
-        ))}
+        <div data-project-list="" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {mine.map((p) => (
+            <div key={p.name} data-project-item={p.name} data-drop-project={p.name}>
+              <ProjectItem
+                color={p.color}
+                label={p.name}
+                count={countOf(p.name)}
+                active={current.kind === "project" && current.name === p.name}
+                onClick={() => go({ kind: "project", name: p.name })}
+                onHandlePointerDown={
+                  drag ? (e) => drag.start(e, { kind: "project", name: p.name }, <ProjectItem color={p.color} label={p.name} />) : undefined
+                }
+                dragging={drag?.active?.kind === "project" && drag.active.name === p.name}
+              />
+            </div>
+          ))}
+        </div>
       </section>
 
       <div style={{ flex: 1 }} />
