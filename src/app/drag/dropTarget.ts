@@ -137,3 +137,11 @@ export function todayInPlace(rows: RowBox[], beforeKey: string | null, draggedKe
   const next = rows.slice(i + 1).find((r): r is TaskBox => isTask(r) && r.key !== draggedKey);
   return (next?.key ?? null) === beforeKey;
 }
+
+/**
+ * Sorted board (spec ⑤ §4: 自動の並びのとき 列の間の移動だけ): true when `list` is the column the card was lifted from,
+ * which then gives no drop target (no line, release cancels). Other columns still take the card (at their end).
+ */
+export function ownSortedColumn<T>(list: T, sorted: boolean, from: T | null): boolean {
+  return sorted && from !== null && list === from;
+}

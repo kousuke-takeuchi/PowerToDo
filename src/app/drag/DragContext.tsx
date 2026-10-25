@@ -3,7 +3,7 @@ import { createContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, 
 import { createPortal } from "react-dom";
 import type { Placement, Task } from "../../types/model";
 import { EASE_CSS, useMotionTiming } from "../../motion";
-import { autoScrollSpeed, computeDrop, orderIndex, placementOf, todayInPlace, type Drop, type RowBox } from "./dropTarget";
+import { autoScrollSpeed, computeDrop, orderIndex, ownSortedColumn, placementOf, todayInPlace, type Drop, type RowBox } from "./dropTarget";
 
 export type DragSource =
   | { kind: "task"; task: Task; view: "project" | "today" | "upcoming" | "label"; depth: number; height: number; subtree: Set<string> }
@@ -155,7 +155,7 @@ const DragLayer = memo(function DragLayer({ bind, settleRef }: { bind: React.Mut
   );
 });
 
-type DragState = { source: DragSource; sx: number; sy: number; lifted: boolean; node: React.ReactNode; rect: DOMRect; key?: string; pointerId: number };
+type DragState = { source: DragSource; sx: number; sy: number; lifted: boolean; node: React.ReactNode; rect: DOMRect; key?: string; pointerId: number; /** The drop list the drag started in (a board column). */ from: Element | null };
 
 /** Spec ③ §2: lift after 4 px, a card follows the pointer, a red line (or a ring / highlight) shows the target. */
 export function DragProvider({ onDrop, children }: { onDrop: (r: DropResult) => void; children: React.ReactNode }) {
@@ -182,6 +182,8 @@ export function DragProvider({ onDrop, children }: { onDrop: (r: DropResult) => 
       const kind = list?.dataset.dropList as "project" | "today" | undefined;
       if (list && kind && kind === d.source.view) {
         const rows = rowBoxes(list);
+        // A sorted board column only takes cards from other columns (spec ⑤ §4).
+        if (ownSortedColumn(list, list.dataset.sorted !== undefined, d.from)) return null;
         const listRect = list.getBoundingClientRect();
         const left = listRect.left + Number(list.dataset.level0 ?? 0);
         const s = d.source;
@@ -288,7 +290,7 @@ export function DragProvider({ onDrop, children }: { onDrop: (r: DropResult) => 
     e.preventDefault();
     const pressed = e.currentTarget as HTMLElement;
     const row = pressed.closest<HTMLElement>("[data-row], [data-drop-section], [data-project-item]") ?? pressed;
-    drag.current = { source, sx: e.clientX, sy: e.clientY, lifted: false, node, rect: row.getBoundingClientRect(), key: source.kind === "task" ? `${source.task.project}/${source.task.no}` : undefined, pointerId: e.pointerId };
+    drag.current = { source, sx: e.clientX, sy: e.clientY, lifted: false, node, rect: row.getBoundingClientRect(), key: source.kind === "task" ? `${source.task.project}/${source.task.no}` : undefined, pointerId: e.pointerId, from: pressed.closest("[data-drop-list]") };
     pointer.current = { x: e.clientX, y: e.clientY, buttons: e.buttons };
     // Capture keeps pointerup / pointercancel coming to us even when released outside the window.
     try {

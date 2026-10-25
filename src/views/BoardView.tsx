@@ -75,7 +75,7 @@ export function BoardView({ columns, sorted, renderCard, renderAdd, trailing }: 
               <span style={{ flex: 1, fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{col.count}</span>
             </div>
             {col.live ? (
-              <div data-drop-list="project" data-level0="0">
+              <div data-drop-list="project" data-level0="0" {...(sorted ? { "data-sorted": "" } : {})}>
                 {sorted ? (
                   // One header-kind row for all the cards: a drop on them goes after the last card (section "" = unsectioned).
                   <div data-row="" data-row-kind="header" data-section={col.section ?? ""}>

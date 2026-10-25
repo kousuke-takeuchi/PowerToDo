@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoScrollSpeed, computeDrop, orderIndex, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
+import { autoScrollSpeed, computeDrop, orderIndex, ownSortedColumn, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
 
 // 40 px rows from y=0: 1, 2 (child of 1), 3, header 会議 at 120, 4 in 会議, slot of 会議, header 空 + slot.
 const rows: RowBox[] = [
@@ -163,4 +163,18 @@ test("a_sorted_board_column_drops_at_its_end_and_the_unsectioned_column_is_no_se
   const drop = computeDrop(column, { x: 0, y: 50 }, 0, d, 0);
   assert.deepEqual(drop, { kind: "between", index: 1, depth: 0, y: 120, x: 0 });
   assert.deepEqual(placementOf(column, drop!, "p/3"), { section: null, parent: null, before: null });
+});
+
+// Spec ⑤ §4: a sorted board moves cards only between columns; the card's own column gives no drop target.
+test("a_sorted_board_gives_no_target_in_the_dragged_cards_own_column", () => {
+  const week = { name: "今週" };
+  const later = { name: "あとで" };
+  // Own column (sorted): no target.
+  assert.equal(ownSortedColumn(week, true, week), true);
+  // Another column (sorted): the drop stays.
+  assert.equal(ownSortedColumn(later, true, week), false);
+  // Unsorted: unchanged.
+  assert.equal(ownSortedColumn(week, false, week), false);
+  // Lifted outside any column: nothing to exclude.
+  assert.equal(ownSortedColumn(week, true, null), false);
 });
