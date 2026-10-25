@@ -151,7 +151,7 @@ export function QuickAddDialog({
             transition={t(0.18)}
             style={{
               boxSizing: "border-box",
-              width: 560,
+              width: "min(560px, calc(100vw - 32px))",
               display: "flex",
               flexDirection: "column",
               gap: "var(--space-3)",

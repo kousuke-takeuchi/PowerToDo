@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import { Bell, CalendarCheck, CalendarDays, CirclePlus, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
+import { Bell, CalendarCheck, CalendarDays, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
 import { isImeKey } from "../app/keys";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
@@ -36,6 +36,8 @@ export type SidebarProps = {
   onOpenSettings?: () => void;
   /** 渡すとマイプロジェクトの「+」が名前入力欄を開き、Enter でこれを呼ぶ (Esc で閉じる)。 */
   onCreateProject?: (name: string) => void;
+  /** 「サイドバーを閉じる」を押したとき。 */
+  onClose?: () => void;
   /** アカウント欄の表示名。既定は絵コンテのサンプル名。 */
   displayName?: string;
 };
@@ -63,6 +65,7 @@ export function Sidebar({
   onSearch,
   onOpenSettings,
   onCreateProject,
+  onClose,
   displayName = "たろう",
 }: SidebarProps) {
   // 選択行のハイライトだけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
@@ -125,7 +128,7 @@ export function Sidebar({
           </span>
         </button>
         <Button variant="icon" icon={Bell} ariaLabel="通知" />
-        <Button variant="icon" icon={PanelLeftClose} ariaLabel="サイドバーを閉じる" />
+        <Button variant="icon" icon={PanelLeftClose} ariaLabel="サイドバーを閉じる" onClick={onClose} />
       </div>
 
       <button
@@ -144,8 +147,21 @@ export function Sidebar({
           cursor: "pointer",
         }}
       >
-        <span style={{ display: "inline-flex", color: "var(--color-accent)", flex: "0 0 auto" }}>
-          <CirclePlus size={20} />
+        {/* Todoist: a filled red circle with a white plus. */}
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            background: "var(--color-accent)",
+            color: "#FFFFFF" /* アクセント上の白 (他と同じ固定値) */,
+            flex: "0 0 auto",
+          }}
+        >
+          <Plus size={16} strokeWidth={2.5} />
         </span>
         <span style={{ fontSize: 14, lineHeight: "20px", fontWeight: 600, color: "var(--color-accent)" }}>タスクを追加</span>
       </button>

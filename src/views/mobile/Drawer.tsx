@@ -100,17 +100,17 @@ export function Drawer({
           <Button variant="icon" icon={Settings} ariaLabel="設定" onClick={onSettings} />
         </div>
         <nav aria-label="ナビゲーション" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <SidebarItem icon={Inbox} label="受信トレイ" count={counts.inbox} {...nav("受信トレイ", { kind: "inbox" })} />
-          <SidebarItem icon={CalendarCheck} label="今日" count={counts.today} {...nav("今日", { kind: "today" })} />
-          <SidebarItem icon={CalendarDays} label="近日" {...nav("近日", { kind: "upcoming" })} />
-          <SidebarItem icon={LayoutGrid} label="フィルターとラベル" {...nav("フィルターとラベル", { kind: "labels" })} />
+          <SidebarItem mobile icon={Inbox} label="受信トレイ" count={counts.inbox} {...nav("受信トレイ", { kind: "inbox" })} />
+          <SidebarItem mobile icon={CalendarCheck} label="今日" count={counts.today} {...nav("今日", { kind: "today" })} />
+          <SidebarItem mobile icon={CalendarDays} label="近日" {...nav("近日", { kind: "upcoming" })} />
+          <SidebarItem mobile icon={LayoutGrid} label="フィルターとラベル" {...nav("フィルターとラベル", { kind: "labels" })} />
         </nav>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={{ fontSize: 12, lineHeight: "17px", fontWeight: 700, color: "var(--color-text-secondary)" }}>マイプロジェクト</div>
           {projects
             .filter((p) => !p.inbox)
             .map((p) => (
-              <ProjectItem key={p.name} color={p.color} label={p.name} count={counts[p.name]} {...nav(p.name, { kind: "project", name: p.name })} />
+              <ProjectItem mobile key={p.name} color={p.color} label={p.name} count={counts[p.name]} {...nav(p.name, { kind: "project", name: p.name })} />
             ))}
         </div>
         <div style={{ flex: 1 }} />

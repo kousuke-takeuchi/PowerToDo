@@ -1,9 +1,10 @@
 import type React from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMotionTiming } from "../motion";
 import type { SyncState } from "../components/SyncStatus";
-import { SidebarRail } from "./SidebarRail";
 import type { SidebarRailProps } from "./SidebarRail";
+import { TopBar, TopBarSlot } from "./TopBar";
 
 export type AppShellProps = {
   width?: 1440 | 960 | 390;
@@ -17,7 +18,13 @@ export type AppShellProps = {
   syncState?: SyncState;
   /** 実アプリ用: ウィンドウいっぱいに広げる (width は 1440 / 960 のレイアウトの選択だけに使い、中央カラムはスクロールする)。 */
   fill?: boolean;
-  /** 960 のとき SidebarRail に渡すハンドラ (Storybook は渡さない)。 */
+  /** Left side of the top bar (the sidebar button while the sidebar is hidden). */
+  topBarLeft?: React.ReactNode;
+  /** Wide layout: the sidebar is closed (slides to width 0). */
+  sidebarHidden?: boolean;
+  /** Stories: the pixel width of the shell, overriding `width` (the layout still follows `width`). */
+  widthPx?: number;
+  /** No longer drawn: the narrow layout hides the sidebar instead of showing the icon rail. Kept so callers compile. */
   rail?: Pick<SidebarRailProps, "onExpand" | "onAddTask" | "onNavigate" | "lastSyncedAt" | "syncDetail" | "syncOffText" | "syncErrorText" | "syncPausedText" | "onSyncClick">;
 };
 
@@ -30,16 +37,16 @@ const PANEL_WIDTH = 400;
  * 960: SidebarRail 56 + Main (Column は全幅、padding 24/32)。390 は Main のみ (モバイルは MobileShell を使う)。
  * overflow: hidden はルートだけ。Main / Column はクリップしない (左余白のシェブロンが見えるように)。
  */
-export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, syncState = "synced", fill, rail: railProps }: AppShellProps) {
+export function AppShell({ width = 1440, sidebar, children, panel, overlay, banner, fullWidth, fill, topBarLeft, sidebarHidden, widthPx }: AppShellProps) {
   const wide = width === 1440;
-  const rail = width === 960;
   const { reduced, t } = useMotionTiming();
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   return (
     <div
       style={{
         position: "relative",
         display: "flex",
-        width: fill ? "100%" : width,
+        width: fill ? "100%" : (widthPx ?? width),
         height: fill ? "100vh" : HEIGHT[width],
         overflow: "hidden",
         background: "var(--color-bg)",
@@ -48,9 +55,16 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
       }}
     >
       {wide && (
-        <aside style={{ flex: "0 0 280px", width: 280, height: "100%", background: "var(--color-bg-sidebar)" }}>{sidebar}</aside>
+        // Hiding slides the sidebar to width 0 in 0.3 s (Todoist); the centered column moves with it.
+        <motion.aside
+          initial={false}
+          animate={{ width: sidebarHidden ? 0 : 280 }}
+          transition={t(0.3)}
+          style={{ flex: "0 0 auto", height: "100%", overflow: "hidden", background: "var(--color-bg-sidebar)" }}
+        >
+          <div style={{ width: 280, height: "100%" }}>{sidebar}</div>
+        </motion.aside>
       )}
-      {rail && <SidebarRail syncState={syncState} {...railProps} />}
       <main
         style={{
           flex: 1,
@@ -61,19 +75,27 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
           overflowY: fill ? "auto" : undefined,
         }}
       >
+        <TopBar left={topBarLeft} slotRef={setSlot} />
         {banner && <div style={{ alignSelf: "stretch" }}>{banner}</div>}
         <div
           style={{
             width: "100%",
-            maxWidth: wide && !fullWidth ? 800 : undefined,
             boxSizing: "border-box",
-            padding: wide ? (fullWidth ? "40px 32px" : panel ? "40px 24px" : "40px 0") : rail ? "24px 32px" : "16px",
+            // Left room for what sits left of the column (section chevron -28, subtask chevron -24, drag handle -40):
+            // `main` scrolls, so it clips anything left of it. Once the 800 column fills `main`, keep 44 / 24 like narrow.
+            padding: wide
+              ? fullWidth
+                ? "8px 32px 40px"
+                : panel
+                  ? "8px 24px 40px 44px"
+                  : "8px max(24px, calc((100% - 800px) / 2)) 40px max(44px, calc((100% - 800px) / 2))"
+              : "8px 24px 16px 44px",
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-4)",
           }}
         >
-          {children}
+          <TopBarSlot.Provider value={slot}>{children}</TopBarSlot.Provider>
         </div>
       </main>
       {/* 詳細パネル: 右から x 24 -> 0 + フェード (200ms)。幅も 0 <-> 400 で動かし、本文の列が開閉に合わせて縮む / 広がる。
@@ -104,7 +126,7 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
         )}
       </AnimatePresence>
       {/* ラッパーはクリックを通す。中身 (scrim など) が pointerEvents: "auto" で受ける。中身が null を返しても下を塞がない。 */}
-      {overlay && <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>{overlay}</div>}
+      {overlay && <div style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }}>{overlay}</div>}
     </div>
   );
 }

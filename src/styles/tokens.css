@@ -1,5 +1,5 @@
 :root {
-  --font-body: "Noto Sans JP", "Inter", system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Segoe UI", "Yu Gothic UI", "Noto Sans JP", system-ui, sans-serif;
   --color-bg: #FFFFFF;
   --color-bg-sidebar: #FCFAF8;
   --color-bg-hover: #F2EFED;

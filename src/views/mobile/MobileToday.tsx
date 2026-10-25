@@ -72,7 +72,7 @@ export function MobileToday({ overdue, todays, today, live, fill, sync, onToggle
         </div>
         {(!live || overdue.length > 0) && (
         <section>
-          <SectionHeader title="期限切れ" count={overdue.length} />
+          <SectionHeader mobile title="期限切れ" count={overdue.length} />
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 0" }}>
             <button
               type="button"
@@ -96,7 +96,7 @@ export function MobileToday({ overdue, todays, today, live, fill, sync, onToggle
         </section>
         )}
         <section>
-          <SectionHeader title="今日" count={todays.length} />
+          <SectionHeader mobile title="今日" count={todays.length} />
           {todays.map((t) => row(t, false))}
         </section>
         {live && overdue.length + todays.length === 0 && (

@@ -1,6 +1,6 @@
 import type React from "react";
 import { motion } from "motion/react";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useMotionTiming } from "../motion";
 
 export type SectionHeaderProps = {
@@ -17,9 +17,12 @@ export type SectionHeaderProps = {
   onStartEdit?: () => void;
   /** 渡すとタイトルの代わりにこれ (名前の入力欄) を出す。編集中かどうかは呼び出し側が持つ。 */
   editor?: React.ReactNode;
+  /** Mobile: the earlier look (the chevron inline before the title, turned by 90° with motion). */
+  mobile?: boolean;
 };
 
 const rowStyle: React.CSSProperties = {
+  position: "relative",
   display: "flex",
   alignItems: "center",
   gap: "var(--space-2)",
@@ -37,18 +40,34 @@ const buttonReset: React.CSSProperties = {
   fontFamily: "var(--font-body)",
   textAlign: "left",
 };
-const chevronStyle: React.CSSProperties = { display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" };
+const inlineChevronStyle: React.CSSProperties = { display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" };
+/** Left of the column (Todoist), so the title lines up with the task titles' column edge. */
+const chevronStyle: React.CSSProperties = {
+  position: "absolute",
+  left: -28,
+  top: "50%",
+  marginTop: 2,
+  transform: "translateY(-50%)",
+  display: "inline-flex",
+  color: "var(--color-text-secondary)",
+};
 const titleTextStyle: React.CSSProperties = { fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" };
 const countStyle: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
 
-export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor }: SectionHeaderProps) {
+export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor, mobile }: SectionHeaderProps) {
   const { t } = useMotionTiming();
-  // 右向きのシェブロンを回して開閉を表す (折りたたみ = 0°, 展開 = 90°)。最初の描画では回すアニメーションをしない。
-  const chevron = showChevron && (
-    <motion.span aria-hidden initial={false} animate={{ rotate: collapsed ? 0 : 90 }} transition={t(0.2)} style={chevronStyle}>
-      <ChevronRight size={16} />
-    </motion.span>
-  );
+  // Desktop: left of the column, the icon swapped at once (Todoist). Mobile: inline, a right chevron turned by 90°.
+  const chevron =
+    showChevron &&
+    (mobile ? (
+      <motion.span aria-hidden initial={false} animate={{ rotate: collapsed ? 0 : 90 }} transition={t(0.2)} style={inlineChevronStyle}>
+        <ChevronRight size={16} />
+      </motion.span>
+    ) : (
+      <span aria-hidden style={chevronStyle}>
+        {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+      </span>
+    ));
   const countEl = count !== undefined && <span style={countStyle}>{count}</span>;
 
   let main: React.ReactNode;
@@ -68,9 +87,13 @@ export function SectionHeader({ title, count, collapsed, onToggle, showChevron =
             onClick={onToggle}
             aria-expanded={!collapsed}
             aria-label={title}
-            style={{ ...buttonReset, cursor: onToggle ? "pointer" : "default" }}
+            style={
+              mobile
+                ? { ...buttonReset, cursor: onToggle ? "pointer" : "default" }
+                : { ...buttonReset, ...chevronStyle, width: 16, height: 16, cursor: onToggle ? "pointer" : "default" }
+            }
           >
-            {chevron}
+            {mobile ? chevron : collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
           </button>
         )}
         <span onDoubleClick={onStartEdit} title="ダブルクリックで名前を変更" style={titleTextStyle}>

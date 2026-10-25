@@ -143,7 +143,7 @@ export function UpdateDialog({
             transition={t(0.18)}
             style={{
               boxSizing: "border-box",
-              width: 480,
+              width: "min(480px, calc(100vw - 32px))",
               maxWidth: "calc(100% - 32px)",
               maxHeight: "calc(100% - 32px)",
               overflowY: "auto",

@@ -1,13 +1,13 @@
 import type React from "react";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { ChevronRight, Pencil, Calendar, MessageSquare, Ellipsis, ListTree, Repeat } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, Hash, Pencil, Calendar, MessageSquare, Ellipsis, ListTree, Repeat } from "lucide-react";
 import { Checkbox } from "./Checkbox";
 import { DateChip } from "./DateChip";
 import { LabelChip } from "./LabelChip";
 import { MoreChip } from "./MoreChip";
 import { Button } from "./Button";
-import { EASE_CSS, useMotionTiming } from "../motion";
+import { useMotionTiming } from "../motion";
 
 export type TaskRowProps = {
   title: string;
@@ -20,6 +20,12 @@ export type TaskRowProps = {
   labels?: string[];
   moreCount?: number;
   project?: string;
+  /** Desktop: shown after the project on the right of the meta line (「プロジェクト / セクション」). */
+  section?: string;
+  /** Desktop: color of the `#` after the project (a CSS color, e.g. "var(--color-priority-3)"). */
+  projectColor?: string;
+  /** Stories: show the drag handle as if hovered. */
+  showHandle?: boolean;
   subtasks?: { done: number; total: number; expanded: boolean };
   indent?: 0 | 1 | 2;
   variant?: "desktop" | "mobile";
@@ -47,16 +53,21 @@ const subCountStyle: React.CSSProperties = {
 
 export function TaskRow(p: TaskRowProps) {
   const mobile = p.variant === "mobile";
-  const indentPx = (p.indent ?? 0) * (mobile ? 24 : 32);
-  const { reduced, t } = useMotionTiming();
+  const indentPx = (p.indent ?? 0) * (mobile ? 24 : 28);
+  const { t } = useMotionTiming();
   const ref = useRef<HTMLDivElement>(null);
   // フォーカス行が画面の外に出たら見える位置までスクロールする (↑↓ で動かしたとき)。
   useEffect(() => {
     if (p.focused) ref.current?.scrollIntoView?.({ block: "nearest" });
   }, [p.focused]);
   const showActions = p.showActions || p.focused;
-  // 開閉はアイコンの差し替えではなく、右向きのシェブロンを 90° 回して表す。最初の描画では回すアニメーションをしない。
-  const chevron = (size: number) => (
+  // Desktop swaps the icon at once (Todoist has no motion here). Mobile turns a right chevron by 90° (not on the first render).
+  const chevron = (size: number) =>
+    !mobile ? (
+      <span aria-hidden style={{ display: "inline-flex" }}>
+        {p.subtasks?.expanded ? <ChevronDown size={size} /> : <ChevronRight size={size} />}
+      </span>
+    ) : (
     <motion.span
       aria-hidden
       initial={false}
@@ -70,23 +81,36 @@ export function TaskRow(p: TaskRowProps) {
   return (
     <div
       ref={ref}
-      className={p.focused ? "group bg-[var(--color-bg-hover)]" : "group"}
+      className={p.focused && mobile ? "group bg-[var(--color-bg-hover)]" : "group"}
       aria-current={p.focused ? "true" : undefined}
       style={{
         position: "relative",
         display: "flex",
-        gap: "var(--space-3)",
+        gap: mobile ? "var(--space-3)" : 10,
         alignItems: "flex-start",
-        padding: "10px 0",
-        // pen の stroke は内側 (高さに加算しない)。フォーカス行は左に 2px の accent 枠を足す。
+        padding: mobile ? "10px 0" : "12px 0 11px",
+        // pen の stroke は内側 (高さに加算しない)。フォーカス行: モバイルは左に 2px の accent 枠、デスクトップは角の丸い薄い枠 (Todoist)。
         boxShadow: p.focused
-          ? "inset 2px 0 0 var(--color-accent), inset 0 -1px 0 var(--color-border)"
+          ? mobile
+            ? "inset 2px 0 0 var(--color-accent), inset 0 -1px 0 var(--color-border)"
+            : "inset 0 0 0 1px var(--color-border)"
           : "inset 0 -1px 0 var(--color-border)",
+        borderRadius: p.focused && !mobile ? 6 : undefined,
         marginLeft: indentPx,
         fontFamily: "var(--font-body)",
       }}
       onClick={p.onClick}
     >
+      {!mobile && (
+        // Drag handle (Todoist): shown on hover or focus. Dragging comes with the drag work (③).
+        <span
+          aria-hidden
+          className={p.showHandle || p.focused ? undefined : "opacity-0 group-hover:opacity-100"}
+          style={{ position: "absolute", left: -40, top: 14, display: "inline-flex", color: "var(--color-text-muted)" }}
+        >
+          <GripVertical size={16} />
+        </span>
+      )}
       {p.subtasks && !mobile && (
         <button
           type="button"
@@ -99,7 +123,7 @@ export function TaskRow(p: TaskRowProps) {
           style={{
             position: "absolute",
             left: -24,
-            top: 12,
+            top: 14,
             width: 16,
             height: 16,
             padding: 0,
@@ -113,9 +137,9 @@ export function TaskRow(p: TaskRowProps) {
         </button>
       )}
       <div style={{ display: "flex", flex: "0 0 auto" }} onClick={(e) => e.stopPropagation()}>
-        <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} />
+        <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} size={mobile ? 20 : 18} />
       </div>
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: mobile ? "var(--space-1)" : 0 }}>
         <div
           style={{
             fontSize: 14,
@@ -141,7 +165,7 @@ export function TaskRow(p: TaskRowProps) {
               <LabelChip key={l} name={l} />
             ))}
             {p.moreCount ? <MoreChip count={p.moreCount} /> : null}
-            {p.project && (
+            {p.project && mobile && (
               <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{p.project}</span>
             )}
             {p.subtasks &&
@@ -166,17 +190,39 @@ export function TaskRow(p: TaskRowProps) {
                   {p.subtasks.done}/{p.subtasks.total}
                 </span>
               ))}
+            {p.project && !mobile && (
+              // Todoist: the project (and section) on the right of the meta line, with a colored #.
+              <span
+                style={{
+                  marginLeft: "auto",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 12,
+                  lineHeight: "17px",
+                  color: "var(--color-text-secondary)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {p.section ? `${p.project} / ${p.section}` : p.project}
+                <Hash size={12} color={p.projectColor ?? "var(--color-text-muted)"} aria-hidden />
+              </span>
+            )}
           </div>
         )}
       </div>
       {!mobile && !p.hideActions && (
+        // On the first line at the right, over the row (Todoist): the meta line keeps the full width for the project.
         <div
           style={{
+            position: "absolute",
+            right: 0,
+            top: 8,
             display: "flex",
             gap: "var(--space-1)",
             alignItems: "center",
+            background: "var(--color-bg)",
             opacity: showActions ? 1 : undefined,
-            transition: reduced ? undefined : `opacity 120ms ${EASE_CSS}`,
           }}
           onClick={(e) => e.stopPropagation()}
           className={showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}

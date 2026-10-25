@@ -103,7 +103,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
   return (
     <>
       <PageHeader>
-        <TitleGroup title="今日" subtitle={`${monthDay(today)} ${weekdayLong(today)} · ${total} 件`} />
+        <TitleGroup title="今日" subtitle={`${total} 件のタスク`} />
       </PageHeader>
       <HiddenNote names={hiddenProjects} />
       <div>
@@ -114,19 +114,15 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
               count={overdue.length}
               collapsed={overdueCollapsed}
               onToggle={() => setOverdueCollapsed((v) => !v)}
+              trailing={<RescheduleButton today={today} onReschedule={onReschedule} />}
             />
             {!overdueCollapsed && (
-              <>
-                <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 0" }}>
-                  <RescheduleButton today={today} onReschedule={onReschedule} />
-                </div>
-                {rows("overdue", overdue)}
-              </>
+              rows("overdue", overdue)
             )}
           </section>
         )}
         <section>
-          {showOverdue && <SectionHeader title={`今日 · ${monthDay(today)}`} count={todays.length} showChevron={false} />}
+          <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} count={todays.length} showChevron={false} />
           {rows("today", todays)}
           <AddSlot onAdd={onAddTask} />
         </section>

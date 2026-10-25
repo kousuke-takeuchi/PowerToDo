@@ -11,7 +11,7 @@ import type { InvalidRow, Section, Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
-import { PageHeader, titleStyle } from "./HeaderActions";
+import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
 
@@ -55,6 +55,8 @@ export type ProjectViewProps = {
   today?: string;
   /** キーボードのフォーカス行 (`project/no`)。 */
   focusedKey?: string;
+  /** Stories: draw this task's row as hovered (handle and actions shown). */
+  hoverNo?: number;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
@@ -67,7 +69,7 @@ const INVALID_TASK_NO = 2; // D-11c で要修正にする行 (洗剤の詰め替
 const INVALID_SUFFIX = "    ⚠ 要修正: 「終了」列が日付ではありません (値: 来週)";
 const noop = () => {};
 /** 完了にしたチェックが付いたまま行を残す時間 (ms)。この後に行が退場する (完了タスクを隠している間だけ)。 */
-const LEAVE_DELAY_MS = 400;
+const LEAVE_DELAY_MS = 250;
 /** 追加された行のハイライトが消えるまで (ms)。 */
 const HIGHLIGHT_MS = 600;
 /** 型の不整合で Task にならなかった行の 1 行表示 (読み取り専用)。 */
@@ -101,6 +103,7 @@ export function ProjectView({
   onDeleteProject,
   today = TODAY,
   focusedKey,
+  hoverNo,
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
@@ -127,6 +130,8 @@ export function ProjectView({
   const { reduced } = useMotionTiming();
 
   const mine = tasks.filter((t) => t.project === project);
+  // Open tasks of this project, for the line under the title.
+  const openCount = mine.filter((t) => t.progress !== 100).length;
   const nosKey = mine.map((t) => t.no).join(",");
   useEffect(() => {
     const now = new Set(nosKey ? nosKey.split(",").map(Number) : []);
@@ -208,7 +213,8 @@ export function ProjectView({
         recurring={onToggleDone && t.rrule ? true : undefined}
         labels={t.labels}
         indent={indent}
-        showActions={showActions}
+        showActions={showActions || hoverNo === t.no}
+        showHandle={hoverNo === t.no}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
         subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
         onToggleDone={() => toggleDone(t)}
@@ -217,7 +223,7 @@ export function ProjectView({
       />
     );
     return (
-      <Collapse key={t.no} enterY={-8} exitX={-24}>
+      <Collapse key={t.no} enterY={-8} duration={0.1}>
         {/* 追加された行のハイライト: accent-soft から透明へ 600ms。行の背面 (DOM で行より前) に置く。 */}
         <div style={{ position: "relative" }}>
           {fresh.has(t.no) && (
@@ -263,7 +269,7 @@ export function ProjectView({
         )}
         <AnimatePresence initial={false}>
           {open && (
-            <Collapse key="subtasks">
+            <Collapse key="subtasks" duration={0}>
               <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}</AnimatePresence>
               {indent === 0 && kids.length > 0 && (
                 <div style={{ marginLeft: 32 }}>
@@ -431,7 +437,7 @@ export function ProjectView({
               />
               <AnimatePresence initial={false}>
                 {!isCollapsed && (
-                  <Collapse key="body">
+                  <Collapse key="body" duration={0}>
                     <AnimatePresence initial={false}>{rows.map((t) => renderRow(t, 0))}</AnimatePresence>
                     {addSlot(s.name)}
                   </Collapse>
@@ -473,7 +479,7 @@ export function ProjectView({
             <InlineEdit
               value={project}
               ariaLabel="プロジェクト名"
-              style={{ fontSize: 24, lineHeight: "35px", fontWeight: 700, padding: "0 7px" }}
+              style={{ fontSize: 26, lineHeight: "36px", fontWeight: 700, padding: "0 7px" }}
               onCommit={(name) => {
                 setRenamingProject(false);
                 if (name !== project) onRenameProject(name);
@@ -482,7 +488,10 @@ export function ProjectView({
             />
           </div>
         ) : (
-          <h1 style={titleStyle}>{project}</h1>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <h1 style={titleStyle}>{project}</h1>
+            <Subtitle text={`${openCount} 件のタスク`} />
+          </div>
         )}
       </PageHeader>
       {body()}

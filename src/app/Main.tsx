@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PanelLeftOpen } from "lucide-react";
+import { Button } from "../components/Button";
+import { ProjectColors } from "../views/crossList";
+import { Toast } from "../components/Toast";
+import { completedOf, merge, toastText, undoOf } from "./completionToast";
+import type { ToastState } from "./completionToast";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
@@ -58,6 +64,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // 通知 / 帯から開いたタスク: プロジェクトが読み込まれたら、そのタスクがあるか一度だけ確かめる
   const [pendingOpen, setPendingOpen] = useState<{ project: string; no: number } | null>(null);
   const [drawer, setDrawer] = useState(false);
+  // Wide layout: the sidebar was closed with its button (it slides away; the top bar's button brings it back).
+  const [sidebarClosed, setSidebarClosed] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
@@ -220,6 +228,28 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     return () => window.clearTimeout(id);
   }, [flash]);
 
+  // Completion toast (spec ④ §5): completions in a row share one toast; 「元に戻す」 undoes each of them.
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const completed = useCallback((t: Task) => setToast((s) => merge(s, completedOf(t))), []);
+  /** Completes / reopens `t` through the project screen or the cross actions, then adds a completion to the toast. */
+  const crossToggle = (t: Task, done: boolean) =>
+    cross.toggleDone(t, done).then((ok) => {
+      if (ok && done) completed(t);
+      return ok;
+    });
+  const undoToast = async (state: ToastState) => {
+    setToast(null);
+    for (const e of state.entries) {
+      const u = undoOf(e);
+      const onScreen = projectScreen && e.project === current;
+      await (onScreen ? p.completeTask(u.no, false) : cross.setDone(u.project, u.no, false));
+      if (u.kind === "restore") {
+        await (onScreen ? p.updateTask(u.no, u.patch) : api.updateTask(u.project, u.no, u.patch).catch(showError));
+      }
+    }
+    refreshAll();
+  };
+
   const { openAny } = useRowShortcuts({
     focus,
     visibleKeys,
@@ -246,6 +276,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
+    onCompleted: completed,
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
@@ -319,6 +350,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
 
   const sidebar = (
     <Sidebar
+      onClose={() => (width === 960 ? setDrawer(false) : setSidebarClosed(true))}
       active={nav}
       counts={counts}
       projects={summaries}
@@ -348,6 +380,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   const qaColor = summaries.find((s) => s.name === qaProject)?.color;
+  const projectColors = useMemo(() => Object.fromEntries(summaries.map((s) => [s.name, s.color])), [summaries]);
 
   // ---- タスク詳細 ----
   // useProject は名前が変わった直後の 1 描画だけ前のプロジェクトの view を持つので、名前で確かめる
@@ -363,7 +396,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         onClose={() => setOpenNo(null)}
         onChange={(patch) => p.updateTask(openTask.no, patch)}
-        onToggleDone={(done) => void p.completeTask(openTask.no, done)}
+        onToggleDone={(done) => {
+          const t = openTask;
+          void p.completeTask(t.no, done).then((ok) => ok && done && completed(t));
+        }}
         onDelete={() => {
           setOpenNo(null);
           void p.deleteTask(openTask.no);
@@ -418,7 +454,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         tasks={[...d.overdue, ...d.today]}
         today={today}
         hideOverdue={d.overdue.length === 0}
-        onToggleDone={cross.toggleDone}
+        onToggleDone={crossToggle}
         onOpenTask={openCross}
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
@@ -443,7 +479,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           setUpFrom(from);
           setUpDays(7);
         }}
-        onToggleDone={cross.toggleDone}
+        onToggleDone={crossToggle}
         onOpenTask={openCross}
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
@@ -462,7 +498,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         label={d.label.name}
         tasks={d.tasks}
         today={today}
-        onToggleDone={cross.toggleDone}
+        onToggleDone={crossToggle}
         onOpenTask={openCross}
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
@@ -497,7 +533,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onVisibleKeys={reportKeys}
         onExpandApi={(api) => (expandApi.current = api)}
         onOpenTask={(t) => openAny(t)}
-        onToggleDone={(t, done) => void p.completeTask(t.no, done)}
+        onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && completed(t))}
         onAddTask={(section, title) => void p.addTask({ title, section })}
         onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
         onDeleteTask={(t) => {
@@ -579,12 +615,17 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
               initial={{ x: reduced ? 0 : "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: reduced ? 0 : "-100%" }}
-              transition={t(0.25)}
+              transition={t(0.2)}
               style={{ flex: "0 0 280px", width: 280, height: "100%" }}
             >
               {sidebar}
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {toast && (
+          <Toast key="toast" text={toastText(toast)} onUndo={() => void undoToast(toast)} onClose={() => setToast(null)} />
         )}
       </AnimatePresence>
       <QuickAddDialog
@@ -618,7 +659,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           setSearchOpen(false);
           openCross(h.task);
         }}
-        onToggleDone={(h, done) => void cross.toggleDone(h.task, done).then(() => search.refresh())}
+        onToggleDone={(h, done) => void crossToggle(h.task, done).then(() => search.refresh())}
         onClose={() => setSearchOpen(false)}
         today={today}
         busy={search.busy}
@@ -661,6 +702,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   return (
+    <ProjectColors.Provider value={projectColors}>
     <AppShell
       width={width}
       fill
@@ -683,8 +725,20 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       banner={banner}
       panel={panel}
       overlay={overlay}
+      sidebarHidden={sidebarClosed}
+      topBarLeft={
+        width === 960 || sidebarClosed ? (
+          <Button
+            variant="icon"
+            icon={PanelLeftOpen}
+            ariaLabel="サイドバーを開く"
+            onClick={() => (width === 960 ? setDrawer(true) : setSidebarClosed(false))}
+          />
+        ) : undefined
+      }
     >
       {body}
     </AppShell>
+    </ProjectColors.Provider>
   );
 }

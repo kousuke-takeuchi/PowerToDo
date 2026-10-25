@@ -3,6 +3,9 @@ import { useState } from "react";
 import { addDays } from "../../app/dates";
 import type { DayGroup, Task } from "../../types/model";
 import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
+import { PanelLeftOpen } from "lucide-react";
+import { Button } from "../../components/Button";
+import { Toast } from "../../components/Toast";
 import { AppShell } from "../../views/AppShell";
 import { BoardView } from "../../views/BoardView";
 import { ConflictBanner } from "../../views/ConflictBanner";
@@ -53,6 +56,11 @@ function Screen({ width, banner, ...view }: Partial<ProjectViewProps> & { width?
 export const D01: Story = {
   name: "D-01 プロジェクト",
   render: () => <Screen showLongTitleRow />,
+};
+
+export const D01h: Story = {
+  name: "D-01h 行にマウスを乗せる",
+  render: () => <Screen hoverNo={1} />,
 };
 
 export const D01b: Story = {
@@ -503,12 +511,40 @@ export const D12d: Story = {
   render: () => <Onboarding step={2} target="nas" />,
 };
 
-export const D13: Story = {
-  name: "D-13 最小ウィンドウ 960x600",
-  globals: { viewport: { value: "min", isRotated: false } },
+// 狭いウィンドウ (750 未満): 左の一覧は隠れ、上の帯の左のボタンで、暗い背景の上に重ねて出す (Todoist)。
+const openButton = <Button variant="icon" icon={PanelLeftOpen} ariaLabel="サイドバーを開く" />;
+const drawer = (
+  <div style={{ width: "100%", height: "100%", display: "flex", background: "var(--color-scrim)", pointerEvents: "auto" }}>
+    <div style={{ flex: "0 0 280px", width: 280, height: "100%", background: "var(--color-bg-sidebar)" }}>{sidebar}</div>
+  </div>
+);
+
+export const D13a: Story = {
+  name: "D-13a 狭いウィンドウ 700 (一覧を開く)",
   render: () => (
-    <AppShell width={960} sidebar={sidebar} syncState="synced">
-      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} showActions />
+    <AppShell width={960} widthPx={700} sidebar={sidebar} topBarLeft={openButton} overlay={drawer}>
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
+    </AppShell>
+  ),
+};
+
+export const D13b: Story = {
+  name: "D-13b 狭いウィンドウ 400",
+  render: () => (
+    <AppShell width={960} widthPx={400} sidebar={sidebar} topBarLeft={openButton}>
+      <ProjectView project="買い物" tasks={shoppingFlat} sections={sections} />
+    </AppShell>
+  ),
+};
+
+export const D14: Story = {
+  name: "D-14 完了のお知らせ",
+  render: () => (
+    <AppShell
+      sidebar={<Sidebar active={{ kind: "today" }} counts={counts} projects={projects} syncState="synced" lastSyncedAt="09:41" />}
+      overlay={<Toast text="2 件のタスクを完了しました" onUndo={() => {}} onClose={() => {}} />}
+    >
+      <TodayView tasks={withoutNo(15)} today={TODAY} />
     </AppShell>
   ),
 };
