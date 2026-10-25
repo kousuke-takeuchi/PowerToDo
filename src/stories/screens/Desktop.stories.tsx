@@ -22,8 +22,8 @@ import type { SyncTarget } from "../../views/SettingsDialog";
 import { Sidebar } from "../../views/Sidebar";
 import type { SidebarProps } from "../../views/Sidebar";
 import { SyncSamples } from "../../views/SyncSamples";
-import { TaskDetailPanel } from "../../views/TaskDetailPanel";
-import type { TaskDetailPanelProps } from "../../views/TaskDetailPanel";
+import { TaskDialog } from "../../views/TaskDialog";
+import type { TaskDialogProps } from "../../views/TaskDialog";
 import type { SyncState } from "../../components/SyncStatus";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
@@ -207,17 +207,21 @@ const detailTask = {
 };
 const detailProject = projects.find((p) => p.name === "買い物")!;
 
-function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProps["initialPopover"] }) {
-  // 行をクリックするとその行のパネルを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
+function DetailScreen({ initialPopover, widthPx, layout }: { initialPopover?: TaskDialogProps["initialPopover"]; widthPx?: number; layout?: "wide" | "narrow" }) {
+  // 行をクリックするとその行のダイアログを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
   const [openNo, setOpenNo] = useState<number | null>(detailTask.no);
   const shown = openNo === null ? undefined : openNo === detailTask.no ? detailTask : tasks.find((t) => t.no === openNo);
+  const order = shopping.filter((t) => t.parentNo === undefined).map((t) => t.no);
+  const i = shown ? order.indexOf(shown.no) : -1;
   return (
     <AppShell
+      width={widthPx && widthPx < 750 ? 960 : 1440}
+      widthPx={widthPx}
       sidebar={sidebar}
       syncState="synced"
-      panel={
+      overlay={
         shown ? (
-          <TaskDetailPanel
+          <TaskDialog
             key={shown.no}
             task={shown}
             subtasks={tasks.filter((t) => t.parentNo === shown.no)}
@@ -225,7 +229,13 @@ function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProp
             section={shown.category ?? undefined}
             comments={comments}
             initialPopover={shown.no === detailTask.no ? initialPopover : undefined}
+            layout={layout}
             onClose={() => setOpenNo(null)}
+            onPrev={i > 0 ? () => setOpenNo(order[i - 1]) : undefined}
+            onNext={i >= 0 && i < order.length - 1 ? () => setOpenNo(order[i + 1]) : undefined}
+            projects={projects.map((pj) => ({ name: pj.name, sections: pj.name === "買い物" ? sections.map((x) => x.name) : [] }))}
+            onMove={() => setOpenNo(null)}
+            allLabels={labels.map((l) => l.name)}
           />
         ) : undefined
       }
@@ -238,6 +248,11 @@ function DetailScreen({ initialPopover }: { initialPopover?: TaskDetailPanelProp
 export const D03: Story = {
   name: "D-03 タスク詳細",
   render: () => <DetailScreen />,
+};
+
+export const D03b: Story = {
+  name: "D-03b タスク詳細 (狭いウィンドウ)",
+  render: () => <DetailScreen widthPx={700} layout="narrow" />,
 };
 
 function navShell(active: SidebarProps["active"], children: React.ReactNode, todayCount: number = counts.today) {
