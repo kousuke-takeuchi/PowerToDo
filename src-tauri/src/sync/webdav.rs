@@ -313,14 +313,14 @@ impl WebDavBackend {
         self.files_of(self.base.clone(), entries, ".xlsx")
     }
 
-    /// The comment files: `_comments/` that does not exist (yet) has none.
-    async fn list_comment_files(&self) -> Result<Vec<RemoteFile>, BackendError> {
+    /// The comment files, `None` when `_comments/` does not exist.
+    async fn list_comment_files(&self) -> Result<Option<Vec<RemoteFile>>, BackendError> {
         let url = self.comments_url();
-        let files = match self.propfind(url.clone(), "1").await? {
-            Some(entries) => self.files_of(url, entries, ".jsonl")?,
-            None => Vec::new(),
+        let Some(entries) = self.propfind(url.clone(), "1").await? else {
+            return Ok(None);
         };
-        Ok(files.into_iter().map(in_comments).collect())
+        let files = self.files_of(url, entries, ".jsonl")?;
+        Ok(Some(files.into_iter().map(in_comments).collect()))
     }
 
     /// The files directly in the folder `url` whose name ends in `suffix`, from its PROPFIND entries.
@@ -570,7 +570,7 @@ impl StorageBackend for WebDavBackend {
         Box::pin(self.archive_file(file))
     }
 
-    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
         Box::pin(self.list_comment_files())
     }
 
@@ -1040,10 +1040,10 @@ mod tests {
     // --- the _comments folder (spec ① §3.4) ----------------------------------------------
 
     #[tokio::test]
-    async fn comments_listing_of_a_missing_folder_is_empty() {
+    async fn comments_listing_of_a_missing_folder_is_none() {
         let s = MockServer::start().await;
         mount(&s, "PROPFIND", "/powertodo/_comments/", 404, "").await;
-        assert!(backend(&s).list_comments().await.unwrap().is_empty());
+        assert!(backend(&s).list_comments().await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -1060,7 +1060,7 @@ mod tests {
             file_response("/powertodo/_comments/notes.txt", None, LM, 1),
         ]);
         mount(&s, "PROPFIND", "/powertodo/_comments/", 207, &body).await;
-        let files = backend(&s).list_comments().await.unwrap();
+        let files = backend(&s).list_comments().await.unwrap().unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].name, "仕事.12.jsonl");
         assert_eq!(files[0].id, "_comments/仕事.12.jsonl");

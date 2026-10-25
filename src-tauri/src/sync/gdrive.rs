@@ -218,6 +218,15 @@ impl GoogleDriveBackend {
         kind: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, BackendError> {
+        Ok(self.find_folders(kind, parent).await?.into_iter().next())
+    }
+
+    /// Every folder marked `powertodo=<kind>` (inside `parent` when given), smallest id first.
+    async fn find_folders(
+        &self,
+        kind: &str,
+        parent: Option<&str>,
+    ) -> Result<Vec<String>, BackendError> {
         let mut q = format!(
             "mimeType='{FOLDER_MIME}' and appProperties has {{ key='powertodo' and value='{kind}' }} and trashed=false"
         );
@@ -225,34 +234,71 @@ impl GoogleDriveBackend {
             q.push_str(&format!(" and '{}' in parents", escape_q(p)));
         }
         let found = self.query(&q, "files(id)").await?;
-        Ok(found
+        let mut ids: Vec<String> = found
             .iter()
             .filter_map(|f| f.get("id").and_then(serde_json::Value::as_str))
-            .min()
-            .map(str::to_string))
+            .map(str::to_string)
+            .collect();
+        ids.sort();
+        Ok(ids)
     }
 
-    /// The comment files (`*.jsonl` in `_comments`). A root without that folder has none.
-    async fn list_comment_files(&self) -> Result<Vec<RemoteFile>, BackendError> {
+    /// The `_comments` folders of the root: one, unless two PCs made it at the same moment (new
+    /// files go to the smallest id, the others are still read).
+    async fn comment_folders(&self) -> Result<Vec<String>, BackendError> {
         let root = self.resolve_root().await?;
-        let Some(folder) = self.find_folder(PROP_COMMENTS, Some(&root)).await? else {
-            return Ok(Vec::new());
-        };
-        let q = format!(
-            "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}'",
-            escape_q(&folder)
-        );
+        self.find_folders(PROP_COMMENTS, Some(&root)).await
+    }
+
+    /// The comment files (`*.jsonl` in every `_comments`), `None` when the root has no such folder.
+    async fn list_comment_files(&self) -> Result<Option<Vec<RemoteFile>>, BackendError> {
+        let folders = self.comment_folders().await?;
+        if folders.is_empty() {
+            return Ok(None);
+        }
         let mut files = Vec::new();
-        for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
-            let is_comment = item
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|n| crate::store::comments::parse_file_name(n).is_some());
-            if is_comment {
-                files.push(remote_file(&item)?);
+        for folder in folders {
+            let q = format!(
+                "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}'",
+                escape_q(&folder)
+            );
+            for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
+                let is_comment = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|n| crate::store::comments::parse_file_name(n).is_some());
+                if is_comment {
+                    files.push(remote_file(&item)?);
+                }
             }
         }
-        Ok(files)
+        Ok(Some(files))
+    }
+
+    /// The `_comments` folder that holds `file`: the only one, or the one its parents name.
+    async fn comment_folder_of(&self, file: &RemoteFile) -> Result<String, BackendError> {
+        let folders = self.comment_folders().await?;
+        if folders.len() > 1 {
+            let url = self.url(
+                &Self::file_path("/drive/v3", &file.id),
+                &[("fields", "parents")],
+            )?;
+            let reply = self.get_json(url).await?;
+            if reply.status != 404 {
+                let meta = reply.json("Google Drive のファイル")?;
+                let parents = meta.get("parents").and_then(serde_json::Value::as_array);
+                if let Some(p) = folders
+                    .iter()
+                    .find(|f| parents.is_some_and(|ps| ps.iter().any(|p| p.as_str() == Some(f))))
+                {
+                    return Ok(p.clone());
+                }
+            }
+        }
+        match folders.into_iter().next() {
+            Some(f) => Ok(f),
+            None => self.comments_folder().await,
+        }
     }
 
     async fn comments_folder(&self) -> Result<String, BackendError> {
@@ -386,13 +432,13 @@ impl GoogleDriveBackend {
         bytes: Vec<u8>,
     ) -> Result<RemoteFile, BackendError> {
         let root = self.root_id().await?;
-        self.update_in(&root, file, bytes, XLSX_MIME).await
+        self.update_in(&[root], file, bytes, XLSX_MIME).await
     }
 
-    /// [`Self::update_file`] for a file of the folder `root`, with the content type `mime`.
+    /// [`Self::update_file`] for a file of one of the folders `roots`, with the content type `mime`.
     async fn update_in(
         &self,
-        root: &str,
+        roots: &[String],
         file: &RemoteFile,
         bytes: Vec<u8>,
         mime: &str,
@@ -400,7 +446,6 @@ impl GoogleDriveBackend {
         // Drive keeps a file's id across a move or a rename, so the id alone does not say it
         // is still the file that was listed: another PC may have archived it (moved and
         // renamed) or the user may have renamed it in the browser.
-        let root = root.to_string();
         let meta_url = self.url(
             &Self::file_path("/drive/v3", &file.id),
             &[("fields", "md5Checksum,trashed,name,parents")],
@@ -419,7 +464,10 @@ impl GoogleDriveBackend {
         let in_root = meta
             .get("parents")
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|ps| ps.iter().any(|p| p.as_str() == Some(root.as_str())));
+            .is_some_and(|ps| {
+                ps.iter()
+                    .any(|p| roots.iter().any(|r| p.as_str() == Some(r.as_str())))
+            });
         if trashed
             || md5 != Some(file.version.as_str())
             || !in_root
@@ -541,7 +589,7 @@ impl StorageBackend for GoogleDriveBackend {
         self.root_lock().clone()
     }
 
-    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
         Box::pin(self.list_comment_files())
     }
 
@@ -552,17 +600,22 @@ impl StorageBackend for GoogleDriveBackend {
         bytes: Vec<u8>,
     ) -> BoxFut<'a, RemoteFile> {
         Box::pin(async move {
-            let folder = self.comments_folder().await?;
             match existing {
-                Some(file) => self.update_in(&folder, file, bytes, JSONL_MIME).await,
-                None => self.create_in(&folder, name, bytes, JSONL_MIME).await,
+                Some(file) => {
+                    let folders = self.comment_folders().await?;
+                    self.update_in(&folders, file, bytes, JSONL_MIME).await
+                }
+                None => {
+                    let folder = self.comments_folder().await?;
+                    self.create_in(&folder, name, bytes, JSONL_MIME).await
+                }
             }
         })
     }
 
     fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
         Box::pin(async move {
-            let folder = self.comments_folder().await?;
+            let folder = self.comment_folder_of(file).await?;
             self.archive_in(&folder, file).await
         })
     }
@@ -786,12 +839,12 @@ mod tests {
         "'com1' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'";
 
     #[tokio::test]
-    async fn comments_listing_without_the_folder_is_empty() {
+    async fn comments_listing_without_the_folder_is_none() {
         let server = MockServer::start().await;
         let b = backend(&server).await;
         mount_root(&server).await;
         mount_list(&server, COMMENTS_FOLDER_Q, json!({"files": []})).await;
-        assert!(b.list_comments().await.unwrap().is_empty());
+        assert_eq!(b.list_comments().await.unwrap(), None);
         assert!(
             sent(&server, "POST").await.is_empty(),
             "listing never creates the folder"
@@ -815,12 +868,130 @@ mod tests {
             json!({"files": [file_json("c1", "仕事.12.jsonl", "m1"), file_json("x", "notes.txt", "m2")]}),
         )
         .await;
-        let files = b.list_comments().await.unwrap();
+        let files = b.list_comments().await.unwrap().unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(
             (files[0].id.as_str(), files[0].name.as_str()),
             ("c1", "仕事.12.jsonl")
         );
+    }
+
+    /// Two PCs that made `_comments` at the same moment: both folders are read, so no file in
+    /// either is taken as gone.
+    #[tokio::test]
+    async fn comments_listing_takes_every_comments_folder() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            COMMENTS_FOLDER_Q,
+            json!({"files": [{"id": "com2"}, {"id": "com1"}]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            COMMENTS_LIST_Q,
+            json!({"files": [file_json("c1", "仕事.1.jsonl", "m1")]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            "'com2' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
+            json!({"files": [file_json("c2", "仕事.2.jsonl", "m2")]}),
+        )
+        .await;
+        let mut names: Vec<String> = b
+            .list_comments()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["仕事.1.jsonl", "仕事.2.jsonl"]);
+    }
+
+    #[tokio::test]
+    async fn a_comment_in_the_second_comments_folder_is_updated() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            COMMENTS_FOLDER_Q,
+            json!({"files": [{"id": "com1"}, {"id": "com2"}]}),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/drive/v3/files/c2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "md5Checksum": "m2", "trashed": false, "name": "仕事.2.jsonl", "parents": ["com2"]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("PATCH"))
+            .and(path("/upload/drive/v3/files/c2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(file_json(
+                "c2",
+                "仕事.2.jsonl",
+                "m3",
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let got = b
+            .upload_comment(
+                "仕事.2.jsonl",
+                Some(&rf("c2", "仕事.2.jsonl", "m2")),
+                b"x\n".to_vec(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(got.version, "m3");
+    }
+
+    #[tokio::test]
+    async fn a_comment_in_the_second_comments_folder_is_archived_from_it() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            COMMENTS_FOLDER_Q,
+            json!({"files": [{"id": "com1"}, {"id": "com2"}]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            "mimeType='application/vnd.google-apps.folder' and appProperties has { key='powertodo' and value='archive' } and trashed=false and 'root1' in parents",
+            json!({"files": [{"id": "arc1"}]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            "'arc1' in parents and trashed=false",
+            json!({"files": []}),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/drive/v3/files/c2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"parents": ["com2"]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("PATCH"))
+            .and(path("/drive/v3/files/c2"))
+            .and(query_param("removeParents", "com2"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(file_json("c2", "x.jsonl", "m2")),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        b.archive_comment(&rf("c2", "仕事.2.jsonl", "m2"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

@@ -932,7 +932,7 @@ impl SyncEngine {
             Ok(files) => backend
                 .list_comments()
                 .await
-                .map(|c| with_comments(files, &c)),
+                .map(|c| with_comments(files, c.as_deref().unwrap_or_default())),
             Err(e) => Err(e),
         };
         let changed = {
@@ -1112,7 +1112,7 @@ impl SyncEngine {
             }
         };
         let seen = match &remote_comments {
-            Some(c) => with_comments(remote.clone(), c),
+            Some(c) => with_comments(remote.clone(), c.as_deref().unwrap_or_default()),
             None => remote.clone(),
         };
         if remote_comments.is_some() {
@@ -1248,7 +1248,7 @@ impl SyncEngine {
             && let Ok(files) = target.backend.list().await
             && let Ok(comment_files) = target.backend.list_comments().await
         {
-            let files = with_comments(files, &comment_files);
+            let files = with_comments(files, comment_files.as_deref().unwrap_or_default());
             let comment_keys: Vec<String> = report
                 .comments
                 .iter()
@@ -1385,6 +1385,10 @@ impl SyncEngine {
     /// but both sides' changes are merged by line id (no conflict copy, no base), and nothing goes
     /// through the store. Records live in `state` under `_comments/<leaf>`. A file that fails is
     /// reported and left for the next run; refused credentials or no network stop the run.
+    ///
+    /// `remote` is `None` when the target has no `_comments` folder. A side without that folder
+    /// (archiving leaves it, so it was wiped or never made) is not read as every comment deleted:
+    /// the records are dropped and the other side fills it again.
     async fn sync_comments(
         &self,
         host: &dyn SyncHost,
@@ -1392,8 +1396,12 @@ impl SyncEngine {
         dir: &Path,
         state: &mut SyncState,
         report: &mut SyncReport,
-        remote: Vec<RemoteFile>,
+        remote: Option<Vec<RemoteFile>>,
     ) -> Result<(), BackendError> {
+        if remote.is_none() || !dir.is_dir() {
+            state.files.retain(|k, _| !is_comment_key(k));
+        }
+        let remote = remote.unwrap_or_default();
         let local = match list_comment_files(dir) {
             Ok(l) => l,
             Err(e) => {
@@ -1415,8 +1423,20 @@ impl SyncEngine {
                 .keys()
                 .filter_map(|k| k.strip_prefix(COMMENT_KEY_PREFIX).map(str::to_string)),
         );
+        // Projects whose workbook waits for the next run: their comments wait too, or they would
+        // attach to whatever task holds that No. before the merge renumbers it.
+        let waiting: BTreeSet<String> = report
+            .left_over()
+            .filter_map(|n| n.strip_suffix(".xlsx").map(str::to_string))
+            .collect();
         let mut changed = Vec::new();
         for name in names {
+            if crate::store::comments::parse_file_name(&name)
+                .is_some_and(|(project, _)| waiting.contains(&project))
+            {
+                report.deferred.push(name);
+                continue;
+            }
             let l = locals.get(&name).copied();
             let r = remotes.get(&name).copied();
             let record = state.files.get(&key(&name)).cloned();
@@ -2730,22 +2750,43 @@ mod tests {
         b.sync().await;
         crate::store::comments::archive(&Paths::new(&a.data), "仕事", Some(1), dt(NOW)).unwrap();
         a.sync().await;
-        assert!(remote.list_comments().await.unwrap().is_empty());
+        assert_eq!(remote.list_comments().await.unwrap(), Some(Vec::new()));
         b.sync().await;
         assert!(said(&b, "仕事", 1).is_empty());
     }
 
+    /// A `_comments` folder that is gone (not emptied: archiving leaves it) is not taken as every
+    /// comment deleted; it is filled again from the other side.
     #[tokio::test]
-    async fn comments_do_not_trigger_the_wiped_guard() {
+    async fn a_wiped_local_comments_folder_is_filled_again() {
         let remote = backend();
         let (a, _b) = two_pcs(&remote).await;
         say(&a, "仕事", 1, "x");
+        say(&a, "仕事", 2, "yy");
         a.sync().await;
         fs::remove_dir_all(a.data.join(crate::store::comments::DIR)).unwrap();
         let r = a.sync().await;
         assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
-        // Local gone with a record: the remote copy is archived (a normal delete).
-        assert!(remote.list_comments().await.unwrap().is_empty());
+        assert_eq!(remote.list_comments().await.unwrap().unwrap().len(), 2);
+        assert_eq!(said(&a, "仕事", 1), ["x"]);
+        assert_eq!(said(&a, "仕事", 2), ["yy"]);
+    }
+
+    #[tokio::test]
+    async fn a_wiped_remote_comments_folder_is_filled_again() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        say(&a, "仕事", 1, "x");
+        say(&a, "仕事", 2, "yy");
+        a.sync().await;
+        b.sync().await;
+        remote.wipe_comments();
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert_eq!(said(&a, "仕事", 1), ["x"]);
+        assert_eq!(remote.list_comments().await.unwrap().unwrap().len(), 2);
+        b.sync().await;
+        assert_eq!(said(&b, "仕事", 2), ["yy"]);
     }
 
     #[tokio::test]
@@ -2805,7 +2846,7 @@ mod tests {
         fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
             self.inner.move_to_archive(file)
         }
-        fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
             self.inner.list_comments()
         }
         fn upload_comment<'a>(
@@ -2884,6 +2925,27 @@ mod tests {
         assert_eq!(said(&a, INBOX, 2), ["Aのコメント"]);
     }
 
+    /// The comments of a project wait while its workbook waits: synced now they would attach to
+    /// whatever task holds that No. before the merge renumbers it.
+    #[tokio::test]
+    async fn comments_wait_for_their_workbook() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        say(&a, INBOX, 2, "Aのコメント");
+        b.add(INBOX, "Bの変更");
+        say(&b, INBOX, 2, "Bのコメント");
+        a.sync().await;
+        b.host.saving.lock().unwrap().insert(INBOX.to_string());
+        let r = b.sync().await;
+        assert!(r.deferred.contains(&format!("{INBOX}.2.jsonl")), "{r:?}");
+        assert_eq!(said(&b, INBOX, 2), ["Bのコメント"]);
+        b.host.saving.lock().unwrap().clear();
+        b.sync().await;
+        assert_eq!(said(&b, INBOX, 3), ["Bのコメント"]);
+        assert_eq!(said(&b, INBOX, 2), ["Aのコメント"]);
+    }
+
     /// A rename reaches the other PC as an archive of the old project and a new one (a sync cannot
     /// tell a rename from a delete plus an add). A comment written there on the old project before
     /// it synced goes to that PC's `archive/` with the project: kept, not attached to the new name.
@@ -2913,6 +2975,7 @@ mod tests {
                 .list_comments()
                 .await
                 .unwrap()
+                .unwrap_or_default()
                 .iter()
                 .all(|f| !f.name.starts_with("仕事."))
         );

@@ -80,10 +80,11 @@ pub trait StorageBackend: Send + Sync {
 
     // ---- the `_comments` folder (spec ① §3.4). Names are the leaf names (`仕事.12.jsonl`). ----
 
-    /// The `*.jsonl` files directly in `_comments/`. A target without that folder has none. Complete
-    /// or `Err`, like [`StorageBackend::list`].
-    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
-        Box::pin(async { Ok(Vec::new()) })
+    /// The `*.jsonl` files directly in `_comments/`, `None` when the target has no such folder (it
+    /// is made on the first upload and stays, so a missing one was never made or was wiped).
+    /// Complete or `Err`, like [`StorageBackend::list`].
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(async { Ok(None) })
     }
     /// [`StorageBackend::upload`] inside `_comments/` (the folder is created when needed).
     fn upload_comment<'a>(
@@ -152,6 +153,8 @@ struct Inner {
     files: BTreeMap<String, Entry>,
     /// `(name, bytes)` of what was moved to `archive/`, oldest first.
     archive: Vec<(String, Vec<u8>)>,
+    /// The `_comments` folder exists (made by the first comment upload).
+    comments_folder: bool,
 }
 
 /// An in-memory remote for tests. `version` is the SHA-256 of the content (or, with
@@ -193,6 +196,15 @@ impl MemoryBackend {
     /// the remote as if another PC had written them, so the precondition fails.
     pub fn race_upload(&self, name: &str, bytes: &[u8]) {
         self.lock().races.insert(name.to_string(), bytes.to_vec());
+    }
+
+    /// Someone deletes the `_comments` folder on the target (its files are gone, not archived).
+    pub fn wipe_comments(&self) {
+        let mut inner = self.lock();
+        inner
+            .files
+            .retain(|_, e| !e.name.starts_with(COMMENTS_PREFIX));
+        inner.comments_folder = false;
     }
 
     /// Ends every injected failure.
@@ -371,11 +383,14 @@ impl StorageBackend for MemoryBackend {
         })
     }
 
-    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+    fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
         Box::pin(async move {
             let inner = self.lock();
             if let Some(f) = inner.list_failure {
                 return Err(f.error());
+            }
+            if !inner.comments_folder {
+                return Ok(None);
             }
             let mut files: Vec<RemoteFile> = inner
                 .files
@@ -389,7 +404,7 @@ impl StorageBackend for MemoryBackend {
                 })
                 .collect();
             files.sort_by(|a, b| a.name.cmp(&b.name));
-            Ok(files)
+            Ok(Some(files))
         })
     }
 
@@ -406,6 +421,7 @@ impl StorageBackend for MemoryBackend {
                 ..f.clone()
             });
             let f = self.upload(&full, existing.as_ref(), bytes).await?;
+            self.lock().comments_folder = true;
             Ok(RemoteFile {
                 name: name.to_string(),
                 ..f
@@ -608,7 +624,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(f.name, "仕事.1.jsonl");
-        let listed = b.list_comments().await.unwrap();
+        let listed = b.list_comments().await.unwrap().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(b.download(&listed[0]).await.unwrap(), b"a\n");
         let g = b
@@ -621,7 +637,8 @@ mod tests {
             Err(BackendError::Precondition)
         ));
         b.archive_comment(&g).await.unwrap();
-        assert!(b.list_comments().await.unwrap().is_empty());
+        // Archiving the last file leaves the folder.
+        assert_eq!(b.list_comments().await.unwrap(), Some(Vec::new()));
     }
 
     #[tokio::test]
@@ -634,8 +651,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_remote_comments_folder_is_empty() {
+    async fn missing_remote_comments_folder_is_none() {
         let b = MemoryBackend::new(chrono::NaiveDateTime::default);
-        assert!(b.list_comments().await.unwrap().is_empty());
+        assert_eq!(b.list_comments().await.unwrap(), None);
     }
 }
