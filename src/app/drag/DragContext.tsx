@@ -89,7 +89,7 @@ const line = (y: number, x: number, w: number) => (
   </div>
 );
 const ring = (r: { left: number; top: number; width: number; height: number }, fill: boolean) => (
-  <div style={{ position: "fixed", left: r.left, top: r.top, width: r.width, height: r.height, borderRadius: 6, pointerEvents: "none", zIndex: 79, boxShadow: fill ? undefined : "inset 0 0 0 1px var(--color-accent)", background: fill ? "var(--color-accent-soft)" : undefined, mixBlendMode: fill ? "multiply" : undefined }} />
+  <div style={{ position: "fixed", left: r.left, top: r.top, width: r.width, height: r.height, borderRadius: 6, pointerEvents: "none", zIndex: 79, boxShadow: fill ? undefined : "inset 0 0 0 1px var(--color-accent)", background: fill ? "var(--color-drop-highlight)" : undefined }} />
 );
 
 /** The card, the red line / ring / highlight, and the settle motion (spec ③ §2.4, ~0.15 s, instant with reduced motion). */

@@ -41,7 +41,7 @@ export type SidebarProps = {
   onClose?: () => void;
   /** アカウント欄の表示名。既定は絵コンテのサンプル名。 */
   displayName?: string;
-  /** Stories only: draw this project as the drop target (accent-soft highlight, D-01r). */
+  /** Stories only: draw this project as the drop target (drop-highlight, D-01r). */
   dropPreview?: string;
 };
 
@@ -239,7 +239,7 @@ export function Sidebar({
               key={p.name}
               data-project-item={p.name}
               data-drop-project={p.name}
-              style={dropPreview === p.name ? { background: "var(--color-accent-soft)", borderRadius: 6 } : undefined}
+              style={dropPreview === p.name ? { background: "var(--color-drop-highlight)", borderRadius: 6 } : undefined}
             >
               <ProjectItem
                 color={p.color}

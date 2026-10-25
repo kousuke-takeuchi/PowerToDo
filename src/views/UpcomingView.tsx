@@ -29,7 +29,7 @@ export type UpcomingViewProps = {
   focusedKey?: string;
   /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
-  /** Stories only: draw this day (YYYY-MM-DD) as the drop target (accent-soft highlight, D-05b). */
+  /** Stories only: draw this day (YYYY-MM-DD) as the drop target (drop-highlight, D-05b). */
   dropPreviewDay?: string;
 };
 
@@ -172,7 +172,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
       <div>
         {groups.map((ymd) => (
           <section key={ymd} id={days ? `day-${ymd}` : undefined} data-drop-day={ymd < today ? undefined : ymd}
-            style={dropPreviewDay === ymd ? { background: "var(--color-accent-soft)", borderRadius: 6 } : undefined}
+            style={dropPreviewDay === ymd ? { background: "var(--color-drop-highlight)", borderRadius: 6 } : undefined}
           >
             <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
             {rows(ymd, rowsOf(ymd))}
