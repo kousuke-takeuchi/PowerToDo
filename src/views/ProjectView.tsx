@@ -64,6 +64,8 @@ export type ProjectViewProps = {
   today?: string;
   /** キーボードのフォーカス行 (`project/no`)。 */
   focusedKey?: string;
+  /** Main: the row (`project/no`) whose drop is being saved. Drawn faded, as while it is lifted. */
+  movingKey?: string;
   /** Stories: draw this task's row as hovered (handle and actions shown). */
   hoverNo?: number;
   /** Stories: this task's row starts as the inline editor (D-01i). */
@@ -122,6 +124,7 @@ export function ProjectView({
   onDeleteProject,
   today = TODAY,
   focusedKey,
+  movingKey,
   hoverNo,
   initialEditNo,
   initialAddSection,
@@ -275,7 +278,9 @@ export function ProjectView({
                     <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
                   )
               : undefined,
-          dragging: drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project,
+          dragging:
+            (drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
+            movingKey === `${project}/${t.no}`,
         }}
       />
     );

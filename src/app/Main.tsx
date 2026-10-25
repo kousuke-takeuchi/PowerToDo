@@ -7,6 +7,7 @@ import { completedOf, nextNotice, noticeText, undoOf } from "./completionToast";
 import type { Notice, ToastState } from "./completionToast";
 import { RowActions, type RowActionsApi } from "./rowActions";
 import { DragProvider, type DropResult } from "./drag/DragContext";
+import { movedRootNo } from "./drag/movedRoot";
 import { rowStateAfter } from "./rowState";
 import { DeleteTaskDialog } from "../views/DeleteTaskDialog";
 import { countDescendants } from "../views/deleteMessage";
@@ -271,8 +272,31 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       },
     );
 
+  // The row whose drop on the open project is being saved: drawn faded (as while lifted) until the save answers.
+  const [movingKey, setMovingKey] = useState<string | null>(null);
+  /**
+   * A move within the open project (spec ③ §2.4): `call` goes through the project's queue, which shows the returned
+   * view at once; the other views follow. A failure is shown and the screen re-read, as in `afterMove`.
+   */
+  const screenMove = (call: Promise<void>, key?: string) => {
+    if (key) setMovingKey(key);
+    void call
+      .then(
+        () => {
+          refreshAll();
+          void refreshSummaries();
+        },
+        (e) => {
+          showError(e);
+          void p.refresh();
+        },
+      )
+      .finally(() => key && setMovingKey((k) => (k === key ? null : k)));
+  };
+
   const { openAny } = useRowShortcuts({
     afterMove,
+    screenMove,
     todayList: () => todayData.data?.today ?? [],
     navKind: nav.kind,
     focus,
@@ -573,16 +597,19 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const onDrop = (r: DropResult) => {
     switch (r.kind) {
       case "place":
+        if (projectScreen && r.source.task.project === current)
+          return screenMove(p.moveWithin(r.source.task.no, r.placement), `${r.source.task.project}/${r.source.task.no}`);
         return afterMove(api.moveTaskWithin(r.source.task.project, r.source.task.no, r.placement));
       case "sections":
+        if (projectScreen && r.project === current) return screenMove(p.reorderSections(r.names));
         return afterMove(api.reorderSections(r.project, r.names));
       case "projects":
         return afterMove(api.reorderProjects(r.names));
       case "project":
         return afterMove(
           api.moveTask(r.source.task.project, r.source.task.no, r.project, null).then((out) => {
-            // The moved task is appended to the target project: it has the highest No. there.
-            const no = out.to.tasks.length ? Math.max(...out.to.tasks.map((x) => x.no)) : undefined;
+            // The subtree is numbered after the target's highest No. in file order: open its root, not its last subtask.
+            const no = movedRootNo(out.to.tasks, r.source.subtree.size);
             note(`タスクを ${r.project} に移しました`, "開く", () => no !== undefined && openTaskAt(r.project, no));
           }),
         );
@@ -835,6 +862,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         invalidRows={view.invalidRows}
         focusedKey={focus.focusedKey ?? undefined}
+        movingKey={movingKey ?? undefined}
         onVisibleKeys={reportKeys}
         onExpandApi={(api) => (expandApi.current = api)}
         onOpenTask={(t) => openAny(t)}

@@ -26,6 +26,9 @@ test("drag_key_maps_alt_arrows_and_ctrl_brackets", () => {
   assert.equal(dragKey(e("[", { ctrlKey: true })), "outdent");
   assert.equal(dragKey(e("x", { ctrlKey: true }, "BracketRight")), "indent");
   assert.equal(dragKey(e("x", { ctrlKey: true }, "BracketLeft")), "outdent");
+  // JIS: the physical `[` key reports code BracketRight, `]` reports Backslash; `key` wins over `code`.
+  assert.equal(dragKey(e("[", { ctrlKey: true }, "BracketRight")), "outdent");
+  assert.equal(dragKey(e("]", { ctrlKey: true }, "Backslash")), "indent");
   assert.equal(dragKey(e("]")), null);
   assert.equal(dragKey(e("]", { ctrlKey: true, altKey: true })), null);
   assert.equal(dragKey(e("]", { metaKey: true })), null);

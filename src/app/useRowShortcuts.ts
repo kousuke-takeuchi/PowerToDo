@@ -16,6 +16,7 @@ type Nav = SidebarProps["active"];
 /** キーボード操作 (shortcuts.ts) とフォーカス行のタスクへの操作。 */
 export function useRowShortcuts({
   afterMove,
+  screenMove,
   todayList,
   navKind,
   focus,
@@ -38,6 +39,8 @@ export function useRowShortcuts({
 }: {
   /** Saves a key move and reloads the screen (the same as a drop). */
   afterMove: (p: Promise<unknown>) => void;
+  /** Saves a key move within the open project through its queue (`p.moveWithin`), which shows the result at once. */
+  screenMove: (call: Promise<void>) => void;
   /** The tasks of the Today group (not overdue), in screen order. */
   todayList: () => Task[];
   navKind: Nav["kind"];
@@ -98,7 +101,7 @@ export function useRowShortcuts({
       while (root?.parentNo !== undefined) root = tasks.find((x) => x.no === root!.parentNo);
       if (!root || root.progress === 100) return;
       const to = k === "up" ? siblingMove(tasks, t.no, -1) : k === "down" ? siblingMove(tasks, t.no, 1) : k === "indent" ? indentMove(tasks, t.no) : outdentMove(tasks, t.no);
-      if (to) afterMove(api.moveTaskWithin(t.project, t.no, to));
+      if (to) screenMove(p.moveWithin(t.no, to));
       return;
     }
     if (navKind === "today" && (k === "up" || k === "down")) {

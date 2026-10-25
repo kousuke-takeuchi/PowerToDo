@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { onProjectChanged, onProjectsChanged, onSaveStatus } from "../api/events";
-import type { ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
+import type { Placement, ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
 
 export type UseProjectOptions = {
   /** Called after every successful command (the sidebar refreshes its counts here). */
@@ -169,11 +169,33 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
     [enqueue, name],
   );
 
+  /**
+   * A drag / key move (spec ③ §2.4): the returned ProjectView is shown at once. Unlike `mutate`, a failure rejects the
+   * promise (the caller shows it and re-reads) and leaves `notice` alone.
+   */
+  const applyMove = useCallback(
+    (call: () => Promise<ProjectView>): Promise<void> => {
+      const g = gen.current;
+      return enqueue(async () => {
+        const v = await call();
+        if (g === gen.current) {
+          setView(v);
+          setError(null);
+        }
+        onMutated.current?.();
+        if (v.warnings?.length) onWarnings.current?.(v.warnings);
+      });
+    },
+    [enqueue],
+  );
+  const moveWithin = useCallback((no: number, to: Placement) => applyMove(() => api.moveTaskWithin(name, no, to)), [applyMove, name]);
+  const reorderSections = useCallback((names: string[]) => applyMove(() => api.reorderSections(name, names)), [applyMove, name]);
+
   const parseQuickAdd = useCallback((text: string): Promise<QuickAddResult> => api.parseQuickAdd(text), []);
   const clearNotice = useCallback(() => setNotice(null), []);
 
   /** Re-read the in-memory view (after a command that did not go through this hook, e.g. move_task). */
   const refresh = useCallback(() => load(() => api.getProject(name), true), [load, name]);
 
-  return { view, loading, error, notice, clearNotice, reload, refresh, addTask, updateTask, completeTask, deleteTask, addSubtask, addSection, renameSection, quickAdd, parseQuickAdd };
+  return { view, loading, error, notice, clearNotice, reload, refresh, addTask, updateTask, completeTask, deleteTask, addSubtask, addSection, renameSection, moveWithin, reorderSections, quickAdd, parseQuickAdd };
 }
