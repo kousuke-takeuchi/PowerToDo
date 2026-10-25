@@ -1442,9 +1442,7 @@ impl SyncEngine {
                     Action::Download(_) => {
                         let r = r.expect("a download has a remote file");
                         let bytes = backend.download(r).await?;
-                        std::fs::create_dir_all(dir)
-                            .map_err(|e| BackendError::Other(e.to_string()))?;
-                        crate::store::paths::write_atomic(&path, &bytes)
+                        write_comments(host, &path, &bytes)
                             .map_err(|e| BackendError::Other(e.to_string()))?;
                         put_record(state, key(&name), r, sha256_hex(&bytes));
                         Ok(Some(true))
@@ -1463,7 +1461,7 @@ impl SyncEngine {
                         let f = backend
                             .upload_comment(&name, Some(r), merged.clone())
                             .await?;
-                        crate::store::paths::write_atomic(&path, &merged)
+                        write_comments(host, &path, &merged)
                             .map_err(|e| BackendError::Other(e.to_string()))?;
                         put_record(state, key(&name), &f, hash);
                         Ok(Some(true))
@@ -1518,6 +1516,31 @@ impl SyncEngine {
         }
         Ok(())
     }
+}
+
+/// Writes a comment file from the remote side, under the store lock (the app appends under it
+/// too): what is on disk now is merged in, so a comment written while the run was away is kept.
+/// The record keeps the remote content's hash, so a kept local line is uploaded next run.
+fn write_comments(
+    host: &dyn SyncHost,
+    path: &Path,
+    incoming: &[u8],
+) -> crate::error::AppResult<()> {
+    let _store = host.lock_store();
+    let bytes = match std::fs::read(path) {
+        Ok(current) if current == incoming => return Ok(()),
+        Ok(current) => crate::store::comments::merge(
+            &String::from_utf8_lossy(&current),
+            &String::from_utf8_lossy(incoming),
+        )
+        .into_bytes(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => incoming.to_vec(),
+        Err(e) => return Err(e.into()),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::store::paths::write_atomic(path, &bytes)
 }
 
 fn put_record(state: &mut SyncState, key: String, remote: &RemoteFile, local_hash: String) {
@@ -2124,6 +2147,8 @@ impl Run<'_> {
                     // Their comment files follow (spec ① §3.5); the comments pass of this run uploads
                     // them under the new No. The highest No. first, so a move never lands on a file
                     // another move still has to take away.
+                    // Under the store lock: the app appends comments under it.
+                    let _store = self.host.lock_store();
                     let paths = crate::store::paths::Paths::new(&self.data_dir);
                     let mut moves = merged.renumbered.clone();
                     moves.sort_by_key(|m| std::cmp::Reverse(m.0));
@@ -2734,6 +2759,110 @@ mod tests {
         say(&b, "仕事", 1, "x");
         b.sync().await;
         assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    /// A backend whose next comment download (or upload) first appends a comment on this PC: the
+    /// app writing one while the run is between reading the file and writing the new copy.
+    struct AppendDuringDownload {
+        inner: Arc<MemoryBackend>,
+        on_download: Mutex<Option<(PathBuf, &'static str)>>,
+        on_upload: Mutex<Option<(PathBuf, &'static str)>>,
+    }
+
+    /// Appends the pending comment (to 仕事 No. 1 in that data folder), once.
+    fn append_now(pending: &Mutex<Option<(PathBuf, &'static str)>>) {
+        if let Some((data, text)) = pending.lock().unwrap().take() {
+            let line = crate::store::comments::Line {
+                id: crate::store::comments::new_id(text.len() as u64),
+                op: crate::store::comments::Op::Add,
+                target: None,
+                at: "2026-10-25T21:00:00+09:00".into(),
+                author: "たろう".into(),
+                text: Some(text.into()),
+            };
+            crate::store::comments::append(&Paths::new(&data), "仕事", 1, &line).unwrap();
+        }
+    }
+
+    impl StorageBackend for AppendDuringDownload {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.inner.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            if file.name.ends_with(".jsonl") {
+                append_now(&self.on_download);
+            }
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.inner.list_comments()
+        }
+        fn upload_comment<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            append_now(&self.on_upload);
+            self.inner.upload_comment(name, existing, bytes)
+        }
+        fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.archive_comment(file)
+        }
+    }
+
+    async fn pc_appending_during_download(
+        remote: &Arc<MemoryBackend>,
+    ) -> (Pc, Pc, Arc<AppendDuringDownload>) {
+        let (a, _) = two_pcs(remote).await;
+        let wrapper = Arc::new(AppendDuringDownload {
+            inner: remote.clone(),
+            on_download: Mutex::new(None),
+            on_upload: Mutex::new(None),
+        });
+        let b = Pc::with_backend(wrapper.clone(), None);
+        assert_eq!(b.sync().await.outcome, RunOutcome::Done);
+        (a, b, wrapper)
+    }
+
+    #[tokio::test]
+    async fn comment_written_during_a_download_is_kept() {
+        let remote = backend();
+        let (a, b, wrapper) = pc_appending_during_download(&remote).await;
+        say(&a, "仕事", 1, "A");
+        a.sync().await;
+        *wrapper.on_download.lock().unwrap() = Some((b.data.clone(), "BB"));
+        b.sync().await;
+        assert_eq!(sorted(said(&b, "仕事", 1)), names(&["A", "BB"]));
+        b.sync().await;
+        a.sync().await;
+        assert_eq!(sorted(said(&a, "仕事", 1)), names(&["A", "BB"]));
+    }
+
+    #[tokio::test]
+    async fn comment_written_during_a_merge_is_kept() {
+        let remote = backend();
+        let (a, b, wrapper) = pc_appending_during_download(&remote).await;
+        say(&a, "仕事", 1, "A");
+        say(&b, "仕事", 1, "BB");
+        a.sync().await;
+        *wrapper.on_upload.lock().unwrap() = Some((b.data.clone(), "CCC"));
+        b.sync().await;
+        assert_eq!(sorted(said(&b, "仕事", 1)), names(&["A", "BB", "CCC"]));
+        b.sync().await;
+        a.sync().await;
+        assert_eq!(sorted(said(&a, "仕事", 1)), names(&["A", "BB", "CCC"]));
     }
 
     #[tokio::test]
