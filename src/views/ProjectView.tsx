@@ -18,6 +18,8 @@ import { SubtaskForm } from "./SubtaskForm";
 import { DatePicker } from "./DatePicker";
 import { DeleteTaskDialog } from "./DeleteTaskDialog";
 import { TaskEditor } from "./TaskEditor";
+import { ActionRow } from "./ActionRow";
+import { RowActions } from "../app/rowActions";
 import { TaskMenu } from "./TaskMenu";
 import { blankValue, editorValueOf } from "./taskEditorValue";
 
@@ -152,6 +154,7 @@ export function ProjectView({
   const { reduced } = useMotionTiming();
 
   const commentCounts = useContext(CommentCounts);
+  const rowCtx = useContext(RowActions);
   const mine = tasks.filter((t) => t.project === project);
   // Open tasks of this project, for the line under the title.
   const openCount = mine.filter((t) => t.progress !== 100).length;
@@ -236,24 +239,29 @@ export function ProjectView({
         onSubmit={() => Promise.resolve(true)}
       />
     ) : (
-      <TaskRow
-        title={invalid ? t.title + INVALID_SUFFIX : t.title}
-        description={t.note}
-        focused={focusedKey === `${t.project}/${t.no}`}
-        done={isDone(t)}
-        priority={t.priority}
-        date={dateLabel(t.due, today)}
-        recurring={onToggleDone && t.rrule ? true : undefined}
-        labels={t.labels}
-        commentCount={commentCounts[`${t.project}/${t.no}`]}
-        indent={indent}
-        showActions={showActions || hoverNo === t.no}
-        showHandle={hoverNo === t.no}
-        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-        subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
-        onToggleDone={() => toggleDone(t)}
-        onMore={onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined}
-        onToggleExpand={() => setExpanded((s) => toggleSet(s, t.no))}
+      <ActionRow
+        task={t}
+        canInsert
+        rowProps={{
+          title: invalid ? t.title + INVALID_SUFFIX : t.title,
+          description: t.note,
+          focused: focusedKey === `${t.project}/${t.no}`,
+          done: isDone(t),
+          priority: t.priority,
+          date: dateLabel(t.due, today),
+          recurring: onToggleDone && t.rrule ? true : undefined,
+          labels: t.labels,
+          commentCount: commentCounts[`${t.project}/${t.no}`],
+          indent,
+          showActions: showActions || hoverNo === t.no,
+          showHandle: hoverNo === t.no,
+          onClick: onOpenTask ? () => onOpenTask(t) : undefined,
+          subtasks: kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined,
+          onToggleDone: () => toggleDone(t),
+          // Without RowActions (stories) the "..." shows the old inline confirmation; ActionRow replaces it otherwise.
+          onMore: onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined,
+          onToggleExpand: () => setExpanded((s) => toggleSet(s, t.no)),
+        }}
       />
     );
     return (
@@ -332,7 +340,16 @@ export function ProjectView({
               <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}</AnimatePresence>
               {indent === 0 && kids.length > 0 && (
                 <div style={{ marginLeft: 32 }}>
-                  {formParent === t.no ? (
+                  {formParent === t.no && rowCtx ? (
+                    <TaskEditor
+                      mode="add"
+                      initial={blankValue(project, t.category)}
+                      allLabels={rowCtx.allLabels}
+                      today={rowCtx.today}
+                      onCancel={() => setFormParent(undefined)}
+                      onSubmit={(v) => rowCtx.add(v, { parentNo: t.no }).then((no) => no !== null)}
+                    />
+                  ) : formParent === t.no ? (
                     <SubtaskForm
                       defaultTitle={formOpenedByClick || onAddSubtask ? "" : FORM_SAMPLE_TITLE}
                       autoFocus={formOpenedByClick}
@@ -401,6 +418,23 @@ export function ProjectView({
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {
+    if (rowCtx) {
+      if (addTo && addTo.section === section) {
+        return (
+          <TaskEditor
+            mode="add"
+            initial={blankValue(project, section)}
+            projects={rowCtx.projects}
+            inbox={rowCtx.inbox}
+            allLabels={rowCtx.allLabels}
+            today={rowCtx.today}
+            onCancel={() => setAddTo(null)}
+            onSubmit={(v) => rowCtx.add(v).then((no) => no !== null)}
+          />
+        );
+      }
+      return <AddTaskRow onClick={() => setAddTo({ section })} />;
+    }
     if (!onAddTask && addTo && addTo.section === section) {
       return (
         <TaskEditor

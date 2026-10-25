@@ -33,6 +33,8 @@ export type TaskDialogProps = {
   comments?: Comment[];
   /** コメントを読み込めなかった。 */
   commentsFailed?: boolean;
+  /** 開いたらコメントの入力欄にカーソルを置く (行のコメントのボタン、spec ② §2)。 */
+  focusCommentInput?: boolean;
   /** 今の表示名 (自分のコメントだけ編集・削除できる)。 */
   me?: string;
   /** 渡すと入力欄を出す。true で保存できた (入力欄を空にする)。 */
@@ -167,6 +169,7 @@ export function TaskDialog({
   onClose,
   comments = [],
   commentsFailed,
+  focusCommentInput,
   onChange,
   onToggleDone,
   onDelete,
@@ -442,6 +445,7 @@ export function TaskDialog({
       <CommentsSection
         comments={comments}
         failed={commentsFailed}
+        autoFocusInput={focusCommentInput}
         me={me}
         onAdd={onAddComment}
         onEdit={onEditComment}

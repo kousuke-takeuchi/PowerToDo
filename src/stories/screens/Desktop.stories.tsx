@@ -6,6 +6,9 @@ import { TODAY, comments, counts, filters, labelCounts, labels, projects, sectio
 import { PanelLeftOpen } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Toast } from "../../components/Toast";
+import { RowActions, type RowActionsApi } from "../../app/rowActions";
+import { DeleteTaskDialog } from "../../views/DeleteTaskDialog";
+import { countDescendants } from "../../views/deleteMessage";
 import { AppShell } from "../../views/AppShell";
 import { BoardView } from "../../views/BoardView";
 import { ConflictBanner } from "../../views/ConflictBanner";
@@ -174,6 +177,89 @@ function InteractiveScreen() {
 export const D01Interactive: Story = {
   name: "D-01 追加と完了 (操作)",
   render: () => <InteractiveScreen />,
+};
+
+// 操作確認用 (spec ②): 行の鉛筆 / 日付 / 「…」/ 追加の欄が、この Story の中のローカル state で動く (RowActions の代わり)。
+function RowActionsScreen() {
+  const [list, setList] = useState<Task[]>(shopping);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
+  const [overlay, setOverlay] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Task | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const nextNo = (cur: Task[]) => Math.max(0, ...cur.map((t) => t.no)) + 1;
+  const patch = (no: number, p: Partial<Task>) => setList((cur) => cur.map((x) => (x.no === no ? { ...x, ...p } : x)));
+  const ctx: RowActionsApi = {
+    today: TODAY,
+    inbox: "受信トレイ",
+    projects: projects.map((p) => ({ name: p.name, sections: p.name === "買い物" ? sections.filter((s) => s.project === "買い物").map((s) => s.name) : [] })),
+    allLabels: labels.map((l) => l.name),
+    editing,
+    setEditing,
+    inserting,
+    setInserting,
+    overlay,
+    setOverlay,
+    save: async (t, _before, after) => {
+      patch(t.no, { title: after.title.trim(), note: after.note || undefined, due: after.due, dueTime: after.dueTime, priority: after.priority, labels: after.labels, category: after.section });
+      return true;
+    },
+    add: async (v, opts) => {
+      const no = nextNo(list);
+      setList((cur) => {
+        const anchor = opts?.position ? cur.find((x) => x.no === ("before" in opts.position! ? opts.position.before : opts.position!.after)) : undefined;
+        const at = anchor ? ("before" in opts!.position! ? anchor.order : anchor.order + 1) : Math.max(0, ...cur.map((x) => x.order)) + 1;
+        const shifted = anchor ? cur.map((x) => (x.category === anchor.category && x.parentNo === anchor.parentNo && x.order >= at ? { ...x, order: x.order + 1 } : x)) : cur;
+        return [...shifted, { no, project: "買い物", category: v.section, title: v.title.trim(), assignee: "たろう", priority: v.priority, progress: 0, due: v.due, parentNo: opts?.parentNo, labels: v.labels, reminders: [], order: at, createdAt: "2026-10-13T09:00" }];
+      });
+      setToast(`タスクが ${v.project} に追加されました`);
+      return no;
+    },
+    setDue: (t, due) => {
+      patch(t.no, { due });
+      setToast(due ? `日付を ${due} に更新しました` : "日付を削除しました");
+    },
+    setPriority: (t, pr) => patch(t.no, { priority: pr }),
+    setReminders: (t, r) => patch(t.no, { reminders: r }),
+    move: (t, _project, section) => patch(t.no, { category: section }),
+    duplicate: (t) => {
+      setList((cur) => [...cur.map((x) => (x.category === t.category && x.parentNo === t.parentNo && x.order > t.order ? { ...x, order: x.order + 1 } : x)), { ...t, no: nextNo(cur), order: t.order + 1 }]);
+      setToast("タスクを複製しました");
+    },
+    requestDelete: setDeleting,
+    openComments: () => setToast("コメントを開く"),
+  };
+  return (
+    <RowActions.Provider value={ctx}>
+      <AppShell
+        sidebar={sidebar}
+        syncState="synced"
+        overlay={
+          <>
+            {toast && <Toast text={toast} onAction={() => setToast(null)} onClose={() => setToast(null)} />}
+            {deleting && (
+              <DeleteTaskDialog
+                title={deleting.title}
+                subtasks={countDescendants(list, deleting.no)}
+                onCancel={() => setDeleting(null)}
+                onConfirm={() => {
+                  setList((cur) => cur.filter((x) => x.no !== deleting.no && x.parentNo !== deleting.no));
+                  setDeleting(null);
+                }}
+              />
+            )}
+          </>
+        }
+      >
+        <ProjectView project="買い物" tasks={list} sections={sections} initialExpanded={[1]} onToggleDone={(t, done) => patch(t.no, { progress: done ? 100 : 0 })} />
+      </AppShell>
+    </RowActions.Provider>
+  );
+}
+
+export const D01RowActions: Story = {
+  name: "D-01 行の操作 (操作)",
+  render: () => <RowActionsScreen />,
 };
 
 // D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
@@ -612,7 +698,7 @@ export const D14: Story = {
   render: () => (
     <AppShell
       sidebar={<Sidebar active={{ kind: "today" }} counts={counts} projects={projects} syncState="synced" lastSyncedAt="09:41" />}
-      overlay={<Toast text="2 件のタスクを完了しました" onUndo={() => {}} onClose={() => {}} />}
+      overlay={<Toast text="2 件のタスクを完了しました" onAction={() => {}} onClose={() => {}} />}
     >
       <TodayView tasks={withoutNo(15)} today={TODAY} />
     </AppShell>

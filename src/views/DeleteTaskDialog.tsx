@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { deleteMessage } from "./deleteMessage";
@@ -5,6 +6,19 @@ import { deleteMessage } from "./deleteMessage";
 /** Spec ② §4.3: the one delete confirmation (row menu, keys, task dialog). Enter deletes, Esc cancels. */
 export function DeleteTaskDialog({ title, subtasks, onCancel, onConfirm }: { title: string; subtasks: number; onCancel: () => void; onConfirm: () => void }) {
   useEscLayer(true, onCancel);
+  // Enter deletes wherever the focus is (the menu item that opened this may still hold it).
+  const confirm = useRef(onConfirm);
+  confirm.current = onConfirm;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      e.stopPropagation();
+      confirm.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   return (
     <div
       style={{ position: "fixed", inset: 0, zIndex: 60, background: "var(--color-scrim)", display: "flex", justifyContent: "center", alignItems: "flex-start", paddingTop: 100 }}
@@ -14,13 +28,6 @@ export function DeleteTaskDialog({ title, subtasks, onCancel, onConfirm }: { tit
         role="alertdialog"
         aria-label="タスクの削除"
         tabIndex={-1}
-        ref={(el) => el?.focus()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            onConfirm();
-          }
-        }}
         style={{
           width: 384,
           boxSizing: "border-box",

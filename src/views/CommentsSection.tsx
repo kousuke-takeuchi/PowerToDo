@@ -45,6 +45,7 @@ export function commentTime(at: string): string {
 export function CommentsSection({
   comments,
   failed,
+  autoFocusInput,
   me,
   onAdd,
   onEdit,
@@ -54,6 +55,8 @@ export function CommentsSection({
   comments: Comment[];
   /** The comments could not be read (spec ① §3.6). */
   failed?: boolean;
+  /** Puts the cursor in the comment input on mount. */
+  autoFocusInput?: boolean;
   me?: string;
   /** Resolves true when saved (the input then clears). Without it there is no input (Storybook). */
   onAdd?: (text: string) => Promise<boolean>;
@@ -150,6 +153,7 @@ export function CommentsSection({
       {onAdd && (
         <textarea
           aria-label="コメント"
+          autoFocus={autoFocusInput}
           placeholder="コメント"
           rows={2}
           value={draft}

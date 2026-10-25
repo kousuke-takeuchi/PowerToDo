@@ -1,4 +1,3 @@
-import { confirmAction } from "../api/dialogs";
 import type { Task } from "../types/model";
 import type { ExpandApi } from "../views/ProjectView";
 import { taskKey } from "../views/crossList";
@@ -23,14 +22,14 @@ export function useRowShortcuts({
   projectScreen,
   today,
   openCross,
-  dialog,
-  setDialog,
   expandApi,
   enabled,
   navigate,
   openQuickAdd,
   openSearch,
   onCompleted,
+  requestDelete,
+  edit,
 }: {
   focus: ReturnType<typeof useRowFocus>;
   visibleKeys: string[];
@@ -42,9 +41,6 @@ export function useRowShortcuts({
   projectScreen: boolean;
   today: string;
   openCross: (t: Task) => void;
-  /** The task open in the task dialog. */
-  dialog: { project: string; no: number } | null;
-  setDialog: (d: { project: string; no: number } | null) => void;
   expandApi: { current: ExpandApi | null };
   enabled: boolean;
   navigate: (target: Nav) => void;
@@ -52,8 +48,11 @@ export function useRowShortcuts({
   openSearch: () => void;
   /** A task was completed with `e` (for the undo toast). */
   onCompleted?: (t: Task) => void;
+  /** Delete / Backspace / ⌘⌫: show the delete confirmation (spec ② §4.3). */
+  requestDelete: (t: Task) => void;
+  /** ⌘E: edit the row in place (spec ② §7). */
+  edit: (key: string) => void;
 }) {
-  const view = p.view;
   // ---- キーボード操作 (shortcuts.ts)。フォーカス行のタスクは、いま出ているビューのデータから探す ----
   const focusedTask = (() => {
     const k = focus.focusedKey;
@@ -74,21 +73,7 @@ export function useRowShortcuts({
     // dueTime は触らない (時刻は保つ)
     setDue: (t: Task, due: string) => (onProjectScreen(t) ? void p.updateTask(t.no, { due }) : void cross.setDue(t, due)),
   };
-  const deleteAny = async (t: Task) => {
-    // プロジェクト画面は実際に子があるときだけ。横断ビューは子を一覧に出さないので、親タスクなら常に添える。
-    const hasSubtasks = onProjectScreen(t) ? !!view?.tasks.some((x) => x.parentNo === t.no) : t.parentNo === undefined;
-    const ok = await confirmAction(`「${t.title}」を削除します。${hasSubtasks ? "サブタスクも削除されます。" : ""}`, {
-      title: "タスクの削除",
-      okLabel: "削除",
-    }).catch(() => false);
-    if (!ok) return;
-    if (onProjectScreen(t)) {
-      if (dialog?.project === t.project && dialog.no === t.no) setDialog(null);
-      void p.deleteTask(t.no);
-    } else {
-      void cross.remove(t);
-    }
-  };
+  const deleteAny = (t: Task) => requestDelete(t);
   /** Opens the task dialog over the current view (spec ① §2.5), from any view. */
   const openAny = (t: Task) => openCross(t);
   const row: RowHandlers | null = visibleKeys.length
@@ -98,7 +83,8 @@ export function useRowShortcuts({
         down: () => focus.move(1),
         open: () => focusedTask && openAny(focusedTask),
         toggleDone: () => focusedTask && actOn.toggleDone(focusedTask),
-        remove: () => focusedTask && void deleteAny(focusedTask),
+        remove: () => focusedTask && deleteAny(focusedTask),
+        edit: () => focusedTask && edit(taskKey(focusedTask)),
         setPriority: (pr) => focusedTask && actOn.setPriority(focusedTask, pr),
         dueToday: () => focusedTask && actOn.setDue(focusedTask, today),
         dueTomorrow: () => focusedTask && actOn.setDue(focusedTask, addDays(today, 1)),
