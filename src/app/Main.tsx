@@ -341,7 +341,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [drawer, width]);
   useEscLayer(drawer && width === 960, () => setDrawer(false));
 
-  const { createProject, renameProject, deleteProject, deleteLabel } = useProjectActions({
+  const { createProject, renameProject, deleteProject, deleteLabel, renameLabel } = useProjectActions({
     current,
     summaries,
     refreshSummaries,
@@ -349,6 +349,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     showError,
     ext,
     labelsData,
+    views: viewStore,
   });
 
   // データフォルダが変わった: 開いていたプロジェクトは新しいフォルダに無いかもしれないので、受信トレイに戻して読み直す。
@@ -771,7 +772,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
             .then(labelsData.refresh)
             .catch(showError)
         }
-        onRenameLabel={(name, newName) => void api.renameLabel(name, newName).then(labelsData.refresh).catch(showError)}
+        onRenameLabel={(name, newName) => void renameLabel(name, newName)}
         onChangeColor={(name, color) => void api.updateLabel(name, color).then(labelsData.refresh).catch(showError)}
         onDeleteLabel={(name) => void deleteLabel(name)}
         onAddFilter={() => setFlash({ text: "フィルターは Phase 5 で実装します", tone: "info" })}

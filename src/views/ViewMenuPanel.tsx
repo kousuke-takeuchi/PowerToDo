@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Kanban, List } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Kanban, List } from "lucide-react";
 import { ALLOWED, DEFAULTS, isDefault, withSort, type CreatedFilter, type DateFilter, type GroupKey, type Screen, type SortKey, type ViewOptions } from "../app/view/viewOptions";
 import { PopRow, PopoverShell } from "./PopoverShell";
 
@@ -81,6 +81,28 @@ function Select<T extends string>({ label, value, options, changed, onPick }: { 
   );
 }
 
+/** A heading that folds its rows (spec §2.1 たためる見出し), open at first; the chevron as in the other collapsible headings. */
+function Fold({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <h3 style={headingStyle}>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="bg-transparent"
+          style={{ display: "flex", alignItems: "center", gap: 4, padding: 0, border: 0, font: "inherit", color: "inherit", cursor: "pointer" }}
+        >
+          {title}
+          <span aria-hidden style={{ display: "inline-flex" }}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+        </button>
+      </h3>
+      {open && children}
+    </>
+  );
+}
+
 function LayoutButton({ icon: Icon, text, active, onClick }: { icon: React.ComponentType<{ size?: number }>; text: string; active: boolean; onClick: () => void }) {
   return (
     <button
@@ -147,33 +169,35 @@ export function ViewMenuPanel({ screen, options, onChange }: { screen: Screen; o
           </button>
         </div>
       )}
-      <h3 style={headingStyle}>並び替え</h3>
-      {showGroup && <Select label="グループ" value={options.group} options={groupOptions} changed={options.group !== DEFAULTS.group} onPick={(group) => set({ group })} />}
-      <Select label="並び替え" value={options.sort} options={sortOptions} changed={options.sort !== DEFAULTS.sort} onPick={(sort) => onChange(withSort(options, sort))} />
-      {options.sort !== "manual" && (
-        <Select
-          label="並び順"
-          value={options.dir}
-          options={[
-            { value: "asc", text: "昇順" },
-            { value: "desc", text: "降順" },
-          ]}
-          changed={options.dir !== withSort(options, options.sort).dir}
-          onPick={(dir) => set({ dir })}
-        />
-      )}
-      <h3 style={headingStyle}>フィルター</h3>
-      {allowed.filters.includes("date") && <Select label="日付" value={options.date} options={dateOptions} changed={options.date !== DEFAULTS.date} onPick={(date) => set({ date })} />}
-      {allowed.filters.includes("created") && <Select label="作成日" value={options.created} options={createdOptions} changed={options.created !== DEFAULTS.created} onPick={(created) => set({ created })} />}
-      {allowed.filters.includes("prio") && (
-        <Select
-          label="優先度"
-          value={String(options.prio)}
-          options={prioOptions}
-          changed={options.prio !== DEFAULTS.prio}
-          onPick={(v) => set({ prio: v === "all" ? "all" : (Number(v) as 1 | 2 | 3 | 4) })}
-        />
-      )}
+      <Fold title="並び替え">
+        {showGroup && <Select label="グループ" value={options.group} options={groupOptions} changed={options.group !== DEFAULTS.group} onPick={(group) => set({ group })} />}
+        <Select label="並び替え" value={options.sort} options={sortOptions} changed={options.sort !== DEFAULTS.sort} onPick={(sort) => onChange(withSort(options, sort))} />
+        {options.sort !== "manual" && (
+          <Select
+            label="並び順"
+            value={options.dir}
+            options={[
+              { value: "asc", text: "昇順" },
+              { value: "desc", text: "降順" },
+            ]}
+            changed={options.dir !== withSort(options, options.sort).dir}
+            onPick={(dir) => set({ dir })}
+          />
+        )}
+      </Fold>
+      <Fold title="フィルター">
+        {allowed.filters.includes("date") && <Select label="日付" value={options.date} options={dateOptions} changed={options.date !== DEFAULTS.date} onPick={(date) => set({ date })} />}
+        {allowed.filters.includes("created") && <Select label="作成日" value={options.created} options={createdOptions} changed={options.created !== DEFAULTS.created} onPick={(created) => set({ created })} />}
+        {allowed.filters.includes("prio") && (
+          <Select
+            label="優先度"
+            value={String(options.prio)}
+            options={prioOptions}
+            changed={options.prio !== DEFAULTS.prio}
+            onPick={(v) => set({ prio: v === "all" ? "all" : (Number(v) as 1 | 2 | 3 | 4) })}
+          />
+        )}
+      </Fold>
       {!isDefault(options) && (
         <button
           type="button"

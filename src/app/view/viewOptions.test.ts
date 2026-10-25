@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULTS, formatView, isDefault, naturalDir, parseView, sanitize, viewKey, withSort } from "./viewOptions.ts";
+import { DEFAULTS, formatView, isDefault, mergePending, naturalDir, parseView, sanitize, viewKey, withSort } from "./viewOptions.ts";
 
 test("defaults_write_nothing_and_unknown_parts_are_ignored", () => {
   assert.equal(formatView(DEFAULTS), "");
@@ -29,4 +29,20 @@ test("withSort resets the direction to the natural one of the new sort", () => {
   assert.equal(withSort(desc, "added").dir, "desc");
   assert.equal(withSort(desc, "date").dir, "asc");
   assert.equal(withSort(desc, "priority").sort, "priority");
+});
+
+test("pending_writes_win_over_a_fresh_load_until_they_settle", () => {
+  const loaded = { "表示:今日": "group=label", "表示:近日": "sort=name", "表示:ラベル:x": "prio=1" };
+  const pending = new Map([
+    ["表示:今日", "group=priority"], // changed, not yet saved
+    ["表示:近日", ""], // reset to defaults, row not yet removed
+    ["表示:プロジェクト:a", "layout=board"], // new row, not yet saved
+  ]);
+  assert.deepEqual(mergePending(loaded, pending), {
+    "表示:今日": "group=priority",
+    "表示:ラベル:x": "prio=1",
+    "表示:プロジェクト:a": "layout=board",
+  });
+  assert.deepEqual(loaded["表示:近日"], "sort=name", "the loaded rows are not changed");
+  assert.deepEqual(mergePending(loaded, new Map()), loaded);
 });

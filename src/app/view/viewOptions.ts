@@ -77,3 +77,13 @@ export function sanitize(screen: Screen, o: ViewOptions): ViewOptions {
     prio: a.filters.includes("prio") ? o.prio : "all",
   };
 }
+
+/** Freshly loaded rows with the not-yet-saved values on top ("" = row to remove), so a reload never undoes a change (spec §6). */
+export function mergePending(loaded: Record<string, string>, pending: ReadonlyMap<string, string>): Record<string, string> {
+  const next = { ...loaded };
+  for (const [key, value] of pending) {
+    if (value) next[key] = value;
+    else delete next[key];
+  }
+  return next;
+}
