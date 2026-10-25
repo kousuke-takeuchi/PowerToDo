@@ -22,6 +22,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use super::backend::{BackendError, RemoteFile, StorageBackend};
+use super::base::BaseStore;
 use super::state::{BackendKind, FileRecord, SyncState};
 use super::{
     Action, LocalFile, PlanMode, Side, conflict_name, fold, is_sync_target, plan, sha256_hex,
@@ -434,6 +435,11 @@ impl SyncEngine {
         Self::with_clock(app_data_dir, || Local::now().naive_local())
     }
 
+    /// The merge bases kept next to `sync.json` (task-level merge spec section 2).
+    pub fn base(&self) -> BaseStore {
+        BaseStore::new(&self.shared.app_data_dir)
+    }
+
     pub fn with_clock(
         app_data_dir: PathBuf,
         clock: impl Fn() -> NaiveDateTime + Send + Sync + 'static,
@@ -547,6 +553,7 @@ impl SyncEngine {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => eprintln!("could not remove {}: {e}", path.display()),
             }
+            self.base().clear();
             inner.target.is_some()
         };
         if on {
@@ -1158,6 +1165,7 @@ impl SyncEngine {
             report.outcome = RunOutcome::Interrupted;
             return report;
         }
+        self.base().retain(&state.files.keys().cloned().collect());
         // What this run sent changed the target: look again, so the next look of
         // `check_remote` does not take our own uploads for someone else's change. A failure
         // only leaves the older fingerprint (the next look then asks for one more run), and so
@@ -1536,6 +1544,7 @@ impl Run<'_> {
         remote: &RemoteFile,
         local_hash: String,
     ) -> Result<(), FileError> {
+        self.engine.base().keep(name, &self.data_dir, &local_hash);
         self.state.files.insert(
             name.to_string(),
             FileRecord {
@@ -1550,6 +1559,7 @@ impl Run<'_> {
     }
 
     fn forget(&mut self, name: &str) -> Result<(), FileError> {
+        self.engine.base().remove(name);
         self.state.files.remove(name);
         self.done.insert(name.to_string());
         self.save()
@@ -2093,6 +2103,27 @@ mod tests {
         let r = b.sync().await;
         assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
         (a, b)
+    }
+
+    #[tokio::test]
+    async fn the_base_follows_the_records() {
+        let remote = backend();
+        let (a, _b) = two_pcs(&remote).await;
+        let base = BaseStore::new(&a.app);
+        let records = a.records();
+        assert!(!records.is_empty());
+        for (name, rec) in records {
+            assert_eq!(
+                base.get(&name, &rec.local_hash),
+                Some(a.file(&name)),
+                "{name}"
+            );
+        }
+        a.engine.reset_records();
+        assert!(
+            base.get(INBOX_FILE, &sha256_hex(&a.file(INBOX_FILE)))
+                .is_none()
+        );
     }
 
     #[tokio::test]
