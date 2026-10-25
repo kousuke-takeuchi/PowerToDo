@@ -30,6 +30,7 @@ export function useRowShortcuts({
   navigate,
   openQuickAdd,
   openSearch,
+  onCompleted,
 }: {
   focus: ReturnType<typeof useRowFocus>;
   visibleKeys: string[];
@@ -48,6 +49,8 @@ export function useRowShortcuts({
   navigate: (target: Nav) => void;
   openQuickAdd: () => void;
   openSearch: () => void;
+  /** A task was completed with `e` (for the undo toast). */
+  onCompleted?: (t: Task) => void;
 }) {
   const view = p.view;
   // ---- キーボード操作 (shortcuts.ts)。フォーカス行のタスクは、いま出ているビューのデータから探す ----
@@ -59,7 +62,12 @@ export function useRowShortcuts({
   /** そのプロジェクトの画面に出ている行か (useProject 経由で更新する) 。今日 / 近日 / ラベルの行は cross 経由。 */
   const onProjectScreen = (t: Task) => projectScreen && t.project === current;
   const actOn = {
-    toggleDone: (t: Task) => (onProjectScreen(t) ? void p.completeTask(t.no, t.progress !== 100) : void cross.toggleDone(t, t.progress !== 100)),
+    toggleDone: (t: Task) => {
+      const done = t.progress !== 100;
+      void (onProjectScreen(t) ? p.completeTask(t.no, done) : cross.toggleDone(t, done)).then((ok) => {
+        if (ok && done) onCompleted?.(t);
+      });
+    },
     setPriority: (t: Task, priority: 1 | 2 | 3 | 4) =>
       onProjectScreen(t) ? void p.updateTask(t.no, { priority }) : void cross.setPriority(t, priority),
     // dueTime は触らない (時刻は保つ)

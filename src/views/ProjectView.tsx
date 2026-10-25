@@ -67,7 +67,7 @@ const INVALID_TASK_NO = 2; // D-11c で要修正にする行 (洗剤の詰め替
 const INVALID_SUFFIX = "    ⚠ 要修正: 「終了」列が日付ではありません (値: 来週)";
 const noop = () => {};
 /** 完了にしたチェックが付いたまま行を残す時間 (ms)。この後に行が退場する (完了タスクを隠している間だけ)。 */
-const LEAVE_DELAY_MS = 400;
+const LEAVE_DELAY_MS = 250;
 /** 追加された行のハイライトが消えるまで (ms)。 */
 const HIGHLIGHT_MS = 600;
 /** 型の不整合で Task にならなかった行の 1 行表示 (読み取り専用)。 */
@@ -219,7 +219,7 @@ export function ProjectView({
       />
     );
     return (
-      <Collapse key={t.no} enterY={-8} exitX={-24}>
+      <Collapse key={t.no} enterY={-8} duration={0.1}>
         {/* 追加された行のハイライト: accent-soft から透明へ 600ms。行の背面 (DOM で行より前) に置く。 */}
         <div style={{ position: "relative" }}>
           {fresh.has(t.no) && (

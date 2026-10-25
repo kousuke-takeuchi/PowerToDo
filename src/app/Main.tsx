@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeftOpen } from "lucide-react";
 import { Button } from "../components/Button";
 import { ProjectColors } from "../views/crossList";
+import { Toast } from "../components/Toast";
+import { completedOf, merge, toastText, undoOf } from "./completionToast";
+import type { ToastState } from "./completionToast";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
@@ -225,6 +228,31 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     return () => window.clearTimeout(id);
   }, [flash]);
 
+  // Completion toast (spec ④ §5): completions in a row share one toast; 「元に戻す」 undoes each of them.
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const completed = useCallback((t: Task) => setToast((s) => merge(s, completedOf(t))), []);
+  /** Completes / reopens `t` through the project screen or the cross actions, then adds a completion to the toast. */
+  const crossToggle = (t: Task, done: boolean) =>
+    cross.toggleDone(t, done).then((ok) => {
+      if (ok && done) completed(t);
+      return ok;
+    });
+  const undoToast = async (state: ToastState) => {
+    setToast(null);
+    for (const e of state.entries) {
+      const u = undoOf(e);
+      const onScreen = projectScreen && e.project === current;
+      if (u.kind === "complete") {
+        await (onScreen ? p.completeTask(u.no, false) : cross.setDone(u.project, u.no, false));
+      } else if (onScreen) {
+        await p.updateTask(u.no, u.patch);
+      } else {
+        await api.updateTask(u.project, u.no, u.patch).catch(showError);
+      }
+    }
+    refreshAll();
+  };
+
   const { openAny } = useRowShortcuts({
     focus,
     visibleKeys,
@@ -251,6 +279,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
+    onCompleted: completed,
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
@@ -370,7 +399,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         onClose={() => setOpenNo(null)}
         onChange={(patch) => p.updateTask(openTask.no, patch)}
-        onToggleDone={(done) => void p.completeTask(openTask.no, done)}
+        onToggleDone={(done) => {
+          const t = openTask;
+          void p.completeTask(t.no, done).then((ok) => ok && done && completed(t));
+        }}
         onDelete={() => {
           setOpenNo(null);
           void p.deleteTask(openTask.no);
@@ -425,7 +457,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         tasks={[...d.overdue, ...d.today]}
         today={today}
         hideOverdue={d.overdue.length === 0}
-        onToggleDone={cross.toggleDone}
+        onToggleDone={crossToggle}
         onOpenTask={openCross}
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
@@ -450,7 +482,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           setUpFrom(from);
           setUpDays(7);
         }}
-        onToggleDone={cross.toggleDone}
+        onToggleDone={crossToggle}
         onOpenTask={openCross}
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
@@ -469,7 +501,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         label={d.label.name}
         tasks={d.tasks}
         today={today}
-        onToggleDone={cross.toggleDone}
+        onToggleDone={crossToggle}
         onOpenTask={openCross}
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
@@ -504,7 +536,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onVisibleKeys={reportKeys}
         onExpandApi={(api) => (expandApi.current = api)}
         onOpenTask={(t) => openAny(t)}
-        onToggleDone={(t, done) => void p.completeTask(t.no, done)}
+        onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && completed(t))}
         onAddTask={(section, title) => void p.addTask({ title, section })}
         onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
         onDeleteTask={(t) => {
@@ -594,6 +626,11 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           </motion.div>
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {toast && (
+          <Toast key="toast" text={toastText(toast)} onUndo={() => void undoToast(toast)} onClose={() => setToast(null)} />
+        )}
+      </AnimatePresence>
       <QuickAddDialog
         open={qa.open}
         tokens={tokens}
@@ -625,7 +662,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           setSearchOpen(false);
           openCross(h.task);
         }}
-        onToggleDone={(h, done) => void cross.toggleDone(h.task, done).then(() => search.refresh())}
+        onToggleDone={(h, done) => void crossToggle(h.task, done).then(() => search.refresh())}
         onClose={() => setSearchOpen(false)}
         today={today}
         busy={search.busy}

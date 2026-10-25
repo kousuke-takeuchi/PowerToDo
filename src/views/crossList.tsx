@@ -11,7 +11,7 @@ import { SubtaskForm } from "./SubtaskForm";
 import { useDone } from "./useDone";
 
 /** 完了にしたチェックが付いたまま行を残す時間 (ms)。ProjectView と同じ。 */
-export const LEAVE_DELAY_MS = 400;
+export const LEAVE_DELAY_MS = 250;
 
 /** 横断ビューの行のキー。番号はプロジェクトごとなので project と組にする。 */
 export const taskKey = (t: Task) => `${t.project}/${t.no}`;
@@ -169,7 +169,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
       />
     );
     return onToggleDone ? (
-      <Collapse key={taskKey(t)} enterY={-8} exitX={-24}>
+      <Collapse key={taskKey(t)} enterY={-8} duration={0.1}>
         {el}
       </Collapse>
     ) : (
