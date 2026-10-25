@@ -63,6 +63,16 @@ export const D01h: Story = {
   render: () => <Screen hoverNo={1} />,
 };
 
+export const D01i: Story = {
+  name: "D-01i 行の編集欄",
+  render: () => <Screen initialEditNo={2} />,
+};
+
+export const D01j: Story = {
+  name: "D-01j タスクを追加の欄",
+  render: () => <Screen initialAddSection={null} />,
+};
+
 export const D01b: Story = {
   name: "D-01b サブタスク展開",
   render: () => <Screen initialExpanded={[1, 5]} />,

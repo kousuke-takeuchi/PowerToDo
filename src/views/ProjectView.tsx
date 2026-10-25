@@ -15,6 +15,8 @@ import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
+import { TaskEditor } from "./TaskEditor";
+import { blankValue, editorValueOf } from "./taskEditorValue";
 
 export type ProjectViewProps = {
   project: string;
@@ -58,6 +60,10 @@ export type ProjectViewProps = {
   focusedKey?: string;
   /** Stories: draw this task's row as hovered (handle and actions shown). */
   hoverNo?: number;
+  /** Stories: this task's row starts as the inline editor (D-01i). */
+  initialEditNo?: number;
+  /** Stories: the "add task" editor of this section starts open (null = unsectioned, D-01j). */
+  initialAddSection?: string | null;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
@@ -105,6 +111,8 @@ export function ProjectView({
   today = TODAY,
   focusedKey,
   hoverNo,
+  initialEditNo,
+  initialAddSection,
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
@@ -116,7 +124,8 @@ export function ProjectView({
   );
   const [doneOverride, setDoneOverride] = useState<Map<number, boolean>>(() => new Map());
   const [showCompleted, setShowCompleted] = useState(false);
-  const [addTo, setAddTo] = useState<{ section: string | null } | null>(null);
+  const [addTo, setAddTo] = useState<{ section: string | null } | null>(initialAddSection !== undefined ? { section: initialAddSection } : null);
+  const [editNo, setEditNo] = useState<number | undefined>(initialEditNo);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [addingSection, setAddingSection] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
@@ -204,7 +213,17 @@ export function ProjectView({
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
     const invalid = state === "invalid" && !invalidRows && t.no === INVALID_TASK_NO;
-    const row = (
+    const row = editNo === t.no ? (
+      <TaskEditor
+        mode="edit"
+        initial={editorValueOf(t)}
+        projects={t.parentNo === undefined ? [{ name: project, sections: projectSections.map((s) => s.name) }] : undefined}
+        allLabels={[]}
+        today={today}
+        onCancel={() => setEditNo(undefined)}
+        onSubmit={() => Promise.resolve(true)}
+      />
+    ) : (
       <TaskRow
         title={invalid ? t.title + INVALID_SUFFIX : t.title}
         description={t.note}
@@ -345,6 +364,19 @@ export function ProjectView({
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {
+    if (!onAddTask && addTo && addTo.section === section) {
+      return (
+        <TaskEditor
+          mode="add"
+          initial={blankValue(project, section)}
+          projects={[{ name: project, sections: projectSections.map((s) => s.name) }]}
+          allLabels={[]}
+          today={today}
+          onCancel={() => setAddTo(null)}
+          onSubmit={() => Promise.resolve(true)}
+        />
+      );
+    }
     if (!onAddTask) return section === null ? null : <AddTaskRow />;
     if (addTo && addTo.section === section) {
       return (
