@@ -524,6 +524,16 @@ impl ProjectStore {
     }
 
     /// All projects, ordered by 並び順 (the inbox first among equals).
+    /// The highest No. this session handed out for project `name` (numbers are never reused).
+    pub fn high_water(&self, name: &str) -> u32 {
+        self.high_water.get(name).copied().unwrap_or(0)
+    }
+
+    /// The holidays of the common workbook (to write a project workbook as the store does).
+    pub fn holidays(&self) -> Vec<NaiveDate> {
+        self.common.holidays.clone()
+    }
+
     pub fn summaries(&self) -> Vec<ProjectSummary> {
         let mut projects: Vec<&Project> = self.common.projects.iter().collect();
         projects.sort_by(|a, b| (a.order, !a.inbox, &a.name).cmp(&(b.order, !b.inbox, &b.name)));

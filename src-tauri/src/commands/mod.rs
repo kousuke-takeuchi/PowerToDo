@@ -689,6 +689,14 @@ impl SyncHost for TauriSyncHost {
             .update_fired(|f| f.forget_project(project));
     }
 
+    fn tasks_renumbered(&self, project: &str, moves: &[(u32, u32)]) {
+        self.app.state::<AppState>().update_fired(|f| {
+            for (from, to) in moves {
+                f.renumber_task(project, *from, *to);
+            }
+        });
+    }
+
     /// iOS: take in edits made in Excel, then check the tailnet proxy. A run that has to wait for
     /// a rebuilt backend is asked again by `set_backend`. Desktop watches the folder instead.
     fn before_run(&self) -> bool {
