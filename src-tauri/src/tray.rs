@@ -7,12 +7,34 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, CloseRequestApi, Emitter, Manager};
 
 use crate::commands::AppState;
+use crate::store::paths::SyncBackend;
 use crate::window::{MAIN_WINDOW, request_quit, show_main_window};
 
 const TRAY_ID: &str = "main";
 const OPEN_ID: &str = "tray-open";
 const ADD_ID: &str = "tray-add";
 const QUIT_ID: &str = "tray-quit";
+const SYNC_ID: &str = "tray-sync";
+
+/// 「今すぐ同期」, kept to follow the sync status (enabled only with a target attached).
+static SYNC_ITEM: std::sync::OnceLock<MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
+
+/// Whether 「今すぐ同期」 can do anything: a target is chosen and attached.
+pub fn sync_item_enabled(has_target: bool, backend: SyncBackend) -> bool {
+    has_target && backend != SyncBackend::None
+}
+
+/// Follows the sync status (called with every `sync-status`). No tray: nothing to do.
+pub fn refresh_sync_item(app: &AppHandle) {
+    let Some(item) = SYNC_ITEM.get() else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    let enabled = sync_item_enabled(state.sync.has_target(), state.sync_backend());
+    if let Err(e) = item.set_enabled(enabled) {
+        eprintln!("could not update the tray menu: {e}");
+    }
+}
 
 /// What closing the main window does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,11 +152,13 @@ pub fn setup(app: &AppHandle) {
 }
 
 fn build(app: &AppHandle) -> tauri::Result<()> {
+    let sync_item = MenuItem::with_id(app, SYNC_ID, "今すぐ同期", false, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, OPEN_ID, "PowerToDo を開く", true, None::<&str>)?,
             &MenuItem::with_id(app, ADD_ID, "タスクを追加…", true, None::<&str>)?,
+            &sync_item,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, QUIT_ID, "終了", true, None::<&str>)?,
         ],
@@ -161,6 +185,12 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
                 show_main_window(app);
                 let _ = app.emit("open-quick-add", serde_json::json!({}));
             }
+            SYNC_ID => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::commands::sync::sync_now_from(&app).await;
+                });
+            }
             QUIT_ID => request_quit(app),
             _ => {}
         });
@@ -168,6 +198,8 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let builder = builder.icon_as_template(true);
     builder.build(app)?;
+    let _ = SYNC_ITEM.set(sync_item);
+    refresh_sync_item(app);
     Ok(())
 }
 
@@ -190,6 +222,22 @@ fn tray_icon(app: &AppHandle) -> tauri::image::Image<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_item_is_enabled_only_with_an_attached_target() {
+        use crate::store::paths::SyncBackend;
+        assert!(!sync_item_enabled(false, SyncBackend::None));
+        assert!(
+            !sync_item_enabled(true, SyncBackend::None),
+            "no target chosen"
+        );
+        assert!(
+            !sync_item_enabled(false, SyncBackend::Nas),
+            "NAS not connected yet"
+        );
+        assert!(sync_item_enabled(true, SyncBackend::Nas));
+        assert!(sync_item_enabled(true, SyncBackend::Gdrive));
+    }
 
     fn exists_only(path: &'static str) -> impl Fn(&Path) -> bool {
         move |p| p == Path::new(path)

@@ -1675,20 +1675,27 @@ pub async fn nas_disconnect(state: State<'_, AppState>) -> AppResult<()> {
 
 /// 「今すぐ同期」. A NAS whose backend could not be built earlier gets another try first.
 #[tauri::command]
-pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> AppResult<SyncStatusView> {
+pub async fn sync_now(app: AppHandle) -> AppResult<SyncStatusView> {
+    Ok(sync_now_from(&app).await)
+}
+
+/// 「今すぐ同期」 (the settings, the header, the tray). A target whose backend could not be built
+/// earlier gets another try first.
+pub async fn sync_now_from(app: &AppHandle) -> SyncStatusView {
+    let state = app.state::<AppState>();
     let tailnet_up = state
         .sync_rt
         .current_tailnet()
         .is_some_and(|t| matches!(t.state(), TailnetState::Running { .. }));
     if !state.sync.has_target() {
         if state.lock_settings().sync.backend == SyncBackend::Gdrive {
-            connect_google(&app, None).await;
+            connect_google(app, None).await;
         } else if tailnet_up {
-            connect_nas(&app, None).await;
+            connect_nas(app, None).await;
         }
     }
     state.sync.request(SyncReason::SyncNow);
-    Ok(state.sync.status())
+    state.sync.status()
 }
 
 #[tauri::command]
