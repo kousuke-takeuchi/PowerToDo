@@ -44,7 +44,8 @@ const cardStyle: React.CSSProperties = {
 export function BoardView({ columns, sorted, renderCard, renderAdd, trailing }: BoardViewProps) {
   const card = (t: Task, col: BoardColumn) => {
     const body = <div style={cardStyle}>{renderCard(t, col)}</div>;
-    if (!col.live || sorted) return <div key={t.no} style={{ paddingBottom: CARD_GAP }}>{body}</div>;
+    // No drop row of its own (a sorted column's cards share one), but the drag ghost is measured from it.
+    if (!col.live || sorted) return <div key={t.no} data-drag-box="" style={{ paddingBottom: CARD_GAP }}>{body}</div>;
     return (
       <div
         key={t.no}

@@ -3,7 +3,7 @@ import { createContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, 
 import { createPortal } from "react-dom";
 import type { Placement, Task } from "../../types/model";
 import { EASE_CSS, useMotionTiming } from "../../motion";
-import { autoScrollSpeed, computeDrop, orderIndex, ownSortedColumn, placementOf, todayInPlace, type Drop, type RowBox } from "./dropTarget";
+import { autoScrollSpeed, computeDrop, dragBox, orderIndex, ownSortedColumn, placementOf, todayInPlace, type Drop, type RowBox } from "./dropTarget";
 
 export type DragSource =
   | { kind: "task"; task: Task; view: "project" | "today" | "upcoming" | "label"; depth: number; height: number; subtree: Set<string> }
@@ -289,7 +289,7 @@ export function DragProvider({ onDrop, children }: { onDrop: (r: DropResult) => 
     if (e.button !== 0) return;
     e.preventDefault();
     const pressed = e.currentTarget as HTMLElement;
-    const row = pressed.closest<HTMLElement>("[data-row], [data-drop-section], [data-project-item]") ?? pressed;
+    const row = dragBox(pressed);
     drag.current = { source, sx: e.clientX, sy: e.clientY, lifted: false, node, rect: row.getBoundingClientRect(), key: source.kind === "task" ? `${source.task.project}/${source.task.no}` : undefined, pointerId: e.pointerId, from: pressed.closest("[data-drop-list]") };
     pointer.current = { x: e.clientX, y: e.clientY, buttons: e.buttons };
     // Capture keeps pointerup / pointercancel coming to us even when released outside the window.

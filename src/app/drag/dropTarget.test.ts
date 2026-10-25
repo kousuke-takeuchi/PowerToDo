@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoScrollSpeed, computeDrop, orderIndex, ownSortedColumn, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
+import { autoScrollSpeed, computeDrop, dragBox, orderIndex, ownSortedColumn, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
 
 // 40 px rows from y=0: 1, 2 (child of 1), 3, header 会議 at 120, 4 in 会議, slot of 会議, header 空 + slot.
 const rows: RowBox[] = [
@@ -177,4 +177,37 @@ test("a_sorted_board_gives_no_target_in_the_dragged_cards_own_column", () => {
   assert.equal(ownSortedColumn(week, false, week), false);
   // Lifted outside any column: nothing to exclude.
   assert.equal(ownSortedColumn(week, true, null), false);
+});
+
+// A fake element chain: `closest` walks up and matches `[data-x]` attribute selectors (a comma list, any of them).
+type Fake = { name: string; attrs: string[]; parent: Fake | null; closest: (sel: string) => Fake | null };
+const fake = (name: string, attrs: string[], parent: Fake | null): Fake => {
+  const el: Fake = {
+    name,
+    attrs,
+    parent,
+    closest(sel) {
+      const want = sel.split(",").map((s) => s.trim().replace(/^\[|\]$/g, ""));
+      for (let n: Fake | null = el; n; n = n.parent) if (n.attrs.some((a) => want.includes(a))) return n;
+      return null;
+    },
+  };
+  return el;
+};
+
+// Final review: on a sorted board the cards share one header-kind row; the ghost is measured from the card itself.
+test("the_ghost_is_measured_from_the_card_not_the_sorted_columns_shared_row", () => {
+  const column = fake("column", ["data-drop-list"], null);
+  const shared = fake("shared", ["data-row"], column);
+  const card = fake("card", ["data-drag-box"], shared);
+  const handle = fake("handle", [], card);
+  assert.equal(dragBox(handle).name, "card");
+  // A list row (no drag box) still measures the row.
+  const row = fake("row", ["data-row"], column);
+  assert.equal(dragBox(fake("h", [], row)).name, "row");
+  // Sidebar: a section or a project item.
+  assert.equal(dragBox(fake("h", [], fake("sec", ["data-drop-section"], null))).name, "sec");
+  assert.equal(dragBox(fake("h", [], fake("item", ["data-project-item"], null))).name, "item");
+  // Nothing around it: the pressed element itself.
+  assert.equal(dragBox(fake("lone", [], null)).name, "lone");
 });

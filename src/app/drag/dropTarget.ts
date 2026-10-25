@@ -145,3 +145,11 @@ export function todayInPlace(rows: RowBox[], beforeKey: string | null, draggedKe
 export function ownSortedColumn<T>(list: T, sorted: boolean, from: T | null): boolean {
   return sorted && from !== null && list === from;
 }
+
+/**
+ * The box the ghost card is measured from (its offset under the pointer): the nearest card (`data-drag-box`, a sorted
+ * board card that is not a drop row of its own), list row, sidebar section or project item; else the pressed element.
+ */
+export function dragBox<E extends { closest: (selector: string) => E | null }>(pressed: E): E {
+  return pressed.closest("[data-drag-box], [data-row], [data-drop-section], [data-project-item]") ?? pressed;
+}
