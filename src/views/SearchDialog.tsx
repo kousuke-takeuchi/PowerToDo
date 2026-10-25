@@ -116,7 +116,7 @@ export function SearchDialog({
             transition={t(0.18)}
             style={{
               boxSizing: "border-box",
-              width: 640,
+              width: "min(640px, calc(100vw - 32px))",
               maxWidth: "calc(100% - 32px)",
               maxHeight: "70vh",
               display: "flex",

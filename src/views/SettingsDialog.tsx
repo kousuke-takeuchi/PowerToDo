@@ -238,7 +238,7 @@ export function SettingsDialog({
             transition={t(0.18)}
             style={{
               boxSizing: "border-box",
-              width: 760,
+              width: "min(760px, calc(100vw - 32px))",
               height: nasForm ? 640 : 560,
               display: "flex",
               overflow: "hidden",
@@ -253,8 +253,8 @@ export function SettingsDialog({
               aria-label="設定の項目"
               style={{
                 boxSizing: "border-box",
-                flex: "0 0 180px",
-                width: 180,
+                flex: "0 0 auto",
+                width: "min(180px, 30vw)",
                 display: "flex",
                 flexDirection: "column",
                 gap: 2,

@@ -36,6 +36,8 @@ export type SidebarProps = {
   onOpenSettings?: () => void;
   /** 渡すとマイプロジェクトの「+」が名前入力欄を開き、Enter でこれを呼ぶ (Esc で閉じる)。 */
   onCreateProject?: (name: string) => void;
+  /** 「サイドバーを閉じる」を押したとき。 */
+  onClose?: () => void;
   /** アカウント欄の表示名。既定は絵コンテのサンプル名。 */
   displayName?: string;
 };
@@ -63,6 +65,7 @@ export function Sidebar({
   onSearch,
   onOpenSettings,
   onCreateProject,
+  onClose,
   displayName = "たろう",
 }: SidebarProps) {
   // 選択行のハイライトだけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
@@ -125,7 +128,7 @@ export function Sidebar({
           </span>
         </button>
         <Button variant="icon" icon={Bell} ariaLabel="通知" />
-        <Button variant="icon" icon={PanelLeftClose} ariaLabel="サイドバーを閉じる" />
+        <Button variant="icon" icon={PanelLeftClose} ariaLabel="サイドバーを閉じる" onClick={onClose} />
       </div>
 
       <button

@@ -1,7 +1,9 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowUpDown, CircleCheck, Ellipsis, LayoutList } from "lucide-react";
 import { useEscLayer } from "../app/layers";
+import { TopBarSlot } from "./TopBar";
 
 const smallButton: React.CSSProperties = {
   display: "inline-flex",
@@ -121,23 +123,67 @@ function MoreMenu({ menu }: { menu: HeaderMenu }) {
   );
 }
 
-/** 画面ヘッダー右の 表示 / 並び替え / その他 (pen の HeaderActions)。viewLabel は 表示 ボタンの文言 (ボード画面では「ボード」)。 */
+/** 「表示」ボタン + メニュー。並び替えはここに入る (Todoist の Display)。並び替えはまだ動かないので押せない項目として出す。 */
+function ViewMenu({ label }: { label: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEscLayer(open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (e.target instanceof Node && !ref.current?.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <HeaderAction icon={LayoutList} label={label} menuOpen={open} onClick={() => setOpen((v) => !v)} />
+      {open && (
+        <div
+          role="menu"
+          aria-label="表示"
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            zIndex: 10,
+            minWidth: 160,
+            padding: "4px 0",
+            background: "var(--color-bg)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 8,
+            boxShadow: "var(--shadow-popover)",
+          }}
+        >
+          <button type="button" role="menuitem" disabled style={{ ...menuItem, display: "flex", alignItems: "center", gap: 8, color: "var(--color-text-muted)", cursor: "default" }}>
+            <ArrowUpDown size={14} aria-hidden />
+            並び替え
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 上の帯の右の 表示 / その他 (Todoist)。viewLabel は 表示 ボタンの文言 (ボード画面では「ボード」)。 */
 export function HeaderActions({ viewLabel = "表示", onMenu }: { viewLabel?: string; onMenu?: HeaderMenu }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-1)" }}>
-      <HeaderAction icon={LayoutList} label={viewLabel} />
-      <HeaderAction icon={ArrowUpDown} label="並び替え" />
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
+      <ViewMenu label={viewLabel} />
       {onMenu && (onMenu.rename || onMenu.delete) ? <MoreMenu menu={onMenu} /> : <HeaderAction icon={Ellipsis} />}
     </div>
   );
 }
 
-/** 画面ヘッダー (pen の Header): 左に children (タイトル群)、右に HeaderActions。 */
+/** 画面ヘッダー: children (タイトル群) をここに、HeaderActions は上の帯の右へ (AppShell の外では横に並べる)。 */
 export function PageHeader({ children, viewLabel, onMenu }: { children: React.ReactNode; viewLabel?: string; onMenu?: HeaderMenu }) {
+  const slot = useContext(TopBarSlot);
+  const actions = <HeaderActions viewLabel={viewLabel} onMenu={onMenu} />;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "var(--font-body)" }}>
       {children}
-      <HeaderActions viewLabel={viewLabel} onMenu={onMenu} />
+      {slot ? createPortal(actions, slot) : actions}
     </div>
   );
 }

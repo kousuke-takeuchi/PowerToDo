@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PanelLeftOpen } from "lucide-react";
+import { Button } from "../components/Button";
 import { ProjectColors } from "../views/crossList";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
@@ -59,6 +61,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // 通知 / 帯から開いたタスク: プロジェクトが読み込まれたら、そのタスクがあるか一度だけ確かめる
   const [pendingOpen, setPendingOpen] = useState<{ project: string; no: number } | null>(null);
   const [drawer, setDrawer] = useState(false);
+  // Wide layout: the sidebar was closed with its button (it slides away; the top bar's button brings it back).
+  const [sidebarClosed, setSidebarClosed] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
@@ -320,6 +324,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
 
   const sidebar = (
     <Sidebar
+      onClose={() => (width === 960 ? setDrawer(false) : setSidebarClosed(true))}
       active={nav}
       counts={counts}
       projects={summaries}
@@ -581,7 +586,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
               initial={{ x: reduced ? 0 : "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: reduced ? 0 : "-100%" }}
-              transition={t(0.25)}
+              transition={t(0.2)}
               style={{ flex: "0 0 280px", width: 280, height: "100%" }}
             >
               {sidebar}
@@ -686,6 +691,17 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       banner={banner}
       panel={panel}
       overlay={overlay}
+      sidebarHidden={sidebarClosed}
+      topBarLeft={
+        width === 960 || sidebarClosed ? (
+          <Button
+            variant="icon"
+            icon={PanelLeftOpen}
+            ariaLabel="サイドバーを開く"
+            onClick={() => (width === 960 ? setDrawer(true) : setSidebarClosed(false))}
+          />
+        ) : undefined
+      }
     >
       {body}
     </AppShell>

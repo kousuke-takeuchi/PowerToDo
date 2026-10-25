@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { layoutFor } from "./shellLayout";
 
 /** Local calendar date as YYYY-MM-DD. */
 export function localYmd(d: Date = new Date()): string {
@@ -36,9 +37,9 @@ export function useToday(): string {
   return today;
 }
 
-/** AppShell layout for the window: the 1440 layout (sidebar 280) from 1100 px, else the 960 layout (icon rail). */
+/** AppShell layout for the window: the 1440 layout (sidebar 280) from 750 px, else the narrow 960 layout (sidebar hidden, opens over the page). */
 export function useShellWidth(): 1440 | 960 {
-  const pick = () => (window.innerWidth < 1100 ? 960 : 1440);
+  const pick = () => (layoutFor(window.innerWidth) === "narrow" ? 960 : 1440);
   const [width, setWidth] = useState<1440 | 960>(pick);
   useEffect(() => {
     const onResize = () => setWidth(pick());

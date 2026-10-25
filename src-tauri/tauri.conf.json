@@ -15,7 +15,7 @@
         "title": "PowerToDo",
         "width": 1440,
         "height": 900,
-        "minWidth": 960,
+        "minWidth": 400,
         "minHeight": 600,
         "center": true
       }
