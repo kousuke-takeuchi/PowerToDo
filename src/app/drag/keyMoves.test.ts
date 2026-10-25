@@ -22,3 +22,20 @@ test("indent_goes_under_the_sibling_above_and_outdent_after_the_parent", () => {
   assert.deepEqual(outdentMove(tasks, 3), { section: null, parent: null, before: 4 });
   assert.equal(outdentMove(tasks, 1), null);
 });
+
+test("completed_top_level_tasks_are_no_siblings", () => {
+  const done = { ...t(1, 1), progress: 100 };
+  const ts = [done, t(2, 2), t(3, 3)];
+  assert.equal(siblingMove(ts, 2, -1), null);
+  assert.equal(indentMove(ts, 2), null);
+  assert.deepEqual(siblingMove(ts, 3, -1), { section: null, parent: null, before: 2 });
+  // A completed top-level task itself does not move by keys.
+  assert.equal(siblingMove(ts, 1, 1), null);
+  assert.equal(indentMove([t(2, 0), done], 1), null);
+});
+
+test("order_ties_keep_the_array_order", () => {
+  const ts = [t(6, 1), t(5, 1)];
+  assert.deepEqual(siblingMove(ts, 5, -1), { section: null, parent: null, before: 6 });
+  assert.equal(siblingMove(ts, 6, -1), null);
+});

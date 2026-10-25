@@ -41,12 +41,39 @@ export function computeDrop(rows: RowBox[], p: { x: number; y: number }, startX:
   const min = Math.min(isTask(next) ? next.depth : 0, max);
   const wanted = d.depth + Math.round((p.x - startX) / LEVEL);
   const depth = Math.max(min, Math.min(max, wanted));
-  const y = next ? next.top : (prev?.bottom ?? r.bottom);
+  // A level capped below the next row's lands after that deeper run: move the gap (and the line) there.
+  while (isTask(rows[index]) && (inSubtree(rows[index]) || (rows[index] as TaskBox).depth > depth)) index++;
+  let lastIdx = index - 1;
+  while (lastIdx >= 0 && inSubtree(rows[lastIdx])) lastIdx--;
+  const y = rows[index] ? rows[index].top : (rows[lastIdx]?.bottom ?? r.bottom);
   return { kind: "between", index, depth, y, x: left + depth * LEVEL };
 }
 
-/** The store placement of a drop (spec ③ §8). Null when it would not move anything. */
+/** Where the dragged row is now, as a placement: its section, parent, and the next sibling after its subtree. */
+function currentPlacement(rows: RowBox[], draggedKey: string): Placement | null {
+  const i = rows.findIndex((x) => isTask(x) && x.key === draggedKey);
+  if (i < 0) return null;
+  const me = rows[i] as TaskBox;
+  let before: number | null = null;
+  for (let k = i + 1; k < rows.length; k++) {
+    const r = rows[k];
+    if (r.kind !== "task" || r.depth < me.depth) break;
+    if (r.depth > me.depth) continue;
+    if (r.parent === me.parent) before = r.no;
+    break;
+  }
+  return { section: me.section, parent: me.parent, before };
+}
+
+/** The store placement of a drop (spec ③ §8). Null when it would not move anything (spec ③ §2.4). */
 export function placementOf(rows: RowBox[], drop: Drop, draggedKey: string): Placement | null {
+  const p = placementOfDrop(rows, drop, draggedKey);
+  const now = currentPlacement(rows, draggedKey);
+  if (p && now && p.section === now.section && p.parent === now.parent && p.before === now.before) return null;
+  return p;
+}
+
+function placementOfDrop(rows: RowBox[], drop: Drop, draggedKey: string): Placement | null {
   if (drop.kind === "onto") {
     const r = rows.find((x) => isTask(x) && x.key === drop.key) as TaskBox | undefined;
     return r ? { section: r.section, parent: r.no, before: null } : null;

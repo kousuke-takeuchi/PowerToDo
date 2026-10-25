@@ -72,3 +72,35 @@ test("autoscroll_speeds_up_near_the_edges", () => {
   assert.equal(autoScrollSpeed(0, 0, 600), -16);
   assert.equal(autoScrollSpeed(600, 0, 600), 16);
 });
+
+// 1(0), 2(1), 5(2), 3(0): a capped level must put the line where the task lands, past the deeper run.
+const deep: RowBox[] = [
+  { kind: "task", key: "p/1", no: 1, depth: 0, parent: null, section: null, top: 0, bottom: 40 },
+  { kind: "task", key: "p/2", no: 2, depth: 1, parent: 1, section: null, top: 40, bottom: 80 },
+  { kind: "task", key: "p/5", no: 5, depth: 2, parent: 2, section: null, top: 80, bottom: 120 },
+  { kind: "task", key: "p/3", no: 3, depth: 0, parent: null, section: null, top: 120, bottom: 160 },
+];
+
+test("a_capped_level_puts_the_line_past_the_deeper_run", () => {
+  const h1 = { key: "p/9", depth: 0, height: 1, subtree: new Set(["p/9", "p/10"]) };
+  const a = computeDrop(deep, { x: 200, y: 75 }, 0, h1, 0);
+  assert.deepEqual(a, { kind: "between", index: 3, depth: 1, y: 120, x: 28 });
+  assert.deepEqual(placementOf(deep, a!, "p/9"), { section: null, parent: 1, before: null });
+  const h2 = { key: "p/9", depth: 0, height: 2, subtree: new Set(["p/9", "p/10", "p/11"]) };
+  const b = computeDrop(deep, { x: 0, y: 35 }, 0, h2, 0);
+  assert.deepEqual(b, { kind: "between", index: 3, depth: 0, y: 120, x: 0 });
+  assert.deepEqual(placementOf(deep, b!, "p/9"), { section: null, parent: null, before: 3 });
+});
+
+test("a_drop_back_in_place_is_null", () => {
+  // 1 (with child 2) into the upper half of 3: where it already is.
+  const drag1 = { key: "p/1", depth: 0, height: 1, subtree: new Set(["p/1", "p/2"]) };
+  const d = computeDrop(rows, { x: 0, y: 85 }, 0, drag1, 0);
+  assert.equal(d?.kind, "between");
+  assert.equal(placementOf(rows, d!, "p/1"), null);
+  // 2 back under 1 as its last child, by gap and by onto.
+  assert.equal(placementOf(rows, { kind: "between", index: 2, depth: 1, y: 80, x: 28 }, "p/2"), null);
+  assert.equal(placementOf(rows, { kind: "onto", key: "p/1" }, "p/2"), null);
+  // 4, last in 会議, dropped above the 会議 slot.
+  assert.equal(placementOf(rows, { kind: "between", index: 5, depth: 0, y: 200, x: 0 }, "p/4"), null);
+});
