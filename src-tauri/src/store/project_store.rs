@@ -418,6 +418,7 @@ impl ProjectStore {
             let loaded = store.load_from_disk(&name);
             store.books.insert(name, loaded);
         }
+        store.prune_view_options(true);
         Ok(store)
     }
 
@@ -718,6 +719,7 @@ impl ProjectStore {
         if let Some(h) = self.high_water.remove(name) {
             self.high_water.insert(new_name.to_string(), h);
         }
+        self.follow_view_option(super::view_options::PROJECT, name, Some(new_name));
         self.common_dirty = true;
         self.save_common_unless_held();
         Ok(self.summary(&self.common.projects[idx]))
@@ -763,6 +765,7 @@ impl ProjectStore {
         self.high_water.remove(name);
         self.last_written.remove(name);
         self.held.remove(name);
+        self.follow_view_option(super::view_options::PROJECT, name, None);
         self.common_dirty = true;
         self.save_common_unless_held();
         Ok(())
@@ -1950,7 +1953,8 @@ impl ProjectStore {
     /// edits to it. Projects loaded here but no longer listed in the file are kept and
     /// re-listed (so the common workbook comes back dirty); `.xlsx` files that are listed or
     /// new but not loaded yet are loaded. The common workbook is clean afterwards unless that
-    /// re-listing happened.
+    /// re-listing happened or orphan 表示 project rows were pruned (`prune_view_options`;
+    /// label rows are pruned at open only).
     pub fn reload_common(&mut self) -> AppResult<()> {
         let path = self.paths.common();
         let fresh = read_common_book(&path)?;
@@ -1986,6 +1990,8 @@ impl ProjectStore {
                 recompute_days(book, &holidays);
             }
         }
+        // Project rows only: in a sync the project books arrive after this book.
+        self.prune_view_options(false);
         Ok(())
     }
 }

@@ -29,6 +29,8 @@ export type TaskRowProps = {
   /** Stories: show the drag handle as if hovered. */
   showHandle?: boolean;
   subtasks?: { done: number; total: number; expanded: boolean };
+  /** A board card (spec ⑤ §4): the card around the row draws the edge, the handle sits inside it, the subtask count has no chevron. */
+  card?: boolean;
   indent?: 0 | 1 | 2;
   variant?: "desktop" | "mobile";
   showActions?: boolean;
@@ -100,13 +102,15 @@ export function TaskRow(p: TaskRowProps) {
         display: "flex",
         gap: mobile ? "var(--space-3)" : 10,
         alignItems: "flex-start",
-        padding: mobile ? "10px 0" : "12px 0 11px",
+        padding: mobile || p.card ? "10px 0" : "12px 0 11px",
         // pen の stroke は内側 (高さに加算しない)。フォーカス行: モバイルは左に 2px の accent 枠、デスクトップは角の丸い薄い枠 (Todoist)。
         boxShadow: p.focused
           ? mobile
             ? "inset 2px 0 0 var(--color-accent), inset 0 -1px 0 var(--color-border)"
             : "inset 0 0 0 1px var(--color-border)"
-          : "inset 0 -1px 0 var(--color-border)",
+          : p.card
+            ? undefined
+            : "inset 0 -1px 0 var(--color-border)",
         borderRadius: p.focused && !mobile ? 6 : undefined,
         marginLeft: indentPx,
         fontFamily: "var(--font-body)",
@@ -122,12 +126,12 @@ export function TaskRow(p: TaskRowProps) {
           aria-label={p.onHandlePointerDown ? "ドラッグして動かす" : undefined}
           onPointerDown={p.onHandlePointerDown}
           className={p.showHandle || p.focused ? undefined : "opacity-0 group-hover:opacity-100"}
-          style={{ position: "absolute", left: -40, top: 14, display: "inline-flex", color: "var(--color-text-muted)", cursor: p.onHandlePointerDown ? "grab" : undefined, touchAction: "none" }}
+          style={{ position: "absolute", left: p.card ? -20 : -40, top: p.card ? 12 : 14, display: "inline-flex", color: "var(--color-text-muted)", cursor: p.onHandlePointerDown ? "grab" : undefined, touchAction: "none" }}
         >
           <GripVertical size={16} />
         </span>
       )}
-      {p.subtasks && !mobile && (
+      {p.subtasks && !mobile && !p.card && (
         <button
           type="button"
           aria-label={p.subtasks.expanded ? "サブタスクを折りたたむ" : "サブタスクを展開"}

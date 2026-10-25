@@ -4,6 +4,11 @@ import { createPortal } from "react-dom";
 import { ArrowUpDown, CircleCheck, Ellipsis, LayoutList } from "lucide-react";
 import { useEscLayer } from "../app/layers";
 import { TopBarSlot } from "./TopBar";
+import { isDefault, type Screen, type ViewOptions } from "../app/view/viewOptions";
+import { ViewMenuPanel } from "./ViewMenuPanel";
+
+/** What a screen passes to its header to get the working 表示 menu. */
+export type HeaderView = { screen: Screen; options: ViewOptions; onChange: (o: ViewOptions) => void };
 
 const smallButton: React.CSSProperties = {
   display: "inline-flex",
@@ -24,12 +29,15 @@ function HeaderAction({
   label,
   onClick,
   menuOpen,
+  dot,
 }: {
   icon: React.ComponentType<{ size?: number }>;
   label?: string;
   onClick?: () => void;
   /** 渡すとメニューを開くボタン (aria-haspopup / aria-expanded を付ける)。 */
   menuOpen?: boolean;
+  /** A 6 px accent dot at the top right (the view differs from its defaults). */
+  dot?: boolean;
 }) {
   return (
     <button
@@ -39,10 +47,11 @@ function HeaderAction({
       aria-expanded={menuOpen}
       onClick={onClick}
       className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-      style={smallButton}
+      style={dot ? { ...smallButton, position: "relative" } : smallButton}
     >
       <Icon size={16} />
       {label}
+      {dot && <span data-testid="view-dot" aria-hidden style={{ position: "absolute", top: 2, right: 2, width: 6, height: 6, borderRadius: 3, background: "var(--color-accent)" }} />}
     </button>
   );
 }
@@ -124,8 +133,8 @@ function MoreMenu({ menu }: { menu: HeaderMenu }) {
 }
 
 /** 「表示」ボタン + メニュー。並び替えはここに入る (Todoist の Display)。並び替えはまだ動かないので押せない項目として出す。 */
-function ViewMenu({ label }: { label: string }) {
-  const [open, setOpen] = useState(false);
+function ViewMenu({ label, view, initialOpen = false }: { label: string; view?: HeaderView; initialOpen?: boolean }) {
+  const [open, setOpen] = useState(initialOpen);
   const ref = useRef<HTMLDivElement>(null);
   useEscLayer(open, () => setOpen(false));
   useEffect(() => {
@@ -138,7 +147,7 @@ function ViewMenu({ label }: { label: string }) {
   }, [open]);
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <HeaderAction icon={LayoutList} label={label} menuOpen={open} onClick={() => setOpen((v) => !v)} />
+      <HeaderAction icon={LayoutList} dot={view !== undefined && !isDefault(view.options)} label={label} menuOpen={open} onClick={() => setOpen((v) => !v)} />
       {open && (
         <div
           role="menu"
@@ -149,17 +158,21 @@ function ViewMenu({ label }: { label: string }) {
             right: 0,
             zIndex: 10,
             minWidth: 160,
-            padding: "4px 0",
+            padding: view ? 0 : "4px 0",
             background: "var(--color-bg)",
             border: "1px solid var(--color-border)",
-            borderRadius: 8,
+            borderRadius: view ? 12 : 8,
             boxShadow: "var(--shadow-popover)",
           }}
         >
-          <button type="button" role="menuitem" disabled style={{ ...menuItem, display: "flex", alignItems: "center", gap: 8, color: "var(--color-text-muted)", cursor: "default" }}>
-            <ArrowUpDown size={14} aria-hidden />
-            並び替え
-          </button>
+          {view ? (
+            <ViewMenuPanel screen={view.screen} options={view.options} onChange={view.onChange} />
+          ) : (
+            <button type="button" role="menuitem" disabled style={{ ...menuItem, display: "flex", alignItems: "center", gap: 8, color: "var(--color-text-muted)", cursor: "default" }}>
+              <ArrowUpDown size={14} aria-hidden />
+              並び替え
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -167,19 +180,19 @@ function ViewMenu({ label }: { label: string }) {
 }
 
 /** 上の帯の右の 表示 / その他 (Todoist)。viewLabel は 表示 ボタンの文言 (ボード画面では「ボード」)。 */
-export function HeaderActions({ viewLabel = "表示", onMenu }: { viewLabel?: string; onMenu?: HeaderMenu }) {
+export function HeaderActions({ viewLabel = "表示", onMenu, view, initialViewMenuOpen }: { viewLabel?: string; onMenu?: HeaderMenu; view?: HeaderView; initialViewMenuOpen?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
-      <ViewMenu label={viewLabel} />
+      <ViewMenu label={viewLabel} view={view} initialOpen={initialViewMenuOpen} />
       {onMenu && (onMenu.rename || onMenu.delete) ? <MoreMenu menu={onMenu} /> : <HeaderAction icon={Ellipsis} />}
     </div>
   );
 }
 
 /** 画面ヘッダー: children (タイトル群) をここに、HeaderActions は上の帯の右へ (AppShell の外では横に並べる)。 */
-export function PageHeader({ children, viewLabel, onMenu }: { children: React.ReactNode; viewLabel?: string; onMenu?: HeaderMenu }) {
+export function PageHeader({ children, viewLabel, onMenu, view, initialViewMenuOpen }: { children: React.ReactNode; viewLabel?: string; onMenu?: HeaderMenu; view?: HeaderView; initialViewMenuOpen?: boolean }) {
   const slot = useContext(TopBarSlot);
-  const actions = <HeaderActions viewLabel={viewLabel} onMenu={onMenu} />;
+  const actions = <HeaderActions viewLabel={viewLabel} onMenu={onMenu} view={view} initialViewMenuOpen={initialViewMenuOpen} />;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "var(--font-body)" }}>
       {children}

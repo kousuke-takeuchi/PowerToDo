@@ -12,7 +12,6 @@ import { DragProvider, type DropResult } from "../../app/drag/DragContext";
 import { DeleteTaskDialog } from "../../views/DeleteTaskDialog";
 import { countDescendants } from "../../views/deleteMessage";
 import { AppShell } from "../../views/AppShell";
-import { BoardView } from "../../views/BoardView";
 import { ConflictBanner } from "../../views/ConflictBanner";
 import { FixBanner } from "../../views/FixBanner";
 import { LabelDetailView } from "../../views/LabelDetailView";
@@ -30,6 +29,8 @@ import { SyncSamples } from "../../views/SyncSamples";
 import { TaskDialog } from "../../views/TaskDialog";
 import type { TaskDialogProps } from "../../views/TaskDialog";
 import type { SyncState } from "../../components/SyncStatus";
+import { DEFAULTS } from "../../app/view/viewOptions";
+import type { ViewOptions } from "../../app/view/viewOptions";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
 
@@ -61,6 +62,22 @@ function Screen({ width, banner, ...view }: Partial<ProjectViewProps> & { width?
 export const D01: Story = {
   name: "D-01 プロジェクト",
   render: () => <Screen showLongTitleRow />,
+};
+
+export const D01s: Story = {
+  name: "D-01s 「表示」メニュー",
+  render: () => <Screen initialViewMenuOpen initialView={{ ...DEFAULTS, sort: "priority", group: "label", date: "7d" }} />,
+};
+
+export const D01t: Story = {
+  name: "D-01t グループ: 優先度",
+  render: () => <Screen initialView={{ ...DEFAULTS, group: "priority" }} />,
+};
+
+// P1 だけ表示: 優先度 3, 4 のタスクが隠れて「n 件を隠しています (フィルター)」が出る。
+export const D01u: Story = {
+  name: "D-01u フィルター中",
+  render: () => <Screen initialView={{ ...DEFAULTS, prio: 1 }} />,
 };
 
 export const D01h: Story = {
@@ -227,8 +244,8 @@ export const D01Interactive: Story = {
 };
 
 // 操作確認用 (spec ②): 行の鉛筆 / 日付 / 「…」/ 追加の欄が、この Story の中のローカル state で動く (RowActions の代わり)。
-function RowActionsScreen() {
-  const [list, setList] = useState<Task[]>(shopping);
+function RowActionsScreen({ initialList = shopping, initialView }: { initialList?: Task[]; initialView?: ViewOptions }) {
+  const [list, setList] = useState<Task[]>(initialList);
   const [editing, setEditing] = useState<string | null>(null);
   const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
   const [overlay, setOverlay] = useState<string | null>(null);
@@ -298,7 +315,14 @@ function RowActionsScreen() {
           </>
         }
       >
-        <ProjectView project="買い物" tasks={list} sections={sections} initialExpanded={[1]} onToggleDone={(t, done) => patch(t.no, { progress: done ? 100 : 0 })} />
+        <ProjectView
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          initialExpanded={[1]}
+          initialView={initialView}
+          onToggleDone={(t, done) => patch(t.no, { progress: done ? 100 : 0 })}
+        />
       </AppShell>
     </RowActions.Provider>
   );
@@ -309,13 +333,25 @@ export const D01RowActions: Story = {
   render: () => <RowActionsScreen />,
 };
 
+// ラベルでグループ: 2 つのラベルを持つ「牛乳と卵を買う」は 2 回出る。編集・追加・サブタスクの欄は最初の 1 つだけに開く。
+export const D01RowActionsLabel: Story = {
+  name: "D-01 行の操作 (ラベルでグループ, 操作)",
+  render: () => (
+    <RowActionsScreen
+      initialList={shopping.map((t) => (t.no === 1 ? { ...t, labels: ["食品", "日用品"] } : t))}
+      initialView={{ ...DEFAULTS, group: "label" }}
+    />
+  ),
+};
+
 // 操作確認用 (spec ③): ドラッグの本体を DragProvider でつなぎ、drop をローカル state に反映する。ハンドルは Task 4 以降で行に付く。
-function DragScreen() {
+function DragScreen({ initialView }: { initialView?: ViewOptions }) {
   const [list, setList] = useState<Task[]>(shopping);
   const [secs, setSecs] = useState(sections);
   const [projs, setProjs] = useState(projects);
   // The last drops that left the project screen (a task onto a sidebar project, a project order), shown below the sidebar for the check.
   const [log, setLog] = useState<string[]>([]);
+  const [locked, setLocked] = useState(0);
   const onDrop = (r: DropResult) => {
     if (r.kind === "project") {
       if (r.project !== r.source.task.project) setLog((l) => [...l, `project:${r.source.task.no}->${r.project}`]);
@@ -341,8 +377,10 @@ function DragScreen() {
       <AppShell
         sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projs} syncState="synced" lastSyncedAt="09:41" />}
         syncState="synced"
+        fullWidth={initialView?.layout === "board"}
       >
-        <ProjectView project="買い物" tasks={list} sections={secs} initialExpanded={[1]} />
+        <ProjectView project="買い物" tasks={list} sections={secs} initialExpanded={[1]} initialView={initialView} onReorderLocked={() => setLocked((n) => n + 1)} />
+        <div data-testid="locked-count" style={{ position: "fixed", right: 8, bottom: 28, fontSize: 12, color: "var(--color-text-muted)" }}>locked:{locked}</div>
         <div data-testid="drag-log" style={{ position: "fixed", right: 8, bottom: 8, fontSize: 12, color: "var(--color-text-muted)" }}>{log.join(" | ")}</div>
       </AppShell>
     </DragProvider>
@@ -352,6 +390,23 @@ function DragScreen() {
 export const D01Drag: Story = {
   name: "D-01 ドラッグ (操作)",
   render: () => <DragScreen />,
+};
+
+// 操作確認用 (spec ⑤ §5): 優先度順のとき、持ち手を押しても赤い線は出ず、onReorderLocked が呼ばれる。
+export const D01DragSorted: Story = {
+  name: "D-01 ドラッグ (並び替え中, 操作)",
+  render: () => <DragScreen initialView={{ ...DEFAULTS, sort: "priority" }} />,
+};
+
+// 操作確認用 (spec ⑤ §4): ボードでカードを別の列へ動かすと category (セクション) が変わる。並び替え中は列の末尾に入る。
+export const D10Drag: Story = {
+  name: "D-10 ボードのドラッグ (操作)",
+  render: () => <DragScreen initialView={BOARD_VIEW} />,
+};
+
+export const D10DragSorted: Story = {
+  name: "D-10 ボードのドラッグ (並び替え中, 操作)",
+  render: () => <DragScreen initialView={{ ...BOARD_VIEW, sort: "priority" }} />,
 };
 
 // D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
@@ -739,13 +794,25 @@ export const D09f: Story = {
   render: () => <SettingsScreen initialTarget="nas" connected syncState="synced" lastSyncedAt="09:41" />,
 };
 
+const BOARD_VIEW = { ...DEFAULTS, layout: "board" as const };
+
+function BoardScreen(view: Partial<ProjectViewProps>) {
+  return (
+    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
+      <ProjectView project="買い物" tasks={shopping} sections={sections} initialView={BOARD_VIEW} {...view} />
+    </AppShell>
+  );
+}
+
 export const D10: Story = {
   name: "D-10 ボード",
-  render: () => (
-    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
-      <BoardView project="買い物" tasks={shopping} sections={sections} dragging={1} />
-    </AppShell>
-  ),
+  render: () => <BoardScreen />,
+};
+
+// 今週の「牛乳と卵を買う」を持ち上げ、いつか列の「新しいフライパン」の下に赤い線 (列の間の移動)。
+export const D10b: Story = {
+  name: "D-10b ボードのドラッグ中",
+  render: () => <BoardScreen dragPreview={{ no: 1, kind: "between", targetNo: 3 }} />,
 };
 
 export const D11a: Story = {

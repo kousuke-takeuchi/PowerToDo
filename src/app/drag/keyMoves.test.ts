@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { indentMove, outdentMove, siblingMove } from "./keyMoves.ts";
+import { indentMove, outdentMove, siblingMove, todayMove } from "./keyMoves.ts";
 import type { Task } from "../../types/model.ts";
 
 const t = (no: number, order: number, parentNo?: number, category: string | null = null): Task => ({
@@ -55,4 +55,38 @@ test("a_category_that_is_no_section_counts_as_unsectioned", () => {
   // A known section stays its own group.
   assert.equal(siblingMove(ts, 5, -1, known), null);
   assert.deepEqual(indentMove(ts, 5, known), null);
+});
+
+test("sibling_moves_skip_rows_the_filter_hides", () => {
+  // Filter P1: 2 is hidden. A move swaps with the nearest shown sibling, as a drop does.
+  const ts = [{ ...t(1, 1), priority: 1 as const }, t(2, 2), { ...t(3, 3), priority: 1 as const }, { ...t(4, 4), priority: 1 as const }];
+  const shown = (x: Task) => x.priority === 1;
+  assert.deepEqual(siblingMove(ts, 1, 1, none, shown), { section: null, parent: null, before: 4 });
+  assert.deepEqual(siblingMove(ts, 3, -1, none, shown), { section: null, parent: null, before: 1 });
+  assert.equal(siblingMove(ts, 1, -1, none, shown), null);
+  assert.equal(siblingMove(ts, 4, 1, none, shown), null);
+});
+
+test("indent_nests_under_the_nearest_shown_sibling_above", () => {
+  // Filter P1: 2 is hidden. Ctrl+] on 3 nests under 1, not under the hidden 2; with no shown sibling above, nothing.
+  const ts = [{ ...t(1, 1), priority: 1 as const }, t(2, 2), { ...t(3, 3), priority: 1 as const }];
+  const shown = (x: Task) => x.priority === 1;
+  assert.deepEqual(indentMove(ts, 3, none, shown), { section: null, parent: 1, before: null });
+  assert.equal(indentMove([t(2, 2), { ...t(3, 3), priority: 1 as const }], 3, none, shown), null);
+});
+
+test("today_moves_skip_rows_the_filter_hides", () => {
+  const a = { ...t(1, 1), priority: 1 as const };
+  const b = t(2, 2);
+  const c = { ...t(3, 3), priority: 1 as const };
+  const shown = (x: Task) => x.priority === 1;
+  const nos = (l: Task[] | null) => l?.map((x) => x.no) ?? null;
+  assert.deepEqual(nos(todayMove([a, b, c], a, 1, shown)), [2, 3, 1]);
+  assert.deepEqual(nos(todayMove([a, b, c], c, -1, shown)), [3, 1, 2]);
+  assert.equal(todayMove([a, b, c], a, -1, shown), null);
+  assert.equal(todayMove([a, b, c], c, 1, shown), null);
+  const d = { ...t(4, 4), priority: 1 as const };
+  assert.deepEqual(nos(todayMove([a, b, c, d], a, 1, shown)), [2, 3, 1, 4]);
+  // Nothing hidden: a plain swap.
+  assert.deepEqual(nos(todayMove([a, b, c], a, 1, () => true)), [2, 1, 3]);
 });

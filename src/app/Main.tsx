@@ -44,6 +44,8 @@ import { useProject } from "./useProject";
 import { useRowFocus } from "./useRowFocus";
 import { PALETTE, useProjectActions } from "./useProjectActions";
 import { useQuickAdd } from "./useQuickAdd";
+import { ViewOptionsCtx, useViewOptionsStore } from "./view/ViewOptionsContext";
+import { sanitize, viewKey } from "./view/viewOptions";
 import { useSummaries } from "./useSummaries";
 import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
@@ -67,6 +69,7 @@ const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
   const today = useToday();
   const width = useShellWidth();
+  const viewStore = useViewOptionsStore();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
 
   const [nav, setNav] = useState<Nav>({ kind: "inbox" });
@@ -233,6 +236,19 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     noteAction.current = run;
     setNotice((s) => nextNotice(s, { text, action, id: ++noteId.current }));
   };
+  // Spec ⑤ §5: a sorted or grouped project cannot be reordered; the toast offers the way back.
+  const projectViewKey = viewKey("project", current);
+  const projectViewOptions = sanitize("project", viewStore.get(projectViewKey));
+  const projectBoard = projectViewOptions.layout === "board";
+  // The board has no groups, so only a sort locks it.
+  const projectSorted = projectViewOptions.sort !== "manual" || (projectViewOptions.group !== "none" && !projectBoard);
+  const reorderLocked = (restore: () => void) => note("手動の並び (グループなし) に戻すと並べ替えられます", "戻す", restore);
+  const restoreProjectView = () =>
+    viewStore.set(projectViewKey, { ...projectViewOptions, sort: "manual", dir: "asc", group: "none" });
+  // The Today order moves only while Today is manual and ungrouped (spec ⑤ §5).
+  const todayViewOptions = sanitize("today", viewStore.get(viewKey("today")));
+  const todaySorted = todayViewOptions.sort !== "manual" || todayViewOptions.group !== "none";
+  const restoreTodayView = () => viewStore.set(viewKey("today"), { ...todayViewOptions, sort: "manual", dir: "asc", group: "none" });
   // ---- 行の操作 (spec ②): the inline editor, the row menu and date picker, the delete confirmation ----
   const [editing, setEditing] = useState<string | null>(null);
   const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
@@ -326,6 +342,11 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     onCompleted: completed,
     requestDelete: (t) => requestDelete(t),
     edit: setEditing,
+    projectSorted,
+    projectBoard,
+    todaySorted,
+    restoreToday: restoreTodayView,
+    onReorderLocked: (restore) => reorderLocked(restore ?? restoreProjectView),
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
@@ -339,7 +360,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [drawer, width]);
   useEscLayer(drawer && width === 960, () => setDrawer(false));
 
-  const { createProject, renameProject, deleteProject, deleteLabel } = useProjectActions({
+  const { createProject, renameProject, deleteProject, deleteLabel, renameLabel } = useProjectActions({
     current,
     summaries,
     refreshSummaries,
@@ -347,6 +368,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     showError,
     ext,
     labelsData,
+    views: viewStore,
   });
 
   // データフォルダが変わった: 開いていたプロジェクトは新しいフォルダに無いかもしれないので、受信トレイに戻して読み直す。
@@ -366,6 +388,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     if (current === app.inbox) void p.reload().catch(() => undefined); // 名前が変わらないと useProject は読み直さない
     void refreshSummaries();
     loadDisplayName();
+    viewStore.reload(); // set_data_dir sends no projects-changed: read the new folder's 表示 rows
   };
 
   const reveal = () => void api.revealDataDir().catch(showError);
@@ -769,7 +792,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
             .then(labelsData.refresh)
             .catch(showError)
         }
-        onRenameLabel={(name, newName) => void api.renameLabel(name, newName).then(labelsData.refresh).catch(showError)}
+        onRenameLabel={(name, newName) => void renameLabel(name, newName)}
         onChangeColor={(name, color) => void api.updateLabel(name, color).then(labelsData.refresh).catch(showError)}
         onDeleteLabel={(name) => void deleteLabel(name)}
         onAddFilter={() => setFlash({ text: "フィルターは Phase 5 で実装します", tone: "info" })}
@@ -793,6 +816,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onAddTask={(title) => void cross.addToInbox({ title, due: today })}
         onReschedule={(due) => void api.rescheduleOverdue(today, due).catch(showError).finally(refreshAll)}
         hiddenProjects={failed}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
+        onReorderLocked={reorderLocked}
       />
     );
   } else if (nav.kind === "upcoming") {
@@ -817,6 +844,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onVisibleKeys={reportKeys}
         onAddTask={(date, title) => void cross.addToInbox({ title, due: date })}
         hiddenProjects={failed}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
       />
     );
   } else if (nav.kind === "label") {
@@ -836,6 +866,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onVisibleKeys={reportKeys}
         onAddTask={(title) => void cross.addToInbox({ title, labels: [labelName] })}
         hiddenProjects={failed}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
       />
     );
   } else if (p.error) {
@@ -873,6 +906,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onRenameSection={(from, to) => void p.renameSection(from, to)}
         onRenameProject={current === app.inbox ? undefined : (name) => void renameProject(name)}
         onDeleteProject={current === app.inbox ? undefined : () => void deleteProject()}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
+        onReorderLocked={reorderLocked}
       />
     );
   }
@@ -1057,12 +1094,15 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   return (
+    <ViewOptionsCtx.Provider value={viewStore}>
     <ProjectColors.Provider value={projectColors}>
     <CommentCounts.Provider value={commentCounts}>
     <RowActions.Provider value={rowActions}>
     <DragProvider onDrop={onDrop}>
     <AppShell
       width={width}
+      // The board uses the whole pane (its columns scroll sideways); the list keeps the 800 column.
+      fullWidth={(nav.kind === "inbox" || nav.kind === "project") && projectBoard && !p.error && !!view}
       fill
       syncState={syncState}
       sidebar={sidebar}
@@ -1100,5 +1140,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     </RowActions.Provider>
     </CommentCounts.Provider>
     </ProjectColors.Provider>
+    </ViewOptionsCtx.Provider>
   );
 }

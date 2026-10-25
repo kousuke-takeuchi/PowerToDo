@@ -8,4 +8,5 @@ pub mod paths;
 pub mod project_book;
 pub mod project_store;
 pub mod style;
+pub mod view_options;
 pub mod watcher;

@@ -5,7 +5,9 @@ import { SectionHeader } from "../components/SectionHeader";
 import { dateLabel, monthDay, weekdayLong } from "../mock/data";
 import { useMotionTiming } from "../motion";
 import type { Task } from "../types/model";
-import { AddSlot, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
+import { useView } from "../app/view/ViewOptionsContext";
+import { arrangeFlat, firstOccurrences } from "../app/view/arrange";
+import { AddSlot, FilterNote, HiddenNote, dupKeysOf, useCrossRows, useOutsideClose } from "./crossList";
 import { DatePicker } from "./DatePicker";
 import { PageHeader, TitleGroup } from "./HeaderActions";
 
@@ -27,6 +29,12 @@ export type TodayViewProps = {
   focusedKey?: string;
   /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
+  /** 「表示」の並べ替え・グループ・フィルターに使う (Main が渡す)。 */
+  weekStart?: "mon" | "sun";
+  labelOrder?: string[];
+  projectOrder?: string[];
+  /** 並べ替え / グループ中の今日の行のハンドルを押した。「戻す」で手動の並び (グループなし) に戻せる。 */
+  onReorderLocked?: (restore: () => void) => void;
 };
 
 const rescheduleButton = {
@@ -86,7 +94,8 @@ function RescheduleButton({ today, onReschedule }: { today: string; onReschedule
 }
 
 /** 期限切れグループ (再スケジュール付き) + 今日。期限切れを出さないときは見出しなしで今日の行だけ並べる。 */
-export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects, focusedKey, onVisibleKeys }: TodayViewProps) {
+export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects, focusedKey, onVisibleKeys, weekStart = "mon", labelOrder = [], projectOrder = [], onReorderLocked }: TodayViewProps) {
+  const [view, setView] = useView("today");
   const [overdueCollapsed, setOverdueCollapsed] = useState(false);
   const open = tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due !== undefined);
   // Rust (today_view) already orders the groups (due, priority, No.); only the mock data needs sorting here.
@@ -96,36 +105,80 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
     overdue.sort((a, b) => (a.due! === b.due! ? a.no - b.no : a.due! < b.due! ? -1 : 1));
     todays.sort((a, b) => a.no - b.no);
   }
+  // 表示の設定 (spec ⑤)。期限切れは並びを保ち、優先度フィルターだけかける。今日は手動 = バックエンドの並び。
+  const ctx = { today, weekStart, labelOrder, projectOrder };
+  const overdueA = arrangeFlat(overdue, { ...view, group: "none", sort: "manual", dir: "asc" }, ctx);
+  const overdueRows = (overdueA.groups[0]?.rows ?? []).map((r) => r.task);
+  const todayA = arrangeFlat(todays, view, ctx);
+  const grouped = view.group !== "none";
+  const firstKeys = firstOccurrences(todayA.groups);
+  const todayRows = grouped ? [] : (todayA.groups[0]?.rows ?? []).map((r) => r.task);
+  const todayCount = grouped ? new Set(todayA.groups.flatMap((g) => g.rows.map((r) => `${r.task.project}/${r.task.no}`))).size : todayRows.length;
   const showOverdue = !hideOverdue && overdue.length > 0;
-  const total = (showOverdue ? overdue.length : 0) + todays.length;
-  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today), focusedKey, onVisibleKeys, dragView: "today" });
+  const total = (showOverdue ? overdueRows.length : 0) + todayCount;
+  const hiddenCount = (showOverdue ? overdueA.hidden : 0) + todayA.hidden;
+  // 今日の並びを動かせるのは、手動でグループなしのときだけ。
+  const sorted = view.sort !== "manual" || grouped;
+  const restoreManual = () => setView({ ...view, sort: "manual", dir: "asc", group: "none" });
+  const rows = useCrossRows({
+    tasks,
+    onToggleDone,
+    onOpenTask,
+    date: (t) => dateLabel(t.due, today),
+    focusedKey,
+    onVisibleKeys,
+    dragView: "today",
+    onHandleLocked: (group) => {
+      if (sorted && group !== "overdue") onReorderLocked?.(restoreManual);
+    },
+  });
+  const [groupCollapsed, setGroupCollapsed] = useState<Set<string>>(() => new Set());
 
   return (
     <>
-      <PageHeader>
+      <PageHeader view={{ screen: "today", options: view, onChange: setView }}>
         <TitleGroup title="今日" subtitle={`${total} 件のタスク`} />
       </PageHeader>
       <HiddenNote names={hiddenProjects} />
+      <FilterNote count={hiddenCount} />
       <div>
         {showOverdue && (
           <section>
             <SectionHeader
               title="期限切れ"
-              count={overdue.length}
+              count={overdueRows.length}
               collapsed={overdueCollapsed}
               onToggle={() => setOverdueCollapsed((v) => !v)}
               trailing={<RescheduleButton today={today} onReschedule={onReschedule} />}
             />
             {!overdueCollapsed && (
-              rows("overdue", overdue)
+              rows("overdue", overdueRows)
             )}
           </section>
         )}
         <section>
-          <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} count={todays.length} showChevron={false} />
-          <div data-drop-list="today" data-level0="0">
-            {rows("today", todays)}
-          </div>
+          <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} count={todayCount} showChevron={false} />
+          {grouped ? (
+            todayA.groups.map((g) => (
+              <section key={g.key}>
+                <SectionHeader
+                  title={g.title}
+                  count={g.rows.length}
+                  collapsed={groupCollapsed.has(g.key)}
+                  onToggle={() =>
+                    setGroupCollapsed((c) => {
+                      const n = new Set(c);
+                      if (!n.delete(g.key)) n.add(g.key);
+                      return n;
+                    })
+                  }
+                />
+                {!groupCollapsed.has(g.key) && rows(g.key, g.rows.map((r) => r.task), dupKeysOf(g, firstKeys))}
+              </section>
+            ))
+          ) : (
+            <div {...(sorted ? {} : { "data-drop-list": "today", "data-level0": "0" })}>{rows("today", todayRows)}</div>
+          )}
           <AddSlot defaults={{ due: today }} onAdd={onAddTask} />
         </section>
       </div>

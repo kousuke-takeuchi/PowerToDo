@@ -157,6 +157,7 @@ impl ProjectStore {
         if let Some(extra) = self.common.label_extra.remove(name) {
             self.common.label_extra.insert(new_name.clone(), extra);
         }
+        self.follow_view_option(super::view_options::LABEL, name, Some(&new_name));
         self.common_dirty = true;
         let changed = self.edit_all_projects(|t| {
             let mut hit = false;
@@ -175,6 +176,7 @@ impl ProjectStore {
         let before = self.common.labels.len();
         self.common.labels.retain(|l| l.name != name);
         self.common.label_extra.remove(name);
+        self.follow_view_option(super::view_options::LABEL, name, None);
         if self.common.labels.len() != before {
             self.common_dirty = true;
         }

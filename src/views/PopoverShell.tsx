@@ -1,13 +1,13 @@
 import type React from "react";
 
 /** ポップオーバーの外枠 (pen の DatePopover など: 幅 320, padding 12, 角丸 12, 影)。位置決めは呼び出し側。 */
-export function PopoverShell({ children, gap = "var(--space-3)", label }: { children: React.ReactNode; gap?: string; label: string }) {
+export function PopoverShell({ children, gap = "var(--space-3)", label, width = 320 }: { children: React.ReactNode; gap?: string; label: string; width?: number }) {
   return (
     <div
       role="dialog"
       aria-label={label}
       style={{
-        width: 320,
+        width,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",

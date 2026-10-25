@@ -104,6 +104,8 @@ export const api = {
 
   settings: () => invoke<SettingsDto>("settings"),
   updateSettings: (settings: SettingsDto) => invoke<SettingsDto>("update_settings", { settings }),
+  viewOptions: () => invoke<Record<string, string>>("view_options"),
+  setViewOption: (key: string, value: string) => invoke<void>("set_view_option", { key, value }),
 
   // ---- Phase 2: cross-project views, labels, search ----
   todayView: (today: string) => invoke<TodayViewDto>("today_view", { today }),

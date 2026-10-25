@@ -3,6 +3,7 @@ import { confirmAction } from "../api/dialogs";
 import type { ProjectSummary } from "../types/model";
 import type { useExternalChanges } from "./useExternalChanges";
 import type { SidebarProps } from "../views/Sidebar";
+import { viewKey } from "./view/viewOptions";
 
 type Nav = SidebarProps["active"];
 
@@ -15,7 +16,7 @@ export const PALETTE = [
   "var(--color-priority-1)",
 ];
 
-/** プロジェクトの作成 / 改名 / 削除とラベルの削除 (受信トレイは改名・削除できない)。 */
+/** プロジェクトの作成 / 改名 / 削除とラベルの改名 / 削除 (受信トレイは改名・削除できない)。 */
 export function useProjectActions({
   current,
   summaries,
@@ -24,6 +25,7 @@ export function useProjectActions({
   showError,
   ext,
   labelsData,
+  views,
 }: {
   current: string;
   summaries: ProjectSummary[];
@@ -32,6 +34,8 @@ export function useProjectActions({
   showError: (e: unknown) => void;
   ext: ReturnType<typeof useExternalChanges>;
   labelsData: { refresh: () => void };
+  /** The 表示 store: the backend moves / removes the row on a rename / delete, so drop the old key's pending write and reload. */
+  views: { reload: () => void; forget: (key: string) => void };
 }) {
   const createProject = async (name: string) => {
     try {
@@ -46,8 +50,10 @@ export function useProjectActions({
 
   // ---- プロジェクトの改名 / 削除 (受信トレイは不可) ----
   const renameProject = async (newName: string) => {
+    views.forget(viewKey("project", current));
     try {
       const renamed = await api.renameProject(current, newName);
+      views.reload();
       await refreshSummaries();
       navigate({ kind: "project", name: renamed.name });
     } catch (e) {
@@ -64,8 +70,10 @@ export function useProjectActions({
       okLabel: "削除",
     }).catch(() => false);
     if (!ok) return;
+    views.forget(viewKey("project", current));
     try {
       await api.deleteProject(current);
+      views.reload();
       await refreshSummaries();
       navigate({ kind: "inbox" });
     } catch (e) {
@@ -81,13 +89,26 @@ export function useProjectActions({
       okLabel: "削除",
     }).catch(() => false);
     if (!ok) return;
+    views.forget(viewKey("label", name));
     try {
       await api.deleteLabel(name);
+      views.reload();
       labelsData.refresh();
     } catch (e) {
       showError(e);
     }
   };
 
-  return { createProject, renameProject, deleteProject, deleteLabel };
+  const renameLabel = async (name: string, newName: string) => {
+    views.forget(viewKey("label", name));
+    try {
+      await api.renameLabel(name, newName);
+      views.reload();
+      labelsData.refresh();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  return { createProject, renameProject, deleteProject, deleteLabel, renameLabel };
 }

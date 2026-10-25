@@ -161,6 +161,8 @@ pub fn run() {
             commands::summarize_recurrence,
             commands::settings,
             commands::update_settings,
+            commands::view_options,
+            commands::set_view_option,
             commands::today_view,
             commands::upcoming_view,
             commands::label_view,

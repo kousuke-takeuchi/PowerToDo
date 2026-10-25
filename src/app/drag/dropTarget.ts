@@ -80,7 +80,9 @@ function placementOfDrop(rows: RowBox[], drop: Drop, draggedKey: string): Placem
   }
   const { index, depth } = drop;
   // Section: of the nearest row above (a header starts its section), else unsectioned.
-  const section = index > 0 ? rows[index - 1].section : null;
+  // A list with no header (a board column) starts in its first row's section; a header with "" is the unsectioned area.
+  const above = index > 0 ? rows[index - 1].section : (rows[0]?.section ?? null);
+  const section = above === "" ? null : above;
   // Parent: the nearest task above at depth - 1 (stopping at the section start).
   let parent: number | null = null;
   if (depth > 0) {
@@ -134,4 +136,20 @@ export function todayInPlace(rows: RowBox[], beforeKey: string | null, draggedKe
   if (i < 0) return false;
   const next = rows.slice(i + 1).find((r): r is TaskBox => isTask(r) && r.key !== draggedKey);
   return (next?.key ?? null) === beforeKey;
+}
+
+/**
+ * Sorted board (spec ⑤ §4: 自動の並びのとき 列の間の移動だけ): true when `list` is the column the card was lifted from,
+ * which then gives no drop target (no line, release cancels). Other columns still take the card (at their end).
+ */
+export function ownSortedColumn<T>(list: T, sorted: boolean, from: T | null): boolean {
+  return sorted && from !== null && list === from;
+}
+
+/**
+ * The box the ghost card is measured from (its offset under the pointer): the nearest card (`data-drag-box`, a sorted
+ * board card that is not a drop row of its own), list row, sidebar section or project item; else the pressed element.
+ */
+export function dragBox<E extends { closest: (selector: string) => E | null }>(pressed: E): E {
+  return pressed.closest("[data-drag-box], [data-row], [data-drop-section], [data-project-item]") ?? pressed;
 }

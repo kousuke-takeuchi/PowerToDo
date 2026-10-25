@@ -132,13 +132,15 @@ export type CrossRowsOptions = {
   onVisibleKeys?: (keys: string[]) => void;
   /** Which view the rows are dragged from (spec 3). Without it the rows have no drag handle. */
   dragView?: "today" | "upcoming" | "label";
+  /** A handle press on a row of `group` while the list cannot be reordered (sorted / grouped): shows the way-back toast. */
+  onHandleLocked?: (group: string) => void;
 };
 
 /**
  * 今日 / 近日 / ラベル詳細の行 (チェック・退場・開く) を作る。戻り値の `rows(group, list)` が、グループ `group` の
  * `list` を描画する要素にする。`onToggleDone` が無いときは従来どおりの素の TaskRow の並び (ラッパーなし)。
  */
-export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey, onVisibleKeys, dragView }: CrossRowsOptions) {
+export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey, onVisibleKeys, dragView, onHandleLocked }: CrossRowsOptions) {
   const drag = useContext(DragCtx);
   const { isDone: fakeDone, toggle: fakeToggle } = useDone();
   const colors = useContext(ProjectColors);
@@ -159,13 +161,16 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
     else leave.cancel(t);
     onToggleDone(t, next);
   };
-  const row = (group: string) => (t: Task, index: number) => {
-    shown.push(taskKey(t));
+  const row = (group: string, dups?: ReadonlySet<string>) => (t: Task, index: number) => {
+    // A repeated copy (label grouping) shares the task's editors and focus: only the first copy takes part in them.
+    const dup = dups?.has(taskKey(t)) ?? false;
+    if (!dup) shown.push(taskKey(t));
     const el = (
       <ActionRow
         key={onToggleDone ? taskKey(t) : t.no}
         task={t}
         canInsert={false}
+        dup={dup}
         rowProps={{
           title: t.title,
           done: isDone(t),
@@ -176,24 +181,26 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
           section: t.category ?? undefined,
           projectColor: colors[t.project],
           commentCount: commentCounts[taskKey(t)],
-          focused: focusedKey === taskKey(t),
+          focused: !dup && focusedKey === taskKey(t),
           onClick: onOpenTask ? () => onOpenTask(t) : undefined,
           onToggleDone: () => toggle(t, group, index),
           // The overdue rows only go to the sidebar: as "label" they are no target for the Today order or the Upcoming days.
           onHandlePointerDown:
             drag && dragView
-              ? (e) =>
+              ? (e) => {
+                  onHandleLocked?.(group);
                   drag.start(
                     e,
                     { kind: "task", task: t, view: group === "overdue" ? "label" : dragView, depth: 0, height: 0, subtree: new Set([taskKey(t)]) },
                     <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
-                  )
+                  );
+                }
               : undefined,
-          dragging: drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === t.project,
+          dragging: !dup && drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === t.project,
         }}
       />
     );
-    const marked = dragView ? (
+    const marked = dragView && !dup ? (
       <div key={onToggleDone ? undefined : t.no} data-row="" data-row-kind="task" data-key={taskKey(t)} data-no={t.no} data-depth="0" data-parent="" data-section="">
         {el}
       </div>
@@ -208,8 +215,8 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
       marked
     );
   };
-  return (group: string, list: Task[]) => {
-    const items = (onToggleDone ? leave.merge(group, list) : list).map(row(group));
+  return (group: string, list: Task[], dups?: ReadonlySet<string>) => {
+    const items = (onToggleDone ? leave.merge(group, list) : list).map(row(group, dups));
     return onToggleDone ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
   };
 }
@@ -266,6 +273,21 @@ export function AddSlot({ label, defaults = {}, onAdd }: { label?: string; defau
     );
   }
   return <AddTaskRow label={label} onClick={ctx || onAdd ? () => setAdding(true) : undefined} />;
+}
+
+/** 「表示」のフィルターで隠した件数の 1 行 (ProjectView と同じ)。 */
+export function FilterNote({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <div style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)", marginBottom: "var(--space-2)" }}>
+      {count} 件を隠しています (フィルター)
+    </div>
+  );
+}
+
+/** グループ内の 2 つ目以降のコピー (taskKey) の集合。ラベルでまとめると 1 つのタスクが複数のグループに出る。 */
+export function dupKeysOf(g: { key: string; rows: { key: string; task: Task }[] }, first: ReadonlySet<string>): Set<string> {
+  return new Set(g.rows.filter((r) => !first.has(r.key)).map((r) => taskKey(r.task)));
 }
 
 /** 読み込めなかったプロジェクトがあるとき、横断ビューの上に出す 1 行の注記 (仕様 §7)。 */

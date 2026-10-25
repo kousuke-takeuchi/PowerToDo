@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoScrollSpeed, computeDrop, orderIndex, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
+import { autoScrollSpeed, computeDrop, dragBox, orderIndex, ownSortedColumn, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
 
 // 40 px rows from y=0: 1, 2 (child of 1), 3, header 会議 at 120, 4 in 会議, slot of 会議, header 空 + slot.
 const rows: RowBox[] = [
@@ -133,4 +133,81 @@ test("today_drop_in_place_is_detected", () => {
   assert.equal(todayInPlace(today, null, "b/2"), false);
   assert.equal(todayInPlace(today, null, "c/3"), true);
   assert.equal(todayInPlace(today, "a/1", "c/3"), false);
+});
+
+// Board columns: each column is its own list with no section header (spec ⑤ §4).
+test("a_board_column_without_a_header_places_in_its_own_section", () => {
+  const column: RowBox[] = [
+    { kind: "task", key: "p/4", no: 4, depth: 0, parent: null, section: "会議", top: 0, bottom: 40 },
+    { kind: "slot", section: "会議", top: 40, bottom: 80 },
+  ];
+  const d = { key: "p/3", depth: 0, height: 2, subtree: new Set(["p/3"]) };
+  // Above the first card: the column's section, not the unsectioned list.
+  const top = computeDrop(column, { x: 0, y: 2 }, 0, d, 0);
+  assert.deepEqual(placementOf(column, top!, "p/3"), { section: "会議", parent: null, before: 4 });
+  // The middle of a card is a gap, never onto (cards do not nest on the board).
+  assert.equal(computeDrop(column, { x: 0, y: 20 }, 0, d, 0)?.kind, "between");
+  // An empty column takes the drop on its add row.
+  const empty: RowBox[] = [{ kind: "slot", section: "空", top: 0, bottom: 40 }];
+  const e = computeDrop(empty, { x: 0, y: 20 }, 0, d, 0);
+  assert.deepEqual(placementOf(empty, e!, "p/3"), { section: "空", parent: null, before: null });
+});
+
+test("a_sorted_board_column_drops_at_its_end_and_the_unsectioned_column_is_no_section", () => {
+  // The cards area is one header-kind row (section "" = unsectioned), then the add row.
+  const column: RowBox[] = [
+    { kind: "header", section: "", top: 0, bottom: 120 },
+    { kind: "slot", section: null, top: 120, bottom: 160 },
+  ];
+  const d = { key: "p/3", depth: 0, height: 2, subtree: new Set(["p/3"]) };
+  const drop = computeDrop(column, { x: 0, y: 50 }, 0, d, 0);
+  assert.deepEqual(drop, { kind: "between", index: 1, depth: 0, y: 120, x: 0 });
+  assert.deepEqual(placementOf(column, drop!, "p/3"), { section: null, parent: null, before: null });
+});
+
+// Spec ⑤ §4: a sorted board moves cards only between columns; the card's own column gives no drop target.
+test("a_sorted_board_gives_no_target_in_the_dragged_cards_own_column", () => {
+  const week = { name: "今週" };
+  const later = { name: "あとで" };
+  // Own column (sorted): no target.
+  assert.equal(ownSortedColumn(week, true, week), true);
+  // Another column (sorted): the drop stays.
+  assert.equal(ownSortedColumn(later, true, week), false);
+  // Unsorted: unchanged.
+  assert.equal(ownSortedColumn(week, false, week), false);
+  // Lifted outside any column: nothing to exclude.
+  assert.equal(ownSortedColumn(week, true, null), false);
+});
+
+// A fake element chain: `closest` walks up and matches `[data-x]` attribute selectors (a comma list, any of them).
+type Fake = { name: string; attrs: string[]; parent: Fake | null; closest: (sel: string) => Fake | null };
+const fake = (name: string, attrs: string[], parent: Fake | null): Fake => {
+  const el: Fake = {
+    name,
+    attrs,
+    parent,
+    closest(sel) {
+      const want = sel.split(",").map((s) => s.trim().replace(/^\[|\]$/g, ""));
+      for (let n: Fake | null = el; n; n = n.parent) if (n.attrs.some((a) => want.includes(a))) return n;
+      return null;
+    },
+  };
+  return el;
+};
+
+// Final review: on a sorted board the cards share one header-kind row; the ghost is measured from the card itself.
+test("the_ghost_is_measured_from_the_card_not_the_sorted_columns_shared_row", () => {
+  const column = fake("column", ["data-drop-list"], null);
+  const shared = fake("shared", ["data-row"], column);
+  const card = fake("card", ["data-drag-box"], shared);
+  const handle = fake("handle", [], card);
+  assert.equal(dragBox(handle).name, "card");
+  // A list row (no drag box) still measures the row.
+  const row = fake("row", ["data-row"], column);
+  assert.equal(dragBox(fake("h", [], row)).name, "row");
+  // Sidebar: a section or a project item.
+  assert.equal(dragBox(fake("h", [], fake("sec", ["data-drop-section"], null))).name, "sec");
+  assert.equal(dragBox(fake("h", [], fake("item", ["data-project-item"], null))).name, "item");
+  // Nothing around it: the pressed element itself.
+  assert.equal(dragBox(fake("lone", [], null)).name, "lone");
 });

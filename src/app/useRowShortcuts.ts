@@ -4,7 +4,7 @@ import { taskKey } from "../views/crossList";
 import type { SidebarProps } from "../views/Sidebar";
 import { api } from "../api/client";
 import { addDays } from "./dates";
-import { indentMove, outdentMove, siblingMove } from "./drag/keyMoves";
+import { indentMove, outdentMove, siblingMove, todayMove } from "./drag/keyMoves";
 import type { RowHandlers } from "./shortcuts";
 import { useShortcuts } from "./shortcuts";
 import type { useCrossActions } from "./useCrossView";
@@ -36,6 +36,11 @@ export function useRowShortcuts({
   onCompleted,
   requestDelete,
   edit,
+  projectSorted,
+  projectBoard,
+  todaySorted,
+  restoreToday,
+  onReorderLocked,
 }: {
   /** Saves a key move and reloads the screen (the same as a drop). */
   afterMove: (p: Promise<unknown>) => void;
@@ -65,6 +70,15 @@ export function useRowShortcuts({
   requestDelete: (t: Task) => void;
   /** ⌘E: edit the row in place (spec ② §7). */
   edit: (key: string) => void;
+  /** The open project is sorted or grouped: its rows cannot be moved by key (spec ⑤ §5). */
+  projectSorted: boolean;
+  /** The open project is shown as a board: its cards do not nest, so Ctrl+] and Ctrl+[ do nothing. */
+  projectBoard: boolean;
+  /** Today is sorted or grouped: its order cannot be moved by key either. */
+  todaySorted: boolean;
+  restoreToday: () => void;
+  /** Shows the "back to manual order" toast; `restore` is given for Today (the project's own restore is the default). */
+  onReorderLocked: (restore?: () => void) => void;
 }) {
   // ---- キーボード操作 (shortcuts.ts)。フォーカス行のタスクは、いま出ているビューのデータから探す ----
   const focusedTask = (() => {
@@ -93,7 +107,15 @@ export function useRowShortcuts({
   const moveKey = (k: "up" | "down" | "indent" | "outdent") => {
     const t = focusedTask;
     if (!t) return;
+    // Rows on screen: a move skips the ones the 表示 filter hides (spec ⑤), as a drop does.
+    const onScreen = new Set(visibleKeys);
+    const shown = (x: Task) => onScreen.has(taskKey(x));
     if (onProjectScreen(t)) {
+      if (projectSorted) {
+        onReorderLocked();
+        return;
+      }
+      if (projectBoard && (k === "indent" || k === "outdent")) return;
       const tasks = p.view?.tasks;
       if (!tasks) return;
       // A completed top-level task, and its subtasks, sit in the completed list: not movable.
@@ -103,22 +125,22 @@ export function useRowShortcuts({
       const sections = (p.view?.sections ?? []).map((s) => s.name);
       const to =
         k === "up"
-          ? siblingMove(tasks, t.no, -1, sections)
+          ? siblingMove(tasks, t.no, -1, sections, shown)
           : k === "down"
-            ? siblingMove(tasks, t.no, 1, sections)
+            ? siblingMove(tasks, t.no, 1, sections, shown)
             : k === "indent"
-              ? indentMove(tasks, t.no, sections)
+              ? indentMove(tasks, t.no, sections, shown)
               : outdentMove(tasks, t.no, sections);
       if (to) screenMove(p.moveWithin(t.no, to));
       return;
     }
     if (navKind === "today" && (k === "up" || k === "down")) {
-      const list = todayList();
-      const i = list.findIndex((x) => taskKey(x) === taskKey(t));
-      const j = k === "up" ? i - 1 : i + 1;
-      if (i < 0 || j < 0 || j >= list.length) return;
-      const next = [...list];
-      [next[i], next[j]] = [next[j], next[i]];
+      if (todaySorted) {
+        onReorderLocked(restoreToday);
+        return;
+      }
+      const next = todayMove(todayList(), t, k === "up" ? -1 : 1, shown);
+      if (!next) return;
       afterMove(api.setTodayOrder(today, next.map((x) => [x.project, x.no])));
     }
   };
