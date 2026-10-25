@@ -250,6 +250,16 @@ export const D03: Story = {
   render: () => <DetailScreen />,
 };
 
+export const D03Project: Story = {
+  name: "D-03 タスク詳細 (プロジェクトを選ぶ)",
+  render: () => <DetailScreen initialPopover="project" />,
+};
+
+export const D03Labels: Story = {
+  name: "D-03 タスク詳細 (ラベルを選ぶ)",
+  render: () => <DetailScreen initialPopover="labels" />,
+};
+
 export const D03b: Story = {
   name: "D-03b タスク詳細 (狭いウィンドウ)",
   render: () => <DetailScreen widthPx={700} layout="narrow" />,

@@ -13,6 +13,8 @@ import { TaskRow } from "../components/TaskRow";
 import { TODAY, dateLabel } from "../mock/data";
 import type { Comment, Project, Task, TaskPatch } from "../types/model";
 import { DatePicker } from "./DatePicker";
+import { LabelPicker } from "./LabelPicker";
+import { ProjectPicker } from "./ProjectPicker";
 import { PopRow, PopoverShell } from "./PopoverShell";
 import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
@@ -216,7 +218,8 @@ export function TaskDialog({
   // 編集モードでは、押した行の直下にポップオーバーを出す (パネル内の位置は行の offsetTop から)。Storybook は pen の座標のまま。
   const [anchorTop, setAnchorTop] = useState<number | null>(null);
   const toggle = (p: Popover, row?: HTMLElement) => {
-    if (editable && row) setAnchorTop(row.offsetTop + row.offsetHeight);
+    // The row's top in the dialog box (its offsetParent), less the scroll of the column it sits in.
+    if (editable && row) setAnchorTop(row.offsetTop + row.offsetHeight - (row.parentElement?.scrollTop ?? 0));
     setPopover((cur) => (cur === p ? null : p));
   };
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -479,6 +482,26 @@ export function TaskDialog({
             {popover === "reminder" && (
               <ReminderPicker reminders={remindersNow} dueTime={timeNow} onChange={(r) => (onChange ? onChange({ reminders: r }) : setReminders(r))} />
             )}
+            {popover === "project" && projects && onMove && (
+              <ProjectPicker
+                projects={projects}
+                current={{ project: project.name, section: section ?? null }}
+                onPick={(pj, sec) => {
+                  setPopover(null);
+                  if (pj !== project.name || sec !== (section ?? null)) onMove(pj, sec);
+                }}
+              />
+            )}
+            {popover === "labels" && allLabels && (
+              <LabelPicker
+                labels={allLabels}
+                selected={task.labels}
+                onToggle={(name) => {
+                  const next = task.labels.includes(name) ? task.labels.filter((l) => l !== name) : [...task.labels, name];
+                  void onChange?.({ labels: next });
+                }}
+              />
+            )}
             {popover === "priority" && (
               <PopoverShell label="優先度" gap="var(--space-1)">
                 {PRIORITIES.map((p) => (
@@ -506,7 +529,6 @@ export function TaskDialog({
   const right = (
     <div
       style={{
-        position: "relative",
         minHeight: narrow ? undefined : 0,
         overflowY: narrow ? undefined : "auto",
         padding: "8px 16px",
@@ -541,7 +563,6 @@ export function TaskDialog({
       />
       <PropRow icon={<Bell size={16} />} name="リマインダー" value={reminderSummary(remindersNow)} onClick={(row) => toggle("reminder", row)} expanded={popover === "reminder"} />
       <PropRow icon={<Repeat size={16} />} name="繰り返し" value={rruleText} onClick={(row) => toggle("recurrence", row)} expanded={popover === "recurrence"} />
-      {pickers}
     </div>
   );
 
@@ -560,6 +581,7 @@ export function TaskDialog({
         aria-label={task.title}
         tabIndex={-1}
         style={{
+          position: "relative",
           outline: "none",
           width: "min(864px, calc(100vw - 32px))",
           height: "min(820px, calc(100vh - 64px))",
@@ -578,6 +600,7 @@ export function TaskDialog({
         {header}
         {left}
         {right}
+        {pickers}
       </div>
     </div>
   );
