@@ -15,7 +15,10 @@ import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
+import { DatePicker } from "./DatePicker";
+import { DeleteTaskDialog } from "./DeleteTaskDialog";
 import { TaskEditor } from "./TaskEditor";
+import { TaskMenu } from "./TaskMenu";
 import { blankValue, editorValueOf } from "./taskEditorValue";
 
 export type ProjectViewProps = {
@@ -64,6 +67,12 @@ export type ProjectViewProps = {
   initialEditNo?: number;
   /** Stories: the "add task" editor of this section starts open (null = unsectioned, D-01j). */
   initialAddSection?: string | null;
+  /** Stories: this row's "..." menu is open (D-01k). */
+  initialMenuNo?: number;
+  /** Stories: this row's date picker is open (D-01l). */
+  initialDateNo?: number;
+  /** Stories: the delete confirmation of this task is shown (D-01m). */
+  initialDeleteNo?: number;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
@@ -113,6 +122,9 @@ export function ProjectView({
   hoverNo,
   initialEditNo,
   initialAddSection,
+  initialMenuNo,
+  initialDateNo,
+  initialDeleteNo,
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
@@ -258,6 +270,31 @@ export function ProjectView({
             />
           )}
           {invalid ? <div style={{ background: "var(--color-accent-soft)" }}>{row}</div> : row}
+          {initialMenuNo === t.no && (
+            <div style={{ position: "absolute", top: 36, right: 0, zIndex: 30 }}>
+              <TaskMenu
+                task={t}
+                today={today}
+                canInsert
+                projects={[{ name: project, sections: projectSections.map((s) => s.name) }]}
+                onAddAbove={noop}
+                onAddBelow={noop}
+                onEdit={noop}
+                onDue={noop}
+                onPriority={noop}
+                onReminders={noop}
+                onMove={noop}
+                onDuplicate={noop}
+                onDelete={noop}
+                onClose={noop}
+              />
+            </div>
+          )}
+          {initialDateNo === t.no && (
+            <div style={{ position: "absolute", top: 36, right: 40, zIndex: 30 }}>
+              <DatePicker value={t.due} time={t.dueTime} today={today} />
+            </div>
+          )}
         </div>
         {onDeleteTask && deleteTarget === t.no && (
           <div
@@ -530,6 +567,11 @@ export function ProjectView({
         )}
       </PageHeader>
       {body()}
+      {initialDeleteNo !== undefined &&
+        (() => {
+          const t = mine.find((x) => x.no === initialDeleteNo);
+          return t ? <DeleteTaskDialog title={t.title} subtasks={childrenOf(t.no).length} onCancel={noop} onConfirm={noop} /> : null;
+        })()}
     </>
   );
 }

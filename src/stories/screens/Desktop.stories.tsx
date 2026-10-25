@@ -73,6 +73,21 @@ export const D01j: Story = {
   render: () => <Screen initialAddSection={null} />,
 };
 
+export const D01k: Story = {
+  name: "D-01k 「…」のメニュー",
+  render: () => <Screen hoverNo={2} initialMenuNo={2} />,
+};
+
+export const D01l: Story = {
+  name: "D-01l 行の日付の選択",
+  render: () => <Screen hoverNo={2} initialDateNo={2} />,
+};
+
+export const D01m: Story = {
+  name: "D-01m 削除の確認",
+  render: () => <Screen initialDeleteNo={1} />,
+};
+
 export const D01b: Story = {
   name: "D-01b サブタスク展開",
   render: () => <Screen initialExpanded={[1, 5]} />,
