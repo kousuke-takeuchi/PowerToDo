@@ -3,12 +3,16 @@
 //! file is newer (the `keep` of `Action::Conflict`); it wins a field both sides changed.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
 
 use crate::domain::model::{Label, Project, Task};
-use crate::store::common_book::{CommonBook, Settings};
-use crate::store::project_book::ProjectBook;
+use crate::error::AppResult;
+use crate::store::common_book::{
+    COMMON_FILE, CommonBook, Settings, read_common_book, write_common_book,
+};
+use crate::store::project_book::{ProjectBook, read_project_book, write_project_book};
 use crate::sync::Side;
 
 /// The change of one side, or the value both changed to, or the newer side's.
@@ -429,6 +433,67 @@ pub fn merge_common(
     }
 }
 
+pub struct Merged {
+    pub bytes: Vec<u8>,
+    /// See [`ProjectMerge::renumbered`]; empty for the common workbook.
+    pub renumbered: Vec<(u32, u32)>,
+}
+
+/// Merges the three contents of `name` (a project workbook, or the common workbook). `Err`
+/// says why it cannot: one does not read, or holds rows the app never rewrites (spec section
+/// 5). The caller then makes a conflict copy. `holidays` and `today` are for writing a project
+/// workbook, as the store writes it.
+#[allow(clippy::too_many_arguments)]
+pub fn merge_files(
+    name: &str,
+    base: &[u8],
+    local: &[u8],
+    remote: &[u8],
+    newer: Side,
+    high_water: u32,
+    holidays: &[NaiveDate],
+    today: NaiveDate,
+) -> Result<Merged, String> {
+    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let put = |tag: &str, bytes: &[u8]| -> Result<PathBuf, String> {
+        let p = tmp.path().join(format!("{tag}.xlsx"));
+        std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
+        Ok(p)
+    };
+    let paths = [
+        put("base", base)?,
+        put("local", local)?,
+        put("remote", remote)?,
+    ];
+    let out = tmp.path().join("merged.xlsx");
+    let renumbered = if name == COMMON_FILE {
+        let [b, l, r] = read3(&paths, read_common_book)?;
+        if [&b, &l, &r].iter().any(|c| !c.unparsed_holidays.is_empty()) {
+            return Err("祝日に日付でない行があります".into());
+        }
+        write_common_book(&out, &merge_common(&b, &l, &r, newer)).map_err(|e| e.to_string())?;
+        Vec::new()
+    } else {
+        let [b, l, r] = read3(&paths, read_project_book)?;
+        if [&b, &l, &r]
+            .iter()
+            .any(|x| !x.invalid_rows.is_empty() || !x.invalid_cells.is_empty())
+        {
+            return Err("要修正の行があります".into());
+        }
+        let m = merge_project(&b, &l, &r, newer, high_water);
+        write_project_book(&out, &m.book, today, holidays).map_err(|e| e.to_string())?;
+        m.renumbered
+    };
+    let bytes = std::fs::read(&out).map_err(|e| e.to_string())?;
+    Ok(Merged { bytes, renumbered })
+}
+
+fn read3<T>(paths: &[PathBuf; 3], read: impl Fn(&Path) -> AppResult<T>) -> Result<[T; 3], String> {
+    let one = |p: &PathBuf| read(p).map_err(|e| e.to_string());
+    Ok([one(&paths[0])?, one(&paths[1])?, one(&paths[2])?])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,5 +786,97 @@ mod tests {
         assert_eq!(m.holidays, l.holidays);
         assert_eq!(m.settings.display_name, "たろう");
         assert_eq!(m.settings.keep_in_tray, r.settings.keep_in_tray);
+    }
+
+    use crate::store::project_book::{HEADERS, TASK_SHEET};
+
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, 25).unwrap()
+    }
+
+    fn xlsx(b: &ProjectBook) -> Vec<u8> {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("仕事.xlsx");
+        write_project_book(&p, b, today(), &[]).unwrap();
+        std::fs::read(&p).unwrap()
+    }
+
+    fn read(bytes: &[u8]) -> ProjectBook {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("仕事.xlsx");
+        std::fs::write(&p, bytes).unwrap();
+        read_project_book(&p).unwrap()
+    }
+
+    /// A workbook whose task 1 has text (来週) in the 終了 date column.
+    fn with_invalid_row() -> Vec<u8> {
+        let mut wb = rust_xlsxwriter::Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(TASK_SHEET).unwrap();
+        for (c, h) in HEADERS.iter().enumerate() {
+            ws.write_string(0, c as u16, *h).unwrap();
+        }
+        ws.write_number(1, 0, 1.0).unwrap();
+        ws.write_string(1, 3, "牛乳").unwrap();
+        ws.write_string(1, 8, "来週").unwrap();
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn merges_project_files() {
+        let b = book(vec![task(1, "牛乳")]);
+        let l = book(vec![task(1, "牛乳"), task(2, "パン")]);
+        let r = book(vec![task(1, "牛乳"), task(3, "卵")]);
+        let m = merge_files(
+            "仕事.xlsx",
+            &xlsx(&b),
+            &xlsx(&l),
+            &xlsx(&r),
+            Side::Remote,
+            2,
+            &[],
+            today(),
+        )
+        .unwrap();
+        let got: Vec<String> = read(&m.bytes).tasks.into_iter().map(|t| t.title).collect();
+        assert_eq!(got, ["牛乳", "パン", "卵"]);
+    }
+
+    #[test]
+    fn unreadable_or_invalid_rows_do_not_merge() {
+        let b = xlsx(&book(vec![task(1, "牛乳")]));
+        let m = |l: &[u8]| merge_files("仕事.xlsx", &b, l, &b, Side::Remote, 1, &[], today());
+        assert!(m(b"not xlsx").is_err());
+        let bad = with_invalid_row();
+        assert_eq!(read(&bad).invalid_rows.len(), 1);
+        assert!(m(&bad).is_err());
+    }
+
+    #[test]
+    fn merges_the_common_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bytes = |c: &CommonBook| {
+            let p = tmp.path().join("_PowerToDo.xlsx");
+            crate::store::common_book::write_common_book(&p, c).unwrap();
+            std::fs::read(&p).unwrap()
+        };
+        let b = common(vec![project("受信トレイ", true)]);
+        let l = common(vec![project("受信トレイ", true), project("仕事", false)]);
+        let r = common(vec![project("受信トレイ", true), project("家", false)]);
+        let m = merge_files(
+            "_PowerToDo.xlsx",
+            &bytes(&b),
+            &bytes(&l),
+            &bytes(&r),
+            Side::Remote,
+            0,
+            &[],
+            today(),
+        )
+        .unwrap();
+        let p = tmp.path().join("out.xlsx");
+        std::fs::write(&p, &m.bytes).unwrap();
+        let got = crate::store::common_book::read_common_book(&p).unwrap();
+        assert_eq!(names_of(&got), s(&["受信トレイ", "家", "仕事"]));
     }
 }
