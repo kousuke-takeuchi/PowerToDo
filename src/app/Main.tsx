@@ -22,7 +22,8 @@ import { LabelDetailView } from "../views/LabelDetailView";
 import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
-import { TaskDetailPanel } from "../views/TaskDetailPanel";
+import { TaskDialog } from "../views/TaskDialog";
+import { afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
@@ -60,9 +61,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
 
   const [nav, setNav] = useState<Nav>({ kind: "inbox" });
-  const [openNo, setOpenNo] = useState<number | null>(null);
+  // The task open in the task dialog (spec ① §2): over whatever view is shown.
+  const [dialog, setDialog] = useState<{ project: string; no: number } | null>(null);
   // 通知 / 帯から開いたタスク: プロジェクトが読み込まれたら、そのタスクがあるか一度だけ確かめる
-  const [pendingOpen, setPendingOpen] = useState<{ project: string; no: number } | null>(null);
   const [drawer, setDrawer] = useState(false);
   // Wide layout: the sidebar was closed with its button (it slides away; the top bar's button brings it back).
   const [sidebarClosed, setSidebarClosed] = useState(false);
@@ -141,8 +142,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const navigate = useCallback(
     (target: Nav) => {
       setNav(target);
-      setOpenNo(null);
-      setPendingOpen(null);
+      setDialog(null);
       setDrawer(false);
       clearFocus();
     },
@@ -158,30 +158,16 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     showWarnings,
     refreshSummaries,
   });
-  /** 横断ビューのタスクを、そのプロジェクトの画面で詳細パネルつきで開く。navigate が openNo を消すので、その後に設定する。 */
-  const openTaskAt = (project: string, no: number, verify = false) => {
+  /** Opens the task dialog over the current view (spec ① §2.5). A project that is gone opens nothing. */
+  const openTaskAt = (project: string, no: number) => {
     // 消えたプロジェクト (通知を受けてから削除 / 改名した) は何も開かない
     if (project !== app.inbox && !summaries.some((s) => s.name === project)) {
       setFlash({ text: "タスクが見つかりません", tone: "error" });
       return;
     }
-    navigate(project === app.inbox ? { kind: "inbox" } : { kind: "project", name: project });
-    setOpenNo(no);
-    if (verify) setPendingOpen({ project, no });
+    setDialog({ project, no });
+    focus.set(`${project}/${no}`);
   };
-  useEffect(() => {
-    if (!pendingOpen) return;
-    if (p.error && current === pendingOpen.project) {
-      setPendingOpen(null);
-      return;
-    }
-    if (!view || view.project.name !== pendingOpen.project || current !== pendingOpen.project) return;
-    setPendingOpen(null);
-    if (!view.tasks.some((t) => t.no === pendingOpen.no)) {
-      setOpenNo(null);
-      setFlash({ text: "タスクが見つかりません", tone: "error" });
-    }
-  }, [pendingOpen, view, current, p.error]);
   const openCross = (t: Task) => openTaskAt(t.project, t.no);
   const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current, setFlash });
   // アプリの更新: 起動 5 秒後の確認、更新ダイアログ、設定の「アップデート」ペイン
@@ -197,7 +183,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     onInfo: (text) => setFlash({ text, tone: "info" }),
     // 開いているプロジェクトのタスクはその画面の処理で (すぐ画面に反映し、行のチェックと同時押しを防ぐ)
     complete: (project, no) => (projectScreen && project === current ? p.completeTask(no, true) : cross.setDone(project, no, true)),
-    openTask: (project, no) => openTaskAt(project, no, true),
+    openTask: (project, no) => openTaskAt(project, no),
   });
   // イベントの購読は 1 回だけにして、呼ぶ先は毎描画の最新を参照する
   const wired = useRef({ updateOpen: !!updates.offer, openTaskAt, openQuickAdd, refreshAll, fetchPending: reminders.fetchPending, removeTask: reminders.removeTask });
@@ -206,7 +192,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     const offs = [
       onOpenTask((project, no) => {
         wired.current.removeTask(project, no); // 通知から開いたタスクの帯は要らない
-        wired.current.openTaskAt(project, no, true);
+        wired.current.openTaskAt(project, no);
       }),
       // 更新ダイアログが開いているあいだは開かない (トレイから押されても、後ろの画面は操作できない)
       onOpenQuickAdd(() => !wired.current.updateOpen && wired.current.openQuickAdd()),
@@ -269,10 +255,11 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     projectScreen,
     today,
     openCross,
-    setOpenNo,
-    openNo,
+    dialog,
+    setDialog,
     expandApi,
-    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer,
+    // Row keys act on the focused row, which the modal task dialog hides: off while it is open.
+    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer && !dialog,
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
@@ -382,33 +369,144 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const qaColor = summaries.find((s) => s.name === qaProject)?.color;
   const projectColors = useMemo(() => Object.fromEntries(summaries.map((s) => [s.name, s.color])), [summaries]);
 
-  // ---- タスク詳細 ----
-  // useProject は名前が変わった直後の 1 描画だけ前のプロジェクトの view を持つので、名前で確かめる
-  const openTask = view && view.project.name === current && openNo !== null ? view.tasks.find((t) => t.no === openNo) : undefined;
-  const panel =
-    projectScreen && view && openTask ? (
-      <TaskDetailPanel
-        key={`${current}/${openTask.no}`}
-        task={openTask}
-        subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
-        project={view.project}
-        section={openTask.category ?? undefined}
-        today={today}
-        onClose={() => setOpenNo(null)}
-        onChange={(patch) => p.updateTask(openTask.no, patch)}
-        onToggleDone={(done) => {
-          const t = openTask;
-          void p.completeTask(t.no, done).then((ok) => ok && done && completed(t));
-        }}
-        onDelete={() => {
-          setOpenNo(null);
-          void p.deleteTask(openTask.no);
-        }}
-        onParseRecurrence={api.parseRecurrence}
-        onAddSubtask={(title) => void p.addSubtask(openTask.no, title)}
-        onToggleSubtask={(no, done) => void p.completeTask(no, done)}
-      />
-    ) : undefined;
+  // ---- タスクの詳細ダイアログ (spec ① §2) ----
+  // The task comes from the open project's useProject on its own screen, else from a second one (enabled on demand).
+  const target = dialogTarget(dialog, current, projectScreen);
+  const other = useProject(target === "other" && dialog ? dialog.project : current, {
+    enabled: target === "other",
+    onMutated: refreshSummaries,
+    onWarnings: showWarnings,
+  });
+  const src = target === "current" ? p : other;
+  const dlgView = target === "none" ? null : src.view;
+  const dlgTask = dialog && dlgView && dlgView.project.name === dialog.project ? dlgView.tasks.find((t) => t.no === dialog.no) : undefined;
+  const dlgKey = dialog ? `${dialog.project}/${dialog.no}` : null;
+  const { prev, next } = dlgKey ? neighbors(visibleKeys, dlgKey) : {};
+  /** Shows the task with row key `k` in the dialog (and focuses its row), or closes the dialog. */
+  const goDialog = (k?: string | null) => {
+    if (!k) {
+      setDialog(null);
+      return;
+    }
+    setDialog(parseKey(k));
+    focus.set(k);
+  };
+  /** Rows that leave with the dialog's task (its subtasks, deleted or moved with it). */
+  const leavingWith = (no: number): Set<string> => {
+    const out = new Set<string>();
+    if (!dlgView || !dialog) return out;
+    const walk = (parent: number) => {
+      for (const t of dlgView.tasks) {
+        if (t.parentNo === parent) {
+          out.add(`${dialog.project}/${t.no}`);
+          walk(t.no);
+        }
+      }
+    };
+    walk(no);
+    return out;
+  };
+  /** After a change through the second source, the open views (Today, the project screen) catch up. */
+  const afterOther = () => {
+    if (target === "other") {
+      refreshAll();
+      if (projectScreen) void p.refresh();
+    }
+  };
+  // The task vanished (deleted elsewhere, gone after a sync) or its project failed to load: close, never show another task.
+  useEffect(() => {
+    if (!dialog || target === "none") return;
+    if (src.error) {
+      setDialog(null);
+      return;
+    }
+    if (dlgView && dlgView.project.name === dialog.project && !dlgView.tasks.some((t) => t.no === dialog.no)) setDialog(null);
+  }, [dialog, target, dlgView, src.error]);
+  const [allLabels, setAllLabels] = useState<string[]>([]);
+  const dialogOpen = dialog !== null;
+  useEffect(() => {
+    if (!dialogOpen) return;
+    void api
+      .labels()
+      .then((d) => setAllLabels(d.labels.map((l) => l.name)))
+      .catch(() => undefined);
+  }, [dialogOpen]);
+  // While j / k moves to a task of another project, its source loads; keep the last dialog on screen meanwhile
+  // (spec ① §2.5: no motion between tasks), instead of unmounting it for a frame.
+  const lastDialogEl = useRef<React.ReactNode>(null);
+  const freshDialogEl =
+    dialog && dlgView && dlgTask && dlgKey ? (
+      <motion.div
+        key="task-dialog"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: t(0.1) }}
+        exit={{ opacity: 0, transition: t(0.08) }}
+        style={{ position: "absolute", inset: 0 }}
+      >
+        <TaskDialog
+          key={dlgKey}
+          task={dlgTask}
+          subtasks={dlgView.tasks.filter((x) => x.parentNo === dlgTask.no).sort((a, b) => a.order - b.order)}
+          project={dlgView.project}
+          section={dlgTask.category ?? undefined}
+          today={today}
+          layout={width === 960 ? "narrow" : "wide"}
+          onClose={() => setDialog(null)}
+          onOpenProject={() => navigate(dialog.project === app.inbox ? { kind: "inbox" } : { kind: "project", name: dialog.project })}
+          onPrev={prev ? () => goDialog(prev) : undefined}
+          onNext={next ? () => goDialog(next) : undefined}
+          onChange={(patch) =>
+            src.updateTask(dlgTask.no, patch).then((ok) => {
+              if (ok) afterOther();
+              return ok;
+            })
+          }
+          onToggleDone={(done) => {
+            const t = dlgTask;
+            // Spec ① §2.5: completing moves on to the next task (taken from the list as it was before).
+            const after = done ? afterRemoval(visibleKeys, dlgKey) : undefined;
+            void src.completeTask(t.no, done).then((ok) => {
+              if (!ok) return;
+              afterOther();
+              if (done) {
+                completed(t);
+                goDialog(after);
+              }
+            });
+          }}
+          onDelete={() => {
+            const after = afterRemoval(visibleKeys, dlgKey, leavingWith(dlgTask.no));
+            void src.deleteTask(dlgTask.no).then((ok) => {
+              if (!ok) return;
+              afterOther();
+              goDialog(after);
+            });
+          }}
+          onParseRecurrence={api.parseRecurrence}
+          onAddSubtask={(title) => void src.addSubtask(dlgTask.no, title).then(afterOther)}
+          onToggleSubtask={(no, done) => void src.completeTask(no, done).then(afterOther)}
+          projects={summaries.map((s) => ({ name: s.name, sections: s.name === dlgView.project.name ? dlgView.sections.map((x) => x.name) : [] }))}
+          onMove={(toProject, toSection) => {
+            // Spec ① §2.5: moving to another project goes on to the next task; a new section keeps the task (same No).
+            const leaves = toProject !== dialog.project;
+            const after = leaves ? afterRemoval(visibleKeys, dlgKey, leavingWith(dlgTask.no)) : null;
+            void api
+              .moveTask(dialog.project, dialog.no, toProject, toSection)
+              .then(() => {
+                refreshAll();
+                void p.refresh();
+                if (target === "other") void other.refresh();
+                if (leaves) goDialog(after);
+              })
+              .catch(showError);
+          }}
+          allLabels={allLabels}
+        />
+      </motion.div>
+    ) : null;
+  const dialogLoading = dialog !== null && !dlgTask && target !== "none" && src.loading && !src.error;
+  const dialogEl = freshDialogEl ?? (dialogLoading ? lastDialogEl.current : null);
+  lastDialogEl.current = dialog ? dialogEl : null;
 
   // ---- 本文 ----
   let body: React.ReactNode;
@@ -537,7 +635,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onAddTask={(section, title) => void p.addTask({ title, section })}
         onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
         onDeleteTask={(t) => {
-          if (openNo === t.no) setOpenNo(null);
+          if (dialog?.project === t.project && dialog.no === t.no) setDialog(null);
           void p.deleteTask(t.no);
         }}
         onAddSection={(name) => void p.addSection(name)}
@@ -571,8 +669,12 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       invalidCount={invalidCount}
       onReveal={reveal}
       onReload={() => void reloadProject()}
-      notice={p.notice}
-      onClearNotice={p.clearNotice}
+      // While the dialog shows a task of another project, that project's command errors are the ones to show.
+      notice={target === "other" ? (other.notice ?? p.notice) : p.notice}
+      onClearNotice={() => {
+        p.clearNotice();
+        other.clearNotice();
+      }}
       flash={flash}
       onClearFlash={() => setFlash(null)}
       sync={{
@@ -628,6 +730,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           <Toast key="toast" text={toastText(toast)} onUndo={() => void undoToast(toast)} onClose={() => setToast(null)} />
         )}
       </AnimatePresence>
+      <AnimatePresence>{dialogEl}</AnimatePresence>
       <QuickAddDialog
         open={qa.open}
         tokens={tokens}
@@ -723,7 +826,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         },
       }}
       banner={banner}
-      panel={panel}
       overlay={overlay}
       sidebarHidden={sidebarClosed}
       topBarLeft={
