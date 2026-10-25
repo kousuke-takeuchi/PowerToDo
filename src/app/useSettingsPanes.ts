@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
-import type { SettingsDto } from "../types/model";
+import type { AutostartDto, SettingsDto } from "../types/model";
 import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "../views/SettingsPanes";
 
 /** `trayError` は呼び出し側 (AppStateDto) が足す。 */
@@ -34,6 +34,9 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   const [notifError, setNotifError] = useState<string | null>(null);
   const [dateBusy, setDateBusy] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
+  const [autostart, setAutostart] = useState<AutostartDto | null>(null);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
   /** 開くたび / 閉じるたびに進める。古い世代の結果は捨てる。 */
   const gen = useRef(0);
   /** 最新の settings と、保存を一つずつ流す列 (続けて変えても前の保存の結果に上書きされない)。 */
@@ -70,10 +73,28 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
         setNotifError(errorMessage(e));
         setDateError(errorMessage(e));
       });
+    setAutostart(null);
+    setAutostartBusy(false);
+    setAutostartError(null);
+    api
+      .autostartStatus()
+      .then((a) => g === gen.current && setAutostart(a))
+      .catch((e) => g === gen.current && setAutostartError(errorMessage(e)));
     return () => {
       gen.current++;
     };
   }, [open]);
+
+  const onToggleAutostart = (v: boolean) => {
+    const g = gen.current;
+    setAutostartBusy(true);
+    setAutostartError(null);
+    api
+      .setAutostart(v)
+      .then((a) => g === gen.current && setAutostart(a))
+      .catch((e) => g === gen.current && setAutostartError(errorMessage(e)))
+      .finally(() => g === gen.current && setAutostartBusy(false));
+  };
 
   const onReveal = useCallback(() => {
     const g = gen.current;
@@ -172,6 +193,8 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
       onToggle: (v) => saveNotif({ notifications: v }),
       keepInTray: settings?.keepInTray ?? true,
       onToggleKeepInTray: (v) => saveNotif({ keepInTray: v }),
+      autostart: autostart ? { ...autostart, busy: autostartBusy, error: autostartError } : undefined,
+      onToggleAutostart,
       loading: !settings,
       busy: notifBusy,
       error: notifError,

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AutostartDto,
   AppError,
   AppErrorKind,
   AppStateDto,
@@ -154,6 +155,10 @@ export const api = {
    */
   updateInstall: () => invoke<null>("update_install"),
   setUpdateAutoCheck: (enabled: boolean) => invoke<null>("set_update_auto_check", { enabled }),
+  /** ログイン時に起動するか (OS の登録の状態)。 */
+  autostartStatus: () => invoke<AutostartDto>("autostart_status"),
+  /** ログイン時に起動するかを OS に登録 / 解除する。返るのは OS の状態。失敗は日本語の文で reject する。 */
+  setAutostart: (enabled: boolean) => invoke<AutostartDto>("set_autostart", { enabled }),
 };
 
 const kinds: readonly AppErrorKind[] = ["not_found", "invalid", "io", "locked", "corrupt", "unsaved"];

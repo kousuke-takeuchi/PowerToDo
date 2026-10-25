@@ -30,6 +30,20 @@ function Notifications(initial: Partial<NotificationsPaneProps>) {
 }
 
 export const 通知: Story = { render: () => <Notifications /> };
+function NotificationsWithAutostart({ error }: { error?: string }) {
+  const [enabled, setEnabled] = useState(true);
+  return (
+    <Notifications
+      autostart={{ enabled, supported: true, error }}
+      onToggleAutostart={setEnabled}
+    />
+  );
+}
+
+export const 通知_ログイン時に起動: Story = { render: () => <NotificationsWithAutostart /> };
+export const 通知_ログイン時に起動の設定に失敗: Story = {
+  render: () => <NotificationsWithAutostart error="ログイン時に起動を設定できませんでした: access denied" />,
+};
 export const 通知_トレイを作れない: Story = { render: () => <Notifications trayError="トレイアイコンを作れませんでした: no system tray available" /> };
 
 function DateTime(initial: Partial<DateTimePaneProps>) {
