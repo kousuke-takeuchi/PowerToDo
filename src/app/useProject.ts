@@ -8,6 +8,8 @@ export type UseProjectOptions = {
   onMutated?: () => void;
   /** Called whenever a command's result carries `warnings` (e.g. an unreadable recurrence rule was ignored). */
   onWarnings?: (warnings: string[]) => void;
+  /** false: load nothing and listen to nothing (`view` stays null). The task dialog's second source uses it. */
+  enabled?: boolean;
 };
 
 /**
@@ -33,6 +35,7 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   // project/no of completions (done=true) in flight: a second completion of the same task is ignored until the first answers
   // (a recurring task would otherwise advance twice).
   const completing = useRef(new Set<string>());
+  const enabled = opts.enabled ?? true;
 
   const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
     const p = queue.current.then(job);
@@ -72,23 +75,26 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
     setView(null);
     setError(null);
     setNotice(null);
-    setLoading(true);
-    void load(() => api.getProject(name), false);
+    setLoading(enabled);
+    if (enabled) void load(() => api.getProject(name), false);
     return () => {
       gen.current += 1;
     };
-  }, [name, load]);
+  }, [name, load, enabled]);
 
   // `project-changed` (a change that did not come through this hook): re-read the in-memory state.
-  useEffect(() => onProjectChanged((n) => n === name && void load(() => api.getProject(name), true)), [name, load]);
+  useEffect(
+    () => (enabled ? onProjectChanged((n) => n === name && void load(() => api.getProject(name), true)) : undefined),
+    [name, load, enabled],
+  );
 
   // `projects-changed` (the project list changed as a whole; this project may be gone): re-read.
-  useEffect(() => onProjectsChanged(() => void load(() => api.getProject(name), true)), [name, load]);
+  useEffect(() => (enabled ? onProjectsChanged(() => void load(() => api.getProject(name), true)) : undefined), [name, load, enabled]);
 
   // A save finished: the file's row numbers (invalid rows) may have changed with it, so re-read the in-memory view.
   useEffect(
-    () => onSaveStatus((s) => s.project === name && s.state === "saved" && void load(() => api.getProject(name), true)),
-    [name, load],
+    () => (enabled ? onSaveStatus((s) => s.project === name && s.state === "saved" && void load(() => api.getProject(name), true)) : undefined),
+    [name, load, enabled],
   );
 
   /** Run a command that returns the new ProjectView. Resolves true on success; failure becomes `notice`. */
@@ -166,5 +172,8 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   const parseQuickAdd = useCallback((text: string): Promise<QuickAddResult> => api.parseQuickAdd(text), []);
   const clearNotice = useCallback(() => setNotice(null), []);
 
-  return { view, loading, error, notice, clearNotice, reload, addTask, updateTask, completeTask, deleteTask, addSubtask, addSection, renameSection, quickAdd, parseQuickAdd };
+  /** Re-read the in-memory view (after a command that did not go through this hook, e.g. move_task). */
+  const refresh = useCallback(() => load(() => api.getProject(name), true), [load, name]);
+
+  return { view, loading, error, notice, clearNotice, reload, refresh, addTask, updateTask, completeTask, deleteTask, addSubtask, addSection, renameSection, quickAdd, parseQuickAdd };
 }

@@ -23,8 +23,8 @@ export function useRowShortcuts({
   projectScreen,
   today,
   openCross,
-  setOpenNo,
-  openNo,
+  dialog,
+  setDialog,
   expandApi,
   enabled,
   navigate,
@@ -42,8 +42,9 @@ export function useRowShortcuts({
   projectScreen: boolean;
   today: string;
   openCross: (t: Task) => void;
-  setOpenNo: (no: number | null) => void;
-  openNo: number | null;
+  /** The task open in the task dialog. */
+  dialog: { project: string; no: number } | null;
+  setDialog: (d: { project: string; no: number } | null) => void;
   expandApi: { current: ExpandApi | null };
   enabled: boolean;
   navigate: (target: Nav) => void;
@@ -82,20 +83,14 @@ export function useRowShortcuts({
     }).catch(() => false);
     if (!ok) return;
     if (onProjectScreen(t)) {
-      if (openNo === t.no) setOpenNo(null);
+      if (dialog?.project === t.project && dialog.no === t.no) setDialog(null);
       void p.deleteTask(t.no);
     } else {
       void cross.remove(t);
     }
   };
-  const openAny = (t: Task) => {
-    if (onProjectScreen(t)) {
-      setOpenNo(t.no);
-      focus.set(taskKey(t));
-    } else {
-      openCross(t);
-    }
-  };
+  /** Opens the task dialog over the current view (spec ① §2.5), from any view. */
+  const openAny = (t: Task) => openCross(t);
   const row: RowHandlers | null = visibleKeys.length
     ? {
         hasFocus: !!focusedTask,
