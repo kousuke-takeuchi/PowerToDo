@@ -103,6 +103,11 @@ pub struct AppSettings {
     /// while it is the default.
     #[serde(default, skip_serializing_if = "UpdateSettings::is_default")]
     pub updates: UpdateSettings,
+    /// Start at login (resident sync spec 2). `None` until the app decided once: the first
+    /// launch with this feature registers with the OS and writes `Some(true)`. Afterwards the
+    /// OS's registration is the truth (see `commands::autostart`). Per device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
 }
 
 /// The update part of `settings.json`.
@@ -236,6 +241,23 @@ mod tests {
         );
         assert_eq!(p.common(), PathBuf::from("/data/_PowerToDo.xlsx"));
         assert_eq!(p.archive_dir(), PathBuf::from("/data/archive"));
+    }
+
+    #[test]
+    fn autostart_setting_round_trips_and_is_left_out_until_decided() {
+        let dir = tempfile::tempdir().unwrap();
+        AppSettings::default().save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
+        assert!(!text.contains("autostart"), "{text}");
+        assert_eq!(AppSettings::load(dir.path()).unwrap().autostart, None);
+        for v in [true, false] {
+            let s = AppSettings {
+                autostart: Some(v),
+                ..AppSettings::default()
+            };
+            s.save(dir.path()).unwrap();
+            assert_eq!(AppSettings::load(dir.path()).unwrap().autostart, Some(v));
+        }
     }
 
     #[test]

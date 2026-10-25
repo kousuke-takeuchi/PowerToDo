@@ -65,6 +65,8 @@ tauri = { version = "2", features = ["test"] }
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
 tauri-plugin-updater = "2.14"
+# Start at login (resident sync spec 2); driven from Rust, the page gets no permission.
+tauri-plugin-autostart = "2.7"
 keyring = { version = "4.2", features = ["v1"] }
 
 # iOS: the node's state folder is excluded from backup (`sync::tailnet_inproc::exclude_from_backup`).
