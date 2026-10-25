@@ -5,8 +5,10 @@ import type { DayGroup, Task } from "../../types/model";
 import { TODAY, comments, counts, filters, labelCounts, labels, projects, sections, tasks } from "../../mock/data";
 import { PanelLeftOpen } from "lucide-react";
 import { Button } from "../../components/Button";
+import { TaskRow } from "../../components/TaskRow";
 import { Toast } from "../../components/Toast";
 import { RowActions, type RowActionsApi } from "../../app/rowActions";
+import { DragProvider, type DropResult } from "../../app/drag/DragContext";
 import { DeleteTaskDialog } from "../../views/DeleteTaskDialog";
 import { countDescendants } from "../../views/deleteMessage";
 import { AppShell } from "../../views/AppShell";
@@ -89,6 +91,51 @@ export const D01l: Story = {
 export const D01m: Story = {
   name: "D-01m 削除の確認",
   render: () => <Screen initialDeleteNo={1} />,
+};
+
+export const D01n: Story = {
+  name: "D-01n ドラッグ中 (並べ替え)",
+  render: () => <Screen dragPreview={{ no: 1, kind: "between", targetNo: 2 }} />,
+};
+
+export const D01o: Story = {
+  name: "D-01o ドラッグ中 (字下げ)",
+  render: () => <Screen dragPreview={{ no: 2, kind: "indent", targetNo: 1 }} />,
+};
+
+export const D01p: Story = {
+  name: "D-01p ドラッグ中 (行に重ねる)",
+  render: () => <Screen dragPreview={{ no: 1, kind: "onto", targetNo: 2 }} />,
+};
+
+export const D01q: Story = {
+  name: "D-01q セクションの並べ替え",
+  render: () => <Screen sectionDragPreview="いつか" />,
+};
+
+// Story only: the card floats where the pointer is (no engine). Same look as the drag card.
+const previewCard = (title: string, style: React.CSSProperties) => (
+  <div
+    aria-hidden
+    style={{ position: "fixed", zIndex: 50, pointerEvents: "none", background: "var(--color-bg)", borderRadius: 6, boxShadow: "var(--shadow-popover)", ...style }}
+  >
+    <TaskRow title={title} done={false} priority={3} hideActions />
+  </div>
+);
+
+export const D01r: Story = {
+  name: "D-01r ドラッグ中 (左の一覧に重ねる)",
+  render: () => (
+    <>
+      <AppShell
+        sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState="synced" lastSyncedAt="09:41" dropPreview="仕事" />}
+        syncState="synced"
+      >
+        <ProjectView project="買い物" tasks={shopping} sections={sections} dragPreview={{ no: 2, kind: "between", targetNo: 0 }} />
+      </AppShell>
+      {previewCard("洗剤の詰め替え", { left: 150, top: 215, width: 420 })}
+    </>
+  ),
 };
 
 export const D01b: Story = {
@@ -262,6 +309,51 @@ export const D01RowActions: Story = {
   render: () => <RowActionsScreen />,
 };
 
+// 操作確認用 (spec ③): ドラッグの本体を DragProvider でつなぎ、drop をローカル state に反映する。ハンドルは Task 4 以降で行に付く。
+function DragScreen() {
+  const [list, setList] = useState<Task[]>(shopping);
+  const [secs, setSecs] = useState(sections);
+  const [projs, setProjs] = useState(projects);
+  // The last drops that left the project screen (a task onto a sidebar project, a project order), shown below the sidebar for the check.
+  const [log, setLog] = useState<string[]>([]);
+  const onDrop = (r: DropResult) => {
+    if (r.kind === "project") {
+      if (r.project !== r.source.task.project) setLog((l) => [...l, `project:${r.source.task.no}->${r.project}`]);
+    } else if (r.kind === "projects") {
+      setProjs((cur) => r.names.map((n, i) => ({ ...cur.find((p) => p.name === n)!, order: i + 1 })).concat(cur.filter((p) => p.inbox)));
+      setLog((l) => [...l, `projects:${r.names.join(",")}`]);
+    } else if (r.kind === "place") {
+      const { section, parent, before } = r.placement;
+      setList((cur) => {
+        const moved = { ...r.source.task, category: section, parentNo: parent ?? undefined };
+        const sibs = cur.filter((t) => t.no !== moved.no && t.category === section && (t.parentNo ?? null) === parent).sort((a, b) => a.order - b.order);
+        const at = before === null ? sibs.length : Math.max(0, sibs.findIndex((t) => t.no === before));
+        const ordered = [...sibs.slice(0, at), moved, ...sibs.slice(at)];
+        const orderOf = new Map(ordered.map((t, i) => [t.no, i]));
+        return cur.map((t) => (t.no === moved.no ? { ...moved, order: orderOf.get(moved.no)! } : orderOf.has(t.no) ? { ...t, order: orderOf.get(t.no)! } : t));
+      });
+    } else if (r.kind === "sections") {
+      setSecs((cur) => cur.map((s) => (s.project === r.project ? { ...s, order: r.names.indexOf(s.name) } : s)));
+    }
+  };
+  return (
+    <DragProvider onDrop={onDrop}>
+      <AppShell
+        sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projs} syncState="synced" lastSyncedAt="09:41" />}
+        syncState="synced"
+      >
+        <ProjectView project="買い物" tasks={list} sections={secs} initialExpanded={[1]} />
+        <div data-testid="drag-log" style={{ position: "fixed", right: 8, bottom: 8, fontSize: 12, color: "var(--color-text-muted)" }}>{log.join(" | ")}</div>
+      </AppShell>
+    </DragProvider>
+  );
+}
+
+export const D01Drag: Story = {
+  name: "D-01 ドラッグ (操作)",
+  render: () => <DragScreen />,
+};
+
 // D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
 const quickAddTokens = [
   { text: "牛乳と卵を買う " },
@@ -420,9 +512,17 @@ export const D04: Story = {
 // 行は TodayView が 400ms だけ完了表示のまま残してから畳む。追加は受信トレイ・期限 = 今日、再スケジュールは期限切れ全件の期限を選んだ日にする。
 function TodayInteractive() {
   const [list, setList] = useState<Task[]>(() => withoutNo(15));
-  return navShell(
+  const [log, setLog] = useState<string[]>([]);
+  return (
+    <DragProvider
+      onDrop={(r) => {
+        if (r.kind === "today") setLog((l) => [...l, `today:before ${r.beforeKey}`]);
+        else if (r.kind === "project" && r.project !== r.source.task.project) setLog((l) => [...l, `project:${r.source.task.no}->${r.project}`]);
+      }}
+    >
+      {navShell(
     { kind: "today" },
-    <TodayView
+    <><div data-testid="drag-log" style={{ position: "fixed", right: 8, bottom: 8, fontSize: 12, color: "var(--color-text-muted)" }}>{log.join(" | ")}</div><TodayView
       tasks={list}
       today={TODAY}
       hiddenProjects={["読書"]}
@@ -448,7 +548,9 @@ function TodayInteractive() {
         ])
       }
       onReschedule={(due) => setList((cur) => cur.map((x) => (x.due !== undefined && x.due < TODAY ? { ...x, due } : x)))}
-    />,
+    /></>,
+      )}
+    </DragProvider>
   );
 }
 
@@ -467,6 +569,16 @@ export const D05: Story = {
   render: () => navShell({ kind: "upcoming" }, <UpcomingView tasks={withoutNo(12, 13, 15)} today={TODAY} />),
 };
 
+export const D05b: Story = {
+  name: "D-05b ドラッグ中 (別の日に重ねる)",
+  render: () => (
+    <>
+      {navShell({ kind: "upcoming" }, <UpcomingView tasks={withoutNo(12, 13, 15)} today={TODAY} dropPreviewDay={addDays(TODAY, 2)} />)}
+      {previewCard("牛乳と卵を買う", { left: 600, top: 400, width: 420 })}
+    </>
+  ),
+};
+
 // 操作確認用 (近日): from から count 日分を mock から組み立てて days に渡す (Rust の upcoming_view の代わり)。
 // 「さらに 7 日」で count を増やし、月セレクトで from を変える (切り替えると 7 日に戻す)。完了・追加は mock 一覧に反映する。
 function UpcomingInteractive() {
@@ -480,7 +592,13 @@ function UpcomingInteractive() {
       tasks: list.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due === date).sort((a, b) => a.no - b.no),
     };
   });
-  return navShell(
+  return (
+    <DragProvider
+      onDrop={(r) => {
+        if (r.kind === "day") setList((cur) => cur.map((x) => (x.no === r.source.task.no ? { ...x, due: r.date } : x)));
+      }}
+    >
+      {navShell(
     { kind: "upcoming" },
     <UpcomingView
       tasks={list}
@@ -513,6 +631,8 @@ function UpcomingInteractive() {
         ])
       }
     />,
+      )}
+    </DragProvider>
   );
 }
 

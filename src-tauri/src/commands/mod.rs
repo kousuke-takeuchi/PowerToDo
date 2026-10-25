@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
-use crate::domain::model::{INBOX, Position, TaskInput, TaskPatch};
+use crate::domain::model::{INBOX, Placement, Position, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
 use crate::domain::recurrence;
 use crate::domain::recurrence_words;
@@ -1651,6 +1651,50 @@ pub async fn reorder_tasks(
 ) -> AppResult<ProjectView> {
     mutate(&app, state.inner(), &[&project], false, |s| {
         s.reorder_tasks(&project, section.as_deref(), &order)
+    })
+}
+
+#[tauri::command]
+pub async fn move_task_within(
+    project: String,
+    no: u32,
+    to: Placement,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectView> {
+    mutate(&app, state.inner(), &[&project], false, |s| {
+        s.move_within(&project, no, to)
+    })
+}
+
+#[tauri::command]
+pub async fn reorder_projects(
+    names: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ProjectSummary>> {
+    mutate(&app, state.inner(), &[], true, |s| {
+        s.reorder_projects(&names)
+    })
+}
+
+#[tauri::command]
+pub async fn set_today_order(
+    today: String,
+    keys: Vec<(String, u32)>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let day = parse_ymd(&today)?;
+    let projects: Vec<String> = keys
+        .iter()
+        .map(|(p, _)| p.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let refs: Vec<&str> = projects.iter().map(String::as_str).collect();
+    mutate(&app, state.inner(), &refs, false, |s| {
+        s.set_today_order(day, &keys).map(|_| ())
     })
 }
 

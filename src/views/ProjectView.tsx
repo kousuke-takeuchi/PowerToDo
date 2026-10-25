@@ -1,5 +1,5 @@
 import type React from "react";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
@@ -20,6 +20,7 @@ import { DeleteTaskDialog } from "./DeleteTaskDialog";
 import { TaskEditor } from "./TaskEditor";
 import { ActionRow } from "./ActionRow";
 import { RowActions } from "../app/rowActions";
+import { DragCtx } from "../app/drag/DragContext";
 import { TaskMenu } from "./TaskMenu";
 import { blankValue, editorValueOf } from "./taskEditorValue";
 
@@ -63,6 +64,12 @@ export type ProjectViewProps = {
   today?: string;
   /** キーボードのフォーカス行 (`project/no`)。 */
   focusedKey?: string;
+  /** Main: the row (`project/no`) whose drop is being saved. Drawn faded, as while it is lifted. */
+  movingKey?: string;
+  /** Stories: draw the drag card, red line or ring at fixed positions without the engine (D-01n/o/p). A targetNo with no row only dims the source (D-01r draws its own card over the sidebar). */
+  dragPreview?: { no: number; kind: "between" | "indent" | "onto"; targetNo: number };
+  /** Stories: this section is drawn as dragged, with the red line above the first other section (D-01q). */
+  sectionDragPreview?: string;
   /** Stories: draw this task's row as hovered (handle and actions shown). */
   hoverNo?: number;
   /** Stories: this task's row starts as the inline editor (D-01i). */
@@ -80,6 +87,77 @@ export type ProjectViewProps = {
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
   onExpandApi?: (api: ExpandApi | null) => void;
 };
+
+type PreviewRect = { top: number; left: number; width: number; height: number };
+const cardStyle = {
+  position: "absolute",
+  boxSizing: "border-box",
+  background: "var(--color-bg)",
+  borderRadius: 6,
+  boxShadow: "var(--shadow-popover)",
+  pointerEvents: "none",
+  zIndex: 5,
+} as const;
+
+/** Stories only (D-01n to D-01q): the card, red line and ring at fixed positions, measured from the rows. No engine. */
+function PreviewLayer({
+  listRef,
+  task,
+  dragPreview,
+  section,
+  firstOther,
+}: {
+  listRef: React.RefObject<HTMLDivElement | null>;
+  task?: Task;
+  dragPreview?: ProjectViewProps["dragPreview"];
+  section?: string;
+  firstOther?: string;
+}) {
+  const [rects, setRects] = useState<{ source?: PreviewRect; target?: PreviewRect; header?: PreviewRect }>({});
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const base = list.getBoundingClientRect();
+    const rel = (el: Element | null): PreviewRect | undefined => {
+      if (!el) return undefined;
+      const r = el.getBoundingClientRect();
+      return { top: r.top - base.top, left: r.left - base.left, width: r.width, height: r.height };
+    };
+    setRects({
+      source: dragPreview ? rel(list.querySelector(`[data-row][data-no="${dragPreview.no}"]`)) : undefined,
+      target: dragPreview ? rel(list.querySelector(`[data-row][data-no="${dragPreview.targetNo}"]`)) : undefined,
+      header: firstOther ? rel(list.querySelector(`[data-row-kind="header"][data-section="${firstOther}"]`)) : undefined,
+    });
+  }, [listRef, dragPreview, firstOther]);
+  const line = (top: number, left: number, width: number) => (
+    <div aria-hidden style={{ position: "absolute", top: top - 1, left, width, height: 2, background: "var(--color-accent)", pointerEvents: "none", zIndex: 6 }}>
+      <span style={{ position: "absolute", left: 0, top: -3, width: 8, height: 8, boxSizing: "border-box", borderRadius: 4, border: "2px solid var(--color-accent)", background: "var(--color-bg)" }} />
+    </div>
+  );
+  const { source, target, header } = rects;
+  return (
+    <>
+      {task && source && target && (
+        <div aria-hidden style={{ ...cardStyle, top: source.top + 14, left: source.left + 6, width: source.width - 12 }}>
+          <TaskRow title={task.title} done={false} priority={task.priority} hideActions />
+        </div>
+      )}
+      {dragPreview && target && dragPreview.kind === "between" && line(target.top + target.height, target.left, target.width)}
+      {dragPreview && target && dragPreview.kind === "indent" && line(target.top + target.height, target.left + 28, target.width - 28)}
+      {dragPreview && target && dragPreview.kind === "onto" && (
+        <div aria-hidden style={{ position: "absolute", top: target.top, left: target.left, width: target.width, height: target.height, borderRadius: 6, boxShadow: "inset 0 0 0 1px var(--color-accent)", pointerEvents: "none", zIndex: 6 }} />
+      )}
+      {section && header && (
+        <>
+          <div aria-hidden style={{ ...cardStyle, top: header.top + 14, left: header.left + 6, width: 280, padding: "8px 12px", fontWeight: 700, fontSize: 14, color: "var(--color-text-primary)" }}>
+            {section}
+          </div>
+          {line(header.top, header.left, header.width)}
+        </>
+      )}
+    </>
+  );
+}
 
 export type ExpandApi = { expand(no: number): void; collapse(no: number): void };
 
@@ -121,7 +199,10 @@ export function ProjectView({
   onDeleteProject,
   today = TODAY,
   focusedKey,
+  movingKey,
   hoverNo,
+  dragPreview,
+  sectionDragPreview,
   initialEditNo,
   initialAddSection,
   initialMenuNo,
@@ -130,6 +211,7 @@ export function ProjectView({
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
+  const previewRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [formParent, setFormParent] = useState<number | undefined>(initialFormParent);
   const [formOpenedByClick, setFormOpenedByClick] = useState(false);
@@ -155,6 +237,7 @@ export function ProjectView({
 
   const commentCounts = useContext(CommentCounts);
   const rowCtx = useContext(RowActions);
+  const drag = useContext(DragCtx);
   const mine = tasks.filter((t) => t.project === project);
   // Open tasks of this project, for the line under the title.
   const openCount = mine.filter((t) => t.progress !== 100).length;
@@ -217,6 +300,8 @@ export function ProjectView({
     onToggleDone(t, next);
   };
   const childrenOf = (no: number) => mine.filter((t) => t.parentNo === no).sort((a, b) => a.order - b.order);
+  const heightOf = (no: number): number => Math.max(0, ...childrenOf(no).map((c) => 1 + heightOf(c.no)));
+  const keysOf = (no: number): Set<string> => new Set([`${project}/${no}`, ...childrenOf(no).flatMap((c) => [...keysOf(c.no)])]);
   const toggleSet = <T,>(set: Set<T>, v: T) => {
     const next = new Set(set);
     if (next.has(v)) next.delete(v);
@@ -224,7 +309,8 @@ export function ProjectView({
     return next;
   };
 
-  const renderRow = (t: Task, indent: 0 | 1 | 2): React.ReactNode => {
+  /** `live`: false for the completed list (no data-row, no drag handle). */
+  const renderRow = (t: Task, indent: 0 | 1 | 2, live = true): React.ReactNode => {
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
     const invalid = state === "invalid" && !invalidRows && t.no === INVALID_TASK_NO;
@@ -261,13 +347,40 @@ export function ProjectView({
           // Without RowActions (stories) the "..." shows the old inline confirmation; ActionRow replaces it otherwise.
           onMore: onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined,
           onToggleExpand: () => setExpanded((s) => toggleSet(s, t.no)),
+          onHandlePointerDown:
+            live && drag
+              ? (e) =>
+                  drag.start(
+                    e,
+                    { kind: "task", task: t, view: "project", depth: indent, height: heightOf(t.no), subtree: keysOf(t.no) },
+                    <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
+                  )
+              : undefined,
+          dragging:
+            (drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
+            movingKey === `${project}/${t.no}` ||
+            dragPreview?.no === t.no,
         }}
       />
     );
     return (
       <Collapse key={t.no} enterY={-8} duration={0.1}>
         {/* 追加された行のハイライト: accent-soft から透明へ 600ms。行の背面 (DOM で行より前) に置く。 */}
-        <div style={{ position: "relative" }}>
+        <div
+          style={{ position: "relative" }}
+          {...(live
+            ? {
+                "data-row": "",
+                "data-row-kind": "task",
+                "data-key": `${t.project}/${t.no}`,
+                "data-no": t.no,
+                "data-depth": indent,
+                "data-parent": t.parentNo ?? "",
+                // A カテゴリ that is no section (typed in Excel) shows unsectioned: drop as unsectioned too.
+                "data-section": t.category !== null && sectionNames.has(t.category) ? t.category : "",
+              }
+            : {})}
+        >
           {fresh.has(t.no) && (
             <motion.div
               aria-hidden
@@ -337,7 +450,7 @@ export function ProjectView({
         <AnimatePresence initial={false}>
           {open && (
             <Collapse key="subtasks" duration={0}>
-              <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}</AnimatePresence>
+              <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2, live))}</AnimatePresence>
               {indent === 0 && kids.length > 0 && (
                 <div style={{ marginLeft: 32 }}>
                   {formParent === t.no && rowCtx ? (
@@ -418,6 +531,14 @@ export function ProjectView({
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {
+    const slot = addSlotInner(section);
+    return slot && (
+      <div data-row="" data-row-kind="slot" data-section={section ?? ""}>
+        {slot}
+      </div>
+    );
+  };
+  const addSlotInner = (section: string | null): React.ReactNode => {
     if (rowCtx) {
       if (addTo && addTo.section === section) {
         return (
@@ -501,7 +622,18 @@ export function ProjectView({
       return <ErrorState fileName={`${project}.xlsx`} detail={errorDetail} onRetry={onRetryLoad} onReveal={onRevealFile ?? (onRetryLoad ? undefined : noop)} />;
     }
     return (
-      <div>
+      <div ref={previewRef} data-drop-list="project" data-level0="0" data-section-list="" style={{ position: "relative" }}>
+        {(dragPreview || sectionDragPreview) && (
+          <PreviewLayer
+            listRef={previewRef}
+            task={dragPreview ? tasks.find((t) => t.no === dragPreview.no) : undefined}
+            dragPreview={dragPreview}
+            section={sectionDragPreview}
+            firstOther={projectSections.find((x) => x.name !== sectionDragPreview)?.name}
+          />
+        )}
+        {/* While a task is dragged, the gutter with the grips counts as part of the list (a pull straight up from the grip keeps its target). */}
+        {drag?.active?.kind === "task" && <div aria-hidden style={{ position: "absolute", left: -48, top: 0, bottom: 0, width: 48 }} />}
         {showLongTitleRow && (
           <TaskRow title={LONG_TITLE} done={false} priority={4} showActions={showActions} />
         )}
@@ -517,7 +649,13 @@ export function ProjectView({
           const isCollapsed = collapsed.has(s.name);
           return (
             <section key={s.name}>
+              <div data-row="" data-row-kind="header" data-section={s.name} data-drop-section={s.name}>
               <SectionHeader
+                onHandlePointerDown={
+                  drag
+                    ? (e) => drag.start(e, { kind: "section", project, name: s.name }, <div style={{ padding: "8px 12px", fontWeight: 700 }}>{s.name}</div>)
+                    : undefined
+                }
                 title={s.name}
                 count={rows.filter((t) => !isDone(t)).length}
                 collapsed={isCollapsed}
@@ -541,6 +679,7 @@ export function ProjectView({
                   ) : undefined
                 }
               />
+              </div>
               <AnimatePresence initial={false}>
                 {!isCollapsed && (
                   <Collapse key="body" duration={0}>
@@ -553,7 +692,7 @@ export function ProjectView({
           );
         })}
         {addSectionSlot}
-        <AnimatePresence initial={false}>{showCompleted && completed.map((t) => renderRow(t, 0))}</AnimatePresence>
+        <AnimatePresence initial={false}>{showCompleted && completed.map((t) => renderRow(t, 0, false))}</AnimatePresence>
         <button
           type="button"
           aria-pressed={showCompleted}

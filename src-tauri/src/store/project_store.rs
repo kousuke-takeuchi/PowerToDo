@@ -30,7 +30,8 @@ use super::project_book::{
 use crate::domain::dates::business_days;
 use crate::domain::ids::next_no;
 use crate::domain::{
-    INBOX, InvalidRow, Label, Position, Project, Section, Task, TaskInput, TaskPatch,
+    INBOX, InvalidRow, Label, Placement, Position, Project, Section, TODAY_ORDER, Task, TaskInput,
+    TaskPatch,
 };
 use crate::domain::{recurrence, reminders};
 use crate::error::{AppError, AppResult};
@@ -1405,6 +1406,152 @@ impl ProjectStore {
         Ok((self.view(project)?, self.view(to_project)?))
     }
 
+    /// Spec ③ §8: moves the task and its subtree to `to` in the same project. The new siblings
+    /// are numbered 1, 2, ... in their shown order (only 並び順 changes for them); the subtree
+    /// takes the new section. The parent must not be in the subtree, must sit in that section,
+    /// and the subtree must stay within three levels.
+    pub fn move_within(&mut self, project: &str, no: u32, to: Placement) -> AppResult<ProjectView> {
+        let section = to.section.as_deref().and_then(non_empty);
+        self.mutate(project, |book, _| {
+            if let Some(s) = &section {
+                check_section(book, s)?;
+            }
+            find_task(book, no)?;
+            // A カテゴリ typed in Excel that is no section shows among the unsectioned rows:
+            // it counts as unsectioned here too (the moved subtree then takes `section`).
+            let section_of = |c: &Option<String>| c.clone().filter(|c| book.sections.contains(c));
+            let moved: BTreeSet<u32> = subtree(book, no)
+                .into_iter()
+                .map(|i| book.tasks[i].no)
+                .collect();
+            let depth_of = |book: &ProjectBook, mut n: u32| {
+                let mut d = 0usize;
+                while let Some(p) = book
+                    .tasks
+                    .iter()
+                    .find(|t| t.no == n)
+                    .and_then(|t| t.parent_no)
+                {
+                    d += 1;
+                    n = p;
+                }
+                d
+            };
+            let base = depth_of(book, no);
+            let height = moved
+                .iter()
+                .map(|&n| depth_of(book, n) - base)
+                .max()
+                .unwrap_or(0);
+            if let Some(p) = to.parent {
+                if moved.contains(&p) {
+                    return Err(invalid("自分のサブタスクの下には動かせません"));
+                }
+                let parent = &book.tasks[find_task(book, p)?];
+                if section_of(&parent.category) != section {
+                    return Err(invalid("親と同じセクションにしか動かせません"));
+                }
+                if depth_of(book, p) + 1 + height > 2 {
+                    return Err(invalid("これ以上深くできません (3 段まで)"));
+                }
+            }
+            let i = find_task(book, no)?;
+            let mut sibs: Vec<usize> = (0..book.tasks.len())
+                .filter(|&k| {
+                    k != i
+                        && !moved.contains(&book.tasks[k].no)
+                        && section_of(&book.tasks[k].category) == section
+                        && book.tasks[k].parent_no == to.parent
+                })
+                .collect();
+            sibs.sort_by_key(|&k| (book.tasks[k].order, k));
+            let at = match to.before {
+                Some(b) => sibs
+                    .iter()
+                    .position(|&k| book.tasks[k].no == b)
+                    .ok_or_else(|| invalid("位置のタスクが同じ並びにありません"))?,
+                None => sibs.len(),
+            };
+            for k in subtree(book, no) {
+                book.tasks[k].category = section.clone();
+            }
+            book.tasks[i].parent_no = to.parent;
+            sibs.insert(at, i);
+            for (n, &k) in sibs.iter().enumerate() {
+                book.tasks[k].order = u32::try_from(n + 1).unwrap_or(u32::MAX);
+            }
+            Ok(())
+        })?;
+        self.view(project)
+    }
+
+    /// Spec ③ §4.1: the projects in this order after the inbox (which stays first). Projects
+    /// not listed keep their relative order after the listed ones.
+    pub fn reorder_projects(&mut self, names: &[String]) -> AppResult<Vec<ProjectSummary>> {
+        for n in names {
+            if !self.common.projects.iter().any(|p| &p.name == n) {
+                return Err(not_found(format!("プロジェクト「{n}」が見つかりません")));
+            }
+        }
+        let mut ordered: Vec<String> = Vec::new();
+        for n in names {
+            if n != INBOX && !ordered.contains(n) {
+                ordered.push(n.clone());
+            }
+        }
+        for s in self.summaries() {
+            if s.name != INBOX && !ordered.contains(&s.name) {
+                ordered.push(s.name);
+            }
+        }
+        for p in &mut self.common.projects {
+            p.order = if p.inbox {
+                0
+            } else {
+                ordered
+                    .iter()
+                    .position(|n| n == &p.name)
+                    .map_or(u32::MAX, |i| u32::try_from(i + 1).unwrap_or(u32::MAX))
+            };
+        }
+        self.common_dirty = true;
+        Ok(self.summaries())
+    }
+
+    /// Spec ③ §6.2: writes `<today>:<n>` into each task's 今日の並び, in this order. Returns the
+    /// projects it changed (to save).
+    pub fn set_today_order(
+        &mut self,
+        today: NaiveDate,
+        keys: &[(String, u32)],
+    ) -> AppResult<Vec<String>> {
+        let mut by_project: BTreeMap<String, Vec<(u32, usize)>> = BTreeMap::new();
+        for (i, (p, no)) in keys.iter().enumerate() {
+            by_project.entry(p.clone()).or_default().push((*no, i + 1));
+        }
+        // Validate every key in every project before writing any, so a bad key leaves
+        // no project half-ordered.
+        for (p, list) in &by_project {
+            let book = self.ok_book(p)?;
+            for (no, _) in list {
+                find_task(book, *no)?;
+            }
+        }
+        let stamp = today.format("%Y-%m-%d").to_string();
+        for (p, list) in &by_project {
+            self.mutate(p, |book, _| {
+                for (no, n) in list {
+                    let i = find_task(book, *no)?;
+                    book.tasks[i]
+                        .extra
+                        .insert(TODAY_ORDER.to_string(), format!("{stamp}:{n}"));
+                }
+                Ok(())
+            })?;
+        }
+        Ok(by_project.into_keys().collect())
+    }
+
     /// Sets 並び順 of the tasks in `section` (None = no category): the listed tasks get
     /// 1..=n in the given sequence, unlisted ones follow in their old order.
     pub fn reorder_tasks(
@@ -2620,6 +2767,230 @@ mod tests {
             ..Default::default()
         };
         assert!(e.store.update_task(INBOX, 1, patch).is_err());
+    }
+
+    fn titles_under(v: &ProjectView, section: Option<&str>, parent: Option<u32>) -> Vec<String> {
+        let mut ts: Vec<&Task> = v
+            .tasks
+            .iter()
+            .filter(|t| t.category.as_deref() == section && t.parent_no == parent)
+            .collect();
+        ts.sort_by_key(|t| (t.order, t.no));
+        ts.iter().map(|t| t.title.clone()).collect()
+    }
+
+    fn place(section: Option<&str>, parent: Option<u32>, before: Option<u32>) -> Placement {
+        Placement {
+            section: section.map(str::to_string),
+            parent,
+            before,
+        }
+    }
+
+    #[test]
+    fn move_within_reorders_and_crosses_sections() {
+        let mut e = env();
+        e.store
+            .create_project("仕事", "var(--color-priority-2)")
+            .unwrap();
+        e.store.add_section("仕事", "会議").unwrap();
+        for t in ["A", "B", "C"] {
+            e.store.add_task("仕事", input(t)).unwrap();
+        }
+        let v = e
+            .store
+            .move_within("仕事", 3, place(None, None, Some(1)))
+            .unwrap();
+        assert_eq!(titles_under(&v, None, None), ["C", "A", "B"]);
+        let v = e
+            .store
+            .move_within("仕事", 1, place(Some("会議"), None, None))
+            .unwrap();
+        assert_eq!(titles_under(&v, None, None), ["C", "B"]);
+        assert_eq!(titles_under(&v, Some("会議"), None), ["A"]);
+    }
+
+    #[test]
+    fn move_within_makes_and_unmakes_a_subtask_with_its_subtree() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("親")).unwrap();
+        e.store.add_task(INBOX, input("子")).unwrap();
+        e.store.add_task(INBOX, child_of("孫", 2)).unwrap();
+        let v = e
+            .store
+            .move_within(INBOX, 2, place(None, Some(1), None))
+            .unwrap();
+        assert_eq!(titles_under(&v, None, Some(1)), ["子"]);
+        assert_eq!(titles_under(&v, None, Some(2)), ["孫"]);
+        let v = e
+            .store
+            .move_within(INBOX, 2, place(None, None, None))
+            .unwrap();
+        assert_eq!(titles_under(&v, None, None), ["親", "子"]);
+    }
+
+    #[test]
+    fn move_within_into_own_subtree_is_refused() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("親")).unwrap();
+        e.store.add_task(INBOX, child_of("子", 1)).unwrap();
+        let err = e
+            .store
+            .move_within(INBOX, 1, place(None, Some(2), None))
+            .unwrap_err();
+        assert!(matches!(err, AppError::Invalid { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn move_within_beyond_depth_is_refused() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("1")).unwrap();
+        e.store.add_task(INBOX, child_of("2", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("3", 2)).unwrap();
+        e.store.add_task(INBOX, input("X")).unwrap();
+        e.store.add_task(INBOX, child_of("Xの子", 4)).unwrap();
+        // X (with a child) under 3 would need levels 3 and 4.
+        let err = e
+            .store
+            .move_within(INBOX, 4, place(None, Some(3), None))
+            .unwrap_err();
+        assert!(matches!(err, AppError::Invalid { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn move_within_a_section_moves_the_subtasks_too() {
+        let mut e = env();
+        e.store.add_section(INBOX, "後で").unwrap();
+        e.store.add_task(INBOX, input("親")).unwrap();
+        e.store.add_task(INBOX, child_of("子", 1)).unwrap();
+        let v = e
+            .store
+            .move_within(INBOX, 1, place(Some("後で"), None, None))
+            .unwrap();
+        assert_eq!(task(&v, 2).category.as_deref(), Some("後で"));
+    }
+
+    /// A, B, C unsectioned; B's カテゴリ is a name typed in Excel that is no section.
+    fn env_with_stray_category() -> Env {
+        let mut e = env();
+        e.store.add_section(INBOX, "後で").unwrap();
+        for t in ["A", "B", "C"] {
+            e.store.add_task(INBOX, input(t)).unwrap();
+        }
+        e.store
+            .mutate(INBOX, |book, _| {
+                let i = find_task(book, 2)?;
+                book.tasks[i].category = Some("迷子".into());
+                Ok(())
+            })
+            .unwrap();
+        e
+    }
+
+    /// Unsectioned, in screen order: the stray B counts as unsectioned (it is shown there).
+    fn unsectioned_titles(v: &ProjectView) -> Vec<String> {
+        let mut ts: Vec<&Task> = v
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.parent_no.is_none()
+                    && t.category
+                        .as_deref()
+                        .is_none_or(|c| !v.sections.iter().any(|s| s.name == c))
+            })
+            .collect();
+        ts.sort_by_key(|t| (t.order, t.no));
+        ts.iter().map(|t| t.title.clone()).collect()
+    }
+
+    #[test]
+    fn move_within_treats_an_unknown_category_as_unsectioned() {
+        // Right before the stray task.
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 3, place(None, None, Some(2)))
+            .unwrap();
+        assert_eq!(unsectioned_titles(&v), ["A", "C", "B"]);
+        // Right after it (at the end, the stray task among the siblings).
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 1, place(None, None, None))
+            .unwrap();
+        assert_eq!(unsectioned_titles(&v), ["B", "C", "A"]);
+        // Onto it: a subtask of the stray task.
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 3, place(None, Some(2), None))
+            .unwrap();
+        assert_eq!(task(&v, 3).parent_no, Some(2));
+        assert_eq!(task(&v, 3).category, None);
+        // The stray task itself among the unsectioned: it takes the placement's section.
+        let mut e = env_with_stray_category();
+        let v = e
+            .store
+            .move_within(INBOX, 2, place(None, None, Some(1)))
+            .unwrap();
+        assert_eq!(unsectioned_titles(&v), ["B", "A", "C"]);
+        assert_eq!(task(&v, 2).category, None);
+    }
+
+    #[test]
+    fn reorder_projects_keeps_the_inbox_first() {
+        let mut e = env();
+        for p in ["仕事", "買い物", "読書"] {
+            e.store
+                .create_project(p, "var(--color-priority-2)")
+                .unwrap();
+        }
+        let s = e
+            .store
+            .reorder_projects(&["読書".into(), "仕事".into(), "買い物".into()])
+            .unwrap();
+        let names: Vec<&str> = s.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, [INBOX, "読書", "仕事", "買い物"]);
+    }
+
+    #[test]
+    fn set_today_order_writes_dated_numbers() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.add_task(INBOX, input("B")).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let changed = e
+            .store
+            .set_today_order(today, &[(INBOX.to_string(), 2), (INBOX.to_string(), 1)])
+            .unwrap();
+        assert_eq!(changed, [INBOX]);
+        let v = e.store.view(INBOX).unwrap();
+        assert_eq!(task(&v, 2).extra[TODAY_ORDER], "2026-10-25:1");
+        assert_eq!(task(&v, 1).extra[TODAY_ORDER], "2026-10-25:2");
+    }
+
+    #[test]
+    fn set_today_order_missing_key_changes_nothing() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.save(INBOX).unwrap();
+        for p in e.store.dirty_projects() {
+            e.store.save(&p).unwrap();
+        }
+        assert!(e.store.dirty_projects().is_empty());
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let cases = [
+            vec![(INBOX.to_string(), 1), (INBOX.to_string(), 99)],
+            vec![(INBOX.to_string(), 1), ("仕事".to_string(), 99)],
+            vec![(INBOX.to_string(), 1), ("無い".to_string(), 1)],
+        ];
+        for keys in cases {
+            assert!(e.store.set_today_order(today, &keys).is_err());
+            let v = e.store.view(INBOX).unwrap();
+            assert!(!task(&v, 1).extra.contains_key(TODAY_ORDER), "{keys:?}");
+            assert!(e.store.dirty_projects().is_empty(), "{keys:?}");
+        }
     }
 
     #[test]

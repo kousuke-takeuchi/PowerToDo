@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use chrono::{Days, NaiveDate};
 use serde::Serialize;
 
-use super::model::{Task, serde_date};
+use super::model::{TODAY_ORDER, Task, serde_date, today_rank};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,7 +50,16 @@ pub fn today_view(tasks: &[Task], today: NaiveDate) -> TodayView {
         .filter(|t| open_top_level(t) && t.due == Some(today))
         .cloned()
         .collect();
-    todays.sort_by(by_priority_no);
+    todays.sort_by(|a, b| {
+        let ra = today_rank(a.extra.get(TODAY_ORDER), today);
+        let rb = today_rank(b.extra.get(TODAY_ORDER), today);
+        match (ra, rb) {
+            (Some(x), Some(y)) => x.cmp(&y).then_with(|| by_priority_no(a, b)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => by_priority_no(a, b),
+        }
+    });
     TodayView {
         overdue,
         today: todays,
@@ -143,6 +152,41 @@ mod tests {
             completed_at: None,
             extra: Default::default(),
         }
+    }
+
+    fn task_due(no: u32, due: NaiveDate) -> Task {
+        task(
+            no,
+            "a",
+            Some(&due.format("%Y-%m-%d").to_string()),
+            4,
+            0,
+            None,
+        )
+    }
+
+    #[test]
+    fn today_view_uses_todays_order_first() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let mut a = task_due(1, today);
+        let mut b = task_due(2, today);
+        let c = task_due(3, today);
+        a.extra.insert(TODAY_ORDER.into(), "2026-10-25:2".into());
+        b.extra.insert(TODAY_ORDER.into(), "2026-10-25:1".into());
+        let v = today_view(&[a, b, c], today);
+        let nos: Vec<u32> = v.today.iter().map(|t| t.no).collect();
+        assert_eq!(nos, [2, 1, 3]);
+    }
+
+    #[test]
+    fn today_view_ignores_an_old_today_order() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let a = task_due(1, today);
+        let mut b = task_due(2, today);
+        b.extra.insert(TODAY_ORDER.into(), "2026-10-24:1".into());
+        let v = today_view(&[a, b], today);
+        let nos: Vec<u32> = v.today.iter().map(|t| t.no).collect();
+        assert_eq!(nos, [1, 2]);
     }
 
     #[test]

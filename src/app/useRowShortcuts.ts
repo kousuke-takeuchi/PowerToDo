@@ -2,7 +2,9 @@ import type { Task } from "../types/model";
 import type { ExpandApi } from "../views/ProjectView";
 import { taskKey } from "../views/crossList";
 import type { SidebarProps } from "../views/Sidebar";
+import { api } from "../api/client";
 import { addDays } from "./dates";
+import { indentMove, outdentMove, siblingMove } from "./drag/keyMoves";
 import type { RowHandlers } from "./shortcuts";
 import { useShortcuts } from "./shortcuts";
 import type { useCrossActions } from "./useCrossView";
@@ -13,6 +15,10 @@ type Nav = SidebarProps["active"];
 
 /** キーボード操作 (shortcuts.ts) とフォーカス行のタスクへの操作。 */
 export function useRowShortcuts({
+  afterMove,
+  screenMove,
+  todayList,
+  navKind,
   focus,
   visibleKeys,
   focusedTaskPool,
@@ -31,6 +37,13 @@ export function useRowShortcuts({
   requestDelete,
   edit,
 }: {
+  /** Saves a key move and reloads the screen (the same as a drop). */
+  afterMove: (p: Promise<unknown>) => void;
+  /** Saves a key move within the open project through its queue (`p.moveWithin`), which shows the result at once. */
+  screenMove: (call: Promise<void>) => void;
+  /** The tasks of the Today group (not overdue), in screen order. */
+  todayList: () => Task[];
+  navKind: Nav["kind"];
   focus: ReturnType<typeof useRowFocus>;
   visibleKeys: string[];
   /** いま出ているビューのタスク (フォーカス行を探す範囲)。フォーカスがあるときだけ呼ぶ。 */
@@ -76,6 +89,39 @@ export function useRowShortcuts({
   const deleteAny = (t: Task) => requestDelete(t);
   /** Opens the task dialog over the current view (spec ① §2.5), from any view. */
   const openAny = (t: Task) => openCross(t);
+  /** ⌥↑↓ / Ctrl+] [ (spec ③ §7): the project screen moves within the tree, the Today group reorders; elsewhere nothing. */
+  const moveKey = (k: "up" | "down" | "indent" | "outdent") => {
+    const t = focusedTask;
+    if (!t) return;
+    if (onProjectScreen(t)) {
+      const tasks = p.view?.tasks;
+      if (!tasks) return;
+      // A completed top-level task, and its subtasks, sit in the completed list: not movable.
+      let root: Task | undefined = t;
+      while (root?.parentNo !== undefined) root = tasks.find((x) => x.no === root!.parentNo);
+      if (!root || root.progress === 100) return;
+      const sections = (p.view?.sections ?? []).map((s) => s.name);
+      const to =
+        k === "up"
+          ? siblingMove(tasks, t.no, -1, sections)
+          : k === "down"
+            ? siblingMove(tasks, t.no, 1, sections)
+            : k === "indent"
+              ? indentMove(tasks, t.no, sections)
+              : outdentMove(tasks, t.no, sections);
+      if (to) screenMove(p.moveWithin(t.no, to));
+      return;
+    }
+    if (navKind === "today" && (k === "up" || k === "down")) {
+      const list = todayList();
+      const i = list.findIndex((x) => taskKey(x) === taskKey(t));
+      const j = k === "up" ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      const next = [...list];
+      [next[i], next[j]] = [next[j], next[i]];
+      afterMove(api.setTodayOrder(today, next.map((x) => [x.project, x.no])));
+    }
+  };
   const row: RowHandlers | null = visibleKeys.length
     ? {
         hasFocus: !!focusedTask,
@@ -91,6 +137,7 @@ export function useRowShortcuts({
         expand: () => focusedTask && expandApi.current?.expand(focusedTask.no),
         collapse: () => focusedTask && expandApi.current?.collapse(focusedTask.no),
         clear: focus.clear,
+        moveKey,
       }
     : null;
   useShortcuts({

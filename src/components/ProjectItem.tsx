@@ -1,4 +1,5 @@
-import { Hash } from "lucide-react";
+import type React from "react";
+import { GripVertical, Hash } from "lucide-react";
 
 export type ProjectItemProps = {
   color: string; // CSS 変数名 (例 "var(--color-priority-3)")
@@ -8,9 +9,13 @@ export type ProjectItemProps = {
   /** Mobile drawer: the earlier look (grey active row, 6 px padding, color dot). */
   mobile?: boolean;
   onClick?: () => void;
+  /** Desktop: pressing the grip starts a drag (spec 3). The grip is always mounted (CSS hover only) because it holds the pointer capture. */
+  onHandlePointerDown?: (e: React.PointerEvent) => void;
+  /** The item being dragged (opacity 0.4). */
+  dragging?: boolean;
 };
 
-export function ProjectItem({ color, label, count, active, mobile, onClick }: ProjectItemProps) {
+export function ProjectItem({ color, label, count, active, mobile, onClick, onHandlePointerDown, dragging }: ProjectItemProps) {
   // Desktop (Todoist): the current item is light red with red text. Mobile keeps the grey row.
   const red = active && !mobile;
   return (
@@ -18,9 +23,11 @@ export function ProjectItem({ color, label, count, active, mobile, onClick }: Pr
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={red ? undefined : "bg-transparent hover:bg-[var(--color-bg-hover)]"}
+      className={`group ${red ? "" : "bg-transparent hover:bg-[var(--color-bg-hover)]"}`}
       style={{
         width: "100%",
+        position: "relative",
+        opacity: dragging ? 0.4 : undefined,
         display: "flex",
         alignItems: "center",
         gap: "var(--space-2)",
@@ -33,6 +40,18 @@ export function ProjectItem({ color, label, count, active, mobile, onClick }: Pr
         cursor: "pointer",
       }}
     >
+      {onHandlePointerDown && !mobile && (
+        <span
+          role="button"
+          aria-label="ドラッグして動かす"
+          onPointerDown={onHandlePointerDown}
+          onClick={(e) => e.stopPropagation()}
+          className="opacity-0 group-hover:opacity-100"
+          style={{ position: "absolute", left: -15, top: 9, display: "inline-flex", color: "var(--color-text-muted)", cursor: "grab", touchAction: "none" }}
+        >
+          <GripVertical size={16} />
+        </span>
+      )}
       {mobile ? (
         <span style={{ width: 10, height: 10, borderRadius: 5, background: color, flex: "0 0 auto" }} />
       ) : (

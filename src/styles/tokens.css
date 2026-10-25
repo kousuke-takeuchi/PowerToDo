@@ -9,6 +9,8 @@
   --color-border: #EEEEEE;
   --color-accent: #DC4C3E;
   --color-accent-soft: #FDEDEB;
+  /* ドロップ先 (サイドバーのプロジェクト / 予定の日) の薄い赤。項目の上に重ねるので半透明: どちらのテーマでも文字が読める。 */
+  --color-drop-highlight: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --color-priority-1: #D1453B;
   --color-priority-2: #EB8909;
   --color-priority-3: #246FE0;

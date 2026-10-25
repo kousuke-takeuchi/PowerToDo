@@ -1,6 +1,6 @@
 import type React from "react";
 import { motion } from "motion/react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import { useMotionTiming } from "../motion";
 
 export type SectionHeaderProps = {
@@ -19,6 +19,8 @@ export type SectionHeaderProps = {
   editor?: React.ReactNode;
   /** Mobile: the earlier look (the chevron inline before the title, turned by 90° with motion). */
   mobile?: boolean;
+  /** Desktop: pressing the grip at the left of the column starts a section drag (spec ③). */
+  onHandlePointerDown?: (e: React.PointerEvent) => void;
 };
 
 const rowStyle: React.CSSProperties = {
@@ -54,7 +56,7 @@ const chevronStyle: React.CSSProperties = {
 const titleTextStyle: React.CSSProperties = { fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" };
 const countStyle: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
 
-export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor, mobile }: SectionHeaderProps) {
+export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor, mobile, onHandlePointerDown }: SectionHeaderProps) {
   const { t } = useMotionTiming();
   // Desktop: left of the column, the icon swapped at once (Todoist). Mobile: inline, a right chevron turned by 90°.
   const chevron =
@@ -117,7 +119,18 @@ export function SectionHeader({ title, count, collapsed, onToggle, showChevron =
     );
   }
   return (
-    <div style={rowStyle}>
+    <div style={rowStyle} className={onHandlePointerDown ? "group" : undefined}>
+      {onHandlePointerDown && (
+        <span
+          role="button"
+          aria-label="ドラッグして動かす"
+          onPointerDown={onHandlePointerDown}
+          className="opacity-0 group-hover:opacity-100"
+          style={{ position: "absolute", left: -40, top: "50%", marginTop: 2, transform: "translateY(-50%)", display: "inline-flex", color: "var(--color-text-muted)", cursor: "grab", touchAction: "none" }}
+        >
+          <GripVertical size={16} />
+        </span>
+      )}
       {main}
       {trailing}
     </div>

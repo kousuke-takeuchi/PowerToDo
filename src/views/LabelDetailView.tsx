@@ -26,7 +26,7 @@ export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask,
   const list = onToggleDone
     ? tasks
     : tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.labels.includes(label)).sort((a, b) => a.no - b.no);
-  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today ?? TODAY), focusedKey, onVisibleKeys });
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today ?? TODAY), focusedKey, onVisibleKeys, dragView: "label" });
 
   return (
     <>

@@ -6,6 +6,8 @@ import { Toast } from "../components/Toast";
 import { completedOf, nextNotice, noticeText, undoOf } from "./completionToast";
 import type { Notice, ToastState } from "./completionToast";
 import { RowActions, type RowActionsApi } from "./rowActions";
+import { DragProvider, type DropResult } from "./drag/DragContext";
+import { movedRootNo } from "./drag/movedRoot";
 import { rowStateAfter } from "./rowState";
 import { DeleteTaskDialog } from "../views/DeleteTaskDialog";
 import { countDescendants } from "../views/deleteMessage";
@@ -256,7 +258,47 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     refreshAll();
   };
 
+  /** Saves a drag / key move, then reloads what is on screen (a failure is shown and the screen re-read). */
+  const afterMove = (p2: Promise<unknown>) =>
+    void p2.then(
+      () => {
+        refreshAll();
+        if (projectScreen) void p.refresh();
+        void refreshSummaries();
+      },
+      (e) => {
+        showError(e);
+        if (projectScreen) void p.refresh();
+      },
+    );
+
+  // The row whose drop on the open project is being saved: drawn faded (as while lifted) until the save answers.
+  const [movingKey, setMovingKey] = useState<string | null>(null);
+  /**
+   * A move within the open project (spec ③ §2.4): `call` goes through the project's queue, which shows the returned
+   * view at once; the other views follow. A failure is shown and the screen re-read, as in `afterMove`.
+   */
+  const screenMove = (call: Promise<void>, key?: string) => {
+    if (key) setMovingKey(key);
+    void call
+      .then(
+        () => {
+          refreshAll();
+          void refreshSummaries();
+        },
+        (e) => {
+          showError(e);
+          void p.refresh();
+        },
+      )
+      .finally(() => key && setMovingKey((k) => (k === key ? null : k)));
+  };
+
   const { openAny } = useRowShortcuts({
+    afterMove,
+    screenMove,
+    todayList: () => todayData.data?.today ?? [],
+    navKind: nav.kind,
     focus,
     visibleKeys,
     focusedTaskPool: () =>
@@ -551,6 +593,36 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       openCross(t);
     },
   };
+  /** Saves a drop from the drag engine (spec ③). */
+  const onDrop = (r: DropResult) => {
+    switch (r.kind) {
+      case "place":
+        if (projectScreen && r.source.task.project === current)
+          return screenMove(p.moveWithin(r.source.task.no, r.placement), `${r.source.task.project}/${r.source.task.no}`);
+        return afterMove(api.moveTaskWithin(r.source.task.project, r.source.task.no, r.placement));
+      case "sections":
+        if (projectScreen && r.project === current) return screenMove(p.reorderSections(r.names));
+        return afterMove(api.reorderSections(r.project, r.names));
+      case "projects":
+        return afterMove(api.reorderProjects(r.names));
+      case "project":
+        return afterMove(
+          api.moveTask(r.source.task.project, r.source.task.no, r.project, null).then((out) => {
+            // The subtree is numbered after the target's highest No. in file order: open its root, not its last subtask.
+            const no = movedRootNo(out.to.tasks, r.source.subtree.size);
+            note(`タスクを ${r.project} に移しました`, "開く", () => no !== undefined && openTaskAt(r.project, no));
+          }),
+        );
+      case "day":
+        return rowActions.setDue(r.source.task, r.date);
+      case "today": {
+        const list = (todayData.data?.today ?? []).filter((x) => !(x.project === r.source.task.project && x.no === r.source.task.no));
+        const at = r.beforeKey ? list.findIndex((x) => `${x.project}/${x.no}` === r.beforeKey) : list.length;
+        list.splice(at < 0 ? list.length : at, 0, r.source.task);
+        return afterMove(api.setTodayOrder(today, list.map((x) => [x.project, x.no])));
+      }
+    }
+  };
   useEffect(() => {
     if (!dialog) setFocusComment(false);
   }, [dialog]);
@@ -790,6 +862,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         invalidRows={view.invalidRows}
         focusedKey={focus.focusedKey ?? undefined}
+        movingKey={movingKey ?? undefined}
         onVisibleKeys={reportKeys}
         onExpandApi={(api) => (expandApi.current = api)}
         onOpenTask={(t) => openAny(t)}
@@ -987,6 +1060,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     <ProjectColors.Provider value={projectColors}>
     <CommentCounts.Provider value={commentCounts}>
     <RowActions.Provider value={rowActions}>
+    <DragProvider onDrop={onDrop}>
     <AppShell
       width={width}
       fill
@@ -1022,6 +1096,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     >
       {body}
     </AppShell>
+    </DragProvider>
     </RowActions.Provider>
     </CommentCounts.Provider>
     </ProjectColors.Provider>

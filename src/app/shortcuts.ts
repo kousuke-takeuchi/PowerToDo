@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isImeKey, metaRowAction } from "./keys";
+import { dragKey, isImeKey, metaRowAction } from "./keys";
 
 /** True while typing: an INPUT / TEXTAREA / SELECT / contentEditable has focus, or the key belongs to an IME composition. */
 export function isTypingTarget(e: KeyboardEvent): boolean {
@@ -33,6 +33,8 @@ export type RowHandlers = {
   expand: () => void;
   collapse: () => void;
   clear: () => void;
+  /** ⌥↑ / ⌥↓ / Ctrl+] / Ctrl+[ on the focused row (spec ③ §7). */
+  moveKey?: (k: "up" | "down" | "indent" | "outdent") => void;
 };
 
 export type ShortcutHandlers = {
@@ -64,6 +66,12 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
         if (isImeKey(e)) return;
         e.preventDefault();
         if (h.enabled) h.search();
+        return;
+      }
+      const moveAct = dragKey(e);
+      if (moveAct && !e.defaultPrevented && h.enabled && !isTypingTarget(e) && h.row?.hasFocus && h.row.moveKey) {
+        e.preventDefault();
+        if (!e.repeat) h.row.moveKey(moveAct);
         return;
       }
       const metaAct = metaRowAction(e);

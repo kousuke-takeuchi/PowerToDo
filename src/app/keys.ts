@@ -19,3 +19,16 @@ export function metaRowAction(e: { key: string; metaKey: boolean; ctrlKey: boole
   if (e.key === "Backspace") return "remove";
   return null;
 }
+
+/** ⌥↑ / ⌥↓ move the focused row among its siblings, Ctrl+] / Ctrl+[ indent / outdent it (spec ③ §3). `key` decides first (on JIS the physical `[` reports code BracketRight); `code` is used only when `key` is neither bracket. */
+export function dragKey(e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): "up" | "down" | "indent" | "outdent" | null {
+  if (e.shiftKey || e.metaKey) return null;
+  if (e.altKey && !e.ctrlKey) return e.key === "ArrowUp" ? "up" : e.key === "ArrowDown" ? "down" : null;
+  if (e.ctrlKey && !e.altKey) {
+    if (e.key === "]") return "indent";
+    if (e.key === "[") return "outdent";
+    if (e.code === "BracketRight") return "indent";
+    if (e.code === "BracketLeft") return "outdent";
+  }
+  return null;
+}
