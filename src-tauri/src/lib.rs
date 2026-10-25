@@ -84,6 +84,9 @@ pub fn run() {
     // `updater:*` permission.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // Start at login (resident sync spec 2): driven from `commands::autostart`.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {
@@ -104,6 +107,8 @@ pub fn run() {
             scheduler::register(app.handle());
             scheduler::start(app.handle().clone());
             commands::start_sync(app.handle());
+            // After the settings are loaded (by `start_sync`).
+            commands::autostart::reconcile_at_startup(app.handle());
             #[cfg(mobile)]
             {
                 use tauri_plugin_powertodo_ios::PowerToDoIosExt;
@@ -185,6 +190,8 @@ pub fn run() {
             commands::update::update_check,
             commands::update::update_install,
             commands::update::set_update_auto_check,
+            commands::autostart::autostart_status,
+            commands::autostart::set_autostart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

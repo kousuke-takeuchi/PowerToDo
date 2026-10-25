@@ -55,6 +55,51 @@ pub fn network_retry_delay(
     NETWORK_RETRY_DELAYS.get(attempts as usize).copied()
 }
 
+/// Resident sync spec 4.1: how often the target's listing is compared with the last one.
+pub const REMOTE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Name to version of the sync targets in `files`.
+fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
+    files
+        .iter()
+        .filter(|f| is_sync_target(&f.name))
+        .map(|f| (f.name.clone(), f.version.clone()))
+        .collect()
+}
+
+/// The target's state as far as the sync cares: the sync targets' names and versions, in name
+/// order, hashed. Files that are not sync targets (conflict copies, temporaries) are left out,
+/// and so are the ids and times (a version changes whenever the content does).
+pub fn remote_fingerprint(files: &[RemoteFile]) -> String {
+    let mut pairs: Vec<(&str, &str)> = files
+        .iter()
+        .filter(|f| is_sync_target(&f.name))
+        .map(|f| (f.name.as_str(), f.version.as_str()))
+        .collect();
+    pairs.sort_unstable();
+    let mut text = String::new();
+    for (name, version) in pairs {
+        text.push_str(name);
+        text.push('\u{1f}');
+        text.push_str(version);
+        text.push('\u{1e}');
+    }
+    sha256_hex(text.as_bytes())
+}
+
+/// What one look at the target ([`SyncEngine::check_remote`]) found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckOutcome {
+    /// Not looked: no target, refused credentials, paused, a run going or wanted, or the target
+    /// changed while the listing was in flight.
+    Skipped,
+    Unchanged,
+    /// Different from the last listing: a run was asked for.
+    Changed,
+    /// The listing failed.
+    Failed,
+}
+
 /// Why a sync is asked for (spec section 3.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncReason {
@@ -71,6 +116,8 @@ pub enum SyncReason {
     Retry,
     /// The network changed or the app came to the front (and its offline retries).
     Network,
+    /// The target's listing differs from the last one (resident sync spec 4.1).
+    RemoteChanged,
 }
 
 impl SyncReason {
@@ -304,6 +351,9 @@ struct Inner {
     network_since: Option<Instant>,
     /// Offline retries used in the current window.
     network_attempts: u32,
+    /// The target's fingerprint at the last look or run ([`remote_fingerprint`]). `None` until
+    /// the first listing of this target.
+    remote_seen: Option<String>,
     status: SyncStatusView,
     /// Set while an app update is being prepared: no new run starts (requests are kept).
     paused: bool,
@@ -313,6 +363,8 @@ struct Inner {
 
 struct Shared {
     app_data_dir: PathBuf,
+    /// [`REMOTE_CHECK_INTERVAL`] in milliseconds; tests that count listings turn the looks off.
+    remote_check_ms: std::sync::atomic::AtomicU64,
     clock: Clock,
     inner: Mutex<Inner>,
     /// Held for a whole run: one run at a time.
@@ -389,6 +441,9 @@ impl SyncEngine {
         SyncEngine {
             shared: Arc::new(Shared {
                 app_data_dir,
+                remote_check_ms: std::sync::atomic::AtomicU64::new(
+                    REMOTE_CHECK_INTERVAL.as_millis() as u64,
+                ),
                 clock: Box::new(clock),
                 inner: Mutex::new(Inner {
                     target: None,
@@ -398,6 +453,7 @@ impl SyncEngine {
                     due_retry: false,
                     network_since: None,
                     network_attempts: 0,
+                    remote_seen: None,
                     status: SyncStatusView::off(),
                     paused: false,
                     host: None,
@@ -410,6 +466,23 @@ impl SyncEngine {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.shared.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn remote_check(&self) -> Duration {
+        Duration::from_millis(
+            self.shared
+                .remote_check_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// Tests that count the target's listings: no looks between runs.
+    #[cfg(test)]
+    fn without_remote_checks(&self) {
+        self.shared.remote_check_ms.store(
+            365 * 24 * 60 * 60 * 1000,
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     fn now(&self) -> NaiveDateTime {
@@ -441,6 +514,7 @@ impl SyncEngine {
             inner.auth_rejected = false;
             inner.due = None;
             inner.due_retry = false;
+            inner.remote_seen = None;
         }
         self.publish(None, None, |s| {
             *s = SyncStatusView {
@@ -466,6 +540,7 @@ impl SyncEngine {
         let on = {
             let mut inner = self.lock();
             inner.generation += 1;
+            inner.remote_seen = None;
             let path = self.shared.app_data_dir.join(SyncState::FILE);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -634,11 +709,17 @@ impl SyncEngine {
         self.lock().host = Some(Arc::clone(&host));
         self.request(SyncReason::Startup);
         let mut next_interval = Instant::now() + INTERVAL;
+        let mut next_check = Instant::now() + self.remote_check();
         loop {
             let now = Instant::now();
             if now >= next_interval {
                 self.request(SyncReason::Interval);
                 next_interval = now + INTERVAL;
+            }
+            if now >= next_check {
+                next_check = now + self.remote_check();
+                self.check_remote().await;
+                continue;
             }
             // While paused the requests stay (`resume` wakes the loop for them).
             let paused = self.lock().paused;
@@ -659,6 +740,7 @@ impl SyncEngine {
             } else {
                 self.next_due()
                     .map_or(next_interval, |d| d.min(next_interval))
+                    .min(next_check)
             };
             let _ = tokio::time::timeout_at(until, self.shared.wake.notified()).await;
         }
@@ -760,17 +842,7 @@ impl SyncEngine {
                 RunOutcome::Offline
             }
             BackendError::Auth => {
-                {
-                    let mut inner = self.lock();
-                    if inner.generation == generation {
-                        inner.auth_rejected = true;
-                    }
-                }
-                self.publish(Some(host), g, |s| {
-                    s.state = SyncPhase::Error;
-                    s.auth_rejected = true;
-                    s.message = Some(auth_failed_message(kind).into());
-                });
+                self.refuse_credentials(Some(host), generation, kind);
                 RunOutcome::Failed
             }
             _ => {
@@ -780,6 +852,84 @@ impl SyncEngine {
                 });
                 RunOutcome::Failed
             }
+        }
+    }
+
+    /// The target refused the credentials: no run (and no look) until a new target.
+    fn refuse_credentials(&self, host: Option<&dyn SyncHost>, generation: u64, kind: BackendKind) {
+        {
+            let mut inner = self.lock();
+            if inner.generation == generation {
+                inner.auth_rejected = true;
+            }
+        }
+        self.publish(host, Some(generation), |s| {
+            s.state = SyncPhase::Error;
+            s.auth_rejected = true;
+            s.message = Some(auth_failed_message(kind).into());
+        });
+    }
+
+    /// Remembers `files` as the target's state, unless the target changed since `generation`.
+    fn see_remote(&self, generation: u64, files: &[RemoteFile]) {
+        let mut inner = self.lock();
+        if inner.generation == generation {
+            inner.remote_seen = Some(remote_fingerprint(files));
+        }
+    }
+
+    /// One look at the target (resident sync spec 4.1, 4.2): lists it and asks for a run when
+    /// its fingerprint differs from the last one seen. Only `list()` is called; the data folder
+    /// is not read. Skipped without a target, while the credentials are refused, while paused,
+    /// and while a run is going or wanted (that run lists the target itself). A target switched
+    /// while the listing was in flight drops the result. Refused credentials are handled as in a
+    /// run (no more looks until a new target); any other failure changes nothing.
+    pub async fn check_remote(&self) -> CheckOutcome {
+        let Ok(_free) = self.shared.running.try_lock() else {
+            return CheckOutcome::Skipped;
+        };
+        let (backend, generation, kind) = {
+            let inner = self.lock();
+            match &inner.target {
+                Some(t) if !inner.auth_rejected && !inner.paused && inner.due.is_none() => {
+                    (Arc::clone(&t.backend), inner.generation, t.kind)
+                }
+                _ => return CheckOutcome::Skipped,
+            }
+        };
+        // A run may start while this one lists; it lists for itself, and its own fingerprint wins.
+        drop(_free);
+        let listed = backend.list().await;
+        let changed = {
+            let mut inner = self.lock();
+            if inner.generation != generation {
+                return CheckOutcome::Skipped;
+            }
+            match &listed {
+                Ok(files) => {
+                    let now = remote_fingerprint(files);
+                    // Also a run when nothing was seen yet or the last run was offline: the
+                    // target answers again, and the start-up run or an edit made offline is
+                    // still waiting (desktops get no network change event).
+                    let changed = inner.remote_seen.as_ref().is_none_or(|seen| *seen != now)
+                        || inner.status.state == SyncPhase::Offline;
+                    inner.remote_seen = Some(now);
+                    Some(changed)
+                }
+                Err(_) => None,
+            }
+        };
+        match (changed, listed) {
+            (Some(true), _) => {
+                self.request(SyncReason::RemoteChanged);
+                CheckOutcome::Changed
+            }
+            (Some(false), _) => CheckOutcome::Unchanged,
+            (None, Err(BackendError::Auth)) => {
+                self.refuse_credentials(None, generation, kind);
+                CheckOutcome::Failed
+            }
+            (None, _) => CheckOutcome::Failed,
         }
     }
 
@@ -915,6 +1065,8 @@ impl SyncEngine {
                 return report;
             }
         };
+        self.see_remote(generation, &remote);
+        let listed = versions(&remote);
 
         // (4) The plan.
         let mut state = SyncState::load(
@@ -954,7 +1106,7 @@ impl SyncEngine {
         let mut run = Run {
             engine: self,
             host,
-            backend: target.backend,
+            backend: Arc::clone(&target.backend),
             data_dir,
             generation,
             mode,
@@ -1005,6 +1157,33 @@ impl SyncEngine {
         if !self.save_state(generation, &state) {
             report.outcome = RunOutcome::Interrupted;
             return report;
+        }
+        // What this run sent changed the target: look again, so the next look of
+        // `check_remote` does not take our own uploads for someone else's change. A failure
+        // only leaves the older fingerprint (the next look then asks for one more run), and so
+        // does a file this run did not touch that changed meanwhile (another device's upload,
+        // which this run never planned).
+        if (!report.uploaded.is_empty()
+            || !report.archived_remote.is_empty()
+            || !report.conflicts.is_empty())
+            && let Ok(files) = target.backend.list().await
+        {
+            let touched: BTreeSet<&str> = report
+                .uploaded
+                .iter()
+                .chain(&report.archived_remote)
+                .map(String::as_str)
+                .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
+                .collect();
+            let now = versions(&files);
+            let others_changed = listed
+                .keys()
+                .chain(now.keys())
+                .filter(|name| !touched.contains(name.as_str()))
+                .any(|name| listed.get(name) != now.get(name));
+            if !others_changed {
+                self.see_remote(generation, &files);
+            }
         }
         report.outcome = RunOutcome::Done;
         let problems = report.problems();
@@ -2276,11 +2455,338 @@ mod tests {
         }
     }
 
+    // ---- the look at the target every 30 s (resident sync spec 4) ----
+
+    fn remote_file(name: &str, version: &str) -> RemoteFile {
+        RemoteFile {
+            id: format!("id-{name}"),
+            name: name.into(),
+            version: version.into(),
+            modified: dt("2026-10-25T09:00:00"),
+            size: 1,
+        }
+    }
+
+    /// Syncs and drops the run that attaching the target asked for (`set_backend` requests
+    /// one; `run_once` does not use it up), so the next look is not skipped for a wanted run.
+    async fn settled(pc: &Pc) -> SyncReport {
+        let r = pc.sync().await;
+        pc.engine.take_due(Instant::now());
+        r
+    }
+
+    #[test]
+    fn remote_fingerprint_depends_on_names_and_versions_only() {
+        let a = vec![
+            remote_file("仕事.xlsx", "v1"),
+            remote_file("_PowerToDo.xlsx", "v1"),
+        ];
+        let b = vec![
+            remote_file("_PowerToDo.xlsx", "v1"),
+            remote_file("仕事.xlsx", "v1"),
+        ];
+        assert_eq!(
+            remote_fingerprint(&a),
+            remote_fingerprint(&b),
+            "order does not matter"
+        );
+        let c = vec![
+            remote_file("仕事.xlsx", "v2"),
+            remote_file("_PowerToDo.xlsx", "v1"),
+        ];
+        assert_ne!(remote_fingerprint(&a), remote_fingerprint(&c));
+        let d = vec![
+            remote_file("仕事.xlsx", "v1"),
+            remote_file("_PowerToDo.xlsx", "v1"),
+            remote_file("仕事 (競合 2026-10-25 0900).xlsx", "x"),
+        ];
+        assert_eq!(
+            remote_fingerprint(&a),
+            remote_fingerprint(&d),
+            "conflict copies are not targets"
+        );
+        let mut e = a.clone();
+        e[0].modified = dt("2026-10-25T10:00:00");
+        e[0].id = "other".into();
+        assert_eq!(
+            remote_fingerprint(&a),
+            remote_fingerprint(&e),
+            "only names and versions count"
+        );
+    }
+
+    #[tokio::test]
+    async fn unchanged_remote_does_not_ask_for_a_run() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        settled(&a).await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+        assert_eq!(a.engine.next_due(), None);
+    }
+
+    #[tokio::test]
+    async fn remote_change_asks_for_one_run() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        let b = Pc::new(&remote);
+        settled(&a).await;
+        settled(&b).await;
+        // b's first run may or may not have changed the target (same initial files): settle.
+        a.engine.check_remote().await;
+        settled(&a).await;
+        b.create("仕事");
+        b.add("仕事", "牛乳");
+        assert_eq!(b.sync().await.outcome, RunOutcome::Done);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+        assert!(a.engine.next_due().is_some(), "a run was asked for");
+        // Asked once: the next look sees the same listing.
+        a.engine.take_due(Instant::now());
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+    }
+
+    #[tokio::test]
+    async fn own_upload_is_not_a_remote_change() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        settled(&a).await;
+        a.create("仕事");
+        a.add("仕事", "牛乳");
+        let r = settled(&a).await;
+        assert_eq!(r.outcome, RunOutcome::Done);
+        assert!(!r.uploaded.is_empty(), "{r:?}");
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+        assert_eq!(a.engine.next_due(), None);
+    }
+
+    #[tokio::test]
+    async fn auth_failure_on_check_stops_checking() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        settled(&a).await;
+        remote.fail_list(Failure::Auth);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Failed);
+        assert!(a.engine.auth_rejected());
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Skipped);
+    }
+
+    #[tokio::test]
+    async fn offline_check_changes_nothing() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        settled(&a).await;
+        let before = a.engine.status();
+        remote.fail_list(Failure::Offline);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Failed);
+        assert_eq!(
+            a.engine.status(),
+            before,
+            "a failed look does not change the status"
+        );
+        assert!(!a.engine.auth_rejected());
+    }
+
+    #[tokio::test]
+    async fn first_successful_look_after_an_offline_start_asks_for_a_run() {
+        let remote = backend();
+        let flaky = Flaky::new(&remote);
+        let a = Pc::with_backend(flaky.clone(), None);
+        a.engine.take_due(Instant::now());
+        assert_eq!(a.sync().await.outcome, RunOutcome::Offline);
+        a.engine.take_due(Instant::now());
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+        assert!(a.engine.next_due().is_some());
+    }
+
+    #[tokio::test]
+    async fn look_after_an_offline_run_asks_for_a_run() {
+        let remote = backend();
+        let flaky = Flaky::new(&remote);
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let a = Pc::with_backend(flaky.clone(), None);
+        settled(&a).await;
+        // An edit made offline: its run fails, the target itself did not change.
+        flaky
+            .offline
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        a.create("仕事");
+        assert_eq!(a.sync().await.outcome, RunOutcome::Offline);
+        a.engine.take_due(Instant::now());
+        flaky
+            .offline
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    /// The second `list()` (the look again after own uploads) first lets another device upload.
+    struct Sneak {
+        inner: Arc<MemoryBackend>,
+        lists: std::sync::atomic::AtomicUsize,
+        at: usize,
+    }
+
+    impl StorageBackend for Sneak {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            Box::pin(async move {
+                let n = self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if n == self.at {
+                    self.inner.upload("他.xlsx", None, b"x".to_vec()).await?;
+                }
+                self.inner.list().await
+            })
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+    }
+
+    #[tokio::test]
+    async fn another_devices_upload_during_a_run_is_not_taken_as_seen() {
+        let remote = backend();
+        let sneak = Arc::new(Sneak {
+            inner: remote.clone(),
+            lists: Default::default(),
+            // 1: the first run's listing, 2: its look again after the first uploads,
+            // 3: the second run's listing, 4: its look again.
+            at: 4,
+        });
+        let a = Pc::with_backend(sneak.clone(), None);
+        settled(&a).await;
+        a.create("仕事");
+        let r = settled(&a).await;
+        assert!(!r.uploaded.is_empty(), "{r:?}");
+        assert_eq!(sneak.lists.load(std::sync::atomic::Ordering::SeqCst), 4);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    /// `list()` waits until released (to switch the target in the middle of a look).
+    struct Gate {
+        inner: Arc<MemoryBackend>,
+        open: tokio::sync::Notify,
+        entered: tokio::sync::Notify,
+    }
+
+    impl StorageBackend for Gate {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            Box::pin(async move {
+                self.entered.notify_one();
+                self.open.notified().await;
+                self.inner.list().await
+            })
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+    }
+
+    #[tokio::test]
+    async fn check_result_of_an_old_target_is_dropped() {
+        let remote = backend();
+        let gate = Arc::new(Gate {
+            inner: remote.clone(),
+            open: tokio::sync::Notify::new(),
+            entered: tokio::sync::Notify::new(),
+        });
+        let a = Pc::with_backend(gate.clone(), None);
+        a.engine.take_due(Instant::now());
+        let engine = a.engine.clone();
+        let look = tokio::spawn(async move { engine.check_remote().await });
+        gate.entered.notified().await;
+        // The target is switched while the listing is in flight.
+        a.engine.set_backend(
+            Some(backend()),
+            BackendKind::Nas,
+            "http://other:5005/powertodo/",
+        );
+        a.engine.take_due(Instant::now());
+        gate.open.notify_one();
+        assert_eq!(look.await.unwrap(), CheckOutcome::Skipped);
+        assert_eq!(
+            a.engine.next_due(),
+            None,
+            "no run for the old target's listing"
+        );
+        assert!(a.engine.lock().remote_seen.is_none());
+    }
+
+    #[tokio::test]
+    async fn no_check_while_paused_running_or_wanted() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        settled(&a).await;
+        a.engine.pause_for_update();
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Skipped);
+        a.engine.resume();
+        a.engine.take_due(Instant::now());
+        a.engine.request(SyncReason::SyncNow);
+        assert_eq!(
+            a.engine.check_remote().await,
+            CheckOutcome::Skipped,
+            "a run is wanted"
+        );
+        a.engine.take_due(Instant::now());
+        let running = a.engine.shared.running.lock().await;
+        assert_eq!(
+            a.engine.check_remote().await,
+            CheckOutcome::Skipped,
+            "a run is going"
+        );
+        drop(running);
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_pcs_see_each_other_within_30_seconds() {
+        let remote = backend();
+        let a = Pc::new(&remote);
+        let b = Pc::new(&remote);
+        let ta = tokio::spawn(a.engine.clone().run_loop(a.host.clone()));
+        let tb = tokio::spawn(b.engine.clone().run_loop(b.host.clone()));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        b.create("仕事");
+        b.add("仕事", "牛乳");
+        b.engine.request(SyncReason::SyncNow);
+        tokio::time::sleep(Duration::from_secs(40)).await;
+        assert!(
+            a.data.join("仕事.xlsx").is_file(),
+            "a got b's project within 40 s"
+        );
+        ta.abort();
+        tb.abort();
+    }
+
     #[tokio::test(start_paused = true)]
     async fn network_failure_retries_twice_then_stops() {
         let remote = backend();
         let flaky = Flaky::new(&remote);
         let a = Pc::with_backend(flaky.clone(), None);
+        a.engine.without_remote_checks();
         let host: Arc<dyn SyncHost> = a.host.clone();
         let task = tokio::spawn(a.engine.clone().run_loop(host));
         // The start-up run fails offline; with no network change it is not retried.
@@ -2307,6 +2813,7 @@ mod tests {
         let remote = backend();
         let flaky = Flaky::new(&remote);
         let a = Pc::with_backend(flaky.clone(), None);
+        a.engine.without_remote_checks();
         let host: Arc<dyn SyncHost> = a.host.clone();
         let task = tokio::spawn(a.engine.clone().run_loop(host));
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -2318,7 +2825,8 @@ mod tests {
             .offline
             .store(false, std::sync::atomic::Ordering::SeqCst);
         tokio::time::sleep(Duration::from_secs(5)).await;
-        assert_eq!(flaky.lists(), before + 1);
+        // The run lists once, and once more after its uploads (resident sync spec 4.1).
+        assert_eq!(flaky.lists(), before + 2);
         assert_eq!(a.engine.status().state, SyncPhase::Synced);
         // Offline again inside the old window: no retry, the window is closed.
         flaky
@@ -3231,7 +3739,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn the_loop_runs_at_start_after_a_save_and_every_five_minutes() {
+    async fn the_loop_runs_at_start_after_a_save_and_when_the_target_changes() {
         let remote = backend();
         let a = Pc::new(&remote);
         let host: Arc<dyn SyncHost> = a.host.clone();
@@ -3247,11 +3755,12 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert_eq!(remote.get(INBOX_FILE).unwrap(), a.file(INBOX_FILE));
 
-        // Nobody asks; the interval brings a remote file down.
+        // Nobody asks; the look at the target every 30 s brings a remote file down (resident
+        // sync spec 4.3), well before the 5-minute interval.
         remote.put("p9.xlsx", &a.file(INBOX_FILE));
-        tokio::time::sleep(INTERVAL - Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(!a.has("p9.xlsx"));
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(REMOTE_CHECK_INTERVAL + Duration::from_secs(1)).await;
         assert!(a.has("p9.xlsx"));
         assert!(a.with(|s| s.summaries().iter().any(|p| p.name == "p9")));
         task.abort();

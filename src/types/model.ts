@@ -178,6 +178,8 @@ export interface TailnetStatus {
 /** `dev`: デバッグビルド (確認しない)。`manual`: AppImage 以外の Linux (deb / rpm)。release ページから入れ直す。 */
 export type UpdateSupport = "supported" | "dev" | "manual";
 /** `update_status`. */
+/** ログイン時に起動 (`autostart_status` / `set_autostart`)。`supported` は iPhone と開発中のビルドで false。 */
+export interface AutostartDto { supported: boolean; enabled: boolean; }
 export interface UpdateStatusDto { currentVersion: string; support: UpdateSupport; autoCheck: boolean; }
 /** `update_check`. `available: false` のときほかの項目は無い。`date` は RFC 3339。`notes` は release の本文 (Markdown のまま)。 */
 export interface UpdateCheckDto { available: boolean; version?: string; notes?: string; date?: string; }

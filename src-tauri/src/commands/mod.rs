@@ -2,6 +2,7 @@
 //! changed for the debounced [`Saver`], and return the new view. The few non-trivial bits
 //! (start-up, quick add) live in plain functions so they can be tested without Tauri.
 
+pub mod autostart;
 pub mod saver;
 pub mod sync;
 pub mod update;
@@ -217,6 +218,11 @@ impl AppState {
     }
 
     /// Why the tray icon could not be created (see [`AppState::tray_error`]).
+    /// The chosen sync target (`settings.json`).
+    pub fn sync_backend(&self) -> crate::store::paths::SyncBackend {
+        self.lock_settings().sync.backend
+    }
+
     pub fn tray_error(&self) -> Option<String> {
         self.tray_error
             .lock()
@@ -649,6 +655,9 @@ impl SyncHost for TauriSyncHost {
 
     fn status_changed(&self, status: &SyncStatusView) {
         let _ = self.app.emit("sync-status", status);
+        // The tray's 「今すぐ同期」 follows whether a target is attached.
+        #[cfg(desktop)]
+        crate::tray::refresh_sync_item(&self.app);
     }
 
     fn conflict(&self, file: &str, conflict_file: &str) {

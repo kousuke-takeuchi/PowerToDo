@@ -144,6 +144,9 @@ export type NotificationsPaneProps = {
   onToggleKeepInTray?: (v: boolean) => void;
   /** トレイを作れなかった理由 (あれば「トレイに残す」は使えない)。 */
   trayError?: string;
+  /** ログイン時に起動 (無ければ Section ごと出さない。`supported: false` も出さない)。 */
+  autostart?: { enabled: boolean; supported: boolean; busy?: boolean; error?: string | null };
+  onToggleAutostart?: (v: boolean) => void;
   /** 設定を読み込むまで操作できない。 */
   loading?: boolean;
   busy?: boolean;
@@ -160,6 +163,8 @@ export function NotificationsPane({
   keepInTray,
   onToggleKeepInTray,
   trayError,
+  autostart,
+  onToggleAutostart,
   loading = false,
   busy = false,
   error,
@@ -192,6 +197,18 @@ export function NotificationsPane({
         {trayError && <Desc>{trayError}</Desc>}
         {linux && <Desc>Linux ではウィンドウを閉じるとアプリが終了します (トレイに残す設定は使われません)。</Desc>}
       </Section>
+      {autostart?.supported && (
+        <Section label="ログイン時に起動">
+          <Segmented
+            options={[...ON_OFF]}
+            value={autostart.enabled ? "on" : "off"}
+            onChange={(v) => !autostart.busy && onToggleAutostart?.(v === "on")}
+            ariaLabel="ログイン時に起動"
+          />
+          <Desc>PC にログインすると PowerToDo が起動します (ウィンドウも開きます)。閉じるとトレイに残り、同期を続けます。</Desc>
+          {autostart.error && <ErrorText>{autostart.error}</ErrorText>}
+        </Section>
+      )}
       {error && <ErrorText>{error}</ErrorText>}
     </div>
   );
