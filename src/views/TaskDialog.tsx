@@ -229,11 +229,12 @@ export function TaskDialog({
 
   // Esc は Esc レイヤー (パネル本体の上にポップオーバー): ポップオーバーが開いていればそれだけ閉じ、無ければパネルを閉じる。
   // ポップオーバー内の行を押すと押した要素が消えてフォーカスが body に戻るので、パネルの onKeyDown では受けられない。
-  useEscLayer(present, () => {
-    // フォーカス中の入力の blur で編集中の値を確定してから閉じる (消えた要素には blur が来ない)
+  // フォーカス中の入力の blur で編集中の値を確定してから閉じる (消えた要素には blur が来ない)。Esc・×・暗い所で共通。
+  const closeSafely = () => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     onClose?.();
-  });
+  };
+  useEscLayer(present, closeSafely);
   useEscLayer(present && popover !== null, () => setPopover(null));
 
   // ポップオーバーの外のクリックで閉じる。
@@ -255,7 +256,7 @@ export function TaskDialog({
   // k / j: 前 / 次のタスク (入力中と IME の変換中は効かない)。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || isTypingTarget(e) || isImeKey(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!present || e.defaultPrevented || isTypingTarget(e) || isImeKey(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "k" && onPrev) {
         e.preventDefault();
         onPrev();
@@ -266,7 +267,7 @@ export function TaskDialog({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onPrev, onNext]);
+  }, [onPrev, onNext, present]);
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => boxRef.current?.focus(), []);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -309,7 +310,7 @@ export function TaskDialog({
         <Button variant="icon" icon={ChevronUp} ariaLabel="前のタスク" onClick={onPrev} disabled={!onPrev && editable} />
         <Button variant="icon" icon={ChevronDown} ariaLabel="次のタスク" onClick={onNext} disabled={!onNext && editable} />
         <Button variant="icon" icon={Ellipsis} ariaLabel="その他" onClick={onDelete ? () => setMenuOpen((v) => !v) : undefined} />
-        <Button variant="icon" icon={X} ariaLabel="閉じる" onClick={onClose} />
+        <Button variant="icon" icon={X} ariaLabel="閉じる" onClick={closeSafely} />
         {menuOpen && onDelete && (
           <div
             role="menu"
@@ -570,7 +571,11 @@ export function TaskDialog({
     <div
       role="presentation"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
+        if (e.target === e.currentTarget) {
+          // Commit the edit in progress first (the mousedown would otherwise remove a focused input before its blur).
+          e.preventDefault();
+          closeSafely();
+        }
       }}
       style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--color-scrim)", pointerEvents: "auto" }}
     >

@@ -5,9 +5,13 @@ export function neighbors(keys: string[], key: string): { prev?: string; next?: 
   return { prev: keys[i - 1], next: keys[i + 1] };
 }
 
-/** The task to show after the current one left the list (completed, deleted, moved): next, else previous. */
-export function afterRemoval(keys: string[], key: string): string | null {
-  const { prev, next } = neighbors(keys, key);
+/**
+ * The task to show after the current one left the list (completed, deleted, moved): next, else previous.
+ * `leaving`: rows that leave with it (its subtasks, deleted or moved together) and are skipped.
+ */
+export function afterRemoval(keys: string[], key: string, leaving: ReadonlySet<string> = new Set()): string | null {
+  const rest = keys.filter((k) => k === key || !leaving.has(k));
+  const { prev, next } = neighbors(rest, key);
   return next ?? prev ?? null;
 }
 

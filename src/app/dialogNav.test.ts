@@ -33,3 +33,9 @@ test("dialogTarget_chooses_the_source", () => {
 test("parseKey_splits_at_the_last_slash", () => {
   assert.deepEqual(parseKey("a/b/12"), { project: "a/b", no: 12 });
 });
+
+test("afterRemoval_skips_the_removed_subtree", () => {
+  const rows = ["仕事/1", "仕事/2", "仕事/3", "仕事/4"]; // 2 and 3 are subtasks of 1
+  assert.equal(afterRemoval(rows, "仕事/1", new Set(["仕事/2", "仕事/3"])), "仕事/4");
+  assert.equal(afterRemoval(["仕事/1", "仕事/2"], "仕事/1", new Set(["仕事/2"])), null);
+});

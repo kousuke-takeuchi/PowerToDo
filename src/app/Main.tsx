@@ -258,7 +258,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     dialog,
     setDialog,
     expandApi,
-    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer,
+    // Row keys act on the focused row, which the modal task dialog hides: off while it is open.
+    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer && !dialog,
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
@@ -390,6 +391,21 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     setDialog(parseKey(k));
     focus.set(k);
   };
+  /** Rows that leave with the dialog's task (its subtasks, deleted or moved with it). */
+  const leavingWith = (no: number): Set<string> => {
+    const out = new Set<string>();
+    if (!dlgView || !dialog) return out;
+    const walk = (parent: number) => {
+      for (const t of dlgView.tasks) {
+        if (t.parentNo === parent) {
+          out.add(`${dialog.project}/${t.no}`);
+          walk(t.no);
+        }
+      }
+    };
+    walk(no);
+    return out;
+  };
   /** After a change through the second source, the open views (Today, the project screen) catch up. */
   const afterOther = () => {
     if (target === "other") {
@@ -415,7 +431,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       .then((d) => setAllLabels(d.labels.map((l) => l.name)))
       .catch(() => undefined);
   }, [dialogOpen]);
-  const dialogEl =
+  // While j / k moves to a task of another project, its source loads; keep the last dialog on screen meanwhile
+  // (spec ① §2.5: no motion between tasks), instead of unmounting it for a frame.
+  const lastDialogEl = useRef<React.ReactNode>(null);
+  const freshDialogEl =
     dialog && dlgView && dlgTask && dlgKey ? (
       <motion.div
         key="task-dialog"
@@ -456,7 +475,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
             });
           }}
           onDelete={() => {
-            const after = afterRemoval(visibleKeys, dlgKey);
+            const after = afterRemoval(visibleKeys, dlgKey, leavingWith(dlgTask.no));
             void src.deleteTask(dlgTask.no).then((ok) => {
               if (!ok) return;
               afterOther();
@@ -468,14 +487,16 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           onToggleSubtask={(no, done) => void src.completeTask(no, done).then(afterOther)}
           projects={summaries.map((s) => ({ name: s.name, sections: s.name === dlgView.project.name ? dlgView.sections.map((x) => x.name) : [] }))}
           onMove={(toProject, toSection) => {
-            const after = afterRemoval(visibleKeys, dlgKey);
+            // Spec ① §2.5: moving to another project goes on to the next task; a new section keeps the task (same No).
+            const leaves = toProject !== dialog.project;
+            const after = leaves ? afterRemoval(visibleKeys, dlgKey, leavingWith(dlgTask.no)) : null;
             void api
               .moveTask(dialog.project, dialog.no, toProject, toSection)
               .then(() => {
                 refreshAll();
                 void p.refresh();
                 if (target === "other") void other.refresh();
-                goDialog(after);
+                if (leaves) goDialog(after);
               })
               .catch(showError);
           }}
@@ -483,6 +504,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         />
       </motion.div>
     ) : null;
+  const dialogLoading = dialog !== null && !dlgTask && target !== "none" && src.loading && !src.error;
+  const dialogEl = freshDialogEl ?? (dialogLoading ? lastDialogEl.current : null);
+  lastDialogEl.current = dialog ? dialogEl : null;
 
   // ---- 本文 ----
   let body: React.ReactNode;
@@ -645,8 +669,12 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       invalidCount={invalidCount}
       onReveal={reveal}
       onReload={() => void reloadProject()}
-      notice={p.notice}
-      onClearNotice={p.clearNotice}
+      // While the dialog shows a task of another project, that project's command errors are the ones to show.
+      notice={target === "other" ? (other.notice ?? p.notice) : p.notice}
+      onClearNotice={() => {
+        p.clearNotice();
+        other.clearNotice();
+      }}
       flash={flash}
       onClearFlash={() => setFlash(null)}
       sync={{
