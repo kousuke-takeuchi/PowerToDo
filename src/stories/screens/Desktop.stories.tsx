@@ -30,6 +30,7 @@ import { SyncSamples } from "../../views/SyncSamples";
 import { TaskDialog } from "../../views/TaskDialog";
 import type { TaskDialogProps } from "../../views/TaskDialog";
 import type { SyncState } from "../../components/SyncStatus";
+import { DEFAULTS } from "../../app/view/viewOptions";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
 
@@ -61,6 +62,11 @@ function Screen({ width, banner, ...view }: Partial<ProjectViewProps> & { width?
 export const D01: Story = {
   name: "D-01 プロジェクト",
   render: () => <Screen showLongTitleRow />,
+};
+
+export const D01s: Story = {
+  name: "D-01s 「表示」メニュー",
+  render: () => <Screen initialViewMenuOpen initialView={{ ...DEFAULTS, sort: "priority", group: "label", date: "7d" }} />,
 };
 
 export const D01h: Story = {

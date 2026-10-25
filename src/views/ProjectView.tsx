@@ -13,6 +13,8 @@ import { useReportKeys } from "../app/useRowFocus";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
+import { useView } from "../app/view/ViewOptionsContext";
+import type { ViewOptions } from "../app/view/viewOptions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
 import { DatePicker } from "./DatePicker";
@@ -82,6 +84,10 @@ export type ProjectViewProps = {
   initialDateNo?: number;
   /** Stories: the delete confirmation of this task is shown (D-01m). */
   initialDeleteNo?: number;
+  /** Stories: the 表示 menu starts open (D-01s). */
+  initialViewMenuOpen?: boolean;
+  /** Stories: the 表示 options without a provider (D-01s). */
+  initialView?: ViewOptions;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
@@ -208,9 +214,12 @@ export function ProjectView({
   initialMenuNo,
   initialDateNo,
   initialDeleteNo,
+  initialViewMenuOpen,
+  initialView,
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
+  const [viewOptions, setViewOptions] = useView("project", project, initialView);
   const previewRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [formParent, setFormParent] = useState<number | undefined>(initialFormParent);
@@ -718,7 +727,7 @@ export function ProjectView({
   const menu = onRenameProject || onDeleteProject ? { rename: onRenameProject ? () => setRenamingProject(true) : undefined, delete: onDeleteProject } : undefined;
   return (
     <>
-      <PageHeader onMenu={menu}>
+      <PageHeader onMenu={menu} view={{ screen: "project", options: viewOptions, onChange: setViewOptions }} initialViewMenuOpen={initialViewMenuOpen}>
         {renamingProject && onRenameProject ? (
           <div style={{ flex: 1, minWidth: 0, maxWidth: 480, marginRight: "var(--space-4)" }}>
             <InlineEdit

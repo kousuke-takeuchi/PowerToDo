@@ -44,6 +44,7 @@ import { useProject } from "./useProject";
 import { useRowFocus } from "./useRowFocus";
 import { PALETTE, useProjectActions } from "./useProjectActions";
 import { useQuickAdd } from "./useQuickAdd";
+import { ViewOptionsCtx, useViewOptionsStore } from "./view/ViewOptionsContext";
 import { useSummaries } from "./useSummaries";
 import { useReminders } from "./useReminders";
 import { useRowShortcuts } from "./useRowShortcuts";
@@ -67,6 +68,7 @@ const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
   const today = useToday();
   const width = useShellWidth();
+  const viewStore = useViewOptionsStore();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
 
   const [nav, setNav] = useState<Nav>({ kind: "inbox" });
@@ -1057,6 +1059,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   return (
+    <ViewOptionsCtx.Provider value={viewStore}>
     <ProjectColors.Provider value={projectColors}>
     <CommentCounts.Provider value={commentCounts}>
     <RowActions.Provider value={rowActions}>
@@ -1100,5 +1103,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     </RowActions.Provider>
     </CommentCounts.Provider>
     </ProjectColors.Provider>
+    </ViewOptionsCtx.Provider>
   );
 }

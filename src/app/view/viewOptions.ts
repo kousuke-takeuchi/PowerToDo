@@ -15,6 +15,8 @@ export type ViewOptions = {
 };
 
 export const naturalDir = (sort: SortKey): "asc" | "desc" => (sort === "added" ? "desc" : "asc");
+/** Changing the sort resets the direction to that sort's natural one. */
+export const withSort = (o: ViewOptions, sort: SortKey): ViewOptions => ({ ...o, sort, dir: naturalDir(sort) });
 export const DEFAULTS: ViewOptions = { layout: "list", done: false, group: "none", sort: "manual", dir: "asc", date: "all", created: "all", prio: "all" };
 
 const pick = <T extends string>(v: string | undefined, allowed: readonly T[]): T | undefined => (allowed as readonly string[]).includes(v ?? "") ? (v as T) : undefined;
