@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ProjectColors } from "../views/crossList";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
@@ -348,6 +349,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   const qaColor = summaries.find((s) => s.name === qaProject)?.color;
+  const projectColors = useMemo(() => Object.fromEntries(summaries.map((s) => [s.name, s.color])), [summaries]);
 
   // ---- タスク詳細 ----
   // useProject は名前が変わった直後の 1 描画だけ前のプロジェクトの view を持つので、名前で確かめる
@@ -661,6 +663,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   );
 
   return (
+    <ProjectColors.Provider value={projectColors}>
     <AppShell
       width={width}
       fill
@@ -686,5 +689,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     >
       {body}
     </AppShell>
+    </ProjectColors.Provider>
   );
 }

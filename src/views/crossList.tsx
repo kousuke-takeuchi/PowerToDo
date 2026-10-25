@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
@@ -110,6 +110,9 @@ export function useLeaving(tasks: Task[]) {
   return { begin, cancel, isLeaving, merge };
 }
 
+/** Project name -> color (a CSS color), for the `#` after the project on cross-view rows. Main provides it. */
+export const ProjectColors = createContext<Record<string, string>>({});
+
 export type CrossRowsOptions = {
   /** いまビューに届いている全行 (退場中の行を手放す判断に使う)。 */
   tasks: Task[];
@@ -130,6 +133,7 @@ export type CrossRowsOptions = {
  */
 export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey, onVisibleKeys }: CrossRowsOptions) {
   const { isDone: fakeDone, toggle: fakeToggle } = useDone();
+  const colors = useContext(ProjectColors);
   const leave = useLeaving(tasks);
   // `rows()` を呼んだ順 (= 表示順) に積む。描画ごとに作り直し、コミット後に useReportKeys が読む。
   const shown: string[] = [];
@@ -157,6 +161,8 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
         date={date?.(t)}
         recurring={onToggleDone && t.rrule ? true : undefined}
         project={t.project}
+        section={t.category ?? undefined}
+        projectColor={colors[t.project]}
         focused={focusedKey === taskKey(t)}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
         onToggleDone={() => toggle(t, group, index)}
