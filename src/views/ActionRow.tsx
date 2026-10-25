@@ -4,7 +4,6 @@ import { useEscLayer } from "../app/layers";
 import { RowActions } from "../app/rowActions";
 import { TaskRow, type TaskRowProps } from "../components/TaskRow";
 import type { Task } from "../types/model";
-import { taskKey } from "./crossList";
 import { DatePicker } from "./DatePicker";
 import { placeMenu } from "./menuPlacement";
 import { TaskEditor } from "./TaskEditor";
@@ -19,7 +18,8 @@ export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps:
   const [open, setOpen] = useState<null | "menu" | "date">(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
-  const key = taskKey(task);
+  // The row key (`taskKey` in crossList, which imports this file).
+  const key = `${task.project}/${task.no}`;
   const close = () => {
     setOpen(null);
     ctx?.setOverlay(null);
