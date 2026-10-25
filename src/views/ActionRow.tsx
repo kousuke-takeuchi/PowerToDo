@@ -8,22 +8,28 @@ import { DatePicker } from "./DatePicker";
 import { placeMenu } from "./menuPlacement";
 import { TaskEditor } from "./TaskEditor";
 import { TASK_MENU_SIZE, TaskMenu } from "./TaskMenu";
-import { blankValue, editorValueOf } from "./taskEditorValue";
+import { blankValue, editBase, insertTarget, type EditorValue } from "./taskEditorValue";
 
 const DATE_PICKER_SIZE = { width: 320, height: 470 };
 
 /** A task row with its hover actions (spec ② §2–§4). Without the RowActions context it is the plain row. */
 export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps: TaskRowProps; canInsert: boolean }) {
   const ctx = useContext(RowActions);
+  // The row key (`taskKey` in crossList, which imports this file).
+  const key = `${task.project}/${task.no}`;
   const [open, setOpen] = useState<null | "menu" | "date">(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
-  // The row key (`taskKey` in crossList, which imports this file).
-  const key = `${task.project}/${task.no}`;
   const close = () => {
     setOpen(null);
     ctx?.setOverlay(null);
   };
+  // A row that leaves with its menu open (completed and hidden, deleted) must not keep the row keys off.
+  const setOverlay = ctx?.setOverlay;
+  useEffect(() => (open ? () => setOverlay?.(null) : undefined), [open, setOverlay]);
+  // The edit is compared with the task as it was when editing began: a sync may change the task meanwhile.
+  const base = useRef<EditorValue | null>(null);
+  base.current = editBase(base.current, ctx?.editing === key, task);
   // Outside both the row (its own buttons toggle) and the popover (portaled to body).
   const pop = useRef<HTMLDivElement>(null);
   const closeRef = useRef(close);
@@ -75,10 +81,11 @@ export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps:
         projects={task.parentNo === undefined ? ctx.projects : undefined}
         onCancel={() => ctx.setInserting(null)}
         onSubmit={async (v) => {
-          const no = await ctx.add(v, { parentNo: task.parentNo, position: where === "before" ? { before: task.no } : { after: task.no } });
+          const target = insertTarget(task, v, where);
+          const no = await ctx.add(v, { parentNo: task.parentNo, position: target.follow ? target.position : undefined });
           if (no === null) return false;
-          // Spec ② §4.1: the editor moves under the task just added.
-          ctx.setInserting({ project: task.project, anchorNo: no, where: "after" });
+          // Spec ② §4.1: the editor moves under the task just added (only when it went next to this one).
+          ctx.setInserting(target.follow ? { project: task.project, anchorNo: no, where: "after" } : null);
           return true;
         }}
       />
@@ -88,14 +95,14 @@ export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps:
     ctx.editing === key ? (
       <TaskEditor
         mode="edit"
-        initial={editorValueOf(task)}
+        initial={base.current ?? editBase(null, true, task)!}
         allLabels={ctx.allLabels}
         today={ctx.today}
         inbox={ctx.inbox}
         projects={task.parentNo === undefined ? ctx.projects : undefined}
         onCancel={() => ctx.setEditing(null)}
         onSubmit={async (v) => {
-          const ok = await ctx.save(task, editorValueOf(task), v);
+          const ok = await ctx.save(task, base.current ?? editBase(null, true, task)!, v);
           if (ok) ctx.setEditing(null);
           return ok;
         }}

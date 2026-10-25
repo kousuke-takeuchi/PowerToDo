@@ -1,23 +1,32 @@
 import { useEffect, useRef } from "react";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
-import { deleteMessage } from "./deleteMessage";
+import { deleteMessage, enterConfirms } from "./deleteMessage";
 
 /** Spec ② §4.3: the one delete confirmation (row menu, keys, task dialog). Enter deletes, Esc cancels. */
 export function DeleteTaskDialog({ title, subtasks, onCancel, onConfirm }: { title: string; subtasks: number; onCancel: () => void; onConfirm: () => void }) {
   useEscLayer(true, onCancel);
-  // Enter deletes wherever the focus is (the menu item that opened this may still hold it).
+  // Enter deletes wherever the focus is (the menu item that opened this may still hold it), except on キャンセル
+  // or another button, and once (not on auto-repeat). The 削除 button takes the focus once drawn.
   const confirm = useRef(onConfirm);
   confirm.current = onConfirm;
+  const del = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const id = window.setTimeout(() => del.current?.querySelector("button")?.focus(), 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+      const a = document.activeElement;
+      const onOther = a instanceof HTMLButtonElement && !del.current?.contains(a);
+      if (e.key !== "Enter") return;
       e.preventDefault();
       e.stopPropagation();
-      confirm.current();
+      if (enterConfirms(e, onOther)) confirm.current();
+      else if (onOther && !e.repeat && a instanceof HTMLButtonElement) a.click();
     };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener("keydown", onKey, true);
+    };
   }, []);
   return (
     <div
@@ -45,7 +54,9 @@ export function DeleteTaskDialog({ title, subtasks, onCancel, onConfirm }: { tit
           <Button variant="secondary" onClick={onCancel}>
             キャンセル
           </Button>
-          <Button onClick={onConfirm}>削除</Button>
+          <div ref={del} style={{ display: "contents" }}>
+            <Button onClick={onConfirm}>削除</Button>
+          </div>
         </div>
       </div>
     </div>

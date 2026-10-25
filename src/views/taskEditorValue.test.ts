@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blankValue, changed, editorValueOf, moveOf, submitKey, toInput, toPatch } from "./taskEditorValue.ts";
+import { blankValue, changed, editBase, editorValueOf, insertTarget, moveOf, submitKey, toInput, toPatch } from "./taskEditorValue.ts";
 import type { Task } from "../types/model.ts";
 
 const task: Task = {
@@ -44,4 +44,20 @@ test("enter_submits_from_the_title_but_not_while_composing", () => {
   assert.equal(submitKey({ ...base, key: "Enter", keyCode: 229 }, "title"), null);
   assert.equal(submitKey({ ...base, key: "Enter" }, "note"), null);
   assert.equal(submitKey({ ...base, key: "Enter", metaKey: true }, "note"), "submit");
+});
+
+test("insert_keeps_the_position_only_in_the_anchor_s_place", () => {
+  const v = blankValue("仕事", "会議");
+  assert.deepEqual(insertTarget(task, v, "after"), { position: { after: 3 }, follow: true });
+  assert.deepEqual(insertTarget(task, v, "before"), { position: { before: 3 }, follow: true });
+  assert.deepEqual(insertTarget(task, { ...v, project: "買い物", section: null }, "after"), { follow: false });
+  assert.deepEqual(insertTarget(task, { ...v, section: null }, "after"), { follow: false });
+});
+
+test("edit_base_is_the_value_when_editing_began", () => {
+  const first = editBase(null, true, task);
+  const synced = { ...task, due: "2026-11-01" };
+  assert.equal(editBase(first, true, synced), first);
+  assert.equal(editBase(first, true, synced).due, "2026-10-26");
+  assert.equal(editBase(first, false, synced), null);
 });

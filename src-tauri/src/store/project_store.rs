@@ -170,16 +170,34 @@ fn non_empty(s: &str) -> Option<String> {
     (!t.is_empty()).then(|| t.to_string())
 }
 
-/// Indices (in book order) of the task `no` and all of its descendants.
-/// Moves the siblings (same section and parent) at `at` or later down one, so `at` is free.
-fn make_room(book: &mut ProjectBook, category: &Option<String>, parent: Option<u32>, at: u32) {
-    for t in book.tasks.iter_mut() {
-        if &t.category == category && t.parent_no == parent && t.order >= at {
-            t.order = t.order.saturating_add(1);
-        }
+/// Frees the place right before / after sibling `anchor` (same section and parent) and returns
+/// its 並び順. The siblings are first numbered 1, 2, ... in their shown order (並び順, then book
+/// order), so tied orders (two PCs appending offline, a hand-edited book) still put the new
+/// task next to the anchor. Only 並び順 changes, which the task-level sync does not treat as an edit.
+fn make_room(
+    book: &mut ProjectBook,
+    category: &Option<String>,
+    parent: Option<u32>,
+    anchor: u32,
+    after: bool,
+) -> u32 {
+    let mut sibs: Vec<usize> = (0..book.tasks.len())
+        .filter(|&i| &book.tasks[i].category == category && book.tasks[i].parent_no == parent)
+        .collect();
+    sibs.sort_by_key(|&i| (book.tasks[i].order, i));
+    let pos = sibs
+        .iter()
+        .position(|&i| book.tasks[i].no == anchor)
+        .unwrap_or(sibs.len());
+    let at = pos + usize::from(after);
+    for (k, &i) in sibs.iter().enumerate() {
+        let n = k + 1 + usize::from(k >= at);
+        book.tasks[i].order = u32::try_from(n).unwrap_or(u32::MAX);
     }
+    u32::try_from(at + 1).unwrap_or(u32::MAX)
 }
 
+/// Indices (in book order) of the task `no` and all of its descendants.
 fn subtree(book: &ProjectBook, no: u32) -> Vec<usize> {
     let mut set = BTreeSet::from([no]);
     loop {
@@ -1020,8 +1038,9 @@ impl ProjectStore {
                     .max()
                     .map_or(1, |m| m.saturating_add(1)),
                 Some(pos) => {
-                    let anchor_no = match pos {
-                        Position::Before(n) | Position::After(n) => n,
+                    let (anchor_no, after) = match pos {
+                        Position::Before(n) => (n, false),
+                        Position::After(n) => (n, true),
                     };
                     let anchor = &book.tasks[find_task(book, anchor_no)?];
                     if anchor.category != category || anchor.parent_no != input.parent_no {
@@ -1029,12 +1048,7 @@ impl ProjectStore {
                             "位置のタスクと同じセクション・親にしか追加できません",
                         ));
                     }
-                    let at = match pos {
-                        Position::Before(_) => anchor.order.max(1),
-                        Position::After(_) => anchor.order.saturating_add(1),
-                    };
-                    make_room(book, &category, input.parent_no, at);
-                    at
+                    make_room(book, &category, input.parent_no, anchor_no, after)
                 }
             };
             if !ctx.display_name.is_empty() && !book.assignees.contains(&ctx.display_name) {
@@ -1258,8 +1272,7 @@ impl ProjectStore {
                 .find(|t| t.no == no)
                 .cloned()
                 .expect("the task is in its own subtree");
-            let at = top.order.saturating_add(1);
-            make_room(book, &top.category, top.parent_no, at);
+            let at = make_room(book, &top.category, top.parent_no, top.no, true);
             let mut renumber: BTreeMap<u32, u32> = BTreeMap::new();
             // Parents before children, so each child finds its parent's new No.
             let mut queue = vec![top.no];
@@ -2013,6 +2026,48 @@ mod tests {
             .add_task_at(INBOX, input("外"), Some(Position::After(2)))
             .unwrap_err();
         assert!(matches!(err, AppError::Invalid { .. }), "{err:?}");
+    }
+
+    /// Two siblings with the same 並び順 (two PCs appended offline, or a hand-edited book): the
+    /// new task still goes right next to the one it was asked for.
+    fn tied_pair(e: &mut Env) {
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.add_task(INBOX, input("B")).unwrap();
+        let order = e.store.view(INBOX).unwrap().tasks[0].order;
+        e.store
+            .update_task(
+                INBOX,
+                2,
+                TaskPatch {
+                    order: Some(order),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn add_task_next_to_a_tied_sibling() {
+        let mut e = env();
+        tied_pair(&mut e);
+        let v = e
+            .store
+            .add_task_at(INBOX, input("A2"), Some(Position::After(1)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A2", "B"]);
+        let v = e
+            .store
+            .add_task_at(INBOX, input("B0"), Some(Position::Before(2)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A2", "B0", "B"]);
+    }
+
+    #[test]
+    fn duplicate_next_to_a_tied_sibling() {
+        let mut e = env();
+        tied_pair(&mut e);
+        let (v, _) = e.store.duplicate_task(INBOX, 1).unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A", "B"]);
     }
 
     #[test]

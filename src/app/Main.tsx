@@ -6,6 +6,7 @@ import { Toast } from "../components/Toast";
 import { completedOf, nextNotice, noticeText, undoOf } from "./completionToast";
 import type { Notice, ToastState } from "./completionToast";
 import { RowActions, type RowActionsApi } from "./rowActions";
+import { rowStateAfter } from "./rowState";
 import { DeleteTaskDialog } from "../views/DeleteTaskDialog";
 import { countDescendants } from "../views/deleteMessage";
 import { moveOf, toInput, toPatch } from "../views/taskEditorValue";
@@ -234,7 +235,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const [editing, setEditing] = useState<string | null>(null);
   const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
   const [rowOverlay, setRowOverlay] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<Task | null>(null);
+  const [deleting, setDeleting] = useState<{ task: Task; subtasks: number } | null>(null);
   const [focusComment, setFocusComment] = useState(false);
   /** Completes / reopens `t` through the project screen or the cross actions, then adds a completion to the toast. */
   const crossToggle = (t: Task, done: boolean) =>
@@ -281,7 +282,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
     onCompleted: completed,
-    requestDelete: setDeleting,
+    requestDelete: (t) => requestDelete(t),
     edit: setEditing,
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
@@ -544,7 +545,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           }, showError),
         );
       }, showError),
-    requestDelete: setDeleting,
+    requestDelete: (t) => requestDelete(t),
     openComments: (t) => {
       setFocusComment(true);
       openCross(t);
@@ -553,6 +554,29 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   useEffect(() => {
     if (!dialog) setFocusComment(false);
   }, [dialog]);
+  // Rows that left the screen (another view, deleted, hidden, gone after a sync) let go of their editor and menu.
+  // Only on a change of the rows: a just-added task's row arrives after the editor already moved under it.
+  useEffect(() => {
+    const next = rowStateAfter(visibleKeys, { editing, inserting, overlay: rowOverlay });
+    if (next.editing !== editing) setEditing(next.editing);
+    if (next.inserting !== inserting) setInserting(next.inserting);
+    if (next.overlay !== rowOverlay) setRowOverlay(next.overlay);
+  }, [visibleKeys]); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * Spec ② §4.3: the confirmation names the subtasks that go too. Counted from the view that holds the task's
+   * project (the open project, the dialog's), else read for it (Today and the other cross views list no subtasks).
+   */
+  const requestDelete = (t: Task) => {
+    const tasks = onScreen(t.project) && view ? view.tasks : dlgView && dlgView.project.name === t.project ? dlgView.tasks : null;
+    if (tasks) {
+      setDeleting({ task: t, subtasks: countDescendants(tasks, t.no) });
+      return;
+    }
+    void api.getProject(t.project).then(
+      (v) => setDeleting({ task: t, subtasks: countDescendants(v.tasks, t.no) }),
+      () => setDeleting({ task: t, subtasks: 0 }),
+    );
+  };
   /** Spec ② §4.3: after the confirmation. The dialog's own task goes on to the next one (spec ① §2.5). */
   const confirmDelete = (t: Task) => {
     setDeleting(null);
@@ -612,7 +636,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
               }
             });
           }}
-          onDelete={() => setDeleting(dlgTask)}
+          onDelete={() => requestDelete(dlgTask)}
           onParseRecurrence={api.parseRecurrence}
           onAddSubtask={(title) => void src.addSubtask(dlgTask.no, title).then(afterOther)}
           onToggleSubtask={(no, done) => void src.completeTask(no, done).then(afterOther)}
@@ -880,10 +904,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       <AnimatePresence>{dialogEl}</AnimatePresence>
       {deleting && (
         <DeleteTaskDialog
-          title={deleting.title}
-          subtasks={onScreen(deleting.project) && view ? countDescendants(view.tasks, deleting.no) : 0}
+          title={deleting.task.title}
+          subtasks={deleting.subtasks}
           onCancel={() => setDeleting(null)}
-          onConfirm={() => confirmDelete(deleting)}
+          onConfirm={() => confirmDelete(deleting.task)}
         />
       )}
       <QuickAddDialog

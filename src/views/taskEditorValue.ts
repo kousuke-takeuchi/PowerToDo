@@ -96,3 +96,22 @@ export function submitKey(
   if (field === "title") return e.shiftKey ? null : "submit";
   return e.metaKey || e.ctrlKey ? "submit" : null;
 }
+
+/**
+ * Spec ② §4.1: an editor opened above / below a task adds right there only while it stays in that task's project
+ * and section; moved elsewhere in the editor, the task is appended there and the editor does not follow it.
+ */
+export function insertTarget(
+  anchor: Task,
+  v: EditorValue,
+  where: "before" | "after",
+): { position: { before: number } | { after: number }; follow: true } | { follow: false } {
+  if (v.project !== anchor.project || v.section !== anchor.category) return { follow: false };
+  return { position: where === "before" ? { before: anchor.no } : { after: anchor.no }, follow: true };
+}
+
+/** The value an edit is compared with: the task as it was when editing began (a sync may change it meanwhile). */
+export function editBase(cur: EditorValue | null, editing: boolean, task: Task): EditorValue | null {
+  if (!editing) return null;
+  return cur ?? editorValueOf(task);
+}
