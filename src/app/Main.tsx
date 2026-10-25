@@ -243,6 +243,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const reorderLocked = (restore: () => void) => note("手動の並び (グループなし) に戻すと並べ替えられます", "戻す", restore);
   const restoreProjectView = () =>
     viewStore.set(projectViewKey, { ...projectViewOptions, sort: "manual", dir: "asc", group: "none" });
+  // The Today order moves only while Today is manual and ungrouped (spec ⑤ §5).
+  const todayViewOptions = sanitize("today", viewStore.get(viewKey("today")));
+  const todaySorted = todayViewOptions.sort !== "manual" || todayViewOptions.group !== "none";
+  const restoreTodayView = () => viewStore.set(viewKey("today"), { ...todayViewOptions, sort: "manual", dir: "asc", group: "none" });
   // ---- 行の操作 (spec ②): the inline editor, the row menu and date picker, the delete confirmation ----
   const [editing, setEditing] = useState<string | null>(null);
   const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
@@ -337,7 +341,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     requestDelete: (t) => requestDelete(t),
     edit: setEditing,
     projectSorted,
-    onReorderLocked: () => reorderLocked(restoreProjectView),
+    todaySorted,
+    restoreToday: restoreTodayView,
+    onReorderLocked: (restore) => reorderLocked(restore ?? restoreProjectView),
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
@@ -806,6 +812,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onAddTask={(title) => void cross.addToInbox({ title, due: today })}
         onReschedule={(due) => void api.rescheduleOverdue(today, due).catch(showError).finally(refreshAll)}
         hiddenProjects={failed}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
+        onReorderLocked={reorderLocked}
       />
     );
   } else if (nav.kind === "upcoming") {
@@ -830,6 +840,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onVisibleKeys={reportKeys}
         onAddTask={(date, title) => void cross.addToInbox({ title, due: date })}
         hiddenProjects={failed}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
       />
     );
   } else if (nav.kind === "label") {
@@ -849,6 +862,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onVisibleKeys={reportKeys}
         onAddTask={(title) => void cross.addToInbox({ title, labels: [labelName] })}
         hiddenProjects={failed}
+        weekStart={settingsPanes.datetime.weekStart}
+        labelOrder={allLabels}
+        projectOrder={summaries.map((s) => s.name)}
       />
     );
   } else if (p.error) {

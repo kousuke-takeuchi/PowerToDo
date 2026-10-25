@@ -6,7 +6,9 @@ import { Button } from "../components/Button";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMotionTiming } from "../motion";
 import type { DayGroup, Task } from "../types/model";
-import { AddSlot, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
+import { useView } from "../app/view/ViewOptionsContext";
+import { arrangeFlat } from "../app/view/arrange";
+import { AddSlot, FilterNote, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
 import { PageHeader, titleStyle } from "./HeaderActions";
 import { WeekStrip } from "./WeekStrip";
 
@@ -29,6 +31,10 @@ export type UpcomingViewProps = {
   focusedKey?: string;
   /** 表示している行のキー (`project/no`) を表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
+  /** 「表示」の並べ替え・フィルターに使う (Main が渡す)。 */
+  weekStart?: "mon" | "sun";
+  labelOrder?: string[];
+  projectOrder?: string[];
   /** Stories only: draw this day (YYYY-MM-DD) as the drop target (drop-highlight, D-05b). */
   dropPreviewDay?: string;
 };
@@ -58,7 +64,8 @@ function dayTitle(ymd: string, today: string): string {
 }
 
 /** MonthSelect + WeekStrip (今日から 7 日) + 日付グループ。タスクのない日も見出し + AddTaskRow を出す。 */
-export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys, dropPreviewDay }: UpcomingViewProps) {
+export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys, dropPreviewDay, weekStart = "mon", labelOrder = [], projectOrder = [] }: UpcomingViewProps) {
+  const [view, setView] = useView("upcoming");
   const { reduced } = useMotionTiming();
   const [monthOpen, setMonthOpen] = useState(false);
   const monthRef = useRef<HTMLDivElement>(null);
@@ -71,6 +78,11 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
   const groups = days ? days.map((d) => d.date) : Array.from({ length: 4 }, (_, i) => addDays(today, i));
   const rowsOf = (ymd: string): Task[] =>
     days ? (days.find((d) => d.date === ymd)?.tasks ?? []) : open.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no);
+
+  // 表示の設定 (spec ⑤): 各日の中で並べ替えと優先度フィルター。日付ごとのまとまりはそのまま。
+  const ctx = { today, weekStart, labelOrder, projectOrder };
+  const arranged = new Map(groups.map((ymd) => [ymd, arrangeFlat(rowsOf(ymd), { ...view, group: "none" }, ctx)]));
+  const hiddenCount = [...arranged.values()].reduce((n, a) => n + a.hidden, 0);
 
   const allTasks = days ? days.flatMap((d) => d.tasks) : tasks;
   const rows = useCrossRows({ tasks: allTasks, onToggleDone, onOpenTask, focusedKey, onVisibleKeys, dragView: "upcoming" });
@@ -109,7 +121,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
 
   return (
     <>
-      <PageHeader>
+      <PageHeader view={{ screen: "upcoming", options: view, onChange: setView }}>
         <h1 style={titleStyle}>近日</h1>
         {onJumpTo ? (
           <div ref={monthRef} style={{ position: "relative" }}>
@@ -160,6 +172,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
         )}
       </PageHeader>
       <HiddenNote names={hiddenProjects} />
+      <FilterNote count={hiddenCount} />
       <WeekStrip
         start={days?.[0]?.date ?? today}
         today={today}
@@ -175,7 +188,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
             style={dropPreviewDay === ymd ? { background: "var(--color-drop-highlight)", borderRadius: 6 } : undefined}
           >
             <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
-            {rows(ymd, rowsOf(ymd))}
+            {rows(ymd, (arranged.get(ymd)?.groups[0]?.rows ?? []).map((r) => r.task))}
             <AddSlot defaults={{ due: ymd }} onAdd={onAddTask ? (title) => onAddTask(ymd, title) : undefined} />
           </section>
         ))}

@@ -46,3 +46,7 @@ test("pending_writes_win_over_a_fresh_load_until_they_settle", () => {
   assert.deepEqual(loaded["表示:近日"], "sort=name", "the loaded rows are not changed");
   assert.deepEqual(mergePending(loaded, new Map()), loaded);
 });
+
+test("label screens have no 完了 option (the label view holds open tasks only)", () => {
+  assert.equal(sanitize("label", { ...DEFAULTS, done: true }).done, false);
+});

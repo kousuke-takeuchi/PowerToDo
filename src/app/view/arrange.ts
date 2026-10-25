@@ -97,3 +97,10 @@ export function firstOccurrences(groups: ArrangedGroup[]): Set<string> {
     }
   return first;
 }
+
+/** Cross-list screens (Today / Upcoming / a label) show subtasks as flat rows: arrange them like top-level tasks, return the originals. */
+export function arrangeFlat(tasks: Task[], o: ViewOptions, c: ArrangeCtx): { groups: ArrangedGroup[]; hidden: number } {
+  const orig = new Map(tasks.map((x) => [`${x.project}/${x.no}`, x]));
+  const r = arrange(tasks.map((x) => (x.parentNo === undefined ? x : { ...x, parentNo: undefined })), o, c);
+  return { hidden: r.hidden, groups: r.groups.map((g) => ({ ...g, rows: g.rows.map((x) => ({ ...x, task: orig.get(`${x.task.project}/${x.task.no}`)! })) })) };
+}

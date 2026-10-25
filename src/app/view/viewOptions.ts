@@ -62,7 +62,7 @@ export const ALLOWED: Record<Screen, { layout: boolean; done: boolean; groups: G
   project: { layout: true, done: true, groups: ["none", "date", "added", "priority", "label"], filters: ["date", "created", "prio"] },
   today: { layout: false, done: false, groups: ["none", "priority", "label", "project"], filters: ["prio"] },
   upcoming: { layout: false, done: false, groups: ["none"], filters: ["prio"] },
-  label: { layout: false, done: true, groups: ["none", "date", "priority", "project"], filters: ["date", "prio"] },
+  label: { layout: false, done: false, groups: ["none", "date", "priority", "project"], filters: ["date", "prio"] },
 };
 
 export function sanitize(screen: Screen, o: ViewOptions): ViewOptions {

@@ -37,6 +37,8 @@ export function useRowShortcuts({
   requestDelete,
   edit,
   projectSorted,
+  todaySorted,
+  restoreToday,
   onReorderLocked,
 }: {
   /** Saves a key move and reloads the screen (the same as a drop). */
@@ -69,8 +71,11 @@ export function useRowShortcuts({
   edit: (key: string) => void;
   /** The open project is sorted or grouped: its rows cannot be moved by key (spec ⑤ §5). */
   projectSorted: boolean;
-  /** Shows the "back to manual order" toast. */
-  onReorderLocked: () => void;
+  /** Today is sorted or grouped: its order cannot be moved by key either. */
+  todaySorted: boolean;
+  restoreToday: () => void;
+  /** Shows the "back to manual order" toast; `restore` is given for Today (the project's own restore is the default). */
+  onReorderLocked: (restore?: () => void) => void;
 }) {
   // ---- キーボード操作 (shortcuts.ts)。フォーカス行のタスクは、いま出ているビューのデータから探す ----
   const focusedTask = (() => {
@@ -123,6 +128,10 @@ export function useRowShortcuts({
       return;
     }
     if (navKind === "today" && (k === "up" || k === "down")) {
+      if (todaySorted) {
+        onReorderLocked(restoreToday);
+        return;
+      }
       const list = todayList();
       const i = list.findIndex((x) => taskKey(x) === taskKey(t));
       const j = k === "up" ? i - 1 : i + 1;

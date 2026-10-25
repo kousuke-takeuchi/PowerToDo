@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, firstOccurrences } from "./arrange.ts";
+import { arrange, arrangeFlat, firstOccurrences } from "./arrange.ts";
 import { DEFAULTS } from "./viewOptions.ts";
 import type { Task } from "../../types/model.ts";
 
@@ -88,4 +88,13 @@ test("first_occurrences_marks_only_the_first_row_of_a_task_in_label_groups", () 
   assert.ok(first.has(`l:急ぎ/${both.project}/${both.no}`));
   assert.ok(!first.has(`l:家/${both.project}/${both.no}`));
   assert.ok(first.has(`l:家/${one.project}/${one.no}`));
+});
+
+test("arrangeFlat_treats_subtasks_as_rows_and_returns_the_original_tasks", () => {
+  const parent = t({ title: "p" });
+  const sub = t({ title: "s", parentNo: parent.no, priority: 1 });
+  const r = arrangeFlat([parent, sub], { ...DEFAULTS, sort: "priority" }, ctx);
+  assert.deepEqual(r.groups[0].rows.map((x) => x.task), [sub, parent]);
+  assert.equal(r.groups[0].rows[0].task.parentNo, parent.no);
+  assert.equal(arrangeFlat([parent, sub], { ...DEFAULTS, prio: 1 }, ctx).hidden, 1);
 });
