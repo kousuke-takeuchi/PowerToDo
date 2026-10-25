@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
 
-use crate::domain::model::{Label, Project, Task};
+use crate::domain::model::{Label, Project, TODAY_ORDER, Task};
 use crate::error::AppResult;
 use crate::store::common_book::{
     COMMON_FILE, CommonBook, Settings, read_common_book, write_common_book,
@@ -107,11 +107,18 @@ fn merge_task(b: &Task, l: &Task, r: &Task, newer: Side) -> Task {
     }
 }
 
-/// `t` differs from `base` in more than 並び順: a drag in a section renumbers the order of
-/// every task there, which must not bring back the tasks the other side deleted.
+/// `t` differs from `base` in more than 並び順 and 今日の並び (spec ③ §6.2): a drag renumbers
+/// the order of every task in its list, which must not bring back the tasks the other side
+/// deleted.
 fn edited(t: &Task, base: &Task) -> bool {
+    let mut extra = t.extra.clone();
+    match base.extra.get(TODAY_ORDER) {
+        Some(v) => extra.insert(TODAY_ORDER.to_string(), v.clone()),
+        None => extra.remove(TODAY_ORDER),
+    };
     Task {
         order: base.order,
+        extra,
         ..t.clone()
     } != *base
 }
@@ -925,6 +932,16 @@ mod tests {
         let b = book(vec![task(1, "牛乳"), task(2, "パン")]);
         let mut r1 = task(1, "牛乳");
         r1.order = 7;
+        let r = book(vec![r1, task(2, "パン")]);
+        let m = merge_project(&b, &book(vec![task(2, "パン")]), &r, Side::Remote, 2);
+        assert_eq!(titles(&m.book), [(2, "パン".into())]);
+    }
+
+    #[test]
+    fn a_today_order_alone_does_not_bring_a_deleted_task_back() {
+        let b = book(vec![task(1, "牛乳"), task(2, "パン")]);
+        let mut r1 = task(1, "牛乳");
+        r1.extra.insert(TODAY_ORDER.into(), "2026-10-25:1".into());
         let r = book(vec![r1, task(2, "パン")]);
         let m = merge_project(&b, &book(vec![task(2, "パン")]), &r, Side::Remote, 2);
         assert_eq!(titles(&m.book), [(2, "パン".into())]);

@@ -10,6 +10,7 @@ import type {
   Label,
   LabelRenamed,
   LabelViewDto,
+  Placement,
   Position,
   LabelsDto,
   MoveOutcome,
@@ -92,6 +93,9 @@ export const api = {
   moveTask: (project: string, no: number, toProject: string, toSection?: string | null) =>
     invoke<MoveOutcome>("move_task", { project, no, toProject, toSection: toSection ?? null }),
   reorderTasks: (project: string, section: string | null, order: number[]) => invoke<ProjectView>("reorder_tasks", { project, section, order }),
+  moveTaskWithin: (project: string, no: number, to: Placement) => invoke<ProjectView>("move_task_within", { project, no, to }),
+  reorderProjects: (names: string[]) => invoke<ProjectSummary[]>("reorder_projects", { names }),
+  setTodayOrder: (today: string, keys: [string, number][]) => invoke<void>("set_today_order", { today, keys }),
 
   quickAdd: (text: string, defaultProject: string) => invoke<QuickAddOutcome>("quick_add", { text, defaultProject }),
   parseQuickAdd: (text: string) => invoke<QuickAddResult>("parse_quick_add", { text }),

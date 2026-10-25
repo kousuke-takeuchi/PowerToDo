@@ -254,6 +254,27 @@ pub enum Position {
     After(u32),
 }
 
+/// Where `move_within` puts a task: in `section` (None = unsectioned), under `parent` (None =
+/// top level), right before sibling `before` (None = at the end).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Placement {
+    pub section: Option<String>,
+    pub parent: Option<u32>,
+    pub before: Option<u32>,
+}
+
+/// The unknown column that holds the Today-only order (spec ③ §6.2): `YYYY-MM-DD:n`.
+pub const TODAY_ORDER: &str = "今日の並び";
+
+/// `n` of a `今日の並び` value written for `today`, else None.
+pub fn today_rank(value: Option<&String>, today: NaiveDate) -> Option<u32> {
+    let (date, n) = value?.split_once(':')?;
+    (NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()? == today)
+        .then(|| n.parse().ok())
+        .flatten()
+}
+
 /// Partial update. Every field is optional: outer `None` = unchanged. The fields that can be
 /// cleared are `Option<Option<T>>`: `Some(None)` clears the value.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

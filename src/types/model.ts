@@ -21,6 +21,9 @@ export interface ProjectView { project: Project; sections: Section[]; tasks: Tas
 export interface TaskInput { title: string; section?: string | null; priority?: Priority | null; due?: string | null; dueTime?: string | null; note?: string | null; labels?: string[]; parentNo?: number | null; rrule?: string | null; reminders?: string[]; }
 /** Where add_task puts the new task: right before / after a sibling (spec ② §5). */
 export type Position = { before: number } | { after: number };
+
+/** Where move_task_within puts a task (spec ③ §8). */
+export interface Placement { section: string | null; parent: number | null; before: number | null }
 /** undefined = unchanged, null = clear the value (Rust `Option<Option<T>>`). */
 export interface TaskPatch {
   title?: string;
