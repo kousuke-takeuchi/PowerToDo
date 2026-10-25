@@ -55,6 +55,8 @@ export type ProjectViewProps = {
   today?: string;
   /** キーボードのフォーカス行 (`project/no`)。 */
   focusedKey?: string;
+  /** Stories: draw this task's row as hovered (handle and actions shown). */
+  hoverNo?: number;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
@@ -101,6 +103,7 @@ export function ProjectView({
   onDeleteProject,
   today = TODAY,
   focusedKey,
+  hoverNo,
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
@@ -210,7 +213,8 @@ export function ProjectView({
         recurring={onToggleDone && t.rrule ? true : undefined}
         labels={t.labels}
         indent={indent}
-        showActions={showActions}
+        showActions={showActions || hoverNo === t.no}
+        showHandle={hoverNo === t.no}
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
         subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
         onToggleDone={() => toggleDone(t)}

@@ -119,7 +119,7 @@ export function AppShell({ width = 1440, sidebar, children, panel, overlay, bann
         )}
       </AnimatePresence>
       {/* ラッパーはクリックを通す。中身 (scrim など) が pointerEvents: "auto" で受ける。中身が null を返しても下を塞がない。 */}
-      {overlay && <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>{overlay}</div>}
+      {overlay && <div style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }}>{overlay}</div>}
     </div>
   );
 }
