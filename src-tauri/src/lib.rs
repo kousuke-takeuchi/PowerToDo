@@ -144,6 +144,7 @@ pub fn run() {
             commands::update_task,
             commands::complete_task,
             commands::delete_task,
+            commands::duplicate_task,
             commands::comments::list_comments,
             commands::comments::comment_counts,
             commands::comments::add_comment,

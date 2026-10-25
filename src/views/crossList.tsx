@@ -2,13 +2,16 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
-import { TaskRow } from "../components/TaskRow";
 import type { TaskRowProps } from "../components/TaskRow";
 import { Collapse } from "../motion";
 import type { Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { CommentCounts } from "../app/useComments";
+import { RowActions } from "../app/rowActions";
+import { ActionRow } from "./ActionRow";
 import { SubtaskForm } from "./SubtaskForm";
+import { TaskEditor } from "./TaskEditor";
+import { blankValue, type EditorValue } from "./taskEditorValue";
 import { useDone } from "./useDone";
 
 /** 完了にしたチェックが付いたまま行を残す時間 (ms)。ProjectView と同じ。 */
@@ -155,20 +158,24 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
   const row = (group: string) => (t: Task, index: number) => {
     shown.push(taskKey(t));
     const el = (
-      <TaskRow
+      <ActionRow
         key={onToggleDone ? taskKey(t) : t.no}
-        title={t.title}
-        done={isDone(t)}
-        priority={t.priority}
-        date={date?.(t)}
-        recurring={onToggleDone && t.rrule ? true : undefined}
-        project={t.project}
-        section={t.category ?? undefined}
-        projectColor={colors[t.project]}
-        commentCount={commentCounts[taskKey(t)]}
-        focused={focusedKey === taskKey(t)}
-        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-        onToggleDone={() => toggle(t, group, index)}
+        task={t}
+        canInsert={false}
+        rowProps={{
+          title: t.title,
+          done: isDone(t),
+          priority: t.priority,
+          date: date?.(t),
+          recurring: onToggleDone && t.rrule ? true : undefined,
+          project: t.project,
+          section: t.category ?? undefined,
+          projectColor: colors[t.project],
+          commentCount: commentCounts[taskKey(t)],
+          focused: focusedKey === taskKey(t),
+          onClick: onOpenTask ? () => onOpenTask(t) : undefined,
+          onToggleDone: () => toggle(t, group, index),
+        }}
       />
     );
     return onToggleDone ? (
@@ -203,8 +210,24 @@ export function useOutsideClose(ref: RefObject<HTMLElement | null>, open: boolea
  * 「タスクを追加」行。`onAdd` があるとクリックでインライン入力 (SubtaskForm、ProjectView と同じ) に変わり、
  * 確定でタイトルを渡す。無いときは見た目だけの行。
  */
-export function AddSlot({ label, onAdd }: { label?: string; onAdd?: (title: string) => void }) {
+export function AddSlot({ label, defaults = {}, onAdd }: { label?: string; defaults?: Partial<EditorValue>; onAdd?: (title: string) => void }) {
+  const ctx = useContext(RowActions);
   const [adding, setAdding] = useState(false);
+  // Spec ② §3.4: the same editor as the project screen, with this view's first values (Today: today, a label: it).
+  if (ctx && adding) {
+    return (
+      <TaskEditor
+        mode="add"
+        initial={blankValue(ctx.inbox, null, defaults)}
+        projects={ctx.projects}
+        inbox={ctx.inbox}
+        allLabels={ctx.allLabels}
+        today={ctx.today}
+        onCancel={() => setAdding(false)}
+        onSubmit={(v) => ctx.add(v).then((no) => no !== null)}
+      />
+    );
+  }
   if (onAdd && adding) {
     return (
       <SubtaskForm
@@ -220,7 +243,7 @@ export function AddSlot({ label, onAdd }: { label?: string; onAdd?: (title: stri
       />
     );
   }
-  return <AddTaskRow label={label} onClick={onAdd ? () => setAdding(true) : undefined} />;
+  return <AddTaskRow label={label} onClick={ctx || onAdd ? () => setAdding(true) : undefined} />;
 }
 
 /** 読み込めなかったプロジェクトがあるとき、横断ビューの上に出す 1 行の注記 (仕様 §7)。 */

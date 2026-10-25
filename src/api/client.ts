@@ -10,6 +10,7 @@ import type {
   Label,
   LabelRenamed,
   LabelViewDto,
+  Position,
   LabelsDto,
   MoveOutcome,
   NotificationPermission,
@@ -77,7 +78,7 @@ export const api = {
   renameSection: (project: string, name: string, newName: string) => invoke<ProjectView>("rename_section", { project, name, newName }),
   reorderSections: (project: string, names: string[]) => invoke<ProjectView>("reorder_sections", { project, names }),
 
-  addTask: (project: string, input: TaskInput) => invoke<ProjectView>("add_task", { project, input }),
+  addTask: (project: string, input: TaskInput, position?: Position) => invoke<ProjectView>("add_task", { project, input, position: position ?? null }),
   updateTask: (project: string, no: number, patch: TaskPatch) => invoke<ProjectView>("update_task", { project, no, patch }),
   completeTask: (project: string, no: number, done: boolean) => invoke<ProjectView>("complete_task", { project, no, done }),
   // ---- comments (spec ① §3) ----
@@ -87,6 +88,7 @@ export const api = {
   editComment: (project: string, no: number, id: string, text: string) => invoke<Comment[]>("edit_comment", { project, no, id, text }),
   deleteComment: (project: string, no: number, id: string) => invoke<Comment[]>("delete_comment", { project, no, id }),
   deleteTask: (project: string, no: number) => invoke<ProjectView>("delete_task", { project, no }),
+  duplicateTask: (project: string, no: number) => invoke<[ProjectView, number]>("duplicate_task", { project, no }),
   moveTask: (project: string, no: number, toProject: string, toSection?: string | null) =>
     invoke<MoveOutcome>("move_task", { project, no, toProject, toSection: toSection ?? null }),
   reorderTasks: (project: string, section: string | null, order: number[]) => invoke<ProjectView>("reorder_tasks", { project, section, order }),

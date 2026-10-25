@@ -41,6 +41,12 @@ export type TaskRowProps = {
   onClick?: () => void;
   /** 右端の「その他」アイコンを押したとき。 */
   onMore?: () => void;
+  /** 鉛筆 (spec ② §2). */
+  onEdit?: () => void;
+  /** 日付のアイコン. */
+  onDate?: () => void;
+  /** コメントのアイコン. */
+  onComment?: () => void;
 };
 
 const subCountStyle: React.CSSProperties = {
@@ -235,9 +241,9 @@ export function TaskRow(p: TaskRowProps) {
           onClick={(e) => e.stopPropagation()}
           className={showActions ? undefined : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}
         >
-          <Button variant="icon" icon={Pencil} ariaLabel="編集" />
-          <Button variant="icon" icon={Calendar} ariaLabel="日付" />
-          <Button variant="icon" icon={MessageSquare} ariaLabel="コメント" />
+          <Button variant="icon" icon={Pencil} ariaLabel="編集" onClick={p.onEdit} />
+          <Button variant="icon" icon={Calendar} ariaLabel="日付" onClick={p.onDate} />
+          <Button variant="icon" icon={MessageSquare} ariaLabel="コメント" onClick={p.onComment} />
           <Button variant="icon" icon={Ellipsis} ariaLabel="その他" onClick={p.onMore} />
         </div>
       )}

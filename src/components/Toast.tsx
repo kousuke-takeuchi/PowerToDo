@@ -10,7 +10,7 @@ export const TOAST_MS = 5000;
  * Bottom-left notice with 「元に戻す」 (Todoist, after completing). Inverted colors so it reads in both themes.
  * Put it inside AnimatePresence; `text` changing restarts the timer.
  */
-export function Toast({ text, onUndo, onClose }: { text: string; onUndo: () => void; onClose: () => void }) {
+export function Toast({ text, actionLabel = "元に戻す", onAction, onClose }: { text: string; actionLabel?: string; onAction: () => void; onClose: () => void }) {
   const { reduced, t } = useMotionTiming();
   const timer = useRef<number | undefined>(undefined);
   const close = useRef(onClose);
@@ -53,10 +53,10 @@ export function Toast({ text, onUndo, onClose }: { text: string; onUndo: () => v
       <span>{text}</span>
       <button
         type="button"
-        onClick={onUndo}
+        onClick={onAction}
         style={{ padding: 0, border: 0, background: "none", font: "inherit", fontWeight: 700, color: "var(--color-accent-soft)", cursor: "pointer" }}
       >
-        元に戻す
+        {actionLabel}
       </button>
       <button
         type="button"

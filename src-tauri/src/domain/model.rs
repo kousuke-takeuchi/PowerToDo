@@ -246,6 +246,14 @@ pub struct TaskInput {
     pub reminders: Vec<String>,
 }
 
+/// Where `add_task` puts the new task: right before or after a sibling (same section and parent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Position {
+    Before(u32),
+    After(u32),
+}
+
 /// Partial update. Every field is optional: outer `None` = unchanged. The fields that can be
 /// cleared are `Option<Option<T>>`: `Some(None)` clears the value.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

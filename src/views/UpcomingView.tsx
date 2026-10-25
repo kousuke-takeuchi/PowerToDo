@@ -172,7 +172,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
           <section key={ymd} id={days ? `day-${ymd}` : undefined}>
             <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
             {rows(ymd, rowsOf(ymd))}
-            <AddSlot onAdd={onAddTask ? (title) => onAddTask(ymd, title) : undefined} />
+            <AddSlot defaults={{ due: ymd }} onAdd={onAddTask ? (title) => onAddTask(ymd, title) : undefined} />
           </section>
         ))}
         {onExtend && days && days.length < MAX_DAYS && (

@@ -15,6 +15,13 @@ import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
+import { DatePicker } from "./DatePicker";
+import { DeleteTaskDialog } from "./DeleteTaskDialog";
+import { TaskEditor } from "./TaskEditor";
+import { ActionRow } from "./ActionRow";
+import { RowActions } from "../app/rowActions";
+import { TaskMenu } from "./TaskMenu";
+import { blankValue, editorValueOf } from "./taskEditorValue";
 
 export type ProjectViewProps = {
   project: string;
@@ -58,6 +65,16 @@ export type ProjectViewProps = {
   focusedKey?: string;
   /** Stories: draw this task's row as hovered (handle and actions shown). */
   hoverNo?: number;
+  /** Stories: this task's row starts as the inline editor (D-01i). */
+  initialEditNo?: number;
+  /** Stories: the "add task" editor of this section starts open (null = unsectioned, D-01j). */
+  initialAddSection?: string | null;
+  /** Stories: this row's "..." menu is open (D-01k). */
+  initialMenuNo?: number;
+  /** Stories: this row's date picker is open (D-01l). */
+  initialDateNo?: number;
+  /** Stories: the delete confirmation of this task is shown (D-01m). */
+  initialDeleteNo?: number;
   /** 表示している行 (折りたたまれていないセクション / 展開中のサブタスク / 表示中の完了) のキーを表示順に知らせる。変わったときだけ呼ぶ。 */
   onVisibleKeys?: (keys: string[]) => void;
   /** → / ← 用に、サブタスクの展開 / 折りたたみ操作をマウント時に 1 度渡す (アンマウントで null)。 */
@@ -105,6 +122,11 @@ export function ProjectView({
   today = TODAY,
   focusedKey,
   hoverNo,
+  initialEditNo,
+  initialAddSection,
+  initialMenuNo,
+  initialDateNo,
+  initialDeleteNo,
   onVisibleKeys,
   onExpandApi,
 }: ProjectViewProps) {
@@ -116,7 +138,8 @@ export function ProjectView({
   );
   const [doneOverride, setDoneOverride] = useState<Map<number, boolean>>(() => new Map());
   const [showCompleted, setShowCompleted] = useState(false);
-  const [addTo, setAddTo] = useState<{ section: string | null } | null>(null);
+  const [addTo, setAddTo] = useState<{ section: string | null } | null>(initialAddSection !== undefined ? { section: initialAddSection } : null);
+  const [editNo, setEditNo] = useState<number | undefined>(initialEditNo);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [addingSection, setAddingSection] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
@@ -131,6 +154,7 @@ export function ProjectView({
   const { reduced } = useMotionTiming();
 
   const commentCounts = useContext(CommentCounts);
+  const rowCtx = useContext(RowActions);
   const mine = tasks.filter((t) => t.project === project);
   // Open tasks of this project, for the line under the title.
   const openCount = mine.filter((t) => t.progress !== 100).length;
@@ -204,25 +228,40 @@ export function ProjectView({
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
     const invalid = state === "invalid" && !invalidRows && t.no === INVALID_TASK_NO;
-    const row = (
-      <TaskRow
-        title={invalid ? t.title + INVALID_SUFFIX : t.title}
-        description={t.note}
-        focused={focusedKey === `${t.project}/${t.no}`}
-        done={isDone(t)}
-        priority={t.priority}
-        date={dateLabel(t.due, today)}
-        recurring={onToggleDone && t.rrule ? true : undefined}
-        labels={t.labels}
-        commentCount={commentCounts[`${t.project}/${t.no}`]}
-        indent={indent}
-        showActions={showActions || hoverNo === t.no}
-        showHandle={hoverNo === t.no}
-        onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-        subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
-        onToggleDone={() => toggleDone(t)}
-        onMore={onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined}
-        onToggleExpand={() => setExpanded((s) => toggleSet(s, t.no))}
+    const row = editNo === t.no ? (
+      <TaskEditor
+        mode="edit"
+        initial={editorValueOf(t)}
+        projects={t.parentNo === undefined ? [{ name: project, sections: projectSections.map((s) => s.name) }] : undefined}
+        allLabels={[]}
+        today={today}
+        onCancel={() => setEditNo(undefined)}
+        onSubmit={() => Promise.resolve(true)}
+      />
+    ) : (
+      <ActionRow
+        task={t}
+        canInsert
+        rowProps={{
+          title: invalid ? t.title + INVALID_SUFFIX : t.title,
+          description: t.note,
+          focused: focusedKey === `${t.project}/${t.no}`,
+          done: isDone(t),
+          priority: t.priority,
+          date: dateLabel(t.due, today),
+          recurring: onToggleDone && t.rrule ? true : undefined,
+          labels: t.labels,
+          commentCount: commentCounts[`${t.project}/${t.no}`],
+          indent,
+          showActions: showActions || hoverNo === t.no,
+          showHandle: hoverNo === t.no,
+          onClick: onOpenTask ? () => onOpenTask(t) : undefined,
+          subtasks: kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined,
+          onToggleDone: () => toggleDone(t),
+          // Without RowActions (stories) the "..." shows the old inline confirmation; ActionRow replaces it otherwise.
+          onMore: onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined,
+          onToggleExpand: () => setExpanded((s) => toggleSet(s, t.no)),
+        }}
       />
     );
     return (
@@ -239,6 +278,31 @@ export function ProjectView({
             />
           )}
           {invalid ? <div style={{ background: "var(--color-accent-soft)" }}>{row}</div> : row}
+          {initialMenuNo === t.no && (
+            <div style={{ position: "absolute", top: 36, right: 0, zIndex: 30 }}>
+              <TaskMenu
+                task={t}
+                today={today}
+                canInsert
+                projects={[{ name: project, sections: projectSections.map((s) => s.name) }]}
+                onAddAbove={noop}
+                onAddBelow={noop}
+                onEdit={noop}
+                onDue={noop}
+                onPriority={noop}
+                onReminders={noop}
+                onMove={noop}
+                onDuplicate={noop}
+                onDelete={noop}
+                onClose={noop}
+              />
+            </div>
+          )}
+          {initialDateNo === t.no && (
+            <div style={{ position: "absolute", top: 36, right: 40, zIndex: 30 }}>
+              <DatePicker value={t.due} time={t.dueTime} today={today} />
+            </div>
+          )}
         </div>
         {onDeleteTask && deleteTarget === t.no && (
           <div
@@ -276,7 +340,16 @@ export function ProjectView({
               <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}</AnimatePresence>
               {indent === 0 && kids.length > 0 && (
                 <div style={{ marginLeft: 32 }}>
-                  {formParent === t.no ? (
+                  {formParent === t.no && rowCtx ? (
+                    <TaskEditor
+                      mode="add"
+                      initial={blankValue(project, t.category)}
+                      allLabels={rowCtx.allLabels}
+                      today={rowCtx.today}
+                      onCancel={() => setFormParent(undefined)}
+                      onSubmit={(v) => rowCtx.add(v, { parentNo: t.no }).then((no) => no !== null)}
+                    />
+                  ) : formParent === t.no ? (
                     <SubtaskForm
                       defaultTitle={formOpenedByClick || onAddSubtask ? "" : FORM_SAMPLE_TITLE}
                       autoFocus={formOpenedByClick}
@@ -345,6 +418,36 @@ export function ProjectView({
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {
+    if (rowCtx) {
+      if (addTo && addTo.section === section) {
+        return (
+          <TaskEditor
+            mode="add"
+            initial={blankValue(project, section)}
+            projects={rowCtx.projects}
+            inbox={rowCtx.inbox}
+            allLabels={rowCtx.allLabels}
+            today={rowCtx.today}
+            onCancel={() => setAddTo(null)}
+            onSubmit={(v) => rowCtx.add(v).then((no) => no !== null)}
+          />
+        );
+      }
+      return <AddTaskRow onClick={() => setAddTo({ section })} />;
+    }
+    if (!onAddTask && addTo && addTo.section === section) {
+      return (
+        <TaskEditor
+          mode="add"
+          initial={blankValue(project, section)}
+          projects={[{ name: project, sections: projectSections.map((s) => s.name) }]}
+          allLabels={[]}
+          today={today}
+          onCancel={() => setAddTo(null)}
+          onSubmit={() => Promise.resolve(true)}
+        />
+      );
+    }
     if (!onAddTask) return section === null ? null : <AddTaskRow />;
     if (addTo && addTo.section === section) {
       return (
@@ -498,6 +601,11 @@ export function ProjectView({
         )}
       </PageHeader>
       {body()}
+      {initialDeleteNo !== undefined &&
+        (() => {
+          const t = mine.find((x) => x.no === initialDeleteNo);
+          return t ? <DeleteTaskDialog title={t.title} subtasks={childrenOf(t.no).length} onCancel={noop} onConfirm={noop} /> : null;
+        })()}
     </>
   );
 }

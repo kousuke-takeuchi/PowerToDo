@@ -11,3 +11,11 @@ export function isImeKey(e: KeyboardEvent | React.KeyboardEvent): boolean {
   const n = "nativeEvent" in e ? e.nativeEvent : e;
   return n.isComposing || n.keyCode === 229;
 }
+
+/** ⌘E / Ctrl+E edits the focused row, ⌘⌫ / Ctrl+Backspace deletes it (spec ② §7). */
+export function metaRowAction(e: { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): "edit" | "remove" | null {
+  if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return null;
+  if (e.key.toLowerCase() === "e") return "edit";
+  if (e.key === "Backspace") return "remove";
+  return null;
+}

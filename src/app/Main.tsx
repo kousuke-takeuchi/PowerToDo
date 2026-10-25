@@ -3,13 +3,19 @@ import { PanelLeftOpen } from "lucide-react";
 import { Button } from "../components/Button";
 import { ProjectColors } from "../views/crossList";
 import { Toast } from "../components/Toast";
-import { completedOf, merge, toastText, undoOf } from "./completionToast";
-import type { ToastState } from "./completionToast";
+import { completedOf, nextNotice, noticeText, undoOf } from "./completionToast";
+import type { Notice, ToastState } from "./completionToast";
+import { RowActions, type RowActionsApi } from "./rowActions";
+import { rowStateAfter } from "./rowState";
+import { DeleteTaskDialog } from "../views/DeleteTaskDialog";
+import { countDescendants } from "../views/deleteMessage";
+import { moveOf, toInput, toPatch } from "../views/taskEditorValue";
+import { dateLabel } from "../mock/data";
 import { AnimatePresence, motion } from "motion/react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { confirmDiscard } from "../api/dialogs";
 import { onNotificationError, onOpenQuickAdd, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
-import type { AppStateDto, Task } from "../types/model";
+import type { AppStateDto, Task, TaskPatch } from "../types/model";
 import { useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
 import { ProjectView } from "../views/ProjectView";
@@ -215,9 +221,22 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     return () => window.clearTimeout(id);
   }, [flash]);
 
-  // Completion toast (spec ④ §5): completions in a row share one toast; 「元に戻す」 undoes each of them.
-  const [toast, setToast] = useState<ToastState | null>(null);
-  const completed = useCallback((t: Task) => setToast((s) => merge(s, completedOf(t))), []);
+  // Bottom-left notice (spec ④ §5, ② §6): completions in a row share one toast and 「元に戻す」 undoes each of them;
+  // any other notice replaces it and carries its own action.
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const noteId = useRef(0);
+  const noteAction = useRef<(() => void) | null>(null);
+  const completed = useCallback((t: Task) => setNotice((s) => nextNotice(s, { done: completedOf(t) })), []);
+  const note = (text: string, action: string, run: () => void) => {
+    noteAction.current = run;
+    setNotice((s) => nextNotice(s, { text, action, id: ++noteId.current }));
+  };
+  // ---- 行の操作 (spec ②): the inline editor, the row menu and date picker, the delete confirmation ----
+  const [editing, setEditing] = useState<string | null>(null);
+  const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
+  const [rowOverlay, setRowOverlay] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<{ task: Task; subtasks: number } | null>(null);
+  const [focusComment, setFocusComment] = useState(false);
   /** Completes / reopens `t` through the project screen or the cross actions, then adds a completion to the toast. */
   const crossToggle = (t: Task, done: boolean) =>
     cross.toggleDone(t, done).then((ok) => {
@@ -225,7 +244,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       return ok;
     });
   const undoToast = async (state: ToastState) => {
-    setToast(null);
+    setNotice(null);
     for (const e of state.entries) {
       const u = undoOf(e);
       const onScreen = projectScreen && e.project === current;
@@ -256,15 +275,15 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     projectScreen,
     today,
     openCross,
-    dialog,
-    setDialog,
     expandApi,
     // Row keys act on the focused row, which the modal task dialog hides: off while it is open.
-    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer && !dialog,
+    enabled: !qa.open && !searchOpen && !settingsOpen && !updates.offer && !dialog && !editing && !inserting && !rowOverlay && !deleting,
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
     onCompleted: completed,
+    requestDelete: (t) => requestDelete(t),
+    edit: setEditing,
   });
   // Esc: 開いているレイヤーが無ければ行フォーカスを外す (layers.ts)
   useEffect(() => {
@@ -429,13 +448,151 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [dialog, target, dlgView, src.error]);
   const [allLabels, setAllLabels] = useState<string[]>([]);
   const dialogOpen = dialog !== null;
+  // Also on start: the inline editors (spec ②) pick labels too.
   useEffect(() => {
-    if (!dialogOpen) return;
     void api
       .labels()
       .then((d) => setAllLabels(d.labels.map((l) => l.name)))
       .catch(() => undefined);
   }, [dialogOpen]);
+  /** A change of task `t`: through the open project when it is on screen, else through the API, then the rest catch up. */
+  const onScreen = (project: string) => projectScreen && project === current;
+  const afterChange = (project: string) => {
+    refreshAll();
+    if (!onScreen(project) && projectScreen) void p.refresh();
+  };
+  const patchTask = (t: Task, patch: TaskPatch): Promise<boolean> =>
+    onScreen(t.project)
+      ? p.updateTask(t.no, patch).then((ok) => (ok && refreshAll(), ok))
+      : api.updateTask(t.project, t.no, patch).then(
+          () => (afterChange(t.project), true),
+          (e) => (showError(e), false),
+        );
+  const pickerProjects = useMemo(
+    () => summaries.map((s) => ({ name: s.name, sections: view && s.name === view.project.name ? view.sections.map((x) => x.name) : [] })),
+    [summaries, view],
+  );
+  const rowActions: RowActionsApi = {
+    today,
+    inbox: app.inbox,
+    projects: pickerProjects,
+    allLabels,
+    editing,
+    setEditing,
+    inserting,
+    setInserting,
+    overlay: rowOverlay,
+    setOverlay: setRowOverlay,
+    save: async (t, before, after) => {
+      const patch = toPatch(before, after);
+      if (Object.keys(patch).length > 0 && !(await patchTask(t, patch))) return false;
+      const mv = moveOf(before, after);
+      if (mv) {
+        try {
+          await api.moveTask(t.project, t.no, mv.project, mv.section);
+        } catch (e) {
+          showError(e);
+          return false;
+        }
+        refreshAll();
+        if (projectScreen) void p.refresh();
+        void refreshSummaries();
+      }
+      focus.set(`${t.project}/${t.no}`);
+      return true;
+    },
+    add: async (v, opts) => {
+      try {
+        const out = await api.addTask(v.project, toInput(v, opts?.parentNo), opts?.position);
+        const no = Math.max(...out.tasks.map((x) => x.no));
+        if (onScreen(v.project)) void p.refresh();
+        refreshAll();
+        void refreshSummaries();
+        const added = out.tasks.find((x) => x.no === no);
+        note(`タスクが ${v.project} に追加されました`, "開く", () => added && openCross(added));
+        return no;
+      } catch (e) {
+        showError(e);
+        return null;
+      }
+    },
+    setDue: (t, due) => {
+      const before: TaskPatch = { due: t.due ?? null, dueTime: t.dueTime ?? null };
+      void patchTask(t, { due: due ?? null, dueTime: due ? (t.dueTime ?? null) : null }).then((ok) => {
+        if (!ok) return;
+        const label = due ? (dateLabel(due, today)?.label ?? due) : null;
+        note(label ? `日付を ${label} に更新しました` : "日付を削除しました", "元に戻す", () => void patchTask(t, before));
+      });
+    },
+    setPriority: (t, pr) => void patchTask(t, { priority: pr }),
+    setReminders: (t, r) => void patchTask(t, { reminders: r }),
+    move: (t, project, section) =>
+      void api.moveTask(t.project, t.no, project, section).then(() => {
+        refreshAll();
+        if (projectScreen) void p.refresh();
+        void refreshSummaries();
+      }, showError),
+    duplicate: (t) =>
+      void api.duplicateTask(t.project, t.no).then(([, copy]) => {
+        if (onScreen(t.project)) void p.refresh();
+        afterChange(t.project);
+        void refreshSummaries();
+        note("タスクを複製しました", "元に戻す", () =>
+          void api.deleteTask(t.project, copy).then(() => {
+            if (onScreen(t.project)) void p.refresh();
+            afterChange(t.project);
+            void refreshSummaries();
+          }, showError),
+        );
+      }, showError),
+    requestDelete: (t) => requestDelete(t),
+    openComments: (t) => {
+      setFocusComment(true);
+      openCross(t);
+    },
+  };
+  useEffect(() => {
+    if (!dialog) setFocusComment(false);
+  }, [dialog]);
+  // Rows that left the screen (another view, deleted, hidden, gone after a sync) let go of their editor and menu.
+  // Only on a change of the rows: a just-added task's row arrives after the editor already moved under it.
+  useEffect(() => {
+    const next = rowStateAfter(visibleKeys, { editing, inserting, overlay: rowOverlay });
+    if (next.editing !== editing) setEditing(next.editing);
+    if (next.inserting !== inserting) setInserting(next.inserting);
+    if (next.overlay !== rowOverlay) setRowOverlay(next.overlay);
+  }, [visibleKeys]); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * Spec ② §4.3: the confirmation names the subtasks that go too. Counted from the view that holds the task's
+   * project (the open project, the dialog's), else read for it (Today and the other cross views list no subtasks).
+   */
+  const requestDelete = (t: Task) => {
+    const tasks = onScreen(t.project) && view ? view.tasks : dlgView && dlgView.project.name === t.project ? dlgView.tasks : null;
+    if (tasks) {
+      setDeleting({ task: t, subtasks: countDescendants(tasks, t.no) });
+      return;
+    }
+    void api.getProject(t.project).then(
+      (v) => setDeleting({ task: t, subtasks: countDescendants(v.tasks, t.no) }),
+      () => setDeleting({ task: t, subtasks: 0 }),
+    );
+  };
+  /** Spec ② §4.3: after the confirmation. The dialog's own task goes on to the next one (spec ① §2.5). */
+  const confirmDelete = (t: Task) => {
+    setDeleting(null);
+    const isDialogTask = dialog?.project === t.project && dialog.no === t.no && dlgKey !== null;
+    const after = isDialogTask ? afterRemoval(visibleKeys, dlgKey, leavingWith(t.no)) : null;
+    const done = onScreen(t.project) ? p.deleteTask(t.no) : cross.remove(t);
+    void done.then((ok) => {
+      if (!ok) return;
+      if (isDialogTask) {
+        afterOther();
+        goDialog(after);
+      }
+      if (onScreen(t.project)) refreshAll();
+    });
+  };
+
   // While j / k moves to a task of another project, its source loads; keep the last dialog on screen meanwhile
   // (spec ① §2.5: no motion between tasks), instead of unmounting it for a frame.
   const lastDialogEl = useRef<React.ReactNode>(null);
@@ -479,14 +636,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
               }
             });
           }}
-          onDelete={() => {
-            const after = afterRemoval(visibleKeys, dlgKey, leavingWith(dlgTask.no));
-            void src.deleteTask(dlgTask.no).then((ok) => {
-              if (!ok) return;
-              afterOther();
-              goDialog(after);
-            });
-          }}
+          onDelete={() => requestDelete(dlgTask)}
           onParseRecurrence={api.parseRecurrence}
           onAddSubtask={(title) => void src.addSubtask(dlgTask.no, title).then(afterOther)}
           onToggleSubtask={(no, done) => void src.completeTask(no, done).then(afterOther)}
@@ -509,6 +659,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           comments={dlgComments.comments}
           commentsFailed={dlgComments.failed}
           me={displayName}
+          focusCommentInput={focusComment}
           onAddComment={dlgComments.add}
           onEditComment={dlgComments.edit}
           onDeleteComment={dlgComments.remove}
@@ -645,10 +796,6 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && completed(t))}
         onAddTask={(section, title) => void p.addTask({ title, section })}
         onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
-        onDeleteTask={(t) => {
-          if (dialog?.project === t.project && dialog.no === t.no) setDialog(null);
-          void p.deleteTask(t.no);
-        }}
         onAddSection={(name) => void p.addSection(name)}
         onRenameSection={(from, to) => void p.renameSection(from, to)}
         onRenameProject={current === app.inbox ? undefined : (name) => void renameProject(name)}
@@ -737,11 +884,32 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {toast && (
-          <Toast key="toast" text={toastText(toast)} onUndo={() => void undoToast(toast)} onClose={() => setToast(null)} />
+        {notice && (
+          <Toast
+            key={notice.kind === "note" ? `note-${notice.id}` : "done"}
+            text={noticeText(notice)}
+            actionLabel={notice.kind === "done" ? "元に戻す" : notice.action}
+            onAction={() => {
+              if (notice.kind === "done") {
+                void undoToast(notice.state);
+                return;
+              }
+              setNotice(null);
+              noteAction.current?.();
+            }}
+            onClose={() => setNotice(null)}
+          />
         )}
       </AnimatePresence>
       <AnimatePresence>{dialogEl}</AnimatePresence>
+      {deleting && (
+        <DeleteTaskDialog
+          title={deleting.task.title}
+          subtasks={deleting.subtasks}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => confirmDelete(deleting.task)}
+        />
+      )}
       <QuickAddDialog
         open={qa.open}
         tokens={tokens}
@@ -818,6 +986,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   return (
     <ProjectColors.Provider value={projectColors}>
     <CommentCounts.Provider value={commentCounts}>
+    <RowActions.Provider value={rowActions}>
     <AppShell
       width={width}
       fill
@@ -853,6 +1022,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     >
       {body}
     </AppShell>
+    </RowActions.Provider>
     </CommentCounts.Provider>
     </ProjectColors.Provider>
   );

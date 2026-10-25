@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isImeKey } from "./keys";
+import { isImeKey, metaRowAction } from "./keys";
 
 /** True while typing: an INPUT / TEXTAREA / SELECT / contentEditable has focus, or the key belongs to an IME composition. */
 export function isTypingTarget(e: KeyboardEvent): boolean {
@@ -25,6 +25,8 @@ export type RowHandlers = {
   open: () => void;
   toggleDone: () => void;
   remove: () => void;
+  /** ⌘E (spec ② §7). */
+  edit?: () => void;
   setPriority: (p: 1 | 2 | 3 | 4) => void;
   dueToday: () => void;
   dueTomorrow: () => void;
@@ -62,6 +64,13 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
         if (isImeKey(e)) return;
         e.preventDefault();
         if (h.enabled) h.search();
+        return;
+      }
+      const metaAct = metaRowAction(e);
+      if (metaAct && !e.defaultPrevented && h.enabled && !isTypingTarget(e) && h.row?.hasFocus) {
+        e.preventDefault();
+        if (metaAct === "edit") h.row.edit?.();
+        else h.row.remove();
         return;
       }
       // an element-level handler (a menu, a tab list) already took this key

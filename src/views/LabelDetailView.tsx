@@ -36,7 +36,7 @@ export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask,
       <HiddenNote names={hiddenProjects} />
       <div>
         {rows("label", list)}
-        <AddSlot label="タスクを追加" onAdd={onAddTask} />
+        <AddSlot label="タスクを追加" defaults={{ labels: [label] }} onAdd={onAddTask} />
       </div>
     </>
   );

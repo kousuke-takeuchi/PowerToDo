@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
-use crate::domain::model::{INBOX, TaskInput, TaskPatch};
+use crate::domain::model::{INBOX, Position, TaskInput, TaskPatch};
 use crate::domain::quick_add::{QuickAddResult, parse};
 use crate::domain::recurrence;
 use crate::domain::recurrence_words;
@@ -1508,11 +1508,12 @@ pub async fn reorder_sections(
 pub async fn add_task(
     project: String,
     input: TaskInput,
+    position: Option<Position>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
     mutate(&app, state.inner(), &[&project], false, |s| {
-        s.add_task(&project, input)
+        s.add_task_at(&project, input, position)
     })
 }
 
@@ -1606,6 +1607,18 @@ pub async fn delete_task(
     })?;
     state.forget_fired(&project, no);
     Ok(view)
+}
+
+#[tauri::command]
+pub async fn duplicate_task(
+    project: String,
+    no: u32,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<(ProjectView, u32)> {
+    mutate(&app, state.inner(), &[&project], false, |s| {
+        s.duplicate_task(&project, no)
+    })
 }
 
 #[tauri::command]

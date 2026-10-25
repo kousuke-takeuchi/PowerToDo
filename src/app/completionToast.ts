@@ -37,3 +37,15 @@ export function completedOf(t: { project: string; no: number; rrule?: string; du
   if (!t.rrule) return { project: t.project, no: t.no };
   return { project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null, reminders: [...t.reminders], rrule: t.rrule } };
 }
+
+/** The bottom-left notice: completions in a row share one (with their undo), anything else replaces it (spec ② §6). */
+export type Notice = { kind: "done"; state: ToastState } | { kind: "note"; text: string; action: string; id: number };
+
+export function nextNotice(cur: Notice | null, incoming: { done: Completed } | { text: string; action: string; id: number }): Notice {
+  if ("done" in incoming) return { kind: "done", state: merge(cur?.kind === "done" ? cur.state : null, incoming.done) };
+  return { kind: "note", ...incoming };
+}
+
+export function noticeText(n: Notice): string {
+  return n.kind === "done" ? toastText(n.state) : n.text;
+}

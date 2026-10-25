@@ -29,7 +29,9 @@ use super::project_book::{
 };
 use crate::domain::dates::business_days;
 use crate::domain::ids::next_no;
-use crate::domain::{INBOX, InvalidRow, Label, Project, Section, Task, TaskInput, TaskPatch};
+use crate::domain::{
+    INBOX, InvalidRow, Label, Position, Project, Section, Task, TaskInput, TaskPatch,
+};
 use crate::domain::{recurrence, reminders};
 use crate::error::{AppError, AppResult};
 
@@ -166,6 +168,33 @@ fn label_recurrence(t: &mut Task) {
 fn non_empty(s: &str) -> Option<String> {
     let t = s.trim();
     (!t.is_empty()).then(|| t.to_string())
+}
+
+/// Frees the place right before / after sibling `anchor` (same section and parent) and returns
+/// its 並び順. The siblings are first numbered 1, 2, ... in their shown order (並び順, then book
+/// order), so tied orders (two PCs appending offline, a hand-edited book) still put the new
+/// task next to the anchor. Only 並び順 changes, which the task-level sync does not treat as an edit.
+fn make_room(
+    book: &mut ProjectBook,
+    category: &Option<String>,
+    parent: Option<u32>,
+    anchor: u32,
+    after: bool,
+) -> u32 {
+    let mut sibs: Vec<usize> = (0..book.tasks.len())
+        .filter(|&i| &book.tasks[i].category == category && book.tasks[i].parent_no == parent)
+        .collect();
+    sibs.sort_by_key(|&i| (book.tasks[i].order, i));
+    let pos = sibs
+        .iter()
+        .position(|&i| book.tasks[i].no == anchor)
+        .unwrap_or(sibs.len());
+    let at = pos + usize::from(after);
+    for (k, &i) in sibs.iter().enumerate() {
+        let n = k + 1 + usize::from(k >= at);
+        book.tasks[i].order = u32::try_from(n).unwrap_or(u32::MAX);
+    }
+    u32::try_from(at + 1).unwrap_or(u32::MAX)
 }
 
 /// Indices (in book order) of the task `no` and all of its descendants.
@@ -974,6 +1003,17 @@ impl ProjectStore {
     }
 
     pub fn add_task(&mut self, project: &str, input: TaskInput) -> AppResult<ProjectView> {
+        self.add_task_at(project, input, None)
+    }
+
+    /// `position`: right before / after that task, which must be a sibling (same section and
+    /// parent); the later siblings move down one. `None` appends to the section.
+    pub fn add_task_at(
+        &mut self,
+        project: &str,
+        input: TaskInput,
+        position: Option<Position>,
+    ) -> AppResult<ProjectView> {
         let name = project.to_string();
         self.mutate(project, move |book, ctx| {
             let title = non_empty(&input.title).ok_or_else(|| invalid("タスク名が空です"))?;
@@ -989,13 +1029,28 @@ impl ProjectStore {
                 None => parent_category,
             };
             let no = next_no_for(book, ctx.high_water);
-            let order = book
-                .tasks
-                .iter()
-                .filter(|t| t.category == category)
-                .map(|t| t.order)
-                .max()
-                .map_or(1, |m| m.saturating_add(1));
+            let order = match position {
+                None => book
+                    .tasks
+                    .iter()
+                    .filter(|t| t.category == category)
+                    .map(|t| t.order)
+                    .max()
+                    .map_or(1, |m| m.saturating_add(1)),
+                Some(pos) => {
+                    let (anchor_no, after) = match pos {
+                        Position::Before(n) => (n, false),
+                        Position::After(n) => (n, true),
+                    };
+                    let anchor = &book.tasks[find_task(book, anchor_no)?];
+                    if anchor.category != category || anchor.parent_no != input.parent_no {
+                        return Err(invalid(
+                            "位置のタスクと同じセクション・親にしか追加できません",
+                        ));
+                    }
+                    make_room(book, &category, input.parent_no, anchor_no, after)
+                }
+            };
             if !ctx.display_name.is_empty() && !book.assignees.contains(&ctx.display_name) {
                 book.assignees.push(ctx.display_name.clone());
             }
@@ -1200,6 +1255,55 @@ impl ProjectStore {
             comments_follow(comments::archive(&self.paths, project, Some(n), self.now()));
         }
         self.view(project)
+    }
+
+    /// Copies the task and its descendants right below it (spec ② §4.2): new numbers, now as
+    /// the creation time, everything else as it is. Comments are not copied. Returns the copy's No.
+    pub fn duplicate_task(&mut self, project: &str, no: u32) -> AppResult<(ProjectView, u32)> {
+        let mut copy_no = 0;
+        self.mutate(project, |book, ctx| {
+            find_task(book, no)?;
+            let originals: Vec<Task> = subtree(book, no)
+                .into_iter()
+                .map(|i| book.tasks[i].clone())
+                .collect();
+            let top = originals
+                .iter()
+                .find(|t| t.no == no)
+                .cloned()
+                .expect("the task is in its own subtree");
+            let at = make_room(book, &top.category, top.parent_no, top.no, true);
+            let mut renumber: BTreeMap<u32, u32> = BTreeMap::new();
+            // Parents before children, so each child finds its parent's new No.
+            let mut queue = vec![top.no];
+            while let Some(old) = queue.pop() {
+                let src = originals
+                    .iter()
+                    .find(|t| t.no == old)
+                    .expect("in the subtree");
+                let new = next_no_for(book, ctx.high_water);
+                renumber.insert(old, new);
+                let mut t = src.clone();
+                t.no = new;
+                t.created_at = ctx.now;
+                if old == top.no {
+                    t.order = at;
+                } else {
+                    t.parent_no = t.parent_no.map(|p| renumber[&p]);
+                }
+                book.tasks.push(t);
+                let mut kids: Vec<u32> = originals
+                    .iter()
+                    .filter(|c| c.parent_no == Some(old))
+                    .map(|c| c.no)
+                    .collect();
+                kids.sort_unstable_by(|a, b| b.cmp(a));
+                queue.extend(kids);
+            }
+            copy_no = renumber[&top.no];
+            Ok(())
+        })?;
+        Ok((self.view(project)?, copy_no))
     }
 
     /// Moves the task and its descendants. In another project they get new numbers (appended
@@ -1857,6 +1961,143 @@ mod tests {
         let on_disk = read_project_book(&e.data().join("仕事.xlsx")).unwrap();
         assert_eq!(on_disk.tasks.len(), 2);
         assert_eq!(on_disk.tasks[1].title, "表を作る");
+    }
+
+    fn titles_in_order(v: &ProjectView, parent: Option<u32>) -> Vec<String> {
+        let mut ts: Vec<&Task> = v
+            .tasks
+            .iter()
+            .filter(|t| t.parent_no == parent && t.category.is_none())
+            .collect();
+        ts.sort_by_key(|t| (t.order, t.no));
+        ts.iter().map(|t| t.title.clone()).collect()
+    }
+
+    #[test]
+    fn add_task_after_and_before_a_row() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.add_task(INBOX, input("B")).unwrap();
+        e.store.add_task(INBOX, input("C")).unwrap();
+        let v = e
+            .store
+            .add_task_at(INBOX, input("A2"), Some(Position::After(1)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A2", "B", "C"]);
+        let v = e
+            .store
+            .add_task_at(INBOX, input("B0"), Some(Position::Before(2)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A2", "B0", "B", "C"]);
+    }
+
+    #[test]
+    fn add_task_before_the_first_row() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("A")).unwrap();
+        let v = e
+            .store
+            .add_task_at(INBOX, input("Z"), Some(Position::Before(1)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["Z", "A"]);
+        assert!(v.tasks.iter().all(|t| t.order >= 1));
+    }
+
+    #[test]
+    fn add_task_next_to_a_subtask_stays_under_its_parent() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("親")).unwrap();
+        e.store.add_task(INBOX, child_of("子1", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("子2", 1)).unwrap();
+        let v = e
+            .store
+            .add_task_at(INBOX, child_of("子1b", 1), Some(Position::After(2)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, Some(1)), ["子1", "子1b", "子2"]);
+    }
+
+    #[test]
+    fn add_task_at_another_parent_is_refused() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("親")).unwrap();
+        e.store.add_task(INBOX, child_of("子", 1)).unwrap();
+        let err = e
+            .store
+            .add_task_at(INBOX, input("外"), Some(Position::After(2)))
+            .unwrap_err();
+        assert!(matches!(err, AppError::Invalid { .. }), "{err:?}");
+    }
+
+    /// Two siblings with the same 並び順 (two PCs appended offline, or a hand-edited book): the
+    /// new task still goes right next to the one it was asked for.
+    fn tied_pair(e: &mut Env) {
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.add_task(INBOX, input("B")).unwrap();
+        let order = e.store.view(INBOX).unwrap().tasks[0].order;
+        e.store
+            .update_task(
+                INBOX,
+                2,
+                TaskPatch {
+                    order: Some(order),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn add_task_next_to_a_tied_sibling() {
+        let mut e = env();
+        tied_pair(&mut e);
+        let v = e
+            .store
+            .add_task_at(INBOX, input("A2"), Some(Position::After(1)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A2", "B"]);
+        let v = e
+            .store
+            .add_task_at(INBOX, input("B0"), Some(Position::Before(2)))
+            .unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A2", "B0", "B"]);
+    }
+
+    #[test]
+    fn duplicate_next_to_a_tied_sibling() {
+        let mut e = env();
+        tied_pair(&mut e);
+        let (v, _) = e.store.duplicate_task(INBOX, 1).unwrap();
+        assert_eq!(titles_in_order(&v, None), ["A", "A", "B"]);
+    }
+
+    #[test]
+    fn duplicate_copies_the_subtree_right_below() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("A")).unwrap();
+        e.store.add_task(INBOX, child_of("A-子", 1)).unwrap();
+        e.store.add_task(INBOX, input("B")).unwrap();
+        let (v, copy) = e.store.duplicate_task(INBOX, 1).unwrap();
+        assert_eq!(copy, 4);
+        assert_eq!(titles_in_order(&v, None), ["A", "A", "B"]);
+        let kids: Vec<&Task> = v
+            .tasks
+            .iter()
+            .filter(|t| t.parent_no == Some(copy))
+            .collect();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(kids[0].title, "A-子");
+        assert_eq!(kids[0].no, 5);
+    }
+
+    #[test]
+    fn duplicate_of_a_subtask_keeps_the_parent() {
+        let mut e = env();
+        e.store.add_task(INBOX, input("親")).unwrap();
+        e.store.add_task(INBOX, child_of("子1", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("子2", 1)).unwrap();
+        let (v, copy) = e.store.duplicate_task(INBOX, 2).unwrap();
+        assert_eq!(task(&v, copy).parent_no, Some(1));
+        assert_eq!(titles_in_order(&v, Some(1)), ["子1", "子1", "子2"]);
     }
 
     #[test]
