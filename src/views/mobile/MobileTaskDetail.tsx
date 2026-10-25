@@ -236,7 +236,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
     >
       <div style={{ flex: 1, minHeight: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "8px 16px" }}>
         <div style={{ display: "flex", gap: "var(--space-3)" }}>
-          <Checkbox checked={done} onChange={setDone} ariaLabel="完了" />
+          <Checkbox checked={done} onChange={setDone} ariaLabel="完了" size={20} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <Tap onClick={open("title")} label="名前を編集">
               <div style={{ fontSize: 20, lineHeight: "29px", fontWeight: 600, color: done ? "var(--color-text-muted)" : "var(--color-text-primary)" }}>{task.title}</div>

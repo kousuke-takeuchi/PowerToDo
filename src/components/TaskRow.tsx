@@ -113,7 +113,7 @@ export function TaskRow(p: TaskRowProps) {
         </button>
       )}
       <div style={{ display: "flex", flex: "0 0 auto" }} onClick={(e) => e.stopPropagation()}>
-        <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} />
+        <Checkbox checked={p.done} priority={p.priority} onChange={() => p.onToggleDone?.()} size={mobile ? 20 : 18} />
       </div>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
         <div

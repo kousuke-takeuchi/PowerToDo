@@ -6,7 +6,8 @@ export type CheckboxProps = {
   checked: boolean;
   priority?: 1 | 2 | 3 | 4;
   onChange?: (checked: boolean) => void;
-  size?: 20;
+  /** 18 on desktop (Todoist), 20 on mobile. */
+  size?: 18 | 20;
   ariaLabel?: string;
 };
 
@@ -21,7 +22,7 @@ const priorityVar = {
  * 完了すると、リングが 1 -> 1.25 -> 1 に膨らみ (200ms)、内側が success で塗られ (150ms)、チェックが描かれる (200ms)。
  * 戻すときは 120ms で逆再生。最初の描画ではアニメーションしない。prefers-reduced-motion では即時。
  */
-export function Checkbox({ checked, priority = 4, onChange, size = 20, ariaLabel }: CheckboxProps) {
+export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel }: CheckboxProps) {
   const { reduced, t } = useMotionTiming();
   const [scope, animate] = useAnimate<HTMLButtonElement>();
   const prev = useRef(checked);
@@ -44,13 +45,15 @@ export function Checkbox({ checked, priority = 4, onChange, size = 20, ariaLabel
       aria-checked={checked}
       aria-label={ariaLabel}
       onClick={() => onChange?.(!checked)}
+      className="group/check"
       style={{
         position: "relative",
         width: size,
         height: size,
         borderRadius: size / 2,
-        border: `1.5px solid ${color}`,
-        background: "transparent",
+        border: `2px solid ${color}`,
+        // Priority 1-3: a light fill of the ring's color (Todoist). Priority 4 has none.
+        background: !checked && priority < 4 ? `color-mix(in srgb, ${priorityVar[priority]} 10%, transparent)` : "transparent",
         display: "grid",
         placeItems: "center",
         padding: 0,
@@ -67,10 +70,24 @@ export function Checkbox({ checked, priority = 4, onChange, size = 20, ariaLabel
         transition={fadeIn}
         style={{ position: "absolute", inset: 0, borderRadius: size / 2, background: "var(--color-success)" }}
       />
+      {!checked && (
+        // Hover preview of the check (Todoist): shown at once, no transition.
+        <svg
+          aria-hidden
+          width={size * 0.6}
+          height={size * 0.6}
+          viewBox="0 0 12 12"
+          fill="none"
+          className="opacity-0 group-hover/check:opacity-100"
+          style={{ position: "absolute", display: "block" }}
+        >
+          <path d="M2.5 6.5 L5 9 L9.5 3.5" stroke="var(--color-text-muted)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
       <svg
         aria-hidden
-        width={12}
-        height={12}
+        width={size * 0.6}
+        height={size * 0.6}
         viewBox="0 0 12 12"
         fill="none"
         style={{ position: "relative", display: "block", flex: "0 0 auto" }}
