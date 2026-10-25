@@ -131,8 +131,10 @@ pub fn to_line(line: &Line) -> String {
 
 // ---- files (spec ① §3.1, §3.5) ----
 
-fn path(paths: &Paths, project: &str, no: u32) -> PathBuf {
-    paths.comments_dir().join(file_name(project, no))
+/// The file of one task. The project must be a valid project name (no path in it).
+fn path(paths: &Paths, project: &str, no: u32) -> AppResult<PathBuf> {
+    crate::store::paths::validate_project_name(project)?;
+    Ok(paths.comments_dir().join(file_name(project, no)))
 }
 
 /// The file's text; a missing file is empty.
@@ -146,16 +148,22 @@ fn read_text(path: &Path) -> AppResult<String> {
 
 /// The comments of one task (a missing file has none).
 pub fn read(paths: &Paths, project: &str, no: u32) -> AppResult<Vec<Comment>> {
-    Ok(view(&parse(&read_text(&path(paths, project, no))?)))
+    Ok(view(&parse(&read_text(&path(paths, project, no)?)?)))
 }
 
 /// Appends one line (creates `_comments/` and the file when needed) and flushes it to disk.
 pub fn append(paths: &Paths, project: &str, no: u32, line: &Line) -> AppResult<()> {
+    let file = path(paths, project, no)?;
     std::fs::create_dir_all(paths.comments_dir())?;
+    // A last line cut short (a crash mid-write, a hand edit) must not swallow this one.
+    let broken_end = std::fs::read(&file).is_ok_and(|b| b.last().is_some_and(|&c| c != b'\n'));
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path(paths, project, no))?;
+        .open(&file)?;
+    if broken_end {
+        f.write_all(b"\n")?;
+    }
     f.write_all(to_line(line).as_bytes())?;
     f.sync_all()?;
     Ok(())
@@ -199,7 +207,7 @@ pub fn counts(paths: &Paths, project: &str) -> AppResult<BTreeMap<u32, u32>> {
 pub fn rename_project(paths: &Paths, from: &str, to: &str) -> AppResult<()> {
     for (pj, no, p) in files(paths)? {
         if pj == from {
-            move_file(paths, &p, &path(paths, to, no))?;
+            move_file(paths, &p, &path(paths, to, no)?)?;
         }
     }
     Ok(())
@@ -235,11 +243,11 @@ pub fn archive(paths: &Paths, project: &str, no: Option<u32>, now: NaiveDateTime
 
 /// A task that got another project or No.: its comments follow, merged into the target's when that exists.
 pub fn move_task(paths: &Paths, from: (&str, u32), to: (&str, u32)) -> AppResult<()> {
-    let src = path(paths, from.0, from.1);
+    let src = path(paths, from.0, from.1)?;
     if !src.exists() {
         return Ok(());
     }
-    move_file(paths, &src, &path(paths, to.0, to.1))
+    move_file(paths, &src, &path(paths, to.0, to.1)?)
 }
 
 /// Moves `src` to `dest`; when `dest` exists, `dest` gets the merged lines of both.
@@ -270,7 +278,7 @@ pub fn check_author(lines: &[Line], id: &str, author: &str) -> AppResult<()> {
 
 /// The lines of one task's file (a missing file has none).
 pub fn lines(paths: &Paths, project: &str, no: u32) -> AppResult<Vec<Line>> {
-    Ok(parse(&read_text(&path(paths, project, no))?))
+    Ok(parse(&read_text(&path(paths, project, no)?)?))
 }
 
 #[cfg(test)]
@@ -491,5 +499,29 @@ mod tests {
             check_author(&lines, "9999", "たろう").is_err(),
             "a missing comment"
         );
+    }
+
+    #[test]
+    fn append_after_a_broken_last_line_starts_a_new_line() {
+        let (_t, p) = paths();
+        std::fs::create_dir_all(p.comments_dir()).unwrap();
+        std::fs::write(
+            p.comments_dir().join("仕事.1.jsonl"),
+            "{\"id\":\"0000\",\"op\":\"add\"",
+        )
+        .unwrap();
+        append(&p, "仕事", 1, &add("0001", "a")).unwrap();
+        assert_eq!(
+            read(&p, "仕事", 1).unwrap().len(),
+            1,
+            "the new comment reads"
+        );
+    }
+
+    #[test]
+    fn a_project_name_with_a_path_is_refused() {
+        let (_t, p) = paths();
+        assert!(append(&p, "../x", 1, &add("0001", "a")).is_err());
+        assert!(read(&p, "../x", 1).is_err());
     }
 }
