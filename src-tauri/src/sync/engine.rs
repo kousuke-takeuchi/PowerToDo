@@ -1179,6 +1179,7 @@ impl SyncEngine {
         // does a file this run did not touch that changed meanwhile (another device's upload,
         // which this run never planned).
         if (!report.uploaded.is_empty()
+            || !report.merged.is_empty()
             || !report.archived_remote.is_empty()
             || !report.conflicts.is_empty())
             && let Ok(files) = target.backend.list().await
@@ -1186,6 +1187,7 @@ impl SyncEngine {
             let touched: BTreeSet<&str> = report
                 .uploaded
                 .iter()
+                .chain(&report.merged)
                 .chain(&report.archived_remote)
                 .map(String::as_str)
                 .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
@@ -2828,6 +2830,18 @@ mod tests {
         assert!(!r.uploaded.is_empty(), "{r:?}");
         assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
         assert_eq!(a.engine.next_due(), None);
+    }
+
+    #[tokio::test]
+    async fn own_merged_upload_is_not_a_remote_change() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        a.sync().await;
+        let r = settled(&b).await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        assert_eq!(b.engine.check_remote().await, CheckOutcome::Unchanged);
     }
 
     #[tokio::test]
