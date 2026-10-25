@@ -19,9 +19,22 @@ pub enum AppError {
     Unsaved { message: String },
 }
 
+/// The text for a write the OS refused (Windows `ERROR_ACCESS_DENIED`). On a folder the user can
+/// write to, the usual cause is a security product stopping an app it does not know: Avast's
+/// ransomware shield, or Windows' Controlled Folder Access. `original` is kept at the end.
+pub fn access_denied_message(original: &str) -> String {
+    format!(
+        "書き込みが拒否されました。セキュリティソフト (Avast のランサムウェア対策や、Windows の「コントロールされたフォルダー アクセス」など) が PowerToDo を止めている可能性があります。PowerToDo を許可するか、別のフォルダを選んでください。({original})"
+    )
+}
+
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
-        let message = e.to_string();
+        let mut message = e.to_string();
+        // 5: Windows ERROR_ACCESS_DENIED (EIO elsewhere, so only on Windows).
+        if cfg!(windows) && e.raw_os_error() == Some(5) {
+            message = access_denied_message(&message);
+        }
         // 32 / 33: Windows ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION (file open in Excel).
         // The codes mean something else on other platforms but are never produced for these
         // operations there.
@@ -61,6 +74,39 @@ mod tests {
         assert!(matches!(AppError::from(denied), AppError::Locked { .. }));
         let other = std::io::Error::from(std::io::ErrorKind::NotFound);
         assert!(matches!(AppError::from(other), AppError::Io { .. }));
+    }
+
+    #[test]
+    fn access_denied_message_points_at_security_software() {
+        let m = access_denied_message("アクセスが拒否されました。 (os error 5)");
+        assert!(m.contains("セキュリティソフト"), "{m}");
+        assert!(m.contains("許可"), "{m}");
+        assert!(
+            m.ends_with("(アクセスが拒否されました。 (os error 5))"),
+            "{m}"
+        );
+    }
+
+    /// Windows ERROR_ACCESS_DENIED: a security product (Avast's ransomware shield, Windows'
+    /// Controlled Folder Access) refusing an unsigned app is the usual cause on a fresh folder.
+    #[cfg(windows)]
+    #[test]
+    fn windows_access_denied_explains_the_likely_cause() {
+        let e = std::io::Error::from_raw_os_error(5);
+        match AppError::from(e) {
+            AppError::Locked { message } => {
+                assert!(message.contains("セキュリティソフト"), "{message}")
+            }
+            other => panic!("expected Locked, got {other:?}"),
+        }
+    }
+
+    /// The same number is EIO on macOS / Linux: no hint there.
+    #[cfg(unix)]
+    #[test]
+    fn os_error_5_elsewhere_is_left_alone() {
+        let e = std::io::Error::from_raw_os_error(5);
+        assert!(!AppError::from(e).to_string().contains("セキュリティソフト"));
     }
 
     #[test]
