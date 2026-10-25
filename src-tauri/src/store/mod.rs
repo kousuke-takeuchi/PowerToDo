@@ -1,4 +1,5 @@
 pub mod cells;
+pub mod comments;
 pub mod common_book;
 pub mod external;
 pub mod fired;
