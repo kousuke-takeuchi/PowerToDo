@@ -1390,6 +1390,7 @@ impl SyncEngine {
     /// `remote` is `None` when the target has no `_comments` folder. A side without that folder
     /// (archiving leaves it, so it was wiped or never made) is not read as every comment deleted:
     /// the records are dropped and the other side fills it again.
+    #[allow(clippy::too_many_arguments)]
     async fn sync_comments(
         &self,
         host: &dyn SyncHost,
