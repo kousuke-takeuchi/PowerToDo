@@ -77,7 +77,39 @@ pub trait StorageBackend: Send + Sync {
     fn root_identity(&self) -> Option<String> {
         None
     }
+
+    // ---- the `_comments` folder (spec ① §3.4). Names are the leaf names (`仕事.12.jsonl`). ----
+
+    /// The `*.jsonl` files directly in `_comments/`. A target without that folder has none. Complete
+    /// or `Err`, like [`StorageBackend::list`].
+    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    /// [`StorageBackend::upload`] inside `_comments/` (the folder is created when needed).
+    fn upload_comment<'a>(
+        &'a self,
+        _name: &'a str,
+        _existing: Option<&'a RemoteFile>,
+        _bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async {
+            Err(BackendError::Other(
+                "この同期先はコメントを扱えません".into(),
+            ))
+        })
+    }
+    /// [`StorageBackend::move_to_archive`] for a file of `_comments/`.
+    fn archive_comment<'a>(&'a self, _file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async {
+            Err(BackendError::Other(
+                "この同期先はコメントを扱えません".into(),
+            ))
+        })
+    }
 }
+
+/// Where comment files live inside the target, as a name prefix of [`MemoryBackend`] entries.
+const COMMENTS_PREFIX: &str = "_comments/";
 
 struct Entry {
     name: String,
@@ -338,6 +370,58 @@ impl StorageBackend for MemoryBackend {
             Ok(())
         })
     }
+
+    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(async move {
+            let inner = self.lock();
+            if let Some(f) = inner.list_failure {
+                return Err(f.error());
+            }
+            let mut files: Vec<RemoteFile> = inner
+                .files
+                .iter()
+                .filter_map(|(id, e)| {
+                    let leaf = e.name.strip_prefix(COMMENTS_PREFIX)?;
+                    leaf.ends_with(".jsonl").then(|| RemoteFile {
+                        name: leaf.to_string(),
+                        ..Self::remote_file(id, e)
+                    })
+                })
+                .collect();
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(files)
+        })
+    }
+
+    fn upload_comment<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            let full = format!("{COMMENTS_PREFIX}{name}");
+            let existing = existing.map(|f| RemoteFile {
+                name: full.clone(),
+                ..f.clone()
+            });
+            let f = self.upload(&full, existing.as_ref(), bytes).await?;
+            Ok(RemoteFile {
+                name: name.to_string(),
+                ..f
+            })
+        })
+    }
+
+    fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async move {
+            let full = RemoteFile {
+                name: format!("{COMMENTS_PREFIX}{}", file.name),
+                ..file.clone()
+            };
+            self.move_to_archive(&full).await
+        })
+    }
 }
 
 #[cfg(test)]
@@ -514,5 +598,44 @@ mod tests {
         b.clear_failures();
         assert_eq!(b.list().await.unwrap().len(), 2);
         assert_eq!(b.download(&files[0]).await.unwrap(), b"a");
+    }
+
+    #[tokio::test]
+    async fn comments_round_trip() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        let f = b
+            .upload_comment("仕事.1.jsonl", None, b"a\n".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(f.name, "仕事.1.jsonl");
+        let listed = b.list_comments().await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(b.download(&listed[0]).await.unwrap(), b"a\n");
+        let g = b
+            .upload_comment("仕事.1.jsonl", Some(&listed[0]), b"a\nb\n".to_vec())
+            .await
+            .unwrap();
+        assert!(matches!(
+            b.upload_comment("仕事.1.jsonl", Some(&listed[0]), b"x".to_vec())
+                .await,
+            Err(BackendError::Precondition)
+        ));
+        b.archive_comment(&g).await.unwrap();
+        assert!(b.list_comments().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn comments_are_not_in_list() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        b.upload_comment("仕事.1.jsonl", None, b"a\n".to_vec())
+            .await
+            .unwrap();
+        assert!(b.list().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_remote_comments_folder_is_empty() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        assert!(b.list_comments().await.unwrap().is_empty());
     }
 }

@@ -28,6 +28,10 @@ const ARCHIVE_FOLDER_NAME: &str = "archive";
 /// and not by their (renameable) name.
 const PROP_ROOT: &str = "root";
 const PROP_ARCHIVE: &str = "archive";
+/// The comment files' folder in the root (spec ① §3.4).
+const COMMENTS_FOLDER_NAME: &str = "_comments";
+const PROP_COMMENTS: &str = "comments";
+const JSONL_MIME: &str = "application/x-ndjson";
 /// The metadata every returned file carries.
 const FILE_FIELDS: &str = "id,name,md5Checksum,modifiedTime,size";
 /// Pages of 1000 files; more than this many pages means something is wrong.
@@ -183,19 +187,8 @@ impl GoogleDriveBackend {
         kind: &str,
         parent: Option<&str>,
     ) -> Result<String, BackendError> {
-        let mut q = format!(
-            "mimeType='{FOLDER_MIME}' and appProperties has {{ key='powertodo' and value='{kind}' }} and trashed=false"
-        );
-        if let Some(p) = parent {
-            q.push_str(&format!(" and '{}' in parents", escape_q(p)));
-        }
-        let found = self.query(&q, "files(id)").await?;
-        if let Some(id) = found
-            .iter()
-            .filter_map(|f| f.get("id").and_then(serde_json::Value::as_str))
-            .min()
-        {
-            return Ok(id.to_string());
+        if let Some(id) = self.find_folder(kind, parent).await? {
+            return Ok(id);
         }
         let mut meta = serde_json::json!({
             "name": name,
@@ -217,6 +210,55 @@ impl GoogleDriveBackend {
             .await?;
         id_of(&reply.json("Google Drive のフォルダ")?)
             .ok_or_else(|| BackendError::Other("Google Drive のフォルダを作れませんでした".into()))
+    }
+
+    /// The folder marked `powertodo=<kind>` (inside `parent` when given), without creating it.
+    async fn find_folder(
+        &self,
+        kind: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, BackendError> {
+        let mut q = format!(
+            "mimeType='{FOLDER_MIME}' and appProperties has {{ key='powertodo' and value='{kind}' }} and trashed=false"
+        );
+        if let Some(p) = parent {
+            q.push_str(&format!(" and '{}' in parents", escape_q(p)));
+        }
+        let found = self.query(&q, "files(id)").await?;
+        Ok(found
+            .iter()
+            .filter_map(|f| f.get("id").and_then(serde_json::Value::as_str))
+            .min()
+            .map(str::to_string))
+    }
+
+    /// The comment files (`*.jsonl` in `_comments`). A root without that folder has none.
+    async fn list_comment_files(&self) -> Result<Vec<RemoteFile>, BackendError> {
+        let root = self.resolve_root().await?;
+        let Some(folder) = self.find_folder(PROP_COMMENTS, Some(&root)).await? else {
+            return Ok(Vec::new());
+        };
+        let q = format!(
+            "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}'",
+            escape_q(&folder)
+        );
+        let mut files = Vec::new();
+        for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
+            let is_comment = item
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|n| crate::store::comments::parse_file_name(n).is_some());
+            if is_comment {
+                files.push(remote_file(&item)?);
+            }
+        }
+        Ok(files)
+    }
+
+    async fn comments_folder(&self) -> Result<String, BackendError> {
+        let root = self.root_id().await?;
+        self.find_or_create_folder(COMMENTS_FOLDER_NAME, PROP_COMMENTS, Some(&root))
+            .await
     }
 
     /// Looks for the root folder again (creating it) and remembers it.
@@ -299,6 +341,18 @@ impl GoogleDriveBackend {
     /// look and the write is accepted, like WebDAV without etags; spec section 9.)
     async fn create_file(&self, name: &str, bytes: Vec<u8>) -> Result<RemoteFile, BackendError> {
         let root = self.root_id().await?;
+        self.create_in(&root, name, bytes, XLSX_MIME).await
+    }
+
+    /// [`Self::create_file`] in the folder `root` with the content type `mime`.
+    async fn create_in(
+        &self,
+        root: &str,
+        name: &str,
+        bytes: Vec<u8>,
+        mime: &str,
+    ) -> Result<RemoteFile, BackendError> {
+        let root = root.to_string();
         let q = format!(
             "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}' and name='{}'",
             escape_q(&root),
@@ -308,7 +362,7 @@ impl GoogleDriveBackend {
             return Err(BackendError::Precondition);
         }
         let meta = serde_json::json!({"name": name, "parents": [root]}).to_string();
-        let (content_type, body) = multipart_related(&meta, XLSX_MIME, &bytes);
+        let (content_type, body) = multipart_related(&meta, mime, &bytes);
         let url = self.url(
             "/upload/drive/v3/files",
             &[("uploadType", "multipart"), ("fields", FILE_FIELDS)],
@@ -331,10 +385,22 @@ impl GoogleDriveBackend {
         file: &RemoteFile,
         bytes: Vec<u8>,
     ) -> Result<RemoteFile, BackendError> {
+        let root = self.root_id().await?;
+        self.update_in(&root, file, bytes, XLSX_MIME).await
+    }
+
+    /// [`Self::update_file`] for a file of the folder `root`, with the content type `mime`.
+    async fn update_in(
+        &self,
+        root: &str,
+        file: &RemoteFile,
+        bytes: Vec<u8>,
+        mime: &str,
+    ) -> Result<RemoteFile, BackendError> {
         // Drive keeps a file's id across a move or a rename, so the id alone does not say it
         // is still the file that was listed: another PC may have archived it (moved and
         // renamed) or the user may have renamed it in the browser.
-        let root = self.root_id().await?;
+        let root = root.to_string();
         let meta_url = self.url(
             &Self::file_path("/drive/v3", &file.id),
             &[("fields", "md5Checksum,trashed,name,parents")],
@@ -369,7 +435,7 @@ impl GoogleDriveBackend {
             .call(|http, token| {
                 http.patch(url.clone())
                     .bearer_auth(token)
-                    .header("Content-Type", XLSX_MIME)
+                    .header("Content-Type", mime)
                     .body(bytes.clone())
             })
             .await?;
@@ -384,6 +450,13 @@ impl GoogleDriveBackend {
     /// repeated name, so the archive is looked at first. Nothing is trashed or deleted.
     async fn archive_file(&self, file: &RemoteFile) -> Result<(), BackendError> {
         let root = self.root_id().await?;
+        self.archive_in(&root, file).await
+    }
+
+    /// [`Self::archive_file`] for a file of the folder `from` (the root or `_comments`).
+    async fn archive_in(&self, from: &str, file: &RemoteFile) -> Result<(), BackendError> {
+        let root = self.root_id().await?;
+        let from = from.to_string();
         let archive = self
             .find_or_create_folder(ARCHIVE_FOLDER_NAME, PROP_ARCHIVE, Some(&root))
             .await?;
@@ -395,10 +468,21 @@ impl GoogleDriveBackend {
             .filter_map(|f| f.get("name").and_then(serde_json::Value::as_str))
             .map(str::to_string)
             .collect();
-        let stem = file.name.strip_suffix(".xlsx").unwrap_or(&file.name);
+        // A comment file keeps its `.jsonl` (archive_file_name writes `.xlsx`).
+        let (stem, jsonl) = match file.name.strip_suffix(".jsonl") {
+            Some(stem) => (stem, true),
+            None => (file.name.strip_suffix(".xlsx").unwrap_or(&file.name), false),
+        };
         let tag = file.modified.format("%Y-%m-%d %H%M").to_string();
         let dest = (1..=MAX_ARCHIVE_NAMES)
-            .map(|n| archive_file_name(stem, &tag, n))
+            .map(|n| {
+                let name = archive_file_name(stem, &tag, n);
+                if jsonl {
+                    format!("{}.jsonl", name.strip_suffix(".xlsx").unwrap_or(&name))
+                } else {
+                    name
+                }
+            })
             .find(|candidate| !taken.contains(candidate))
             .ok_or_else(|| {
                 BackendError::Other(format!(
@@ -410,7 +494,7 @@ impl GoogleDriveBackend {
             &Self::file_path("/drive/v3", &file.id),
             &[
                 ("addParents", archive.as_str()),
-                ("removeParents", root.as_str()),
+                ("removeParents", from.as_str()),
                 ("fields", FILE_FIELDS),
             ],
         )?;
@@ -455,6 +539,32 @@ impl StorageBackend for GoogleDriveBackend {
     /// made against.
     fn root_identity(&self) -> Option<String> {
         self.root_lock().clone()
+    }
+
+    fn list_comments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(self.list_comment_files())
+    }
+
+    fn upload_comment<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            let folder = self.comments_folder().await?;
+            match existing {
+                Some(file) => self.update_in(&folder, file, bytes, JSONL_MIME).await,
+                None => self.create_in(&folder, name, bytes, JSONL_MIME).await,
+            }
+        })
+    }
+
+    fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async move {
+            let folder = self.comments_folder().await?;
+            self.archive_in(&folder, file).await
+        })
     }
 }
 
@@ -669,6 +779,83 @@ mod tests {
             .query_pairs()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.into_owned())
+    }
+
+    const COMMENTS_FOLDER_Q: &str = "mimeType='application/vnd.google-apps.folder' and appProperties has { key='powertodo' and value='comments' } and trashed=false and 'root1' in parents";
+    const COMMENTS_LIST_Q: &str =
+        "'com1' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'";
+
+    #[tokio::test]
+    async fn comments_listing_without_the_folder_is_empty() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, COMMENTS_FOLDER_Q, json!({"files": []})).await;
+        assert!(b.list_comments().await.unwrap().is_empty());
+        assert!(
+            sent(&server, "POST").await.is_empty(),
+            "listing never creates the folder"
+        );
+    }
+
+    #[tokio::test]
+    async fn comments_listing_reads_the_comments_folder() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            COMMENTS_FOLDER_Q,
+            json!({"files": [{"id": "com1"}]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            COMMENTS_LIST_Q,
+            json!({"files": [file_json("c1", "仕事.12.jsonl", "m1"), file_json("x", "notes.txt", "m2")]}),
+        )
+        .await;
+        let files = b.list_comments().await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            (files[0].id.as_str(), files[0].name.as_str()),
+            ("c1", "仕事.12.jsonl")
+        );
+    }
+
+    #[tokio::test]
+    async fn comment_upload_creates_inside_the_comments_folder() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            COMMENTS_FOLDER_Q,
+            json!({"files": [{"id": "com1"}]}),
+        )
+        .await;
+        let exists_q = "'com1' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder' and name='a.1.jsonl'";
+        mount_list(&server, exists_q, json!({"files": []})).await;
+        Mock::given(method("POST"))
+            .and(path("/upload/drive/v3/files"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(file_json(
+                "c9",
+                "a.1.jsonl",
+                "m9",
+            )))
+            .mount(&server)
+            .await;
+        let f = b
+            .upload_comment("a.1.jsonl", None, b"x\n".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(f.id, "c9");
+        let post = sent(&server, "POST").await;
+        let body = String::from_utf8_lossy(&post[0].body).to_string();
+        assert!(
+            body.contains("\"parents\":[\"com1\"]") && body.contains("application/x-ndjson"),
+            "{body}"
+        );
     }
 
     #[tokio::test]
