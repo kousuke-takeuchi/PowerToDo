@@ -103,7 +103,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
   return (
     <>
       <PageHeader>
-        <TitleGroup title="今日" subtitle={`${monthDay(today)} ${weekdayLong(today)} · ${total} 件`} />
+        <TitleGroup title="今日" subtitle={`${total} 件のタスク`} />
       </PageHeader>
       <HiddenNote names={hiddenProjects} />
       <div>
@@ -126,7 +126,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
           </section>
         )}
         <section>
-          {showOverdue && <SectionHeader title={`今日 · ${monthDay(today)}`} count={todays.length} showChevron={false} />}
+          <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} showChevron={false} />
           {rows("today", todays)}
           <AddSlot onAdd={onAddTask} />
         </section>

@@ -31,7 +31,7 @@ export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask,
   return (
     <>
       <PageHeader>
-        <TitleGroup title={`@${label}`} subtitle={`${list.length} 件 · 全プロジェクト`} />
+        <TitleGroup title={`@${label}`} subtitle={`${list.length} 件のタスク`} />
       </PageHeader>
       <HiddenNote names={hiddenProjects} />
       <div>

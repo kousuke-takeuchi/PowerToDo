@@ -11,7 +11,7 @@ import type { InvalidRow, Section, Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
-import { PageHeader, titleStyle } from "./HeaderActions";
+import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { InlineEdit } from "./InlineEdit";
 import { SubtaskForm } from "./SubtaskForm";
 
@@ -127,6 +127,8 @@ export function ProjectView({
   const { reduced } = useMotionTiming();
 
   const mine = tasks.filter((t) => t.project === project);
+  // Open tasks of this project, for the line under the title.
+  const openCount = mine.filter((t) => t.progress !== 100).length;
   const nosKey = mine.map((t) => t.no).join(",");
   useEffect(() => {
     const now = new Set(nosKey ? nosKey.split(",").map(Number) : []);
@@ -473,7 +475,7 @@ export function ProjectView({
             <InlineEdit
               value={project}
               ariaLabel="プロジェクト名"
-              style={{ fontSize: 24, lineHeight: "35px", fontWeight: 700, padding: "0 7px" }}
+              style={{ fontSize: 26, lineHeight: "36px", fontWeight: 700, padding: "0 7px" }}
               onCommit={(name) => {
                 setRenamingProject(false);
                 if (name !== project) onRenameProject(name);
@@ -482,7 +484,10 @@ export function ProjectView({
             />
           </div>
         ) : (
-          <h1 style={titleStyle}>{project}</h1>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <h1 style={titleStyle}>{project}</h1>
+            <Subtitle text={`${openCount} 件のタスク`} />
+          </div>
         )}
       </PageHeader>
       {body()}

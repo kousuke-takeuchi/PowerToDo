@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpDown, Ellipsis, LayoutList } from "lucide-react";
+import { ArrowUpDown, CircleCheck, Ellipsis, LayoutList } from "lucide-react";
 import { useEscLayer } from "../app/layers";
 
 const smallButton: React.CSSProperties = {
@@ -144,20 +144,37 @@ export function PageHeader({ children, viewLabel, onMenu }: { children: React.Re
 
 export const titleStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 24,
-  lineHeight: "35px",
+  fontSize: 26,
+  lineHeight: "36px",
   fontWeight: 700,
   color: "var(--color-text-primary)",
 };
 
-const subtitleStyle: React.CSSProperties = { fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)" };
+const subtitleStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "var(--space-1)",
+  fontSize: 13,
+  lineHeight: "19px",
+  color: "var(--color-text-secondary)",
+};
 
-/** Title + Subtitle を下揃え (pen の TitleGroup, gap 12)。 */
+/** The line under a page title, with a check icon (Todoist: 「✓ 6 件のタスク」). */
+export function Subtitle({ text }: { text: string }) {
+  return (
+    <span style={subtitleStyle}>
+      <CircleCheck size={14} aria-hidden />
+      {text}
+    </span>
+  );
+}
+
+/** Title, and under it the subtitle line. */
 export function TitleGroup({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <h1 style={titleStyle}>{title}</h1>
-      <span style={subtitleStyle}>{subtitle}</span>
+      <Subtitle text={subtitle} />
     </div>
   );
 }
