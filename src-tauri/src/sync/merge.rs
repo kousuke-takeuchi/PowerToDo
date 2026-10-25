@@ -107,6 +107,15 @@ fn merge_task(b: &Task, l: &Task, r: &Task, newer: Side) -> Task {
     }
 }
 
+/// `t` differs from `base` in more than 並び順: a drag in a section renumbers the order of
+/// every task there, which must not bring back the tasks the other side deleted.
+fn edited(t: &Task, base: &Task) -> bool {
+    Task {
+        order: base.order,
+        ..t.clone()
+    } != *base
+}
+
 pub struct ProjectMerge {
     pub book: ProjectBook,
     /// (old No., new No.) of local tasks moved because the remote added a task with that No.
@@ -123,8 +132,20 @@ pub fn merge_project(
     newer: Side,
     high_water: u32,
 ) -> ProjectMerge {
+    // 日数 is derived (the writer recomputes it with this PC's holidays): never a change.
     let by_no = |b: &ProjectBook| -> BTreeMap<u32, Task> {
-        b.tasks.iter().map(|t| (t.no, t.clone())).collect()
+        b.tasks
+            .iter()
+            .map(|t| {
+                (
+                    t.no,
+                    Task {
+                        days: None,
+                        ..t.clone()
+                    },
+                )
+            })
+            .collect()
     };
     let (bm, lm, rm) = (by_no(base), by_no(local), by_no(remote));
     let nos: BTreeSet<u32> = bm
@@ -145,8 +166,8 @@ pub fn merge_project(
                 moved.push(l.clone());
             }
             // Deleted on one side, edited on the other: the edit stays.
-            (Some(b), None, Some(r)) if r != b => tasks.push(r.clone()),
-            (Some(b), Some(l), None) if l != b => tasks.push(l.clone()),
+            (Some(b), None, Some(r)) if edited(r, b) => tasks.push(r.clone()),
+            (Some(b), Some(l), None) if edited(l, b) => tasks.push(l.clone()),
             (Some(b), Some(l), Some(r)) => tasks.push(merge_task(b, l, r, newer)),
             // Deleted on one side and untouched on the other, or deleted on both.
             _ => {}
@@ -455,8 +476,11 @@ pub fn merge_files(
     today: NaiveDate,
 ) -> Result<Merged, String> {
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    // Each under its own name: a project workbook takes its project from the file name.
     let put = |tag: &str, bytes: &[u8]| -> Result<PathBuf, String> {
-        let p = tmp.path().join(format!("{tag}.xlsx"));
+        let dir = tmp.path().join(tag);
+        std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+        let p = dir.join(name);
         std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
         Ok(p)
     };
@@ -465,7 +489,7 @@ pub fn merge_files(
         put("local", local)?,
         put("remote", remote)?,
     ];
-    let out = tmp.path().join("merged.xlsx");
+    let out = put("merged", &[])?;
     let renumbered = if name == COMMON_FILE {
         let [b, l, r] = read3(&paths, read_common_book)?;
         if [&b, &l, &r].iter().any(|c| !c.unparsed_holidays.is_empty()) {
@@ -788,7 +812,7 @@ mod tests {
         assert_eq!(m.settings.keep_in_tray, r.settings.keep_in_tray);
     }
 
-    use crate::store::project_book::{HEADERS, TASK_SHEET};
+    use crate::store::project_book::{HEADERS, TASK_SHEET, read_project_book};
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, 25).unwrap()
@@ -878,5 +902,63 @@ mod tests {
         std::fs::write(&p, &m.bytes).unwrap();
         let got = crate::store::common_book::read_common_book(&p).unwrap();
         assert_eq!(names_of(&got), s(&["受信トレイ", "家", "仕事"]));
+    }
+
+    #[test]
+    fn derived_days_do_not_count_as_an_edit() {
+        let mut bt = task(1, "牛乳");
+        bt.days = Some(3);
+        let b = book(vec![bt.clone(), task(2, "パン")]);
+        let mut rt = bt.clone();
+        rt.days = Some(2); // another holiday list on the other side
+        let r = book(vec![rt, task(2, "パン")]);
+        let m = merge_project(&b, &book(vec![task(2, "パン")]), &r, Side::Remote, 2);
+        assert_eq!(
+            titles(&m.book),
+            [(2, "パン".into())],
+            "the delete is followed"
+        );
+    }
+
+    #[test]
+    fn a_reorder_alone_does_not_bring_a_deleted_task_back() {
+        let b = book(vec![task(1, "牛乳"), task(2, "パン")]);
+        let mut r1 = task(1, "牛乳");
+        r1.order = 7;
+        let r = book(vec![r1, task(2, "パン")]);
+        let m = merge_project(&b, &book(vec![task(2, "パン")]), &r, Side::Remote, 2);
+        assert_eq!(titles(&m.book), [(2, "パン".into())]);
+    }
+
+    /// Rows whose プロジェクト cell is blank (added in Excel) take the file's name.
+    fn blank_project_rows(titles: &[&str]) -> Vec<u8> {
+        let mut wb = rust_xlsxwriter::Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(TASK_SHEET).unwrap();
+        for (c, h) in HEADERS.iter().enumerate() {
+            ws.write_string(0, c as u16, *h).unwrap();
+        }
+        for (i, t) in titles.iter().enumerate() {
+            let r = i as u32 + 1;
+            ws.write_number(r, 0, r as f64).unwrap();
+            ws.write_string(r, 3, *t).unwrap();
+        }
+        wb.save_to_buffer().unwrap()
+    }
+
+    #[test]
+    fn the_project_name_is_the_files_not_the_temp_files() {
+        let b = blank_project_rows(&["牛乳"]);
+        let l = blank_project_rows(&["牛乳", "パン"]);
+        let m = merge_files("仕事.xlsx", &b, &l, &b, Side::Remote, 2, &[], today()).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("other.xlsx");
+        std::fs::write(&p, &m.bytes).unwrap();
+        let got = read_project_book(&p).unwrap();
+        assert!(
+            got.tasks.iter().all(|t| t.project == "仕事"),
+            "{:?}",
+            got.tasks
+        );
     }
 }

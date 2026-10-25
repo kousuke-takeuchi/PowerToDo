@@ -1766,19 +1766,24 @@ impl Run<'_> {
         }
     }
 
-    /// Task-level merge spec section 3: a merge needs the record the plan saw, a base with the
-    /// record's hash, a local file the store could load, and three readable contents. `None`
-    /// falls back to the conflict copy.
-    fn try_merge(
+    /// Task-level merge spec section 3: the base of `name`, when the plan saw its record and
+    /// the base still has the record's hash.
+    fn merge_base(&self, name: &str) -> Option<Vec<u8>> {
+        let record = self.records.get(name)?;
+        self.engine.base().get(name, &record.local_hash)
+    }
+
+    /// The merged content, or `None` (a conflict copy then) when the store could not load the
+    /// local file or one of the three contents cannot be merged.
+    fn merge(
         &self,
         name: &str,
         key: &str,
+        base: &[u8],
         local: &[u8],
         remote: &[u8],
         newer: Side,
     ) -> Option<Merged> {
-        let record = self.records.get(name)?;
-        let base = self.engine.base().get(name, &record.local_hash)?;
         let (high_water, holidays) = {
             let guard = self.host.lock_store();
             let store = guard.as_ref()?;
@@ -1789,7 +1794,7 @@ impl Run<'_> {
         };
         let today = self.engine.now().date();
         match merge_files(
-            name, &base, local, remote, newer, high_water, &holidays, today,
+            name, base, local, remote, newer, high_water, &holidays, today,
         ) {
             Ok(m) => Some(m),
             Err(why) => {
@@ -1821,22 +1826,38 @@ impl Run<'_> {
             return Ok(());
         }
         // Task-level merge spec section 3: merge when possible, else a conflict copy.
-        if let Some(merged) = self.try_merge(name, &key, &local_bytes, &remote_bytes, keep) {
-            let staged = stage(&self.data_dir, name, &merged.bytes)?;
-            self.write_local(name, staged, Some(&planned), false)?;
-            if !merged.renumbered.is_empty() {
-                self.host.tasks_renumbered(&key, &merged.renumbered);
+        if let Some(base) = self.merge_base(name) {
+            // The local file will be replaced: make sure it can be before merging or uploading
+            // (unsaved, being saved, open in Excel: next round).
+            {
+                let guard = self.host.lock_store();
+                let store = guard.as_ref().ok_or(FileError::Changed)?;
+                check_local(
+                    store,
+                    &self.host.saving_keys(),
+                    &self.data_dir,
+                    &key,
+                    name,
+                    Some(&planned),
+                )?;
             }
-            // A refused upload leaves the old record: the next run merges again from the same
-            // base, with this merged content as the local side.
-            let hash = sha256_hex(&merged.bytes);
-            let uploaded = self
-                .backend
-                .upload(name, Some(&remote), merged.bytes)
-                .await?;
-            self.record(name, &uploaded, hash)?;
-            self.report.merged.push(name.to_string());
-            return Ok(());
+            if let Some(merged) = self.merge(name, &key, &base, &local_bytes, &remote_bytes, keep) {
+                let staged = stage(&self.data_dir, name, &merged.bytes)?;
+                let hash = sha256_hex(&merged.bytes);
+                // Up first: a refused upload leaves this side as it was, so the next run merges
+                // the same local content against the newer remote.
+                let uploaded = self
+                    .backend
+                    .upload(name, Some(&remote), merged.bytes)
+                    .await?;
+                self.write_local(name, staged, Some(&planned), false)?;
+                if !merged.renumbered.is_empty() {
+                    self.host.tasks_renumbered(&key, &merged.renumbered);
+                }
+                self.record(name, &uploaded, hash)?;
+                self.report.merged.push(name.to_string());
+                return Ok(());
+            }
         }
         let first_sync = !self.records.contains_key(name);
         let (keep, pristine) = {
@@ -2284,6 +2305,63 @@ mod tests {
             sorted(names(&["牛乳を買う", "Aの変更", "Aの2つ目", "Bの変更"]))
         );
         assert_eq!(b.file(INBOX_FILE), remote.get(INBOX_FILE).unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_refused_merge_upload_changes_nothing_locally() {
+        // Local files are newer than the remote (stamped NOW, in the past).
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        a.with(|s| {
+            s.update_task(INBOX, 1, edit_title("Y")).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        a.sync().await;
+        b.with(|s| {
+            let patch = TaskPatch {
+                note: Some(Some("スーパーで".into())),
+                ..Default::default()
+            };
+            s.update_task(INBOX, 1, patch).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        let before = b.file(INBOX_FILE);
+        // A renames again right before B's merged upload.
+        a.with(|s| {
+            s.update_task(INBOX, 1, edit_title("Z")).unwrap();
+            s.save(INBOX).unwrap();
+        });
+        remote.race_upload(INBOX_FILE, &a.file(INBOX_FILE));
+        let r = b.sync().await;
+        assert!(r.merged.is_empty(), "{r:?}");
+        assert_eq!(
+            b.file(INBOX_FILE),
+            before,
+            "nothing installed before the upload"
+        );
+        let r = b.sync().await;
+        assert_eq!(r.merged, [INBOX_FILE], "{r:?}");
+        let task = b.with(|s| s.view(INBOX).unwrap().tasks[0].clone());
+        assert_eq!(task.title, "Z", "A's later rename is not lost");
+        assert_eq!(task.note.as_deref(), Some("スーパーで"));
+    }
+
+    #[tokio::test]
+    async fn a_busy_local_file_is_not_merged() {
+        let remote = backend_at("2100-01-01T00:00:00");
+        let (a, b) = two_pcs(&remote).await;
+        a.add(INBOX, "Aの変更");
+        b.add(INBOX, "Bの変更");
+        a.sync().await;
+        let remote_before = remote.get(INBOX_FILE).unwrap();
+        b.host.saving.lock().unwrap().insert(INBOX.to_string());
+        let r = b.sync().await;
+        assert!(r.merged.is_empty(), "{r:?}");
+        assert_eq!(
+            remote.get(INBOX_FILE).unwrap(),
+            remote_before,
+            "nothing uploaded"
+        );
     }
 
     #[tokio::test]
