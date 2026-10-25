@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::store::paths::{Paths, write_atomic};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,6 +255,24 @@ fn move_file(paths: &Paths, src: &Path, dest: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Only the author edits or deletes a comment (spec ① §3.3); a missing comment cannot be changed.
+pub fn check_author(lines: &[Line], id: &str, author: &str) -> AppResult<()> {
+    match view(lines).into_iter().find(|c| c.id == id) {
+        Some(c) if c.author == author => Ok(()),
+        Some(_) => Err(AppError::Invalid {
+            message: "自分のコメントだけ変えられます".into(),
+        }),
+        None => Err(AppError::NotFound {
+            message: "コメントが見つかりません".into(),
+        }),
+    }
+}
+
+/// The lines of one task's file (a missing file has none).
+pub fn lines(paths: &Paths, project: &str, no: u32) -> AppResult<Vec<Line>> {
+    Ok(parse(&read_text(&path(paths, project, no))?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +479,17 @@ mod tests {
         assert!(
             !p.comments_dir().join("買い物.6.jsonl").exists(),
             "nothing to move"
+        );
+    }
+
+    #[test]
+    fn only_the_author_changes_a_comment() {
+        let lines = vec![add("0001", "a")];
+        assert!(check_author(&lines, "0001", "たろう").is_ok());
+        assert!(check_author(&lines, "0001", "はなこ").is_err());
+        assert!(
+            check_author(&lines, "9999", "たろう").is_err(),
+            "a missing comment"
         );
     }
 }

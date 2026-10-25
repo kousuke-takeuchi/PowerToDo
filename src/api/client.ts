@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Comment,
   AutostartDto,
   AppError,
   AppErrorKind,
@@ -79,6 +80,12 @@ export const api = {
   addTask: (project: string, input: TaskInput) => invoke<ProjectView>("add_task", { project, input }),
   updateTask: (project: string, no: number, patch: TaskPatch) => invoke<ProjectView>("update_task", { project, no, patch }),
   completeTask: (project: string, no: number, done: boolean) => invoke<ProjectView>("complete_task", { project, no, done }),
+  // ---- comments (spec ① §3) ----
+  listComments: (project: string, no: number) => invoke<Comment[]>("list_comments", { project, no }),
+  commentCounts: (project: string) => invoke<Record<string, number>>("comment_counts", { project }),
+  addComment: (project: string, no: number, text: string) => invoke<Comment[]>("add_comment", { project, no, text }),
+  editComment: (project: string, no: number, id: string, text: string) => invoke<Comment[]>("edit_comment", { project, no, id, text }),
+  deleteComment: (project: string, no: number, id: string) => invoke<Comment[]>("delete_comment", { project, no, id }),
   deleteTask: (project: string, no: number) => invoke<ProjectView>("delete_task", { project, no }),
   moveTask: (project: string, no: number, toProject: string, toSection?: string | null) =>
     invoke<MoveOutcome>("move_task", { project, no, toProject, toSection: toSection ?? null }),

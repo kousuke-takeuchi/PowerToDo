@@ -24,6 +24,8 @@ export type TaskRowProps = {
   section?: string;
   /** Desktop: color of the `#` after the project (a CSS color, e.g. "var(--color-priority-3)"). */
   projectColor?: string;
+  /** Comments of the task (spec ① §3.3): shown on the meta line when more than 0. */
+  commentCount?: number;
   /** Stories: show the drag handle as if hovered. */
   showHandle?: boolean;
   subtasks?: { done: number; total: number; expanded: boolean };
@@ -153,7 +155,7 @@ export function TaskRow(p: TaskRowProps) {
         {p.description && (
           <div style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-secondary)" }}>{p.description}</div>
         )}
-        {(p.date || p.recurring || p.labels?.length || p.moreCount || p.project || p.subtasks) && (
+        {(p.date || p.recurring || p.labels?.length || p.moreCount || p.project || p.subtasks || p.commentCount) && (
           <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "nowrap" }}>
             {p.date && <DateChip label={p.date.label} tone={p.date.tone} />}
             {p.recurring && (
@@ -190,6 +192,12 @@ export function TaskRow(p: TaskRowProps) {
                   {p.subtasks.done}/{p.subtasks.total}
                 </span>
               ))}
+            {p.commentCount ? (
+              <span style={subCountStyle} aria-label={`コメント ${p.commentCount} 件`}>
+                <MessageSquare size={12} color="var(--color-text-muted)" aria-hidden />
+                {p.commentCount}
+              </span>
+            ) : null}
             {p.project && !mobile && (
               // Todoist: the project (and section) on the right of the meta line, with a colored #.
               <span

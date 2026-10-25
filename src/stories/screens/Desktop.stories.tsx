@@ -227,7 +227,11 @@ function DetailScreen({ initialPopover, widthPx, layout }: { initialPopover?: Ta
             subtasks={tasks.filter((t) => t.parentNo === shown.no)}
             project={detailProject}
             section={shown.category ?? undefined}
-            comments={comments}
+            comments={shown.no === detailTask.no ? comments : []}
+            me="たろう"
+            onAddComment={() => Promise.resolve(true)}
+            onEditComment={() => Promise.resolve(true)}
+            onDeleteComment={() => {}}
             initialPopover={shown.no === detailTask.no ? initialPopover : undefined}
             layout={layout}
             onClose={() => setOpenNo(null)}

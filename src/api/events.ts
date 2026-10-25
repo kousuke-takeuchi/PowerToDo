@@ -119,3 +119,8 @@ export function onSyncConflict(cb: (c: SyncConflict) => void): () => void {
 export function onUpdateProgress(cb: (p: UpdateProgress) => void, onReady?: () => void): () => void {
   return subscribe<UpdateProgress>("update-progress", cb, onReady);
 }
+
+/** `comments-changed`: comment files (`<project>.<No>.jsonl`) written here or by a sync. */
+export function onCommentsChanged(cb: (files: string[]) => void): () => void {
+  return subscribe<{ files: string[] }>("comments-changed", (p) => cb(p.files));
+}

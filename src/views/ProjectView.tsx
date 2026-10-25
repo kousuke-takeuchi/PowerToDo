@@ -1,11 +1,12 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
 import { TaskRow } from "../components/TaskRow";
 import { Button } from "../components/Button";
 import { Collapse, useMotionTiming } from "../motion";
+import { CommentCounts } from "../app/useComments";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
 import type { InvalidRow, Section, Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
@@ -129,6 +130,7 @@ export function ProjectView({
   const timers = useRef(new Set<number>());
   const { reduced } = useMotionTiming();
 
+  const commentCounts = useContext(CommentCounts);
   const mine = tasks.filter((t) => t.project === project);
   // Open tasks of this project, for the line under the title.
   const openCount = mine.filter((t) => t.progress !== 100).length;
@@ -212,6 +214,7 @@ export function ProjectView({
         date={dateLabel(t.due, today)}
         recurring={onToggleDone && t.rrule ? true : undefined}
         labels={t.labels}
+        commentCount={commentCounts[`${t.project}/${t.no}`]}
         indent={indent}
         showActions={showActions || hoverNo === t.no}
         showHandle={hoverNo === t.no}
