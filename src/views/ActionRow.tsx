@@ -12,8 +12,12 @@ import { blankValue, editBase, insertTarget, type EditorValue } from "./taskEdit
 
 const DATE_PICKER_SIZE = { width: 320, height: 470 };
 
-/** A task row with its hover actions (spec ② §2–§4). Without the RowActions context it is the plain row. */
-export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps: TaskRowProps; canInsert: boolean }) {
+/**
+ * A task row with its hover actions (spec ② §2–§4). Without the RowActions context it is the plain row.
+ * `dup`: a repeated copy of a task shown more than once (label grouping). It never shows the edit or insert
+ * editors (they open on the first copy only, so one editor exists); its menu and date picker still work.
+ */
+export function ActionRow({ task, rowProps, canInsert, dup = false }: { task: Task; rowProps: TaskRowProps; canInsert: boolean; dup?: boolean }) {
   const ctx = useContext(RowActions);
   // The row key (`taskKey` in crossList, which imports this file).
   const key = `${task.project}/${task.no}`;
@@ -29,7 +33,7 @@ export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps:
   useEffect(() => (open ? () => setOverlay?.(null) : undefined), [open, setOverlay]);
   // The edit is compared with the task as it was when editing began: a sync may change the task meanwhile.
   const base = useRef<EditorValue | null>(null);
-  base.current = editBase(base.current, ctx?.editing === key, task);
+  base.current = editBase(base.current, !dup && ctx?.editing === key, task);
   // Outside both the row (its own buttons toggle) and the popover (portaled to body).
   const pop = useRef<HTMLDivElement>(null);
   const closeRef = useRef(close);
@@ -71,7 +75,7 @@ export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps:
   };
   const ins = ctx.inserting;
   const insertHere = (where: "before" | "after") =>
-    ins && ins.project === task.project && ins.anchorNo === task.no && ins.where === where ? (
+    !dup && ins && ins.project === task.project && ins.anchorNo === task.no && ins.where === where ? (
       <TaskEditor
         mode="add"
         initial={blankValue(task.project, task.category)}
@@ -92,7 +96,7 @@ export function ActionRow({ task, rowProps, canInsert }: { task: Task; rowProps:
     ) : null;
 
   const row =
-    ctx.editing === key ? (
+    !dup && ctx.editing === key ? (
       <TaskEditor
         mode="edit"
         initial={base.current ?? editBase(null, true, task)!}

@@ -245,8 +245,8 @@ export const D01Interactive: Story = {
 };
 
 // 操作確認用 (spec ②): 行の鉛筆 / 日付 / 「…」/ 追加の欄が、この Story の中のローカル state で動く (RowActions の代わり)。
-function RowActionsScreen() {
-  const [list, setList] = useState<Task[]>(shopping);
+function RowActionsScreen({ initialList = shopping, initialView }: { initialList?: Task[]; initialView?: ViewOptions }) {
+  const [list, setList] = useState<Task[]>(initialList);
   const [editing, setEditing] = useState<string | null>(null);
   const [inserting, setInserting] = useState<RowActionsApi["inserting"]>(null);
   const [overlay, setOverlay] = useState<string | null>(null);
@@ -316,7 +316,14 @@ function RowActionsScreen() {
           </>
         }
       >
-        <ProjectView project="買い物" tasks={list} sections={sections} initialExpanded={[1]} onToggleDone={(t, done) => patch(t.no, { progress: done ? 100 : 0 })} />
+        <ProjectView
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          initialExpanded={[1]}
+          initialView={initialView}
+          onToggleDone={(t, done) => patch(t.no, { progress: done ? 100 : 0 })}
+        />
       </AppShell>
     </RowActions.Provider>
   );
@@ -325,6 +332,17 @@ function RowActionsScreen() {
 export const D01RowActions: Story = {
   name: "D-01 行の操作 (操作)",
   render: () => <RowActionsScreen />,
+};
+
+// ラベルでグループ: 2 つのラベルを持つ「牛乳と卵を買う」は 2 回出る。編集・追加・サブタスクの欄は最初の 1 つだけに開く。
+export const D01RowActionsLabel: Story = {
+  name: "D-01 行の操作 (ラベルでグループ, 操作)",
+  render: () => (
+    <RowActionsScreen
+      initialList={shopping.map((t) => (t.no === 1 ? { ...t, labels: ["食品", "日用品"] } : t))}
+      initialView={{ ...DEFAULTS, group: "label" }}
+    />
+  ),
 };
 
 // 操作確認用 (spec ③): ドラッグの本体を DragProvider でつなぎ、drop をローカル state に反映する。ハンドルは Task 4 以降で行に付く。

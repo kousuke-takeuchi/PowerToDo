@@ -340,7 +340,8 @@ export function ProjectView({
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
     const invalid = state === "invalid" && !invalidRows && t.no === INVALID_TASK_NO;
-    const row = editNo === t.no ? (
+    // A repeated copy (`dup`, label grouping) shares the task's editor / form / drag state: only the first copy shows them.
+    const row = !dup && editNo === t.no ? (
       <TaskEditor
         mode="edit"
         initial={editorValueOf(t)}
@@ -354,6 +355,7 @@ export function ProjectView({
       <ActionRow
         task={t}
         canInsert
+        dup={dup}
         rowProps={{
           title: invalid ? t.title + INVALID_SUFFIX : t.title,
           description: t.note,
@@ -385,9 +387,10 @@ export function ProjectView({
                 }
               : undefined,
           dragging:
-            (drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
-            movingKey === `${project}/${t.no}` ||
-            dragPreview?.no === t.no,
+            !dup &&
+            ((drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
+              movingKey === `${project}/${t.no}` ||
+              dragPreview?.no === t.no),
         }}
       />
     );
@@ -479,7 +482,7 @@ export function ProjectView({
           {open && (
             <Collapse key="subtasks" duration={0}>
               <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2, live, k.no, dup))}</AnimatePresence>
-              {indent === 0 && kids.length > 0 && (
+              {indent === 0 && kids.length > 0 && !dup && (
                 <div style={{ marginLeft: 32 }}>
                   {formParent === t.no && rowCtx ? (
                     <TaskEditor
