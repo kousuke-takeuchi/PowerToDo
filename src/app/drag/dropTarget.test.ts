@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoScrollSpeed, computeDrop, placementOf, type RowBox } from "./dropTarget.ts";
+import { autoScrollSpeed, computeDrop, orderIndex, placementOf, todayInPlace, type RowBox } from "./dropTarget.ts";
 
 // 40 px rows from y=0: 1, 2 (child of 1), 3, header 会議 at 120, 4 in 会議, slot of 会議, header 空 + slot.
 const rows: RowBox[] = [
@@ -103,4 +103,34 @@ test("a_drop_back_in_place_is_null", () => {
   assert.equal(placementOf(rows, { kind: "onto", key: "p/1" }, "p/2"), null);
   // 4, last in 会議, dropped above the 会議 slot.
   assert.equal(placementOf(rows, { kind: "between", index: 5, depth: 0, y: 200, x: 0 }, "p/4"), null);
+});
+
+test("order_index_needs_the_pointer_inside_the_list_with_a_small_margin", () => {
+  const items = [
+    { top: 100, bottom: 130 },
+    { top: 130, bottom: 160 },
+  ];
+  const list = { left: 0, right: 200, top: 100, bottom: 160 };
+  assert.deepEqual(orderIndex(items, list, 50, 110), { index: 0, y: 100 });
+  assert.deepEqual(orderIndex(items, list, 50, 150), { index: 2, y: 160 });
+  assert.deepEqual(orderIndex(items, list, 50, 94), { index: 0, y: 100 });
+  assert.deepEqual(orderIndex(items, list, 50, 166), { index: 2, y: 160 });
+  assert.equal(orderIndex(items, list, 50, 80), null);
+  assert.equal(orderIndex(items, list, 50, 200), null);
+  assert.equal(orderIndex(items, list, 250, 110), null);
+  assert.equal(orderIndex([], list, 50, 110), null);
+});
+
+test("today_drop_in_place_is_detected", () => {
+  const today: RowBox[] = [
+    { kind: "task", key: "a/1", no: 1, depth: 0, parent: null, section: null, top: 0, bottom: 40 },
+    { kind: "task", key: "b/2", no: 2, depth: 0, parent: null, section: null, top: 40, bottom: 80 },
+    { kind: "task", key: "c/3", no: 3, depth: 0, parent: null, section: null, top: 80, bottom: 120 },
+  ];
+  assert.equal(todayInPlace(today, "c/3", "b/2"), true);
+  assert.equal(todayInPlace(today, "b/2", "b/2"), true);
+  assert.equal(todayInPlace(today, "a/1", "b/2"), false);
+  assert.equal(todayInPlace(today, null, "b/2"), false);
+  assert.equal(todayInPlace(today, null, "c/3"), true);
+  assert.equal(todayInPlace(today, "a/1", "c/3"), false);
 });

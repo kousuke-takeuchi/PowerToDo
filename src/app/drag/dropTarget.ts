@@ -110,3 +110,28 @@ export function autoScrollSpeed(y: number, top: number, bottom: number): number 
   if (y > bottom - EDGE) return Math.round(MAX_SPEED * Math.min(1, (y - (bottom - EDGE)) / EDGE));
   return 0;
 }
+
+type Box = { top: number; bottom: number };
+const ORDER_MARGIN = 8;
+
+/**
+ * Section / project reorder (spec ③ §2.2): the gap index under the pointer and the y of its line.
+ * Null when the pointer is outside the list (x outside, or y more than 8 px above / below it): no line, release cancels.
+ */
+export function orderIndex(items: Box[], list: { left: number; right: number; top: number; bottom: number }, x: number, y: number): { index: number; y: number } | null {
+  if (!items.length) return null;
+  if (x < list.left || x > list.right) return null;
+  if (y < list.top - ORDER_MARGIN || y > list.bottom + ORDER_MARGIN) return null;
+  let index = items.findIndex((r) => y < (r.top + r.bottom) / 2);
+  if (index < 0) index = items.length;
+  return { index, y: index < items.length ? items[index].top : items[items.length - 1].bottom };
+}
+
+/** Today drop (spec ③ §2.4): true when `beforeKey` keeps the dragged row where it is (same place does nothing). */
+export function todayInPlace(rows: RowBox[], beforeKey: string | null, draggedKey: string): boolean {
+  if (beforeKey === draggedKey) return true;
+  const i = rows.findIndex((r) => isTask(r) && r.key === draggedKey);
+  if (i < 0) return false;
+  const next = rows.slice(i + 1).find((r): r is TaskBox => isTask(r) && r.key !== draggedKey);
+  return (next?.key ?? null) === beforeKey;
+}
