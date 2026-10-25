@@ -1,7 +1,5 @@
 import type React from "react";
-import { motion } from "motion/react";
-import { ChevronRight } from "lucide-react";
-import { useMotionTiming } from "../motion";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 export type SectionHeaderProps = {
   title: string;
@@ -20,6 +18,7 @@ export type SectionHeaderProps = {
 };
 
 const rowStyle: React.CSSProperties = {
+  position: "relative",
   display: "flex",
   alignItems: "center",
   gap: "var(--space-2)",
@@ -37,17 +36,25 @@ const buttonReset: React.CSSProperties = {
   fontFamily: "var(--font-body)",
   textAlign: "left",
 };
-const chevronStyle: React.CSSProperties = { display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" };
+/** Left of the column (Todoist), so the title lines up with the task titles' column edge. */
+const chevronStyle: React.CSSProperties = {
+  position: "absolute",
+  left: -28,
+  top: "50%",
+  marginTop: 2,
+  transform: "translateY(-50%)",
+  display: "inline-flex",
+  color: "var(--color-text-secondary)",
+};
 const titleTextStyle: React.CSSProperties = { fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" };
 const countStyle: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
 
 export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor }: SectionHeaderProps) {
-  const { t } = useMotionTiming();
-  // 右向きのシェブロンを回して開閉を表す (折りたたみ = 0°, 展開 = 90°)。最初の描画では回すアニメーションをしない。
+  // Open / closed swap the icon at once (Todoist has no motion here).
   const chevron = showChevron && (
-    <motion.span aria-hidden initial={false} animate={{ rotate: collapsed ? 0 : 90 }} transition={t(0.2)} style={chevronStyle}>
-      <ChevronRight size={16} />
-    </motion.span>
+    <span aria-hidden style={chevronStyle}>
+      {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+    </span>
   );
   const countEl = count !== undefined && <span style={countStyle}>{count}</span>;
 

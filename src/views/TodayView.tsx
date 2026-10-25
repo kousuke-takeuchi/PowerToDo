@@ -114,14 +114,10 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
               count={overdue.length}
               collapsed={overdueCollapsed}
               onToggle={() => setOverdueCollapsed((v) => !v)}
+              trailing={<RescheduleButton today={today} onReschedule={onReschedule} />}
             />
             {!overdueCollapsed && (
-              <>
-                <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 0" }}>
-                  <RescheduleButton today={today} onReschedule={onReschedule} />
-                </div>
-                {rows("overdue", overdue)}
-              </>
+              rows("overdue", overdue)
             )}
           </section>
         )}

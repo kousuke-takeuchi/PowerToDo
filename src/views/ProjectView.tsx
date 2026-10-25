@@ -265,7 +265,7 @@ export function ProjectView({
         )}
         <AnimatePresence initial={false}>
           {open && (
-            <Collapse key="subtasks">
+            <Collapse key="subtasks" duration={0}>
               <AnimatePresence initial={false}>{kids.map((k) => renderRow(k, Math.min(indent + 1, 2) as 1 | 2))}</AnimatePresence>
               {indent === 0 && kids.length > 0 && (
                 <div style={{ marginLeft: 32 }}>
@@ -433,7 +433,7 @@ export function ProjectView({
               />
               <AnimatePresence initial={false}>
                 {!isCollapsed && (
-                  <Collapse key="body">
+                  <Collapse key="body" duration={0}>
                     <AnimatePresence initial={false}>{rows.map((t) => renderRow(t, 0))}</AnimatePresence>
                     {addSlot(s.name)}
                   </Collapse>
