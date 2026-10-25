@@ -388,6 +388,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     if (current === app.inbox) void p.reload().catch(() => undefined); // 名前が変わらないと useProject は読み直さない
     void refreshSummaries();
     loadDisplayName();
+    viewStore.reload(); // set_data_dir sends no projects-changed: read the new folder's 表示 rows
   };
 
   const reveal = () => void api.revealDataDir().catch(showError);
