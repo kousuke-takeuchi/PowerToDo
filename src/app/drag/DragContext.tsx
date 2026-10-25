@@ -26,7 +26,7 @@ const LIFT = 4;
 const GUTTER = 48;
 const SETTLE = 0.15;
 type Target =
-  | { kind: "list"; drop: Drop; rows: RowBox[]; list: "project" | "today" }
+  | { kind: "list"; drop: Drop; rows: RowBox[]; list: "project" | "today"; right: number }
   | { kind: "project"; name: string; rect: DOMRect }
   | { kind: "day"; date: string; rect: DOMRect }
   | { kind: "order"; attr: "section" | "project"; names: string[]; index: number; y: number; x: number; w: number };
@@ -116,8 +116,8 @@ const DragLayer = memo(function DragLayer({ bind, settleRef }: { bind: React.Mut
   let indicator: React.ReactNode = null;
   if (!settle) {
     if (target?.kind === "list" && target.drop.kind === "between") {
-      const lr = document.querySelector(`[data-drop-list="${target.list}"]`)?.getBoundingClientRect();
-      indicator = line(target.drop.y, target.drop.x, (lr?.right ?? target.drop.x + 600) - target.drop.x);
+      // The list under the pointer (the board has one per column), not the first one on the page.
+      indicator = line(target.drop.y, target.drop.x, target.right - target.drop.x);
     } else if (target?.kind === "list" && target.drop.kind === "onto") {
       const el = rowEl(target.drop.key);
       if (el) indicator = ring(el.getBoundingClientRect(), false);
@@ -182,11 +182,12 @@ export function DragProvider({ onDrop, children }: { onDrop: (r: DropResult) => 
       const kind = list?.dataset.dropList as "project" | "today" | undefined;
       if (list && kind && kind === d.source.view) {
         const rows = rowBoxes(list);
-        const left = list.getBoundingClientRect().left + Number(list.dataset.level0 ?? 0);
+        const listRect = list.getBoundingClientRect();
+        const left = listRect.left + Number(list.dataset.level0 ?? 0);
         const s = d.source;
         const dragged = kind === "today" ? { key: d.key!, depth: 0, height: 2, subtree: s.subtree } : { key: d.key!, depth: s.depth, height: s.height, subtree: s.subtree };
         const drop = computeDrop(rows, { x, y }, d.sx, dragged, left);
-        return drop ? { kind: "list", drop, rows, list: kind } : null;
+        return drop ? { kind: "list", drop, rows, list: kind, right: listRect.right } : null;
       }
       return null;
     }

@@ -142,7 +142,8 @@ export function ViewMenuPanel({ screen, options, onChange }: { screen: Screen; o
   const dateOptions = (Object.keys(DATE_LABEL) as DateFilter[]).map((v) => ({ value: v, text: DATE_LABEL[v] }));
   const createdOptions = (Object.keys(CREATED_LABEL) as CreatedFilter[]).map((v) => ({ value: v, text: CREATED_LABEL[v] }));
   const prioOptions = Object.keys(PRIO_LABEL).map((v) => ({ value: v, text: PRIO_LABEL[v] }));
-  const showGroup = allowed.groups.length > 1;
+  // The board has no groups (spec ⑤ §4).
+  const showGroup = allowed.groups.length > 1 && options.layout !== "board";
   return (
     <div style={{ width: 260, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 8, padding: 12, fontFamily: "var(--font-body)" }}>
       {allowed.layout && (

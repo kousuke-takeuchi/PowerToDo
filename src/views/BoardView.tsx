@@ -1,141 +1,100 @@
-import { Ellipsis, Plus } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
-import { AddTaskRow } from "../components/AddTaskRow";
-import { Button } from "../components/Button";
-import { Checkbox } from "../components/Checkbox";
-import { DateChip } from "../components/DateChip";
-import { PriorityChip } from "../components/PriorityChip";
-import { dateLabel } from "../mock/data";
-import type { Section, Task } from "../types/model";
-import { PageHeader, titleStyle } from "./HeaderActions";
+import type { Task } from "../types/model";
 
-export type BoardViewProps = {
-  project: string;
+/** One board column (spec ⑤ §4): 未分類, a section, or 完了. `live`: it takes drops and its cards can be dragged. */
+export type BoardColumn = {
+  key: string;
+  title: string;
+  /** The section a card dropped here joins. Null: unsectioned. */
+  section: string | null;
   tasks: Task[];
-  sections: Section[];
-  /** ドラッグ中のカードの task no。そのカードに影と回転、いつか列の先頭にドロップ線を出す (D-10)。 */
-  dragging?: number;
+  /** Cards that are not done (the number in the header). */
+  count: number;
+  live: boolean;
 };
 
-const DROP_COLUMN = "いつか"; // ドロップ線を出す列 (pen の D-10)
-const DONE_COLUMN = "完了";
-const LIFT_OFFSET = 9; // 幅 270 のカードを 2° 回転したときの外接枠の増分 (270 x sin 2° ≒ 9.4)
+export type BoardViewProps = {
+  columns: BoardColumn[];
+  /** Sorted by a rule: the cards take no between-drops, so a drop lands at the end of the column (spec ⑤ §5). */
+  sorted: boolean;
+  /** One card (an ActionRow with the list's row props). */
+  renderCard: (t: Task, column: BoardColumn) => React.ReactNode;
+  /** The "add task" slot at the end of a live column. */
+  renderAdd: (section: string | null) => React.ReactNode;
+  /** After the last column, e.g. 「セクションを追加」. */
+  trailing?: React.ReactNode;
+};
 
-/** プロジェクトのタスクをセクション列 + 完了列に並べるボード (D-10)。AppShell の fullWidth 内に置く。 */
-export function BoardView({ project, tasks, sections, dragging }: BoardViewProps) {
-  const [doneOverride, setDoneOverride] = useState<Map<number, boolean>>(() => new Map());
-  const mine = tasks.filter((t) => t.project === project && t.parentNo === undefined).sort((a, b) => a.order - b.order);
-  const isDone = (t: Task) => doneOverride.get(t.no) ?? t.progress === 100;
-  const open = mine.filter((t) => t.progress !== 100);
-  const columns = [
-    ...sections
-      .filter((s) => s.project === project)
-      .sort((a, b) => a.order - b.order)
-      .map((s) => ({ name: s.name, tasks: open.filter((t) => t.category === s.name) })),
-    { name: DONE_COLUMN, tasks: mine.filter((t) => t.progress === 100) },
-  ];
+export const COLUMN_WIDTH = 272;
+const CARD_GAP = 8;
 
-  const card = (t: Task): React.ReactNode => {
-    const date = dateLabel(t.due);
-    const lifted = t.no === dragging;
-    const body = (
+const cardStyle: React.CSSProperties = {
+  boxSizing: "border-box",
+  padding: "0 12px 0 24px",
+  background: "var(--color-bg)",
+  boxShadow: "var(--shadow-card), inset 0 0 0 1px var(--color-border)",
+  borderRadius: "var(--radius)",
+};
+
+/**
+ * The columns of a project board. Each live column is its own drop list for the drag engine (`data-drop-list`), so
+ * the pointer picks the column; the cards and the add row carry the same `data-*` as the list rows (spec ③ §8).
+ * AppShell's `fullWidth` holds it; it scrolls sideways when the columns are wider than the screen.
+ */
+export function BoardView({ columns, sorted, renderCard, renderAdd, trailing }: BoardViewProps) {
+  const card = (t: Task, col: BoardColumn) => {
+    const body = <div style={cardStyle}>{renderCard(t, col)}</div>;
+    if (!col.live || sorted) return <div key={t.no} style={{ paddingBottom: CARD_GAP }}>{body}</div>;
+    return (
       <div
-        style={{
-          boxSizing: "border-box",
-          width: lifted ? 270 : "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-          padding: "var(--space-3)",
-          background: "var(--color-bg)",
-          boxShadow: `${lifted ? "var(--shadow-drag)" : "var(--shadow-card)"}, inset 0 0 0 1px var(--color-border)`,
-          borderRadius: "var(--radius)",
-          transform: lifted ? "rotate(-2deg)" : undefined, // pen の rotation=2 は反時計回り
-          transformOrigin: "top left",
-        }}
+        key={t.no}
+        data-row=""
+        data-row-kind="task"
+        data-key={`${t.project}/${t.no}`}
+        data-no={t.no}
+        data-depth={0}
+        data-parent=""
+        data-section={col.section ?? ""}
+        style={{ paddingBottom: CARD_GAP }}
       >
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Checkbox
-            checked={isDone(t)}
-            ariaLabel={`${t.title}を完了にする`}
-            onChange={(c) => setDoneOverride((m) => new Map(m).set(t.no, c))}
-          />
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontSize: 13,
-              lineHeight: "19px",
-              color: isDone(t) ? "var(--color-text-muted)" : "var(--color-text-primary)",
-            }}
-          >
-            {t.title}
-          </span>
-        </div>
-        {date && (
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <DateChip label={date.label} tone={date.tone} />
-            <PriorityChip priority={t.priority} />
-          </div>
-        )}
-      </div>
-    );
-    // pen は回転後の外接枠 (高さ +約 9) で列を並べるので、持ち上げたカードは上に 9px の余白を取って同じ位置に合わせる。
-    return lifted ? (
-      <div key={t.no} style={{ paddingTop: LIFT_OFFSET }}>
         {body}
       </div>
-    ) : (
-      <div key={t.no}>{body}</div>
     );
   };
 
   return (
-    <>
-      <PageHeader viewLabel="ボード">
-        <h1 style={titleStyle}>{project}</h1>
-      </PageHeader>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-4)", fontFamily: "var(--font-body)" }}>
-        {columns.map((col) => (
-          <section key={col.name} aria-label={col.name} style={{ flex: "0 0 280px", width: 280, display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-            <div style={{ boxSizing: "border-box", display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-1)" }}>
-              <span style={{ fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}>{col.name}</span>
-              <span style={{ flex: 1, fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{col.tasks.length}</span>
-              <Button variant="icon" icon={Ellipsis} ariaLabel={`${col.name}のメニュー`} />
+    <div
+      style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-4)", overflowX: "auto", paddingBottom: "var(--space-2)", fontFamily: "var(--font-body)" }}
+    >
+      {columns.map((col) => {
+        const cards = col.tasks.map((t) => card(t, col));
+        return (
+          <section key={col.key} aria-label={col.title} style={{ flex: `0 0 ${COLUMN_WIDTH}px`, width: COLUMN_WIDTH, display: "flex", flexDirection: "column" }}>
+            <div style={{ boxSizing: "border-box", display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-1)", marginBottom: "var(--space-2)" }}>
+              <span style={{ fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}>{col.title}</span>
+              <span style={{ flex: 1, fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{col.count}</span>
             </div>
-            {dragging !== undefined && col.name === DROP_COLUMN && (
-              <div aria-hidden style={{ height: 3, borderRadius: 2, background: "var(--color-accent)" }} />
+            {col.live ? (
+              <div data-drop-list="project" data-level0="0">
+                {sorted ? (
+                  // One header-kind row for all the cards: a drop on them goes after the last card (section "" = unsectioned).
+                  <div data-row="" data-row-kind="header" data-section={col.section ?? ""}>
+                    {cards}
+                  </div>
+                ) : (
+                  cards
+                )}
+                <div data-row="" data-row-kind="slot" data-section={col.section ?? ""}>
+                  {renderAdd(col.section)}
+                </div>
+              </div>
+            ) : (
+              cards
             )}
-            {col.tasks.map(card)}
-            <AddTaskRow />
           </section>
-        ))}
-        <button
-          type="button"
-          className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-          style={{
-            flex: "0 0 200px",
-            width: 200,
-            boxSizing: "border-box",
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--space-2)",
-            padding: "8px 12px",
-            border: 0,
-            boxShadow: "inset 0 0 0 1px var(--color-border)",
-            borderRadius: "var(--radius)",
-            fontFamily: "var(--font-body)",
-            fontSize: 13,
-            lineHeight: "19px",
-            color: "var(--color-text-secondary)",
-            cursor: "pointer",
-          }}
-        >
-          <Plus size={16} />
-          セクションを追加
-        </button>
-      </div>
-    </>
+        );
+      })}
+      {trailing && <div style={{ flex: "0 0 200px", width: 200 }}>{trailing}</div>}
+    </div>
   );
 }

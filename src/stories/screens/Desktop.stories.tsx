@@ -12,7 +12,6 @@ import { DragProvider, type DropResult } from "../../app/drag/DragContext";
 import { DeleteTaskDialog } from "../../views/DeleteTaskDialog";
 import { countDescendants } from "../../views/deleteMessage";
 import { AppShell } from "../../views/AppShell";
-import { BoardView } from "../../views/BoardView";
 import { ConflictBanner } from "../../views/ConflictBanner";
 import { FixBanner } from "../../views/FixBanner";
 import { LabelDetailView } from "../../views/LabelDetailView";
@@ -378,6 +377,7 @@ function DragScreen({ initialView }: { initialView?: ViewOptions }) {
       <AppShell
         sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projs} syncState="synced" lastSyncedAt="09:41" />}
         syncState="synced"
+        fullWidth={initialView?.layout === "board"}
       >
         <ProjectView project="買い物" tasks={list} sections={secs} initialExpanded={[1]} initialView={initialView} onReorderLocked={() => setLocked((n) => n + 1)} />
         <div data-testid="locked-count" style={{ position: "fixed", right: 8, bottom: 28, fontSize: 12, color: "var(--color-text-muted)" }}>locked:{locked}</div>
@@ -396,6 +396,17 @@ export const D01Drag: Story = {
 export const D01DragSorted: Story = {
   name: "D-01 ドラッグ (並び替え中, 操作)",
   render: () => <DragScreen initialView={{ ...DEFAULTS, sort: "priority" }} />,
+};
+
+// 操作確認用 (spec ⑤ §4): ボードでカードを別の列へ動かすと category (セクション) が変わる。並び替え中は列の末尾に入る。
+export const D10Drag: Story = {
+  name: "D-10 ボードのドラッグ (操作)",
+  render: () => <DragScreen initialView={BOARD_VIEW} />,
+};
+
+export const D10DragSorted: Story = {
+  name: "D-10 ボードのドラッグ (並び替え中, 操作)",
+  render: () => <DragScreen initialView={{ ...BOARD_VIEW, sort: "priority" }} />,
 };
 
 // D-02: D-01 の上にクイック追加ダイアログ。キャンセル / scrim / Esc で閉じ、サイドバーの「タスクを追加」で開き直す。
@@ -783,13 +794,25 @@ export const D09f: Story = {
   render: () => <SettingsScreen initialTarget="nas" connected syncState="synced" lastSyncedAt="09:41" />,
 };
 
+const BOARD_VIEW = { ...DEFAULTS, layout: "board" as const };
+
+function BoardScreen(view: Partial<ProjectViewProps>) {
+  return (
+    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
+      <ProjectView project="買い物" tasks={shopping} sections={sections} initialView={BOARD_VIEW} {...view} />
+    </AppShell>
+  );
+}
+
 export const D10: Story = {
   name: "D-10 ボード",
-  render: () => (
-    <AppShell sidebar={sidebar} syncState="synced" fullWidth>
-      <BoardView project="買い物" tasks={shopping} sections={sections} dragging={1} />
-    </AppShell>
-  ),
+  render: () => <BoardScreen />,
+};
+
+// 今週の「牛乳と卵を買う」を持ち上げ、いつか列の「新しいフライパン」の下に赤い線 (列の間の移動)。
+export const D10b: Story = {
+  name: "D-10b ボードのドラッグ中",
+  render: () => <BoardScreen dragPreview={{ no: 1, kind: "between", targetNo: 3 }} />,
 };
 
 export const D11a: Story = {

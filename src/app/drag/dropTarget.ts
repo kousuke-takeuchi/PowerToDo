@@ -80,7 +80,9 @@ function placementOfDrop(rows: RowBox[], drop: Drop, draggedKey: string): Placem
   }
   const { index, depth } = drop;
   // Section: of the nearest row above (a header starts its section), else unsectioned.
-  const section = index > 0 ? rows[index - 1].section : null;
+  // A list with no header (a board column) starts in its first row's section; a header with "" is the unsectioned area.
+  const above = index > 0 ? rows[index - 1].section : (rows[0]?.section ?? null);
+  const section = above === "" ? null : above;
   // Parent: the nearest task above at depth - 1 (stopping at the section start).
   let parent: number | null = null;
   if (depth > 0) {

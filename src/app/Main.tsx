@@ -239,7 +239,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // Spec ⑤ §5: a sorted or grouped project cannot be reordered; the toast offers the way back.
   const projectViewKey = viewKey("project", current);
   const projectViewOptions = sanitize("project", viewStore.get(projectViewKey));
-  const projectSorted = projectViewOptions.sort !== "manual" || projectViewOptions.group !== "none";
+  const projectBoard = projectViewOptions.layout === "board";
+  // The board has no groups, so only a sort locks it.
+  const projectSorted = projectViewOptions.sort !== "manual" || (projectViewOptions.group !== "none" && !projectBoard);
   const reorderLocked = (restore: () => void) => note("手動の並び (グループなし) に戻すと並べ替えられます", "戻す", restore);
   const restoreProjectView = () =>
     viewStore.set(projectViewKey, { ...projectViewOptions, sort: "manual", dir: "asc", group: "none" });
@@ -341,6 +343,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     requestDelete: (t) => requestDelete(t),
     edit: setEditing,
     projectSorted,
+    projectBoard,
     todaySorted,
     restoreToday: restoreTodayView,
     onReorderLocked: (restore) => reorderLocked(restore ?? restoreProjectView),
@@ -1097,6 +1100,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     <DragProvider onDrop={onDrop}>
     <AppShell
       width={width}
+      // The board uses the whole pane (its columns scroll sideways); the list keeps the 800 column.
+      fullWidth={(nav.kind === "inbox" || nav.kind === "project") && projectBoard && !p.error && !!view}
       fill
       syncState={syncState}
       sidebar={sidebar}

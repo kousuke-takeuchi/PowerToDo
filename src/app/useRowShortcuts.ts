@@ -37,6 +37,7 @@ export function useRowShortcuts({
   requestDelete,
   edit,
   projectSorted,
+  projectBoard,
   todaySorted,
   restoreToday,
   onReorderLocked,
@@ -71,6 +72,8 @@ export function useRowShortcuts({
   edit: (key: string) => void;
   /** The open project is sorted or grouped: its rows cannot be moved by key (spec ⑤ §5). */
   projectSorted: boolean;
+  /** The open project is shown as a board: its cards do not nest, so Ctrl+] and Ctrl+[ do nothing. */
+  projectBoard: boolean;
   /** Today is sorted or grouped: its order cannot be moved by key either. */
   todaySorted: boolean;
   restoreToday: () => void;
@@ -112,6 +115,7 @@ export function useRowShortcuts({
         onReorderLocked();
         return;
       }
+      if (projectBoard && (k === "indent" || k === "outdent")) return;
       const tasks = p.view?.tasks;
       if (!tasks) return;
       // A completed top-level task, and its subtasks, sit in the completed list: not movable.

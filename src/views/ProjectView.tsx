@@ -3,7 +3,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { SectionHeader } from "../components/SectionHeader";
-import { TaskRow } from "../components/TaskRow";
+import { TaskRow, type TaskRowProps } from "../components/TaskRow";
 import { Button } from "../components/Button";
 import { Collapse, useMotionTiming } from "../motion";
 import { CommentCounts } from "../app/useComments";
@@ -22,6 +22,7 @@ import { DatePicker } from "./DatePicker";
 import { DeleteTaskDialog } from "./DeleteTaskDialog";
 import { TaskEditor } from "./TaskEditor";
 import { ActionRow } from "./ActionRow";
+import { BoardView, type BoardColumn } from "./BoardView";
 import { RowActions } from "../app/rowActions";
 import { DragCtx } from "../app/drag/DragContext";
 import { TaskMenu } from "./TaskMenu";
@@ -129,6 +130,9 @@ function PreviewLayer({
   firstOther?: string;
 }) {
   const [rects, setRects] = useState<{ source?: PreviewRect; target?: PreviewRect; header?: PreviewRect }>({});
+  // Measure again once the parent has set the list ref (a child's layout effect runs before its parent's ref is attached).
+  const [, again] = useState(0);
+  useEffect(() => again(1), []);
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -138,12 +142,14 @@ function PreviewLayer({
       const r = el.getBoundingClientRect();
       return { top: r.top - base.top, left: r.left - base.left, width: r.width, height: r.height };
     };
-    setRects({
+    const next = {
       source: dragPreview ? rel(list.querySelector(`[data-row][data-no="${dragPreview.no}"]`)) : undefined,
       target: dragPreview ? rel(list.querySelector(`[data-row][data-no="${dragPreview.targetNo}"]`)) : undefined,
       header: firstOther ? rel(list.querySelector(`[data-row-kind="header"][data-section="${firstOther}"]`)) : undefined,
-    });
-  }, [listRef, dragPreview, firstOther]);
+    };
+    // Runs after every render (the list ref is only set once the parent commits); sets state only when a box moved.
+    setRects((cur) => (JSON.stringify(cur) === JSON.stringify(next) ? cur : next));
+  });
   const line = (top: number, left: number, width: number) => (
     <div aria-hidden style={{ position: "absolute", top: top - 1, left, width, height: 2, background: "var(--color-accent)", pointerEvents: "none", zIndex: 6 }}>
       <span style={{ position: "absolute", left: 0, top: -3, width: 8, height: 8, boxSizing: "border-box", borderRadius: 4, border: "2px solid var(--color-accent)", background: "var(--color-bg)" }} />
@@ -243,7 +249,9 @@ export function ProjectView({
   const [doneOverride, setDoneOverride] = useState<Map<number, boolean>>(() => new Map());
   const [groupCollapsed, setGroupCollapsed] = useState<Set<string>>(() => new Set());
   const showCompleted = viewOptions.done;
-  const sorted = viewOptions.sort !== "manual" || viewOptions.group !== "none";
+  // The board has no groups (the menu hides them), so only the sort locks its card order.
+  const board = viewOptions.layout === "board";
+  const sorted = viewOptions.sort !== "manual" || (viewOptions.group !== "none" && !board);
   const restoreManual = () => setViewOptions({ ...viewOptions, sort: "manual", dir: "asc", group: "none" });
   const lockedToast = () => onReorderLocked?.(restoreManual);
   const [addTo, setAddTo] = useState<{ section: string | null } | null>(initialAddSection !== undefined ? { section: initialAddSection } : null);
@@ -335,6 +343,49 @@ export function ProjectView({
     return next;
   };
 
+  /** The props of a task's row, for the list and the board card (`board`: no indent, drag height 2 so a card never nests). */
+  const rowPropsFor = (t: Task, indent: 0 | 1 | 2, live: boolean, dup: boolean, board = false): TaskRowProps => {
+    const kids = childrenOf(t.no);
+    const open = expanded.has(t.no);
+    const invalid = state === "invalid" && !invalidRows && t.no === INVALID_TASK_NO;
+    return {
+      title: invalid ? t.title + INVALID_SUFFIX : t.title,
+      description: t.note,
+      focused: !dup && focusedKey === `${t.project}/${t.no}`,
+      done: isDone(t),
+      priority: t.priority,
+      date: dateLabel(t.due, today),
+      recurring: onToggleDone && t.rrule ? true : undefined,
+      labels: t.labels,
+      commentCount: commentCounts[`${t.project}/${t.no}`],
+      indent,
+      showActions: showActions || hoverNo === t.no,
+      showHandle: hoverNo === t.no,
+      onClick: onOpenTask ? () => onOpenTask(t) : undefined,
+      subtasks: kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined,
+      onToggleDone: () => toggleDone(t),
+      // Without RowActions (stories) the "..." shows the old inline confirmation; ActionRow replaces it otherwise.
+      onMore: onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined,
+      onToggleExpand: () => setExpanded((s) => toggleSet(s, t.no)),
+      onHandlePointerDown:
+        live && drag
+          ? (e) => {
+              if (sorted) lockedToast();
+              drag.start(
+                e,
+                { kind: "task", task: t, view: "project", depth: indent, height: board ? 2 : heightOf(t.no), subtree: keysOf(t.no) },
+                <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
+              );
+            }
+          : undefined,
+      dragging:
+        !dup &&
+        ((drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
+          movingKey === `${project}/${t.no}` ||
+          dragPreview?.no === t.no),
+    };
+  };
+
   /** `live`: false for the completed list (no data-row, no drag handle). */
   const renderRow = (t: Task, indent: 0 | 1 | 2, live = true, rowKey: string | number = t.no, dup = false): React.ReactNode => {
     const kids = childrenOf(t.no);
@@ -356,42 +407,7 @@ export function ProjectView({
         task={t}
         canInsert
         dup={dup}
-        rowProps={{
-          title: invalid ? t.title + INVALID_SUFFIX : t.title,
-          description: t.note,
-          focused: !dup && focusedKey === `${t.project}/${t.no}`,
-          done: isDone(t),
-          priority: t.priority,
-          date: dateLabel(t.due, today),
-          recurring: onToggleDone && t.rrule ? true : undefined,
-          labels: t.labels,
-          commentCount: commentCounts[`${t.project}/${t.no}`],
-          indent,
-          showActions: showActions || hoverNo === t.no,
-          showHandle: hoverNo === t.no,
-          onClick: onOpenTask ? () => onOpenTask(t) : undefined,
-          subtasks: kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined,
-          onToggleDone: () => toggleDone(t),
-          // Without RowActions (stories) the "..." shows the old inline confirmation; ActionRow replaces it otherwise.
-          onMore: onDeleteTask ? () => setDeleteTarget((cur) => (cur === t.no ? null : t.no)) : undefined,
-          onToggleExpand: () => setExpanded((s) => toggleSet(s, t.no)),
-          onHandlePointerDown:
-            live && drag
-              ? (e) => {
-                  if (sorted) lockedToast();
-                  drag.start(
-                    e,
-                    { kind: "task", task: t, view: "project", depth: indent, height: heightOf(t.no), subtree: keysOf(t.no) },
-                    <TaskRow title={t.title} done={false} priority={t.priority} hideActions />,
-                  );
-                }
-              : undefined,
-          dragging:
-            !dup &&
-            ((drag?.active?.kind === "task" && drag.active.task.no === t.no && drag.active.task.project === project) ||
-              movingKey === `${project}/${t.no}` ||
-              dragPreview?.no === t.no),
-        }}
+        rowProps={rowPropsFor(t, indent, live, dup)}
       />
     );
     return (
@@ -535,7 +551,7 @@ export function ProjectView({
   const arrangeCtx = { today, weekStart, labelOrder, projectOrder };
   const byNo = new Map(topLevel.map((t) => [t.no, t]));
   const asOpen = (t: Task): Task => (leaving.has(t.no) ? { ...t, progress: 0 } : t);
-  const grouped = viewOptions.group !== "none";
+  const grouped = viewOptions.group !== "none" && !board;
   const arrangedGroups = grouped ? arrange(topLevel.map(asOpen), viewOptions, arrangeCtx) : null;
   const firstKeys = arrangedGroups ? firstOccurrences(arrangedGroups.groups) : new Set<string>();
   const arrangeSection = (list: Task[]) => {
@@ -551,6 +567,33 @@ export function ProjectView({
     ? arrangedGroups.hidden
     : unsectionedA.hidden + [...sectionA.values()].reduce((n, a) => n + a.hidden, 0);
 
+  // ボード (spec ⑤ §4): 未分類 (あるときだけ)、各セクション、完了 (「表示」のとき)。列の中は arrangeSection と同じ並び。
+  const boardColumns: BoardColumn[] = [
+    ...(unsectioned.length ? [{ key: "unsectioned", title: "未分類", section: null, tasks: unsectionedA.rows, count: unsectionedA.rows.filter((t) => !isDone(t)).length, live: true }] : []),
+    ...projectSections.map((s) => {
+      const rows = sectionA.get(s.name)!.rows;
+      return { key: `section:${s.name}`, title: s.name, section: s.name, tasks: rows, count: rows.filter((t) => !isDone(t)).length, live: true };
+    }),
+    ...(showCompleted ? [{ key: "done", title: "完了", section: null, tasks: doneRows, count: doneRows.length, live: false }] : []),
+  ];
+  /** A card: the list's row props without the indent, the subtask count only (no nested rows, no chevron), no inline delete line. */
+  const renderCard = (t: Task, col: BoardColumn): React.ReactNode => {
+    const kids = childrenOf(t.no);
+    return (
+      <ActionRow
+        task={t}
+        canInsert
+        rowProps={{
+          ...rowPropsFor(t, 0, col.live, false, true),
+          card: true,
+          onMore: undefined,
+          subtasks: kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: false } : undefined,
+          onToggleExpand: undefined,
+        }}
+      />
+    );
+  };
+
   // キーボードのフォーカス対象 = 画面に出ている行を表示順に (renderRow と同じ並び)。
   const rowKeys = (t: Task): string[] => [
     `${t.project}/${t.no}`,
@@ -558,6 +601,8 @@ export function ProjectView({
   ];
   const visibleKeys = (): string[] => {
     if (state === "empty" || state === "error") return [];
+    // The board shows top-level cards only, column by column.
+    if (board) return boardColumns.flatMap((c) => c.tasks.map((t) => `${t.project}/${t.no}`));
     if (arrangedGroups) {
       return arrangedGroups.groups.flatMap((g) =>
         groupCollapsed.has(g.key) ? [] : g.rows.filter((r) => firstKeys.has(r.key)).flatMap((r) => rowKeys(r.task)),
@@ -663,6 +708,27 @@ export function ProjectView({
       <AddTaskRow label="セクションを追加" onClick={() => setAddingSection(true)} />
     ));
 
+  const doneToggle = (
+    <button
+      type="button"
+      aria-pressed={showCompleted}
+      onClick={() => setViewOptions({ ...viewOptions, done: !viewOptions.done })}
+      style={{
+        display: "block",
+        padding: 0,
+        border: 0,
+        background: "none",
+        fontFamily: "var(--font-body)",
+        fontSize: 13,
+        lineHeight: "19px",
+        color: "var(--color-text-secondary)",
+        cursor: "pointer",
+      }}
+    >
+      {showCompleted ? "完了したタスクを隠す" : "完了したタスクを表示"}
+    </button>
+  );
+
   const body = (): React.ReactNode => {
     if (state === "empty") return <EmptyState onAdd={onAddTask ? () => setAddTo({ section: null }) : undefined} />;
     const liveEmpty = state !== "error" && !!onAddTask && mine.length === 0 && projectSections.length === 0 && !invalidRows?.length && !addTo;
@@ -676,6 +742,28 @@ export function ProjectView({
     }
     if (state === "error") {
       return <ErrorState fileName={`${project}.xlsx`} detail={errorDetail} onRetry={onRetryLoad} onReveal={onRevealFile ?? (onRetryLoad ? undefined : noop)} />;
+    }
+    if (board) {
+      return (
+        <>
+          {invalidRows?.map((r) => (
+            <div key={`invalid-${r.row}`} style={{ background: "var(--color-accent-soft)", marginBottom: "var(--space-2)" }}>
+              <TaskRow title={invalidRowTitle(r)} done={false} priority={4} hideActions />
+            </div>
+          ))}
+          <div ref={previewRef} style={{ position: "relative" }}>
+            {dragPreview && <PreviewLayer listRef={previewRef} task={tasks.find((t) => t.no === dragPreview.no)} dragPreview={dragPreview} />}
+            <BoardView
+              columns={boardColumns}
+              sorted={sorted}
+              renderCard={renderCard}
+              renderAdd={addSlotInner}
+              trailing={addSectionSlot}
+            />
+          </div>
+          <div>{doneToggle}</div>
+        </>
+      );
     }
     return (
       <div ref={previewRef} {...(sorted ? {} : { "data-drop-list": "project" })} data-level0="0" data-section-list="" style={{ position: "relative" }}>
@@ -783,24 +871,7 @@ export function ProjectView({
         <AnimatePresence initial={false}>{showCompleted && doneRows.map((t) => renderRow(t, 0, false))}</AnimatePresence>
           </>
         )}
-        <button
-          type="button"
-          aria-pressed={showCompleted}
-          onClick={() => setViewOptions({ ...viewOptions, done: !viewOptions.done })}
-          style={{
-            display: "block",
-            padding: 0,
-            border: 0,
-            background: "none",
-            fontFamily: "var(--font-body)",
-            fontSize: 13,
-            lineHeight: "19px",
-            color: "var(--color-text-secondary)",
-            cursor: "pointer",
-          }}
-        >
-          {showCompleted ? "完了したタスクを隠す" : "完了したタスクを表示"}
-        </button>
+        {doneToggle}
       </div>
     );
   };
@@ -808,7 +879,7 @@ export function ProjectView({
   const menu = onRenameProject || onDeleteProject ? { rename: onRenameProject ? () => setRenamingProject(true) : undefined, delete: onDeleteProject } : undefined;
   return (
     <>
-      <PageHeader onMenu={menu} view={{ screen: "project", options: viewOptions, onChange: setViewOptions }} initialViewMenuOpen={initialViewMenuOpen}>
+      <PageHeader viewLabel={board ? "ボード" : undefined} onMenu={menu} view={{ screen: "project", options: viewOptions, onChange: setViewOptions }} initialViewMenuOpen={initialViewMenuOpen}>
         {renamingProject && onRenameProject ? (
           <div style={{ flex: 1, minWidth: 0, maxWidth: 480, marginRight: "var(--space-4)" }}>
             <InlineEdit

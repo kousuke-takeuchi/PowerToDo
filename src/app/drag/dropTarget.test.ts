@@ -134,3 +134,33 @@ test("today_drop_in_place_is_detected", () => {
   assert.equal(todayInPlace(today, null, "c/3"), true);
   assert.equal(todayInPlace(today, "a/1", "c/3"), false);
 });
+
+// Board columns: each column is its own list with no section header (spec ⑤ §4).
+test("a_board_column_without_a_header_places_in_its_own_section", () => {
+  const column: RowBox[] = [
+    { kind: "task", key: "p/4", no: 4, depth: 0, parent: null, section: "会議", top: 0, bottom: 40 },
+    { kind: "slot", section: "会議", top: 40, bottom: 80 },
+  ];
+  const d = { key: "p/3", depth: 0, height: 2, subtree: new Set(["p/3"]) };
+  // Above the first card: the column's section, not the unsectioned list.
+  const top = computeDrop(column, { x: 0, y: 2 }, 0, d, 0);
+  assert.deepEqual(placementOf(column, top!, "p/3"), { section: "会議", parent: null, before: 4 });
+  // The middle of a card is a gap, never onto (cards do not nest on the board).
+  assert.equal(computeDrop(column, { x: 0, y: 20 }, 0, d, 0)?.kind, "between");
+  // An empty column takes the drop on its add row.
+  const empty: RowBox[] = [{ kind: "slot", section: "空", top: 0, bottom: 40 }];
+  const e = computeDrop(empty, { x: 0, y: 20 }, 0, d, 0);
+  assert.deepEqual(placementOf(empty, e!, "p/3"), { section: "空", parent: null, before: null });
+});
+
+test("a_sorted_board_column_drops_at_its_end_and_the_unsectioned_column_is_no_section", () => {
+  // The cards area is one header-kind row (section "" = unsectioned), then the add row.
+  const column: RowBox[] = [
+    { kind: "header", section: "", top: 0, bottom: 120 },
+    { kind: "slot", section: null, top: 120, bottom: 160 },
+  ];
+  const d = { key: "p/3", depth: 0, height: 2, subtree: new Set(["p/3"]) };
+  const drop = computeDrop(column, { x: 0, y: 50 }, 0, d, 0);
+  assert.deepEqual(drop, { kind: "between", index: 1, depth: 0, y: 120, x: 0 });
+  assert.deepEqual(placementOf(column, drop!, "p/3"), { section: null, parent: null, before: null });
+});
