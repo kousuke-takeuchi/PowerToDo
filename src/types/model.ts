@@ -19,6 +19,8 @@ export interface InvalidRow { row: number; no?: number; column: string; value: s
 export interface ProjectView { project: Project; sections: Section[]; tasks: Task[]; invalidRows: InvalidRow[]; /** 操作についての通知 (例: 繰り返しが読めず通常の完了になった)。 */ warnings?: string[]; }
 
 export interface TaskInput { title: string; section?: string | null; priority?: Priority | null; due?: string | null; dueTime?: string | null; note?: string | null; labels?: string[]; parentNo?: number | null; rrule?: string | null; reminders?: string[]; }
+/** Where add_task puts the new task: right before / after a sibling (spec ② §5). */
+export type Position = { before: number } | { after: number };
 /** undefined = unchanged, null = clear the value (Rust `Option<Option<T>>`). */
 export interface TaskPatch {
   title?: string;
