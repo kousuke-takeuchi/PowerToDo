@@ -184,4 +184,4 @@
 | 2026-10-25 | 自動の並び・グループの間は並べ替えのドラッグを止め、お知らせで手動に戻せるようにする | 所有者の答え。自動で並ぶ間はドラッグした位置を保てない |
 | 2026-10-25 | 「期限」と担当者での並び替えは入れない | PowerToDo のデータに期限が無い。担当者は Todoist の受信トレイのメニューにも出ていなかった |
 | 2026-10-25 | 作成日のフィルターの選択肢は「すべて / 今日 / 過去 7 日間 / 過去 30 日間」 | Todoist の作成日の選択肢は今回確かめていない。作成日は過去にしか無いので過去の範囲にした |
-| 2026-10-26 | Labels hide the 完了したタスク option (`ALLOWED.label.done = false`) | The label view's data (Rust `label_tasks`) holds open tasks only, so there are no completed tasks to show |
+| 2026-10-26 | ラベルの画面には「完了したタスク」を出さない (`ALLOWED.label.done = false`) | ラベルの画面のデータ (Rust の `label_tasks`) は未完了のタスクだけを持つので、出す完了タスクが無い |
