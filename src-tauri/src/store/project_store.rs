@@ -418,6 +418,7 @@ impl ProjectStore {
             let loaded = store.load_from_disk(&name);
             store.books.insert(name, loaded);
         }
+        store.prune_view_options();
         Ok(store)
     }
 
@@ -1952,7 +1953,7 @@ impl ProjectStore {
     /// edits to it. Projects loaded here but no longer listed in the file are kept and
     /// re-listed (so the common workbook comes back dirty); `.xlsx` files that are listed or
     /// new but not loaded yet are loaded. The common workbook is clean afterwards unless that
-    /// re-listing happened.
+    /// re-listing happened or orphan 表示 rows were pruned (`prune_view_options`).
     pub fn reload_common(&mut self) -> AppResult<()> {
         let path = self.paths.common();
         let fresh = read_common_book(&path)?;
@@ -1988,6 +1989,7 @@ impl ProjectStore {
                 recompute_days(book, &holidays);
             }
         }
+        self.prune_view_options();
         Ok(())
     }
 }

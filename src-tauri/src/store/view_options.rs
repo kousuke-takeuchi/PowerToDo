@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use super::project_store::{ProjectStore, invalid};
+use super::project_store::{LoadedProject, ProjectStore, invalid};
 use crate::error::AppResult;
 
 pub const PREFIX: &str = "表示:";
@@ -38,27 +38,59 @@ impl ProjectStore {
         Ok(())
     }
 
-    /// Moves `<prefix><from>` to `<prefix><to>` (rename), or drops it (`to` = None).
+    /// Moves `<prefix><from>` to `<prefix><to>` (rename), or drops it (`to` = None). On a
+    /// rename any row already at the new key is dropped first, even when there is no row at
+    /// the old key, so a renamed project or label never inherits a stale row.
     pub(crate) fn follow_view_option(&mut self, prefix: &str, from: &str, to: Option<&str>) {
         let old = format!("{prefix}{from}");
+        let new = to.map(|t| format!("{prefix}{t}"));
         let rows = &mut self.common.extra_settings;
-        let Some(i) = rows.iter().position(|(k, _)| *k == old) else {
-            return;
-        };
-        match to {
-            Some(t) => {
-                let new = format!("{prefix}{t}");
-                // A stale row already at the new key is replaced by the moved row.
-                rows.retain(|(k, _)| *k != new);
-                if let Some(row) = rows.iter_mut().find(|(k, _)| *k == old) {
-                    row.0 = new;
+        let before = rows.len();
+        if let Some(new) = &new {
+            rows.retain(|(k, _)| k != new);
+        }
+        let mut changed = rows.len() != before;
+        if let Some(i) = rows.iter().position(|(k, _)| *k == old) {
+            match new {
+                Some(new) => rows[i].0 = new,
+                None => {
+                    rows.remove(i);
                 }
             }
-            None => {
-                rows.remove(i);
-            }
+            changed = true;
         }
-        self.common_dirty = true;
+        if changed {
+            self.common_dirty = true;
+        }
+    }
+
+    /// Drops `表示:プロジェクト:<n>` rows whose project is not listed and `表示:ラベル:<n>` rows
+    /// whose label is not in use (`labels_union`, exact names as the label code compares them).
+    /// Such orphans appear when a sync merges another device's write to a name renamed here.
+    /// Label rows are kept while any project failed to load, since its tasks' labels are
+    /// unknown. Marks the common book dirty only when something was dropped. Call after the
+    /// books are loaded (at open and after `reload_common`).
+    pub(crate) fn prune_view_options(&mut self) {
+        let labels: Option<Vec<String>> = self
+            .books
+            .values()
+            .all(|b| matches!(b, LoadedProject::Ok(_)))
+            .then(|| self.labels_union().into_iter().map(|l| l.name).collect());
+        let projects = &self.common.projects;
+        let rows = &mut self.common.extra_settings;
+        let before = rows.len();
+        rows.retain(|(k, _)| {
+            if let Some(n) = k.strip_prefix(PROJECT) {
+                projects.iter().any(|p| p.name == n)
+            } else if let (Some(n), Some(labels)) = (k.strip_prefix(LABEL), &labels) {
+                labels.iter().any(|l| l == n)
+            } else {
+                true
+            }
+        });
+        if rows.len() != before {
+            self.common_dirty = true;
+        }
     }
 }
 
@@ -143,6 +175,121 @@ mod tests {
         e.store.rename_label("急ぎ", "至急").unwrap();
         assert_eq!(e.store.view_options()["表示:ラベル:至急"], "sort=date");
         e.store.delete_label("至急").unwrap();
+        assert!(e.store.view_options().is_empty());
+    }
+
+    fn task(title: &str, labels: &[&str]) -> crate::domain::TaskInput {
+        crate::domain::TaskInput {
+            title: title.into(),
+            section: None,
+            priority: None,
+            due: None,
+            due_time: None,
+            note: None,
+            labels: labels.iter().map(|s| s.to_string()).collect(),
+            parent_no: None,
+            rrule: None,
+            reminders: vec![],
+        }
+    }
+
+    fn keys(s: &ProjectStore) -> Vec<String> {
+        s.view_options().into_keys().collect()
+    }
+
+    #[test]
+    fn orphan_project_and_label_rows_are_pruned_at_open() {
+        let mut e = env();
+        e.store
+            .create_project("仕事", "var(--color-priority-2)")
+            .unwrap();
+        e.store
+            .add_label("急ぎ", "var(--color-text-muted)")
+            .unwrap();
+        // A label that exists only on a task still counts as in use.
+        e.store.add_task("仕事", task("a", &["食品"])).unwrap();
+        e.store.save("仕事").unwrap();
+        for k in [
+            "表示:今日",
+            "表示:プロジェクト:仕事",
+            "表示:プロジェクト:無い",
+            "表示:ラベル:急ぎ",
+            "表示:ラベル:食品",
+            "表示:ラベル:無い",
+        ] {
+            e.store.set_view_option(k, "x=1").unwrap();
+        }
+        e.store.save_common().unwrap();
+
+        let s = e.reopen();
+        assert_eq!(
+            keys(&s),
+            vec![
+                "表示:プロジェクト:仕事",
+                "表示:ラベル:急ぎ",
+                "表示:ラベル:食品",
+                "表示:今日",
+            ]
+        );
+        assert!(s.common_dirty);
+    }
+
+    #[test]
+    fn open_without_orphans_leaves_the_common_book_clean() {
+        let mut e = env();
+        e.store
+            .create_project("仕事", "var(--color-priority-2)")
+            .unwrap();
+        e.store
+            .set_view_option("表示:プロジェクト:仕事", "x=1")
+            .unwrap();
+        e.store.save_common().unwrap();
+        assert!(!e.reopen().common_dirty);
+    }
+
+    /// A rename here (仕事 → 業務) merged with another device's write to the old key leaves both
+    /// rows in the common book; the reload after the sync drops the orphan.
+    #[test]
+    fn the_sync_reload_prunes_the_old_key_left_by_a_cross_device_rename() {
+        let mut e = env();
+        e.store
+            .create_project("仕事", "var(--color-priority-2)")
+            .unwrap();
+        e.store
+            .set_view_option("表示:プロジェクト:仕事", "a=1")
+            .unwrap();
+        e.store.rename_project("仕事", "業務").unwrap();
+        // The merged book as the sync writes it: our moved row plus the remote's late write.
+        e.store
+            .set_view_option("表示:プロジェクト:仕事", "b=2")
+            .unwrap();
+        e.store.save_common().unwrap();
+
+        e.store.reload_common().unwrap();
+        assert_eq!(keys(&e.store), vec!["表示:プロジェクト:業務"]);
+        assert_eq!(e.store.view_options()["表示:プロジェクト:業務"], "a=1");
+        assert!(e.store.common_dirty);
+    }
+
+    #[test]
+    fn a_rename_drops_a_stale_row_at_the_new_key_even_without_an_old_row() {
+        let mut e = env();
+        e.store
+            .create_project("仕事", "var(--color-priority-2)")
+            .unwrap();
+        e.store
+            .set_view_option("表示:プロジェクト:業務", "stale=1")
+            .unwrap();
+        e.store.rename_project("仕事", "業務").unwrap();
+        assert!(e.store.view_options().is_empty());
+
+        e.store
+            .add_label("急ぎ", "var(--color-text-muted)")
+            .unwrap();
+        e.store
+            .set_view_option("表示:ラベル:至急", "stale=1")
+            .unwrap();
+        e.store.rename_label("急ぎ", "至急").unwrap();
         assert!(e.store.view_options().is_empty());
     }
 }
