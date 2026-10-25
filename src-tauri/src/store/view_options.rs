@@ -67,15 +67,18 @@ impl ProjectStore {
     /// Drops `表示:プロジェクト:<n>` rows whose project is not listed and `表示:ラベル:<n>` rows
     /// whose label is not in use (`labels_union`, exact names as the label code compares them).
     /// Such orphans appear when a sync merges another device's write to a name renamed here.
-    /// Label rows are kept while any project failed to load, since its tasks' labels are
-    /// unknown. Marks the common book dirty only when something was dropped. Call after the
-    /// books are loaded (at open and after `reload_common`).
-    pub(crate) fn prune_view_options(&mut self) {
-        let labels: Option<Vec<String>> = self
-            .books
-            .values()
-            .all(|b| matches!(b, LoadedProject::Ok(_)))
-            .then(|| self.labels_union().into_iter().map(|l| l.name).collect());
+    /// Label rows are pruned only when `prune_labels` is set (at open, after every book is
+    /// loaded): after `reload_common` in a sync the project books have not arrived yet, so a
+    /// label another device just put on a task would look unused. They are also kept while any
+    /// project failed to load, since its tasks' labels are unknown. Marks the common book dirty
+    /// only when something was dropped.
+    pub(crate) fn prune_view_options(&mut self, prune_labels: bool) {
+        let labels: Option<Vec<String>> = (prune_labels
+            && self
+                .books
+                .values()
+                .all(|b| matches!(b, LoadedProject::Ok(_))))
+        .then(|| self.labels_union().into_iter().map(|l| l.name).collect());
         let projects = &self.common.projects;
         let rows = &mut self.common.extra_settings;
         let before = rows.len();
@@ -269,6 +272,29 @@ mod tests {
         assert_eq!(keys(&e.store), vec!["表示:プロジェクト:業務"]);
         assert_eq!(e.store.view_options()["表示:プロジェクト:業務"], "a=1");
         assert!(e.store.common_dirty);
+    }
+
+    /// During a sync the common book is reloaded before the project books: a label another
+    /// device just put on a task (with its 表示 row) is not in use here yet, so the reload keeps
+    /// the row. Label orphans are pruned at the next open only.
+    #[test]
+    fn the_sync_reload_keeps_a_label_row_whose_task_has_not_arrived_yet() {
+        let mut e = env();
+        e.store
+            .create_project("仕事", "var(--color-priority-2)")
+            .unwrap();
+        e.store.save("仕事").unwrap();
+        e.store.set_view_option("表示:ラベル:新", "x=1").unwrap();
+        e.store.save_common().unwrap();
+
+        e.store.reload_common().unwrap();
+        assert_eq!(keys(&e.store), vec!["表示:ラベル:新"]);
+        assert!(!e.store.common_dirty);
+
+        // At the next start the label is still nowhere in use: the row is pruned then.
+        let s = e.reopen();
+        assert!(s.view_options().is_empty());
+        assert!(s.common_dirty);
     }
 
     #[test]
