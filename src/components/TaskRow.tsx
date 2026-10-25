@@ -47,6 +47,10 @@ export type TaskRowProps = {
   onDate?: () => void;
   /** コメントのアイコン. */
   onComment?: () => void;
+  /** Desktop: pressing the drag handle starts a drag (spec ③). The handle stays mounted while dragging (it holds the pointer capture). */
+  onHandlePointerDown?: (e: React.PointerEvent) => void;
+  /** This row is the one being dragged: drawn at opacity 0.4 while the card follows the pointer. */
+  dragging?: boolean;
 };
 
 const subCountStyle: React.CSSProperties = {
@@ -106,15 +110,19 @@ export function TaskRow(p: TaskRowProps) {
         borderRadius: p.focused && !mobile ? 6 : undefined,
         marginLeft: indentPx,
         fontFamily: "var(--font-body)",
+        opacity: p.dragging ? 0.4 : undefined,
       }}
       onClick={p.onClick}
     >
       {!mobile && (
-        // Drag handle (Todoist): shown on hover or focus. Dragging comes with the drag work (③).
+        // Drag handle (Todoist): shown on hover or focus (CSS only, so it stays mounted during a drag).
         <span
-          aria-hidden
+          aria-hidden={p.onHandlePointerDown ? undefined : true}
+          role={p.onHandlePointerDown ? "button" : undefined}
+          aria-label={p.onHandlePointerDown ? "ドラッグして動かす" : undefined}
+          onPointerDown={p.onHandlePointerDown}
           className={p.showHandle || p.focused ? undefined : "opacity-0 group-hover:opacity-100"}
-          style={{ position: "absolute", left: -40, top: 14, display: "inline-flex", color: "var(--color-text-muted)" }}
+          style={{ position: "absolute", left: -40, top: 14, display: "inline-flex", color: "var(--color-text-muted)", cursor: p.onHandlePointerDown ? "grab" : undefined, touchAction: "none" }}
         >
           <GripVertical size={16} />
         </span>

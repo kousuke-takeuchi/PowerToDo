@@ -22,6 +22,8 @@ export type DragApi = { start: (e: React.PointerEvent, source: DragSource, card:
 export const DragCtx = createContext<DragApi | null>(null);
 
 const LIFT = 4;
+/** Room left of a list for the drag grips (-40 from the column edge). */
+const GUTTER = 48;
 const SETTLE = 0.15;
 type Target =
   | { kind: "list"; drop: Drop; rows: RowBox[]; list: "project" | "today" }
@@ -195,7 +197,8 @@ export function DragProvider({ onDrop, children }: { onDrop: (r: DropResult) => 
     const items = [...listEl.querySelectorAll<HTMLElement>(attr === "section" ? "[data-drop-section]" : "[data-project-item]")];
     const names = items.map((it) => (attr === "section" ? it.dataset.dropSection! : it.dataset.projectItem!));
     const lr = listEl.getBoundingClientRect();
-    const at = orderIndex(items.map((it) => it.getBoundingClientRect()), lr, x, y);
+    // The grip sits in the gutter left of the column, so a straight pull up from it must stay inside the list.
+    const at = orderIndex(items.map((it) => it.getBoundingClientRect()), { left: lr.left - GUTTER, right: lr.right, top: lr.top, bottom: lr.bottom }, x, y);
     return at ? { kind: "order", attr, names, index: at.index, y: at.y, x: lr.left, w: lr.width } : null;
   }, []);
 

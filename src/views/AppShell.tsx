@@ -63,6 +63,7 @@ export function AppShell({ width = 1440, sidebar, children, overlay, banner, ful
         </motion.aside>
       )}
       <main
+        data-drag-scroll={fill ? "" : undefined}
         style={{
           flex: 1,
           minWidth: 0,
