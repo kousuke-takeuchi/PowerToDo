@@ -4,7 +4,7 @@ import { taskKey } from "../views/crossList";
 import type { SidebarProps } from "../views/Sidebar";
 import { api } from "../api/client";
 import { addDays } from "./dates";
-import { indentMove, outdentMove, siblingMove } from "./drag/keyMoves";
+import { indentMove, outdentMove, siblingMove, todayMove } from "./drag/keyMoves";
 import type { RowHandlers } from "./shortcuts";
 import { useShortcuts } from "./shortcuts";
 import type { useCrossActions } from "./useCrossView";
@@ -104,6 +104,9 @@ export function useRowShortcuts({
   const moveKey = (k: "up" | "down" | "indent" | "outdent") => {
     const t = focusedTask;
     if (!t) return;
+    // Rows on screen: a move skips the ones the 表示 filter hides (spec ⑤), as a drop does.
+    const onScreen = new Set(visibleKeys);
+    const shown = (x: Task) => onScreen.has(taskKey(x));
     if (onProjectScreen(t)) {
       if (projectSorted) {
         onReorderLocked();
@@ -118,9 +121,9 @@ export function useRowShortcuts({
       const sections = (p.view?.sections ?? []).map((s) => s.name);
       const to =
         k === "up"
-          ? siblingMove(tasks, t.no, -1, sections)
+          ? siblingMove(tasks, t.no, -1, sections, shown)
           : k === "down"
-            ? siblingMove(tasks, t.no, 1, sections)
+            ? siblingMove(tasks, t.no, 1, sections, shown)
             : k === "indent"
               ? indentMove(tasks, t.no, sections)
               : outdentMove(tasks, t.no, sections);
@@ -132,12 +135,8 @@ export function useRowShortcuts({
         onReorderLocked(restoreToday);
         return;
       }
-      const list = todayList();
-      const i = list.findIndex((x) => taskKey(x) === taskKey(t));
-      const j = k === "up" ? i - 1 : i + 1;
-      if (i < 0 || j < 0 || j >= list.length) return;
-      const next = [...list];
-      [next[i], next[j]] = [next[j], next[i]];
+      const next = todayMove(todayList(), t, k === "up" ? -1 : 1, shown);
+      if (!next) return;
       afterMove(api.setTodayOrder(today, next.map((x) => [x.project, x.no])));
     }
   };

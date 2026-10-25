@@ -18,11 +18,20 @@ const depthOf = (tasks: Task[], t: Task): number => (t.parentNo === undefined ? 
 const heightOf = (tasks: Task[], no: number): number =>
   Math.max(0, ...tasks.filter((x) => x.parentNo === no).map((c) => 1 + heightOf(tasks, c.no)));
 
-/** ⌥↑ / ⌥↓ (spec ③ §7): one place up / down among the siblings. Null at the ends. `sections`: the project's section names. */
-export function siblingMove(tasks: Task[], no: number, dir: -1 | 1, sections: readonly string[]): Placement | null {
+/**
+ * ⌥↑ / ⌥↓ (spec ③ §7): one place up / down among the siblings. Null at the ends. `sections`: the project's section names.
+ * `shown`: the rows the 表示 filter leaves on screen (spec ⑤); hidden siblings are skipped, as a drop skips them.
+ */
+export function siblingMove(
+  tasks: Task[],
+  no: number,
+  dir: -1 | 1,
+  sections: readonly string[],
+  shown: (t: Task) => boolean = () => true,
+): Placement | null {
   const t = tasks.find((x) => x.no === no);
   if (!t || hidden(t)) return null;
-  const s = siblingsOf(tasks, t, sections);
+  const s = siblingsOf(tasks, t, sections).filter((x) => x.no === no || shown(x));
   const i = s.findIndex((x) => x.no === no);
   const j = i + dir;
   if (j < 0 || j >= s.length) return null;
@@ -48,4 +57,22 @@ export function outdentMove(tasks: Task[], no: number, sections: readonly string
   const s = siblingsOf(tasks, parent, sections);
   const next = s[s.findIndex((x) => x.no === parent.no) + 1];
   return at(parent, sections, next?.no ?? null, parent.parentNo ?? null);
+}
+
+/**
+ * ⌥↑ / ⌥↓ on Today: the new order of `list` (the Today group), or null at the ends. Rows the filter hides
+ * (`shown` false) are skipped: the task goes before the shown row above, or before the shown row after the next one
+ * (else to the end), the same as a drop.
+ */
+export function todayMove(list: Task[], t: Task, dir: -1 | 1, shown: (t: Task) => boolean): Task[] | null {
+  const same = (x: Task) => x.project === t.project && x.no === t.no;
+  const s = list.filter((x) => same(x) || shown(x));
+  const i = s.findIndex(same);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= s.length) return null;
+  const before = dir < 0 ? s[j] : s[j + 1];
+  const rest = list.filter((x) => !same(x));
+  const at = before ? rest.indexOf(before) : rest.length;
+  rest.splice(at, 0, list.find(same)!);
+  return rest;
 }
