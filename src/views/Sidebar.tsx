@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import { Bell, CalendarCheck, CalendarDays, CirclePlus, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
+import { Bell, CalendarCheck, CalendarDays, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
 import { isImeKey } from "../app/keys";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
@@ -144,8 +144,21 @@ export function Sidebar({
           cursor: "pointer",
         }}
       >
-        <span style={{ display: "inline-flex", color: "var(--color-accent)", flex: "0 0 auto" }}>
-          <CirclePlus size={20} />
+        {/* Todoist: a filled red circle with a white plus. */}
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            background: "var(--color-accent)",
+            color: "#FFFFFF" /* アクセント上の白 (他と同じ固定値) */,
+            flex: "0 0 auto",
+          }}
+        >
+          <Plus size={16} strokeWidth={2.5} />
         </span>
         <span style={{ fontSize: 14, lineHeight: "20px", fontWeight: 600, color: "var(--color-accent)" }}>タスクを追加</span>
       </button>
