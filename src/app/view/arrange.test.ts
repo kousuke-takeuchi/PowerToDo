@@ -70,3 +70,11 @@ test("filters_dates_created_and_done", () => {
   assert.deepEqual(pick({ created: "7d" }), [["", ["today", "later", "none"]]]);
   assert.deepEqual(pick({ done: true }), [["", ["today", "later", "none", "old"]], ["完了", ["done"]]]);
 });
+
+test("filters_apply_to_the_done_group_too", () => {
+  const open = t({ title: "open", priority: 1 }), openP4 = t({ title: "openP4", priority: 4 });
+  const doneP4 = t({ title: "doneP4", priority: 4, progress: 100 }), doneP1 = t({ title: "doneP1", priority: 1, progress: 100 });
+  const r = arrange([open, openP4, doneP4, doneP1], { ...DEFAULTS, prio: 1, done: true }, ctx);
+  assert.deepEqual(titles(r), [["", ["open"]], ["完了", ["doneP1"]]]);
+  assert.equal(r.hidden, 1);
+});

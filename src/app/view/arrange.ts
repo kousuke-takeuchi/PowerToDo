@@ -80,6 +80,6 @@ export function arrange(tasks: Task[], o: ViewOptions, c: Ctx): { groups: Arrang
     const dates = [...new Set(sorted.map((t) => t.createdAt.slice(0, 10)))].sort().reverse();
     for (const d of dates) add(`a:${d}`, num(d) === today ? "今日" : num(d) === today - 1 ? "昨日" : dayTitle(d), sorted.filter((t) => t.createdAt.startsWith(d)));
   }
-  if (o.done) add("done", "完了", done);
+  if (o.done) add("done", "完了", done.filter(keep));
   return { groups, hidden };
 }
