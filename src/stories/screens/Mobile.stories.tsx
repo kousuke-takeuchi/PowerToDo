@@ -223,6 +223,21 @@ export const M02Typing: Story = {
   render: () => <TypingQuickAdd />,
 };
 
+// 長い日付とプロジェクト名: 日付・プロジェクトのチップが縮んで省略され、送信ボタンはカードの内側に残る (375 / 390 幅)。
+export const M02LongChips: Story = {
+  name: "M-02 長い日付とプロジェクト名",
+  render: () => (
+    <SheetFrame>
+      <MobileQuickAddSheet
+        tokens={[{ text: "牛乳 " }, { text: "来週の月曜日", kind: "date" }, { text: " " }, { text: "#とても長いプロジェクトの名前", kind: "project" }]}
+        text="牛乳 来週の月曜日 #とても長いプロジェクトの名前"
+        onTextChange={() => undefined}
+        onSubmit={() => undefined}
+      />
+    </SheetFrame>
+  ),
+};
+
 export const M03DateSheet: Story = {
   name: "M-03 日付のシートを開いた",
   render: () => (

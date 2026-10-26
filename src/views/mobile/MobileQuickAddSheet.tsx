@@ -34,9 +34,11 @@ export type MobileQuickAddSheetProps = {
 };
 
 const ellipsis: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const noShrink: React.CSSProperties = { flexShrink: 0 };
 
-/** A chip of the quick add's bottom row (spec ④ iPhone §5.3). Pressing it keeps the keyboard up. */
-function Chip({ label, onClick, color = "var(--color-text-secondary)", pressed, children }: { label: string; onClick?: () => void; color?: string; pressed?: boolean; children: React.ReactNode }) {
+/** A chip of the quick add's bottom row (spec ④ iPhone §5.3). Pressing it keeps the keyboard up.
+ *  `shrink`: the date and project chips give way (text ellipsizes) so the send button stays inside the card. */
+function Chip({ label, onClick, color = "var(--color-text-secondary)", pressed, shrink, children }: { label: string; onClick?: () => void; color?: string; pressed?: boolean; shrink?: boolean; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -44,7 +46,7 @@ function Chip({ label, onClick, color = "var(--color-text-secondary)", pressed, 
       aria-pressed={pressed}
       onClick={onClick}
       onMouseDown={(e) => e.preventDefault()}
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 32, maxWidth: 110, padding: "0 8px", border: "1px solid var(--color-border)", borderRadius: 8, background: pressed ? "var(--color-bg-hover)" : "none", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", color, whiteSpace: "nowrap", overflow: "hidden", cursor: "pointer", flex: "0 0 auto" }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 32, maxWidth: 110, padding: "0 8px", border: "1px solid var(--color-border)", borderRadius: 8, background: pressed ? "var(--color-bg-hover)" : "none", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", color, whiteSpace: "nowrap", overflow: "hidden", cursor: "pointer", flex: shrink ? "0 1 auto" : "0 0 auto", minWidth: shrink ? 0 : undefined }}
     >
       {children}
     </button>
@@ -235,19 +237,19 @@ export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange,
             <Chip label="その他の項目" pressed={more} onClick={() => setMore((v) => !v)}>
               <Plus size={16} />
             </Chip>
-            <Chip label="日付" onClick={live ? () => insert("date") : undefined} color={dateTok === "今日" ? "var(--color-success)" : dateTok ? "var(--color-text-primary)" : undefined}>
-              <Calendar size={16} />
+            <Chip label="日付" shrink onClick={live ? () => insert("date") : undefined} color={dateTok === "今日" ? "var(--color-success)" : dateTok ? "var(--color-text-primary)" : undefined}>
+              <Calendar size={16} style={noShrink} />
               <span style={ellipsis}>{dateTok ?? "日付"}</span>
             </Chip>
             <Chip label="優先度" onClick={live ? () => insert("priority") : undefined} color={prioNo ? "var(--color-text-primary)" : undefined}>
               <Flag size={16} color={prioNo ? `var(--color-priority-${prioNo})` : undefined} />
               {prioNo ? `P${prioNo}` : "優先度"}
             </Chip>
-            <Chip label="プロジェクト" onClick={live ? () => insert("project") : undefined}>
-              <Hash size={16} />
+            <Chip label="プロジェクト" shrink onClick={live ? () => insert("project") : undefined}>
+              <Hash size={16} style={noShrink} />
               <span style={ellipsis}>{projTok ?? projectName ?? "受信トレイ"}</span>
             </Chip>
-            <div style={{ flex: 1 }} />
+            {/* marginLeft auto, not a spacer div: a spacer costs one more 6 px gap, which the defaults (日付 / 受信トレイ) don't have at 390. */}
             <button
               type="button"
               aria-label="送信"
@@ -267,6 +269,7 @@ export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange,
                 color: "#FFFFFF", // pen と同じ (アクセント上の白)
                 cursor: "pointer",
                 flex: "0 0 auto",
+                marginLeft: "auto",
               }}
             >
               <ArrowUp size={18} />
