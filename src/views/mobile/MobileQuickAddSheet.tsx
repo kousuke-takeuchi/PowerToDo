@@ -46,7 +46,7 @@ function Chip({ label, onClick, color = "var(--color-text-secondary)", pressed, 
       aria-pressed={pressed}
       onClick={onClick}
       onMouseDown={(e) => e.preventDefault()}
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 32, maxWidth: 110, padding: "0 8px", border: "1px solid var(--color-border)", borderRadius: 8, background: pressed ? "var(--color-bg-hover)" : "none", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", color, whiteSpace: "nowrap", overflow: "hidden", cursor: "pointer", flex: shrink ? "0 1 auto" : "0 0 auto", minWidth: shrink ? 0 : undefined }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 32, maxWidth: 110, padding: "0 6px", border: "1px solid var(--color-border)", borderRadius: 8, background: pressed ? "var(--color-bg-hover)" : "none", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", color, whiteSpace: "nowrap", overflow: "hidden", cursor: "pointer", flex: shrink ? "0 1 auto" : "0 0 auto", minWidth: shrink ? 0 : undefined }}
     >
       {children}
     </button>
@@ -233,7 +233,7 @@ export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange,
               <ToolbarIcon icon={Bell} label="リマインダー" size={ts} color={reminders.length > 0 ? "var(--color-success)" : undefined} onClick={onPickReminder} />
             </div>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <Chip label="その他の項目" pressed={more} onClick={() => setMore((v) => !v)}>
               <Plus size={16} />
             </Chip>
