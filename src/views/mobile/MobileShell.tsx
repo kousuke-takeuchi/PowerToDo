@@ -7,7 +7,7 @@ import { MobileHeader, type HeaderAction } from "../../components/MobileHeader";
 import { PullIndicator } from "../../components/PullIndicator";
 import { TabBar } from "../../components/TabBar";
 import type { TabBarProps } from "../../components/TabBar";
-import { titleLook, titleProgress } from "../../components/largeTitle";
+import { LARGE_TITLE_HEIGHT, titleLook, titleProgress } from "../../components/largeTitle";
 
 export type MobileShellProps = {
   /** A custom top bar (M-03's breadcrumb). Without it the shell draws MobileHeader from title / subtitle / actions / onBack. */
@@ -73,8 +73,12 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
     pulling.ref(el);
   };
   useLayoutEffect(() => {
-    if (initialScrollTop && scrollEl.current) scrollEl.current.scrollTop = initialScrollTop;
-  }, [initialScrollTop]);
+    if (initialScrollTop && scrollEl.current) {
+      scrollEl.current.scrollTop = initialScrollTop;
+      // The body may have less room than asked (clamped, or no scroll event at 0): follow the real position.
+      progress.set(titleProgress(scrollEl.current.scrollTop));
+    }
+  }, [initialScrollTop, progress]);
   return (
     <div
       style={{
@@ -102,8 +106,15 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
           onScroll={largeTitle ? (e) => progress.set(titleProgress(e.currentTarget.scrollTop)) : undefined}
           style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflowY: "auto", overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" }}
         >
-          {largeTitle && title !== undefined && <LargeTitle title={title} subtitle={subtitle} progress={progress} />}
-          {children}
+          {largeTitle ? (
+            // Like iOS, any list can scroll the full collapse distance, so the title never rests half-faded.
+            <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", minHeight: `calc(100% + ${LARGE_TITLE_HEIGHT}px)` }}>
+              {title !== undefined && <LargeTitle title={title} subtitle={subtitle} progress={progress} />}
+              {children}
+            </div>
+          ) : (
+            children
+          )}
         </div>
       </div>
       {tab !== undefined && (
