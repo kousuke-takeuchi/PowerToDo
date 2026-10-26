@@ -18,6 +18,7 @@ import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
+import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
 import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
@@ -56,6 +57,7 @@ type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | 
  * デスクトップの Main と同じフックにつなぐ。「一覧」のタブはドロワーを開き、選んだ受信トレイ / プロジェクト / ラベルを本文に出す。
  */
 export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
+  useSystemTheme();
   const today = useToday();
   const { errors: saveErrors } = useSaveErrors();
 
