@@ -1,5 +1,5 @@
 import { Check, Flag } from "lucide-react";
-import { SheetRow } from "./BottomSheet";
+import { SheetCard, SheetRow } from "./BottomSheet";
 
 export type PrioritySheetProps = {
   value: 1 | 2 | 3 | 4;
@@ -17,7 +17,7 @@ const PRIORITIES: { value: 1 | 2 | 3 | 4; label: string }[] = [
 /** 優先度のシートの中身 (BottomSheet の children)。選ぶと onChange して onClose (今と同じ値なら onClose だけ)。 */
 export function PrioritySheet({ value, onChange, onClose }: PrioritySheetProps) {
   return (
-    <div role="group" aria-label="優先度" style={{ display: "flex", flexDirection: "column" }}>
+    <SheetCard label="優先度">
       {PRIORITIES.map((p) => (
         <SheetRow
           key={p.value}
@@ -31,6 +31,6 @@ export function PrioritySheet({ value, onChange, onClose }: PrioritySheetProps) 
           }}
         />
       ))}
-    </div>
+    </SheetCard>
   );
 }

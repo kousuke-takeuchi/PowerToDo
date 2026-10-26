@@ -1,6 +1,6 @@
 import { Bell, Check } from "lucide-react";
 import { REMINDER_CODES, reminderLabel } from "../ReminderPicker";
-import { SheetRow } from "./BottomSheet";
+import { SheetCard, SheetRow } from "./BottomSheet";
 
 export type ReminderSheetProps = {
   /** 設定済みのリマインダー ("-30m" など)。 */
@@ -12,7 +12,7 @@ export type ReminderSheetProps = {
 export function ReminderSheet({ value, onChange }: ReminderSheetProps) {
   const codes = [...REMINDER_CODES, ...value.filter((v) => !REMINDER_CODES.includes(v))];
   return (
-    <div role="group" aria-label="リマインダー" style={{ display: "flex", flexDirection: "column" }}>
+    <SheetCard label="リマインダー">
       {codes.map((code) => {
         const on = value.includes(code);
         return (
@@ -25,6 +25,6 @@ export function ReminderSheet({ value, onChange }: ReminderSheetProps) {
           />
         );
       })}
-    </div>
+    </SheetCard>
   );
 }

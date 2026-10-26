@@ -1,7 +1,11 @@
 import type React from "react";
-import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Check, X } from "lucide-react";
+import { AnimatePresence, motion, useDragControls, useIsPresent, useMotionValue } from "motion/react";
 import { useEscLayer } from "../../app/layers";
+import { Glass } from "../../components/Glass";
 import { useMotionTiming } from "../../motion";
+import { sheetDragEnd, sheetTransition, type Detent, type SheetPhase } from "./sheetMotion";
 import { useKeyboardInset } from "./useKeyboardInset";
 
 export type BottomSheetProps = {
@@ -9,22 +13,62 @@ export type BottomSheetProps = {
   title?: string;
   onClose: () => void;
   children: React.ReactNode;
-  /** 実機用: キーボードの高さぶん持ち上げる (入力欄のあるシートが、キーボードで隠れないように)。省略すると今のまま。 */
+  /** Device: lift the sheet by the keyboard's height. */
   fill?: boolean;
+  /** A form id: shows the red round check at the top right, which submits that form (sheets that need a decision: TextSheet). */
+  confirmForm?: string;
+  /** "large": opens at 85 % and pulls up to full height (spec iPhone 5.2). Default: as tall as its content, at most 85 %. */
+  size?: "auto" | "large";
 };
 
-function Sheet({ title, onClose, children, fill }: Omit<BottomSheetProps, "open">) {
+const round: React.CSSProperties = { width: 36, height: 36, display: "grid", placeItems: "center", padding: 0, border: 0, borderRadius: 18, cursor: "pointer", flex: "0 0 auto" };
+const TOP_GAP = 8;
+
+function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: Omit<BottomSheetProps, "open">) {
   const inset = useKeyboardInset(!!fill);
-  // 閉じるアニメーション中は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)
+  // While closing, leave the Esc layer (do not take the Esc of the layer below)
   useEscLayer(useIsPresent(), onClose);
-  const { reduced, t } = useMotionTiming();
+  const { reduced } = useMotionTiming();
+  const controls = useDragControls();
+  const dragY = useMotionValue(0);
+  const [detent, setDetent] = useState<Detent>(size === "large" ? "large" : "auto");
+  const [phase, setPhase] = useState<SheetPhase>("open");
+  // Once a drag has decided to close, drag must stop fighting the exit animation (a sheet left half-way would never be removed).
+  const [leaving, setLeaving] = useState(false);
+  // A sheet whose content is swapped while open (menu -> move) re-opens at the stop its new size wants.
+  const lastSize = useRef(size);
+  useEffect(() => {
+    if (lastSize.current === size) return;
+    lastSize.current = size;
+    setPhase("detent");
+    setDetent(size === "large" ? "large" : "auto");
+  }, [size]);
+
+  // The drag needs pixels (a percentage y is read as px by the drag), so measure the room the sheet has.
+  const overlay = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState(0);
+  useLayoutEffect(() => {
+    const el = overlay.current;
+    if (!el) return;
+    const measure = () => setRoom(el.clientHeight - inset);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [inset]);
+  const tall = Math.max(0, room - TOP_GAP);
+  const yLarge = Math.round(tall * 0.15);
+  const y = detent === "large" ? yLarge : 0;
+  const bottomPad = detent === "large" ? `${yLarge + 16}px` : inset > 0 ? "12px" : "calc(16px + env(safe-area-inset-bottom))";
+  const open = sheetTransition("open", reduced);
+  const close = sheetTransition("close", reduced);
   return (
     <motion.div
+      ref={overlay}
       role="presentation"
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={t(0.15)}
+      animate={{ opacity: 1, transition: open }}
+      exit={{ opacity: 0, transition: close }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -41,56 +85,103 @@ function Sheet({ title, onClose, children, fill }: Omit<BottomSheetProps, "open"
         boxSizing: "border-box",
       }}
     >
-      <motion.div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title ?? "シート"}
-        initial={{ y: reduced ? 0 : "100%" }}
-        animate={{ y: 0 }}
-        exit={{ y: reduced ? 0 : "100%" }}
-        transition={t(0.25)}
-        style={{
-          boxSizing: "border-box",
-          maxHeight: "85%",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-          // キーボードが出ている間 (inset > 0) は、キーボードの上端が下端なのでセーフエリアは空けない
-          padding: `var(--space-2) var(--space-4) ${inset > 0 ? "var(--space-3)" : "calc(var(--space-3) + env(safe-area-inset-bottom))"}`,
-          background: "var(--color-bg)",
-          color: "var(--color-text-primary)",
-          borderRadius: "16px 16px 0 0",
-          flex: "0 0 auto",
-        }}
-      >
-        <div aria-hidden style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, background: "var(--color-border)", flex: "0 0 auto" }} />
-        {title && (
-          <div style={{ fontSize: 13, lineHeight: "19px", fontWeight: 600, color: "var(--color-text-secondary)", overflowWrap: "anywhere" }}>{title}</div>
-        )}
-        {children}
-      </motion.div>
+      {room > 0 && (
+        <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-label={title ?? "シート"}
+          drag={leaving ? false : "y"}
+          dragControls={controls}
+          dragListener={false}
+          dragMomentum={false}
+          dragConstraints={{ top: y, bottom: y }}
+          dragElastic={{ top: detent === "large" ? 0.6 : 0.05, bottom: 1 }}
+          onDragEnd={(_, info) => {
+            const out = sheetDragEnd(detent, info.offset.y, info.velocity.y);
+            if (out === "close") {
+              dragY.stop(); // the release animation (back to the stop) must not fight the exit
+              setLeaving(true);
+              onClose();
+            } else {
+              setPhase("detent");
+              setDetent(out);
+            }
+          }}
+          initial={{ y: reduced ? y : room }}
+          animate={{ y, transition: sheetTransition(phase, reduced) }}
+          exit={{ y: reduced ? y : room, transition: close }}
+          style={{
+            y: dragY,
+            position: "relative",
+            boxSizing: "border-box",
+            height: size === "large" ? tall : undefined,
+            maxHeight: size === "large" ? undefined : "85%",
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--color-sheet-bg)",
+            color: "var(--color-text-primary)",
+            borderRadius: "16px 16px 0 0",
+            flex: "0 0 auto",
+          }}
+        >
+          {/* Grabber + title row: the drag handle (the content may scroll, so it does not start drags) */}
+          <div onPointerDown={(e) => controls.start(e)} style={{ flex: "0 0 auto", touchAction: "none", padding: "6px 15px 8px" }}>
+            <div aria-hidden style={{ margin: "0 auto 6px", width: 36, height: 4, borderRadius: 2, background: "var(--color-border)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Glass radius={18} style={{ flex: "0 0 auto" }}>
+                <button type="button" aria-label="閉じる" onClick={onClose} style={{ ...round, background: "none", color: "var(--color-text-primary)" }}>
+                  <X size={18} />
+                </button>
+              </Glass>
+              <div style={{ flex: 1, minWidth: 0, textAlign: "center", fontSize: 17, lineHeight: "22px", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+              {confirmForm ? (
+                <button type="submit" form={confirmForm} aria-label="決定" style={{ ...round, background: "var(--color-accent)", color: "#FFFFFF" /* white on accent */ }}>
+                  <Check size={18} />
+                </button>
+              ) : (
+                <span aria-hidden style={{ width: 36, flex: "0 0 auto" }} />
+              )}
+            </div>
+          </div>
+          <div
+            style={{
+              flex: "1 1 auto",
+              minHeight: 0,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              // At the 85 % stop the bottom 15 % is below the screen: pad it so the end of a long list can be scrolled into view.
+              padding: `4px 15px ${bottomPad}`,
+            }}
+          >
+            {children}
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }
 
 /**
- * 下からせり上がるシート (250 ms)。scrim のタップ / Esc で閉じる。下はセーフエリアぶん空ける。MobileShell の overlay に入れる。
- * 開いたまま中身 (children) を入れ替えられる (メニュー -> 日付のシート)。最初の描画で既に開いているときは動かさない。
+ * Spec iPhone 5.1-5.2: a sheet from the bottom. It has a grabber, a glass x, the title and an optional check, with content as cards on grey.
+ * It opens with a no-bounce spring, closes in 0.13 s, and the header drags it (down closes; "large" pulls up to full).
+ * The content can be swapped while open (menu -> date). Already open on the first render: no motion.
  */
-export function BottomSheet({ open, title, onClose, children, fill }: BottomSheetProps) {
+export function BottomSheet({ open, ...rest }: BottomSheetProps) {
+  return <AnimatePresence initial={false}>{open && <Sheet key="sheet" {...rest} />}</AnimatePresence>;
+}
+
+/** A white card on the sheet's grey ground (spec iPhone 5.1). Rows inside get hairlines (`.sheet-card`, direct children only). `label` makes it an aria group. */
+export function SheetCard({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <Sheet key="sheet" title={title} onClose={onClose} fill={fill}>
-          {children}
-        </Sheet>
-      )}
-    </AnimatePresence>
+    <div className="sheet-card" role={label ? "group" : undefined} aria-label={label} style={{ background: "var(--color-sheet-card)", borderRadius: 16, overflow: "hidden", flex: "0 0 auto" }}>
+      {children}
+    </div>
   );
 }
 
-/** シートの 1 行 (44 pt 以上のタップ領域)。 */
+/** One row of a sheet card (48 px tall). */
 export function SheetRow({
   icon,
   iconColor = "var(--color-text-secondary)",
@@ -113,20 +204,19 @@ export function SheetRow({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className="bg-transparent hover:bg-[var(--color-bg-hover)]"
       style={{
         width: "100%",
-        minHeight: 44,
+        minHeight: 48,
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
         gap: "var(--space-3)",
-        padding: "0 8px",
+        padding: "0 16px",
         border: 0,
-        borderRadius: 8,
-        background: selected ? "var(--color-bg-hover)" : undefined,
+        borderRadius: 0,
+        background: selected ? "var(--color-bg-hover)" : "transparent",
         fontFamily: "var(--font-body)",
-        fontSize: 15,
+        fontSize: 16,
         lineHeight: "22px",
         textAlign: "left",
         color: danger ? "var(--color-danger)" : "var(--color-text-primary)",

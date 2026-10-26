@@ -200,8 +200,8 @@ export const M01Menu: Story = {
   render: () => <LiveWithSheet kind="menu" />,
 };
 
-export const M01DateSheet: Story = {
-  name: "M-01 日付のシート (fill)",
+export const M09: Story = {
+  name: "M-09 日付のシート",
   render: () => <LiveWithSheet kind="date" />,
 };
 

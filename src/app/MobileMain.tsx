@@ -17,7 +17,7 @@ import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
 import { ProjectMenuSheet } from "../views/mobile/ProjectMenuSheet";
-import { TextSheet } from "../views/mobile/TextSheet";
+import { TEXT_SHEET_FORM, TextSheet } from "../views/mobile/TextSheet";
 import { INITIAL_NAV, crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
 import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
@@ -367,7 +367,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       <BottomSheet fill open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
         <ReminderSheet value={qa.reminders} onChange={setReminders} />
       </BottomSheet>
-      <BottomSheet fill open={projectSheet !== null} title={projectSheet === "rename" ? "名前を変更" : navCurrent} onClose={() => setProjectSheet(null)}>
+      <BottomSheet fill confirmForm={projectSheet === "rename" ? TEXT_SHEET_FORM : undefined} open={projectSheet !== null} title={projectSheet === "rename" ? "名前を変更" : navCurrent} onClose={() => setProjectSheet(null)}>
         {projectSheet === "menu" && (
           <ProjectMenuSheet project={navCurrent} onRename={() => setProjectSheet("rename")} onDelete={() => void deleteProject()} onClose={() => setProjectSheet(null)} />
         )}
@@ -385,6 +385,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       </BottomSheet>
       <BottomSheet
         fill
+        size={sheet?.kind === "move" ? "large" : "auto"}
         open={sheet !== null}
         title={sheet === null ? undefined : sheetTitle[sheet.kind](sheet)}
         onClose={closeSheet}

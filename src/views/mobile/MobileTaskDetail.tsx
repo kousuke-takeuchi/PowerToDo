@@ -13,13 +13,13 @@ import { RecurrencePicker, recurrenceLabel } from "../RecurrencePicker";
 import type { RecurrenceParse } from "../RecurrencePicker";
 import { reminderLabel } from "../ReminderPicker";
 import { useDone } from "../useDone";
-import { BottomSheet } from "./BottomSheet";
+import { BottomSheet, SheetCard } from "./BottomSheet";
 import { DateSheet } from "./DateSheet";
 import { LabelSheet } from "./LabelSheet";
 import { MobileShell } from "./MobileShell";
 import { PrioritySheet } from "./PrioritySheet";
 import { ReminderSheet } from "./ReminderSheet";
-import { TextSheet } from "./TextSheet";
+import { TEXT_SHEET_FORM, TextSheet } from "./TextSheet";
 
 export type MobileTaskDetailProps = {
   task: Task;
@@ -134,7 +134,12 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
       overlay={
         <>
           {overlay}
-          <BottomSheet fill={fill} open={sheet !== null} title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}>
+          <BottomSheet
+            fill={fill}
+            confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : undefined}
+            open={sheet !== null}
+            title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}
+          >
             {sheet === "title" && (
               <TextSheet
                 label="名前"
@@ -183,6 +188,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             {sheet === "label" && <LabelSheet labels={labels} value={task.labels} onChange={(l) => onChange?.({ labels: l })} />}
             {sheet === "reminder" && <ReminderSheet value={task.reminders} onChange={(r) => onChange?.({ reminders: r })} />}
             {sheet === "recurrence" && (
+              <SheetCard>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <RecurrencePicker
                   value={task.rrule}
@@ -195,9 +201,11 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
                   }}
                 />
               </div>
+              </SheetCard>
             )}
             {sheet === "delete" && (
-              <div role="alertdialog" aria-label="タスクの削除" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              <SheetCard>
+              <div role="alertdialog" aria-label="タスクの削除" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", padding: 16 }}>
                 <div style={{ fontSize: 14, lineHeight: "20px", color: "var(--color-text-secondary)" }}>
                   {subtasks.length > 0 ? "このタスクとサブタスクを削除します。" : "このタスクを削除します。"}
                 </div>
@@ -215,6 +223,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
                   </Button>
                 </div>
               </div>
+              </SheetCard>
             )}
           </BottomSheet>
         </>
