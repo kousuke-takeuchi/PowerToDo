@@ -152,7 +152,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject } = useQuickAdd({ p, current: navCurrent, setFlash });
 
   useEffect(() => {
     if (!qa.open) setQaReminderSheet(false);
@@ -360,6 +360,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onInsert={(kind) => setText(insertToken(qa.text, kind))}
             reminders={qa.reminders}
             onPickReminder={() => setQaReminderSheet(true)}
+            projectName={qaProject === app.inbox ? "受信トレイ" : qaProject}
+            covered={qaReminderSheet}
             onClose={closeQuickAdd}
           />
         )}
