@@ -2,22 +2,16 @@ import type React from "react";
 import { AnimatePresence } from "motion/react";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
-import { daysBetween, monthDay, weekdayLong } from "../../mock/data";
 import type { MobileTab } from "../../app/mobileNav";
 import type { Task } from "../../types/model";
 import { Collapse } from "../../motion";
 import { taskKey, useLeaving } from "../crossList";
 import { useDone } from "../useDone";
 import { mobileRowProps, type RowContext } from "./rowProps";
-import { WeekStrip } from "../WeekStrip";
+import { MobileWeekNav } from "./MobileWeekNav";
+import { dayHeading } from "./mobileDates";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
-
-/** 見出し: 今日 / 明日は「10月13日 · 今日」、それ以外は「10月16日 · 金曜日」 (pen の M-05)。 */
-function dayTitle(ymd: string, today: string): string {
-  const diff = daysBetween(ymd, today);
-  return `${monthDay(ymd)} · ${diff === 0 ? "今日" : diff === 1 ? "明日" : weekdayLong(ymd)}`;
-}
 
 export type MobileUpcomingProps = {
   tasks: Task[];
@@ -96,7 +90,9 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
   return (
     <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div style={{ padding: "0 15px" }}>
-        <WeekStrip variant="mobile" start={today} today={today} onSelect={(ymd) => {
+        <MobileWeekNav
+          today={today}
+          onSelect={(ymd) => {
             onSelectDay?.(ymd);
             // 実画面では、その日のグループまでスクロールする (タスクが無い日は動かない)
             if (live) document.querySelector(`[data-day="${ymd}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -104,7 +100,7 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
         />
         {days.map((ymd) => (
           <section key={ymd} data-day={ymd}>
-            <SectionHeader mobile title={dayTitle(ymd, today)} showChevron={false} />
+            <SectionHeader mobile title={dayHeading(ymd, today)} showChevron={false} />
             {list(
               ymd,
               tasks.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no),

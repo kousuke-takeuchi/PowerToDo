@@ -249,11 +249,11 @@ export function MobileProjectView({
     >
       <div style={{ padding: "0 15px" }}>
         {list("s:", unsectioned)}
-        {projectSections.map((s) => {
+        {projectSections.map((s, i) => {
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
-              <SectionHeader mobile title={s.name} count={rows.length} />
+              <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
               {list(`s:${s.name}`, rows)}
             </section>
           );

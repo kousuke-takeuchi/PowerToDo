@@ -1,4 +1,5 @@
 import type React from "react";
+import { ChevronRight } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
@@ -10,6 +11,7 @@ import { useDone } from "../useDone";
 import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
+import { dayHeading } from "./mobileDates";
 
 export type MobileTodayProps = {
   overdue: Task[];
@@ -89,32 +91,27 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
     <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="今日" subtitle={`${overdue.length + todays.length} 件のタスク`} largeTitle initialScrollTop={initialScrollTop} tab="today" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div style={{ padding: "0 15px" }}>
         {(!live || overdue.length > 0) && (
-        <section>
-          <SectionHeader mobile title="期限切れ" count={overdue.length} />
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 0" }}>
-            <button
-              type="button"
-              onClick={onReschedule}
-              style={{
-                padding: 0,
-                border: 0,
-                background: "none",
-                fontFamily: "var(--font-body)",
-                fontSize: 13,
-                lineHeight: "19px",
-                fontWeight: 600,
-                color: "var(--color-accent)",
-                cursor: "pointer",
-              }}
-            >
-              再スケジュール
-            </button>
-          </div>
-          {list("overdue", overdue, { project: true, date: true })}
-        </section>
+          <section>
+            <SectionHeader
+              mobile
+              tight
+              title="期限切れ"
+              trailing={
+                <button
+                  type="button"
+                  onClick={onReschedule}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 2, minHeight: 32, padding: 0, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 15, lineHeight: "20px", color: "var(--color-accent)", cursor: "pointer" }}
+                >
+                  再スケジュール
+                  <ChevronRight size={16} aria-hidden />
+                </button>
+              }
+            />
+            {list("overdue", overdue, { project: true, date: true })}
+          </section>
         )}
         <section>
-          <SectionHeader mobile title="今日" count={todays.length} />
+          <SectionHeader mobile tight={live && overdue.length === 0} title={dayHeading(today, today)} />
           {list("today", todays, { project: true, date: false })}
         </section>
         {live && overdue.length + todays.length === 0 && (

@@ -24,7 +24,7 @@ export function WeekStrip({ start, today, initialSelected, onSelect, variant = "
         justifyContent: "space-between",
         gap: "var(--space-1)",
         padding: mobile ? "4px 0 8px 0" : "0 0 8px 0",
-        boxShadow: "inset 0 -1px 0 var(--color-border)",
+        boxShadow: mobile ? undefined : "inset 0 -1px 0 var(--color-border)", // the grabber sits under the iPhone strip
         fontFamily: "var(--font-body)",
       }}
     >
