@@ -1,11 +1,11 @@
 import type React from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
-import { AnimatePresence, motion, useDragControls, useIsPresent, useMotionValue } from "motion/react";
+import { AnimatePresence, PresenceContext, animate, motion, useDragControls, useMotionValue, usePresence } from "motion/react";
 import { useEscLayer } from "../../app/layers";
 import { Glass } from "../../components/Glass";
 import { useMotionTiming } from "../../motion";
-import { sheetDragEnd, sheetTransition, type Detent, type SheetPhase } from "./sheetMotion";
+import { sheetDragEnd, sheetTransition, type Detent } from "./sheetMotion";
 import { useKeyboardInset } from "./useKeyboardInset";
 
 export type BottomSheetProps = {
@@ -26,26 +26,26 @@ const TOP_GAP = 8;
 
 function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: Omit<BottomSheetProps, "open">) {
   const inset = useKeyboardInset(!!fill);
+  const [isPresent, safeToRemove] = usePresence();
   // While closing, leave the Esc layer (do not take the Esc of the layer below)
-  useEscLayer(useIsPresent(), onClose);
+  useEscLayer(isPresent, onClose);
   const { reduced } = useMotionTiming();
   const controls = useDragControls();
   const dragY = useMotionValue(0);
   const [detent, setDetent] = useState<Detent>(size === "large" ? "large" : "auto");
-  const [phase, setPhase] = useState<SheetPhase>("open");
+  // A sheet whose content is swapped while open (menu -> move) takes the stop its new size wants in the same commit,
+  // so the first frame of the new size already knows where it goes (no frame at the old stop).
+  const [shownSize, setShownSize] = useState(size);
+  if (shownSize !== size) {
+    setShownSize(size);
+    setDetent(size === "large" ? "large" : "auto");
+  }
   // Once a drag has decided to close, drag must stop fighting the exit animation (a sheet left half-way would never be removed).
   const [leaving, setLeaving] = useState(false);
-  // A sheet whose content is swapped while open (menu -> move) re-opens at the stop its new size wants.
-  const lastSize = useRef(size);
-  useEffect(() => {
-    if (lastSize.current === size) return;
-    lastSize.current = size;
-    setPhase("detent");
-    setDetent(size === "large" ? "large" : "auto");
-  }, [size]);
 
   // The drag needs pixels (a percentage y is read as px by the drag), so measure the room the sheet has.
   const overlay = useRef<HTMLDivElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0);
   useLayoutEffect(() => {
     const el = overlay.current;
@@ -62,6 +62,44 @@ function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: O
   const bottomPad = detent === "large" ? `${yLarge + 16}px` : inset > 0 ? "12px" : "calc(16px + env(safe-area-inset-bottom))";
   const open = sheetTransition("open", reduced);
   const close = sheetTransition("close", reduced);
+
+  // y is driven here, not by initial/animate/exit: the off-screen start and end are the sheet's own height (plus its stop),
+  // measured in the same layout pass, so the whole spring is on screen whatever the sheet's height.
+  // Already open on BottomSheet's first render (AnimatePresence initial={false}): no open motion.
+  const presence = useContext(PresenceContext);
+  const openedWithParent = useRef(presence?.initial === false);
+  const played = useRef<string | null>(null);
+  const ready = room > 0;
+  useLayoutEffect(() => {
+    const el = sheet.current;
+    if (!el || !isPresent) return;
+    if (played.current !== size) {
+      // First open, or a size swap (menu -> move): from just below the screen, the open spring to the new stop.
+      const still = reduced || (played.current === null && openedWithParent.current);
+      played.current = size;
+      if (still) {
+        dragY.jump(y);
+        return;
+      }
+      dragY.jump(el.offsetHeight + y); // jump, not set: set() would give the spring a huge downward start velocity
+      animate(dragY, y, sheetTransition("open", false));
+      return;
+    }
+    // A new stop (drag release, room resize): the stop motion.
+    if (dragY.get() !== y) animate(dragY, y, sheetTransition("detent", reduced));
+  }, [ready, size, y, reduced, isPresent, dragY]);
+  // Closing: down by the sheet's own height (plus its stop), then let AnimatePresence remove it.
+  useEffect(() => {
+    if (isPresent) return;
+    const el = sheet.current;
+    dragY.stop();
+    if (!el || reduced) {
+      safeToRemove?.();
+      return;
+    }
+    animate(dragY, Math.max(el.offsetHeight + y, dragY.get()), close).then(() => safeToRemove?.());
+    // Runs once, when the sheet starts leaving.
+  }, [isPresent]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <motion.div
       ref={overlay}
@@ -90,7 +128,8 @@ function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: O
           role="dialog"
           aria-modal="true"
           aria-label={title ?? "シート"}
-          drag={leaving ? false : "y"}
+          ref={sheet}
+          drag={leaving || !isPresent ? false : "y"}
           dragControls={controls}
           dragListener={false}
           dragMomentum={false}
@@ -103,13 +142,9 @@ function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: O
               setLeaving(true);
               onClose();
             } else {
-              setPhase("detent");
               setDetent(out);
             }
           }}
-          initial={{ y: reduced ? y : room }}
-          animate={{ y, transition: sheetTransition(phase, reduced) }}
-          exit={{ y: reduced ? y : room, transition: close }}
           style={{
             y: dragY,
             position: "relative",

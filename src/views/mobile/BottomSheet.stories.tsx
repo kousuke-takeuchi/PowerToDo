@@ -52,3 +52,47 @@ export const Large: Story = {
     return <Demo />;
   },
 };
+
+export const Swap: Story = {
+  name: "開く・メニューから移動へ",
+  render: () => {
+    const Demo = () => {
+      const [open, setOpen] = useState(false);
+      const [kind, setKind] = useState<"menu" | "move">("menu");
+      const close = () => setOpen(false);
+      return (
+        <SheetFrame>
+          <BottomSheet open={open} size={kind === "move" ? "large" : "auto"} title={kind === "move" ? "移動" : "タスク"} onClose={close}>
+            {kind === "menu" ? (
+              <SheetCard>
+                <SheetRow label="日付" onClick={close} />
+                <SheetRow label="優先度" onClick={close} />
+                <SheetRow label="移動" onClick={() => setKind("move")} />
+                <SheetRow label="削除" danger onClick={close} />
+              </SheetCard>
+            ) : (
+              <SheetCard>
+                {Array.from({ length: 14 }, (_, i) => (
+                  <SheetRow key={i} label={`プロジェクト ${i + 1}`} onClick={close} />
+                ))}
+              </SheetCard>
+            )}
+          </BottomSheet>
+          {!open && (
+            <button
+              type="button"
+              style={{ pointerEvents: "auto", margin: 16 }}
+              onClick={() => {
+                setKind("menu");
+                setOpen(true);
+              }}
+            >
+              開く
+            </button>
+          )}
+        </SheetFrame>
+      );
+    };
+    return <Demo />;
+  },
+};
