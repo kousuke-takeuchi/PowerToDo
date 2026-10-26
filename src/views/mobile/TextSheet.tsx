@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SheetCard } from "./BottomSheet";
 
 /** The form id the sheet's red check (BottomSheet confirmForm) submits. */
@@ -19,7 +19,11 @@ export type TextSheetProps = {
 /** Sheet body for a name / note / subtask name (BottomSheet children). 16 px text (iOS does not zoom). The x cancels and the check saves. */
 export function TextSheet({ label, value, multiline, placeholder, onSave, onClose, formId = TEXT_SHEET_FORM }: TextSheetProps) {
   const [draft, setDraft] = useState(value);
+  // The form lives on through the 0.13 s exit: a second check tap (or Enter) must not save again (a duplicate subtask).
+  const saved = useRef(false);
   const save = () => {
+    if (saved.current) return;
+    saved.current = true;
     if (draft !== value) onSave(draft);
     onClose();
   };
