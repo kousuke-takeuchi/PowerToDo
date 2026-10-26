@@ -24,6 +24,11 @@ import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
 import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
 import { Banners } from "./Banners";
+import { MobileToast } from "../components/MobileToast";
+import { pushUndo, undoSteps, undoText, type MobileUndo } from "./mobileUndo";
+import { completedOf } from "./completionToast";
+import { movedRootNo } from "./drag/movedRoot";
+import { dateLabel } from "../mock/data";
 import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
@@ -181,9 +186,32 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   // ---- 行の操作 (スワイプ / 長押しのシート)。開いているプロジェクトの行は useProject、横断ビューの行は cross (操作のあと refreshAll) ----
   const closeSheet = () => setSheet(null);
   const inCurrent = (t: Task) => (listProject || !!detail) && t.project === current;
+  // Spec ④ iPhone §5.4: the toast with 「元に戻す」 after completing, changing a date, or moving.
+  const [undo, setUndo] = useState<{ u: MobileUndo; id: number } | null>(null);
+  const undoId = useRef(0);
+  const offer = (u: MobileUndo) => setUndo((cur) => ({ u: pushUndo(cur?.u ?? null, u), id: ++undoId.current }));
+  const onScreen = (project: string) => (listProject || !!detail) && project === current;
+  const runUndo = async (u: MobileUndo) => {
+    setUndo(null);
+    try {
+      for (const s of undoSteps(u)) {
+        if (s.op === "complete") await (onScreen(s.project) ? p.completeTask(s.no, false) : cross.setDone(s.project, s.no, false));
+        else if (s.op === "update") await (onScreen(s.project) ? p.updateTask(s.no, s.patch) : api.updateTask(s.project, s.no, s.patch));
+        else await api.moveTask(s.project, s.no, s.toProject, s.toSection);
+      }
+    } catch (e) {
+      showError(e);
+    }
+    if (listProject || detail) void p.reload().catch(() => undefined);
+    refreshAll();
+    void refreshSummaries();
+  };
+  const offerDate = (entries: { project: string; no: number; due?: string; dueTime?: string }[], date: string | null) =>
+    offer({ kind: "date", entries: entries.map((t) => ({ project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null } })), label: date ? (dateLabel(date, today)?.label ?? date) : null });
+  const offerDone = (t: Task) => offer({ kind: "complete", entries: [completedOf(t)] });
   const setDue = (t: Task, date?: string) => {
-    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? undefined : null });
-    else void cross.setDue(t, date ?? null);
+    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? undefined : null }).then((ok) => ok && offerDate([t], date ?? null));
+    else void cross.setDue(t, date ?? null).then((ok) => ok && offerDate([t], date ?? null));
   };
   const setPriority = (t: Task, priority: 1 | 2 | 3 | 4) => {
     if (inCurrent(t)) void p.updateTask(t.no, { priority });
@@ -196,7 +224,10 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   };
   const moveTask = async (t: Task, toProject: string, toSection: string | null) => {
     try {
-      await api.moveTask(t.project, t.no, toProject, toSection);
+      const out = await api.moveTask(t.project, t.no, toProject, toSection);
+      // Same project: only the section changes. Another project renumbers the subtree; its root is the highest parentless No.
+      const no = toProject === t.project ? t.no : movedRootNo(out.to.tasks, 1);
+      if (no !== undefined) offer({ kind: "move", to: { project: toProject, no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
     } catch (e) {
       showError(e);
     }
@@ -365,6 +396,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onClose={closeQuickAdd}
           />
         )}
+        {undo && <MobileToast key="undo" id={undo.id} text={undoText(undo.u)} onAction={() => void runUndo(undo.u)} onClose={() => setUndo(null)} />}
       </AnimatePresence>
       <BottomSheet fill open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
         <ReminderSheet value={qa.reminders} onChange={setReminders} />
@@ -420,7 +452,10 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             dateOnly
             today={today}
             onChange={(v) => {
-              if (v.date) void api.rescheduleOverdue(today, v.date).catch(showError).finally(refreshAll);
+              if (v.date) {
+                const before = todayData.data?.overdue ?? [];
+                void api.rescheduleOverdue(today, v.date).then(() => offerDate(before, v.date!), showError).finally(refreshAll);
+              }
             }}
             onClose={closeSheet}
           />
@@ -511,9 +546,24 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         project={view.project}
         section={openTask.category ?? undefined}
         onBack={() => setDetail(null)}
-        onToggleDone={(done) => void p.completeTask(openTask.no, done).then(refreshAll)}
-        onToggleSubtask={(t, done) => void p.completeTask(t.no, done).then(refreshAll)}
-        onChange={(patch) => void p.updateTask(openTask.no, patch).then(refreshAll)}
+        onToggleDone={(done) =>
+          void p.completeTask(openTask.no, done).then((ok) => {
+            if (ok && done) offerDone(openTask);
+            refreshAll();
+          })
+        }
+        onToggleSubtask={(t, done) =>
+          void p.completeTask(t.no, done).then((ok) => {
+            if (ok && done) offerDone(t);
+            refreshAll();
+          })
+        }
+        onChange={(patch) =>
+          void p.updateTask(openTask.no, patch).then((ok) => {
+            if (ok && "due" in patch) offerDate([openTask], patch.due ?? null);
+            refreshAll();
+          })
+        }
         onAddSubtask={(title) => void p.addSubtask(openTask.no, title).then(refreshAll)}
         onDelete={() => {
           setDetail(null);
@@ -541,7 +591,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         onRefresh={pullRefresh}
         overdue={d.overdue}
         todays={d.today}
-        onToggleDone={(t, done) => void cross.toggleDone(t, done)}
+        onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onReschedule={() => setSheet({ kind: "reschedule" })}
         {...rowOps}
@@ -561,7 +611,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         banner={banner}
         onRefresh={pullRefresh}
         tasks={d.days.flatMap((g) => g.tasks)}
-        onToggleDone={(t, done) => void cross.toggleDone(t, done)}
+        onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
         {...rowOps}
@@ -603,7 +653,12 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         hits={search.hits}
         busy={search.busy}
         onOpenHit={(h: SearchHit) => openCross(h.task)}
-        onToggleDone={(h, done) => void cross.toggleDone(h.task, done).then(() => search.refresh())}
+        onToggleDone={(h, done) =>
+          void cross.toggleDone(h.task, done).then((ok) => {
+            if (ok && done) offerDone(h.task);
+            search.refresh();
+          })
+        }
         overlay={layers}
       />
     );
@@ -626,7 +681,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         onBack={back}
         label={d.label.name}
         tasks={d.tasks}
-        onToggleDone={(t, done) => void cross.toggleDone(t, done)}
+        onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         overlay={layers}
       />
@@ -651,7 +706,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       project={current}
       tasks={view.tasks}
       sections={view.sections}
-      onToggleDone={(t, done) => void p.completeTask(t.no, done)}
+      onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && offerDone(t))}
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
       {...rowOps}
       overlay={layers}

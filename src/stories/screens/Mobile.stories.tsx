@@ -17,6 +17,7 @@ import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
 import { SheetFrame } from "../../views/mobile/SheetFrame";
 import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
 import { insertToken } from "../../app/quickAddInsert";
+import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
@@ -364,4 +365,16 @@ export const M01Refreshing: Story = {
     };
     return <Live />;
   },
+};
+
+export const M08: Story = {
+  name: "M-08 お知らせ",
+  render: () => (
+    <MobileToday
+      overdue={byNo(9, 10)}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      overlay={<MobileToast id={1} text="今日 にスケジュールしました" onAction={() => undefined} onClose={() => undefined} />}
+    />
+  ),
 };
