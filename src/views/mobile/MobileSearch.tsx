@@ -2,7 +2,7 @@ import type React from "react";
 import { Search } from "lucide-react";
 import { Segmented } from "../../components/Segmented";
 import { TaskRow } from "../../components/TaskRow";
-import type { TabBarProps } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
 import { TODAY, dateLabel } from "../../mock/data";
 import type { SearchHit } from "../../types/model";
 import { MobileShell } from "./MobileShell";
@@ -20,8 +20,9 @@ export type MobileSearchProps = {
   onOpenHit?: (hit: SearchHit) => void;
   onToggleDone?: (hit: SearchHit, done: boolean) => void;
   onFab?: () => void;
-  onMenu?: () => void;
-  onTabChange?: TabBarProps["onChange"];
+  /** Back to 閲覧. */
+  onBack?: () => void;
+  onTabChange?: (t: MobileTab) => void;
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
@@ -45,7 +46,7 @@ export function MobileSearch({
   onOpenHit,
   onToggleDone,
   onFab,
-  onMenu,
+  onBack,
   onTabChange,
   overlay,
   banner,
@@ -55,8 +56,9 @@ export function MobileSearch({
       banner={banner}
       fill={fill}
       title="検索"
-      onMenu={onMenu}
-      tab="search"
+      onBack={onBack}
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
       fab
       onFab={onFab}

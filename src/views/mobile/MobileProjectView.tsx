@@ -6,14 +6,13 @@ import { AddTaskRow } from "../../components/AddTaskRow";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
 import { Collapse } from "../../motion";
-import { TODAY, counts as mockCounts, dateLabel, projects as mockProjects } from "../../mock/data";
-import type { Project, Section, Task } from "../../types/model";
+import { TODAY, dateLabel } from "../../mock/data";
+import type { Section, Task } from "../../types/model";
 import { useDone } from "../useDone";
-import { Drawer } from "./Drawer";
 import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
-import type { TabBarProps } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
 import type { QuickAddToken } from "../QuickAddDialog";
 
 export type MobileProjectViewProps = {
@@ -22,15 +21,14 @@ export type MobileProjectViewProps = {
   sections: Section[];
   /** 最初から展開しておく親タスクの no (M-01b)。 */
   initialExpanded?: number[];
-  /** 最初から開いておく層 (M-02: quickAdd / M-06: drawer)。 */
-  initialOverlay?: "none" | "quickAdd" | "drawer";
-  projects?: Project[];
+  /** 最初から開いておく層 (M-02: quickAdd)。 */
+  initialOverlay?: "none" | "quickAdd";
   quickAddTokens?: QuickAddToken[];
-  /** スワイプ中の行のタイトル。pen は M-01 / M-02 / M-06 が「食パン」、M-01b が「電池を買う」。 */
+  /** スワイプ中の行のタイトル。pen は M-01 / M-02 が「食パン」、M-01b が「電池を買う」。 */
   swipeTitle?: string;
   /**
    * 実データで動かす (Phase 6): チェックは task.progress を見て onToggleDone を呼び、優先度の色は task.priority、
-   * スワイプの見本は出さず、層 (ドロワー / クイック追加) は呼び出し側の `overlay` で出す。省略すると Story の見た目のまま。
+   * スワイプの見本は出さず、層 (クイック追加) は呼び出し側の `overlay` で出す。省略すると Story の見た目のまま。
    */
   live?: boolean;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア (MobileShell の fill)。 */
@@ -42,13 +40,14 @@ export type MobileProjectViewProps = {
   onToggleDone?: (t: Task, done: boolean) => void;
   onOpenTask?: (t: Task) => void;
   onFab?: () => void;
-  onMenu?: () => void;
+  /** The back arrow (a project opened from 閲覧). */
+  onBack?: () => void;
   /** The 「…」 pill at the right of the top bar (project menu). Omitted: no pill. */
   onProjectMenu?: () => void;
-  /** 下部タブの選択。省略すると「一覧」。 */
-  tab?: TabBarProps["active"];
-  onTabChange?: TabBarProps["onChange"];
-  /** 呼び出し側が持つ層。ドロワー / クイック追加の内部の状態の代わりに出す。 */
+  /** 下部タブの選択。省略すると「受信トレイ」。 */
+  tab?: MobileTab;
+  onTabChange?: (t: MobileTab) => void;
+  /** 呼び出し側が持つ層。クイック追加の内部の状態の代わりに出す。 */
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
@@ -95,9 +94,9 @@ function SwipeDemo({ title }: { title: string }) {
 }
 
 /**
- * M-01 / M-01b / M-02 / M-06: モバイルのプロジェクト画面。ヘッダー (同期中) + セクション付きの一覧 + SwipeDemo + FAB + 下部タブ (一覧)。
- * 件数バッジのタップで子タスクを展開 / 折りたたみ。FAB でクイック追加シート (M-02)、ハンバーガーでドロワー (M-06) を開き、scrim タップで閉じる。
- * 層が開いている間は FAB を出さない (pen の M-02 / M-06)。pen のとおりチェックの色は全行 priority-4。
+ * M-01 / M-01b / M-02: モバイルのプロジェクト画面。ヘッダー (同期中) + セクション付きの一覧 + SwipeDemo + FAB + 下部タブ。
+ * 件数バッジのタップで子タスクを展開 / 折りたたみ。FAB でクイック追加シート (M-02)、scrim タップで閉じる。
+ * 層が開いている間は FAB を出さない (pen の M-02)。pen のとおりチェックの色は全行 priority-4。
  */
 export function MobileProjectView({
   project,
@@ -105,7 +104,6 @@ export function MobileProjectView({
   sections,
   initialExpanded = [],
   initialOverlay = "none",
-  projects = mockProjects,
   quickAddTokens = defaultTokens,
   swipeTitle = "電池を買う",
   live,
@@ -115,9 +113,9 @@ export function MobileProjectView({
   onToggleDone,
   onOpenTask,
   onFab,
-  onMenu,
+  onBack,
   onProjectMenu,
-  tab = "list",
+  tab = "inbox",
   onTabChange,
   overlay: externalOverlay,
   banner,
@@ -202,9 +200,10 @@ export function MobileProjectView({
       title={title ?? project}
       subtitle={`${openCount} 件のタスク`}
       largeTitle
-      onMenu={onMenu ?? (() => setOverlay("drawer"))}
+      onBack={onBack}
       actions={onProjectMenu ? [{ icon: Ellipsis, label: "その他", onClick: onProjectMenu }] : undefined}
       tab={tab}
+      today={today}
       onTabChange={onTabChange}
       fab={externalOverlay !== undefined ? true : overlay === "none"}
       onFab={onFab ?? (() => setOverlay("quickAdd"))}
@@ -212,7 +211,6 @@ export function MobileProjectView({
         externalOverlay !== undefined ? externalOverlay : (
         <AnimatePresence initial={false}>
           {overlay === "quickAdd" && <MobileQuickAddSheet key="quickAdd" tokens={quickAddTokens} onClose={() => setOverlay("none")} />}
-          {overlay === "drawer" && <Drawer key="drawer" counts={mockCounts} projects={projects} syncState="syncing" onClose={() => setOverlay("none")} />}
         </AnimatePresence>
         )
       }

@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
-import type { TabBarProps } from "../components/TabBar";
 import type { AppStateDto, Label, NotificationPermission, SearchHit, Task } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
 import { DateSheet } from "../views/mobile/DateSheet";
-import { Drawer } from "../views/mobile/Drawer";
+import { MobileBrowse } from "../views/mobile/MobileBrowse";
 import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
 import { MobileProjectView } from "../views/mobile/MobileProjectView";
 import { MobileQuickAddSheet } from "../views/mobile/MobileQuickAddSheet";
@@ -17,11 +16,13 @@ import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
+import { ProjectMenuSheet } from "../views/mobile/ProjectMenuSheet";
+import { TextSheet } from "../views/mobile/TextSheet";
+import { INITIAL_NAV, crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
 import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
 import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
-import type { SidebarProps } from "../views/Sidebar";
 import { Banners } from "./Banners";
 import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
@@ -38,8 +39,6 @@ import { useSync } from "./useSync";
 import type { SyncConflicts } from "./useSyncConflicts";
 import { formatSynced, syncErrorText, targetName } from "./syncText";
 
-type Nav = SidebarProps["active"];
-type Tab = NonNullable<TabBarProps["active"]>;
 type Flash = { text: string; tone: "error" | "info" };
 const sheetTitle: Record<NonNullable<SheetState>["kind"], (s: NonNullable<SheetState>) => string> = {
   menu: (s) => (s.kind === "menu" ? s.task.title : ""),
@@ -60,21 +59,24 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const today = useToday();
   const { errors: saveErrors } = useSaveErrors();
 
-  // 画面: tab (下部タブ) と、tab が「一覧」のときに本文に出す nav。起動直後は受信トレイ。
-  const [tab, setTab] = useState<Tab>("list");
-  const [nav, setNav] = useState<Nav>({ kind: "inbox" });
-  const [drawer, setDrawer] = useState(false);
+  // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は受信トレイ。
+  const [nav, dispatchNav] = useReducer(reduceNav, INITIAL_NAV);
+  const screen = screenOf(nav);
+  const settingsOpen = screen.kind === "settings";
+  const goTab = (id: MobileTab) => dispatchNav({ type: "tab", tab: id });
+  const push = (s: BrowseScreen) => dispatchNav({ type: "push", screen: s });
+  const back = () => dispatchNav({ type: "back" });
+  // プロジェクトの「…」(名前を変更 / 削除)
+  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   // クイック追加の上に重ねるリマインダーのシート
   const [qaReminderSheet, setQaReminderSheet] = useState(false);
-  // 設定 (M-07、全画面)。ドロワーの歯車で開く
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>("granted");
 
-  const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
+  const { summaries, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
@@ -87,17 +89,15 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   // ヘッダーの同期アイコン: エラーのうち「今すぐ同期」で直らないもの (片側が空 / 認証の拒否) は設定の同期を開く。それ以外は今すぐ同期。
   const syncNeedsSettings = !!syncStatus?.suspect || (syncState === "error" && !!syncStatus?.authRejected);
   const headerSync = () => {
-    if (syncNeedsSettings) setSettingsOpen(true);
+    if (syncNeedsSettings) push({ kind: "settings" });
     else if (syncState !== "syncing") void sync.syncNow(true);
   };
-  void headerSync; // the header icon is gone; Task 3 hands this to the 閲覧 tab's sync row
   const syncErrorMessage =
     syncState === "error" && !syncStatus?.suspect && syncStatus?.message && syncStatus.message !== dismissedSyncError ? syncStatus.message : null;
 
-  // 本文の元になる nav: 今日 / 近日のタブはそれぞれ、検索は何も取らない (受信トレイを読み続ける)
-  const viewNav: Nav = tab === "today" ? { kind: "today" } : tab === "upcoming" ? { kind: "upcoming" } : tab === "list" ? nav : { kind: "inbox" };
-  const listProject = tab === "list" && (nav.kind === "inbox" || nav.kind === "project");
-  const navCurrent = nav.kind === "project" && nav.name ? nav.name : app.inbox;
+  const viewNav = crossNavOf(nav);
+  const listProject = screen.kind === "inbox" || screen.kind === "project";
+  const navCurrent = projectOf(nav, app.inbox);
   // タスク詳細を開くあいだは、そのプロジェクトを読む
   const current = detail ? detail.project : navCurrent;
 
@@ -117,7 +117,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     refreshSummaries,
   });
 
-  const search = useSearch(tab === "search");
+  const search = useSearch(screen.kind === "search");
   const settingsPanes = useSettingsPanes(settingsOpen, { onDataDirChanged: () => undefined, onDisplayNameChanged: () => loadDisplayName() });
   // 引っ張って更新: 同期してから、見えている一覧を読み直す。同期先が無いときは同期は何もせず、読み直しだけ。
   const pullRefresh = async () => {
@@ -195,36 +195,38 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     if (listProject || detail) void p.reload().catch(() => undefined);
     refreshAll();
   };
+  const renameProject = async (name: string) => {
+    const from = navCurrent;
+    try {
+      const r = await api.renameProject(from, name);
+      dispatchNav({ type: "renamed", from, to: r.name });
+      await refreshSummaries();
+    } catch (e) {
+      showError(e);
+    } finally {
+      void ext.refresh(); // held projects are held again under the new name (as desktop)
+    }
+  };
+  const deleteProject = async () => {
+    const name = navCurrent;
+    try {
+      await api.deleteProject(name);
+      dispatchNav({ type: "removed", project: name });
+      await refreshSummaries();
+    } catch (e) {
+      showError(e);
+    } finally {
+      void ext.refresh();
+    }
+  };
   const rowOps = { onSwipeDate: (t: Task) => setSheet({ kind: "date", task: t }), onTaskMenu: (t: Task) => setSheet({ kind: "menu", task: t }) };
 
-  // ---- 画面の切り替え ----
-  const goTab = (id: Tab) => {
-    if (id === "list") {
-      setDrawer(true); // 一覧はドロワーを開く (選択は移らない)
-      return;
-    }
-    setSettingsOpen(false);
-    setTab(id);
-  };
-  const navigateTo = (target: Nav) => {
-    setDrawer(false);
-    setDetail(null);
-    setSettingsOpen(false);
-    if (target.kind === "today") setTab("today");
-    else if (target.kind === "upcoming") setTab("upcoming");
-    else {
-      setTab("list");
-      setNav(target);
-    }
-  };
   /** タスクの詳細を開く (別のプロジェクトのタスクでも、元の画面を保ったまま)。 */
   const openTaskAt = (project: string, no: number) => {
     if (project !== app.inbox && !summaries.some((s) => s.name === project)) {
       setFlash({ text: "タスクが見つかりません", tone: "error" });
       return;
     }
-    setDrawer(false);
-    setSettingsOpen(false);
     closeQuickAdd();
     setDetail({ project, no });
   };
@@ -286,8 +288,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   }, [flash]);
 
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
-  const syncNow = syncClickable ? () => void sync.syncNow(true) : undefined;
-  const header = { fill: true as const, onMenu: () => setDrawer(true), onFab: openQuickAdd, onTabChange: goTab };
+  const header = { fill: true as const, onFab: openQuickAdd, onTabChange: goTab, today };
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
@@ -354,30 +355,25 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onClose={closeQuickAdd}
           />
         )}
-        {drawer && (
-          <Drawer
-            key="drawer"
-            safeArea
-            counts={counts}
-            projects={summaries}
-            active={tab === "search" ? undefined : viewNav}
-            syncState={syncState}
-            lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
-            syncOffText="同期オフ"
-            syncErrorText={syncErrorText(syncStatus, syncClickable)}
-            onSyncClick={syncNow}
-            displayName={displayName}
-            onNavigate={navigateTo}
-            onSettings={() => {
-              setDrawer(false);
-              setSettingsOpen(true);
-            }}
-            onClose={() => setDrawer(false)}
-          />
-        )}
       </AnimatePresence>
       <BottomSheet fill open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
         <ReminderSheet value={qa.reminders} onChange={setReminders} />
+      </BottomSheet>
+      <BottomSheet fill open={projectSheet !== null} title={projectSheet === "rename" ? "名前を変更" : navCurrent} onClose={() => setProjectSheet(null)}>
+        {projectSheet === "menu" && (
+          <ProjectMenuSheet project={navCurrent} onRename={() => setProjectSheet("rename")} onDelete={() => void deleteProject()} onClose={() => setProjectSheet(null)} />
+        )}
+        {projectSheet === "rename" && (
+          <TextSheet
+            label="プロジェクト名"
+            value={navCurrent}
+            onSave={(v) => {
+              const t = v.trim();
+              if (t && t !== navCurrent) void renameProject(t);
+            }}
+            onClose={() => setProjectSheet(null)}
+          />
+        )}
       </BottomSheet>
       <BottomSheet
         fill
@@ -427,9 +423,10 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     <MobileShell
       fill
       title={title}
-      onMenu={header.onMenu}
-      tab={tab}
+      onBack={nav.tab === "browse" && nav.browse.length > 0 ? back : undefined}
+      tab={nav.tab}
       onTabChange={goTab}
+      today={today}
       banner={banner}
       overlay={layers}
     >
@@ -460,8 +457,9 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         fill
         banner={banner}
         overlay={layers}
-        onBack={() => setSettingsOpen(false)}
+        onBack={back}
         onTabChange={goTab}
+        today={today}
         sync={sync.pane}
         notifications={{ ...settingsPanes.notifications, permission }}
         onToggleNotifications={toggleNotifications}
@@ -519,16 +517,16 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   }
 
   // ---- 本文 ----
-  if (tab === "today") {
+  if (screen.kind === "today") {
     const d = todayData.data;
     if (todayData.error) return frame("今日", todayData.error, "danger");
     if (!d) return frame("今日", "読み込み中…");
     return (
       <MobileToday
         live
-        {...header} banner={banner}
+        {...header}
+        banner={banner}
         onRefresh={pullRefresh}
-        today={today}
         overdue={d.overdue}
         todays={d.today}
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
@@ -539,16 +537,16 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       />
     );
   }
-  if (tab === "upcoming") {
+  if (screen.kind === "upcoming") {
     const d = lastUpcoming.current;
     if (upcomingData.error) return frame("近日", upcomingData.error, "danger");
     if (!d) return frame("近日", "読み込み中…");
     return (
       <MobileUpcoming
         live
-        {...header} banner={banner}
+        {...header}
+        banner={banner}
         onRefresh={pullRefresh}
-        today={today}
         tasks={d.days.flatMap((g) => g.tasks)}
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
         onOpenTask={openCross}
@@ -558,11 +556,32 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       />
     );
   }
-  if (tab === "search") {
+  if (screen.kind === "browse") {
+    return (
+      <MobileBrowse
+        {...header}
+        banner={banner}
+        overlay={layers}
+        projects={summaries}
+        counts={counts}
+        syncState={syncState}
+        lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
+        syncOffText="同期オフ"
+        syncErrorText={syncErrorText(syncStatus, syncClickable)}
+        onSync={syncState === "off" ? () => push({ kind: "settings" }) : headerSync}
+        onOpenProject={(name) => push({ kind: "project", name })}
+        onOpenLabels={() => push({ kind: "labels" })}
+        onSearch={() => push({ kind: "search" })}
+        onSettings={() => push({ kind: "settings" })}
+      />
+    );
+  }
+  if (screen.kind === "search") {
     return (
       <MobileSearch
-        {...header} banner={banner}
-        today={today}
+        {...header}
+        banner={banner}
+        onBack={back}
         query={search.query}
         onChangeQuery={search.setQuery}
         includeDone={search.includeDone}
@@ -575,20 +594,21 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       />
     );
   }
-  if (nav.kind === "labels") {
+  if (screen.kind === "labels") {
     const d = labelsData.data;
     if (labelsData.error) return frame("ラベル", labelsData.error, "danger");
     if (!d) return frame("ラベル", "読み込み中…");
-    return <MobileLabels {...header} banner={banner} labels={d.labels} counts={d.counts} onOpenLabel={(name) => setNav({ kind: "label", name })} overlay={layers} />;
+    return <MobileLabels {...header} banner={banner} onBack={back} labels={d.labels} counts={d.counts} onOpenLabel={(name) => push({ kind: "label", name })} overlay={layers} />;
   }
-  if (nav.kind === "label") {
+  if (screen.kind === "label") {
     const d = labelData.data;
-    if (labelData.error) return frame(`@${nav.name ?? ""}`, labelData.error, "danger");
-    if (!d || !labelName) return frame(`@${nav.name ?? ""}`, "読み込み中…");
+    if (labelData.error) return frame(`@${screen.name}`, labelData.error, "danger");
+    if (!d || !labelName) return frame(`@${screen.name}`, "読み込み中…");
     return (
       <MobileLabelDetail
-        {...header} banner={banner}
-        today={today}
+        {...header}
+        banner={banner}
+        onBack={back}
         label={d.label.name}
         tasks={d.tasks}
         onToggleDone={(t, done) => void cross.toggleDone(t, done)}
@@ -597,7 +617,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       />
     );
   }
-  // 受信トレイ / プロジェクト
+  // 受信トレイ (タブ) / プロジェクト (閲覧から)
   const title = current === app.inbox ? "受信トレイ" : current;
   if (p.error) return frame(title, p.error, "danger", () => void p.reload().catch(() => undefined));
   if (!view) return frame(title, "読み込み中…");
@@ -605,15 +625,16 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     <MobileProjectView
       key={current}
       live
-      {...header} banner={banner}
+      {...header}
+      banner={banner}
       onRefresh={pullRefresh}
-      tab="list"
-      today={today}
+      tab={nav.tab}
+      onBack={screen.kind === "project" ? back : undefined}
+      onProjectMenu={screen.kind === "project" ? () => setProjectSheet("menu") : undefined}
       title={title}
       project={current}
       tasks={view.tasks}
       sections={view.sections}
-      projects={summaries}
       onToggleDone={(t, done) => void p.completeTask(t.no, done)}
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
       {...rowOps}

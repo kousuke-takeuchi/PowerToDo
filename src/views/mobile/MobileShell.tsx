@@ -1,11 +1,12 @@
 import type React from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { usePullToRefresh } from "../../app/useGestures";
 import { MobileHeader, type HeaderAction } from "../../components/MobileHeader";
 import { PullIndicator } from "../../components/PullIndicator";
-import { TabBar } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
+import { TAB_BAR, TabBar } from "../../components/TabBar";
 import type { TabBarProps } from "../../components/TabBar";
 import { LARGE_TITLE_HEIGHT, titleLook, titleProgress } from "../../components/largeTitle";
 
@@ -19,17 +20,17 @@ export type MobileShellProps = {
   largeTitle?: boolean;
   actions?: HeaderAction[];
   onBack?: () => void;
-  /** Hamburger (removed with the drawer in Task 3). */
-  onMenu?: () => void;
   /** Stories: start scrolled by this many px (M-04b). */
   initialScrollTop?: number;
   children: React.ReactNode;
-  /** 下部タブ。省略するとタブなし (M-03)。"none" はタブを出して選択なし (M-07)。 */
-  tab?: TabBarProps["active"] | "none";
+  /** 下部タブ。省略するとタブなし (M-03)。 */
+  tab?: MobileTab;
+  /** 今日 (YYYY-MM-DD)。タブの「今日」のアイコンの日にち。省略すると端末の日付。 */
+  today?: string;
   onTabChange?: TabBarProps["onChange"];
   fab?: boolean;
   onFab?: () => void;
-  /** 画面全体に重ねる層 (M-02 のシート、M-06 のドロワー)。ラッパーは pointer-events: none、中身側で auto にする。 */
+  /** 画面全体に重ねる層 (M-02 のシート)。ラッパーは pointer-events: none、中身側で auto にする。 */
   overlay?: React.ReactNode;
   /** 実機用: 幅 100% / 高さ 100dvh、本文はスクロール、上下の空きはセーフエリア (header 側は MobileHeader の safeArea)。省略すると 390x844 の絵のまま。 */
   fill?: boolean;
@@ -58,14 +59,9 @@ function LargeTitle({ title, subtitle, progress }: { title: string; subtitle?: s
  * モバイルのシェル 390x844: header + body (flex 1) + TabBar (下)。FAB は右 16 / タブの上 16。
  * overflow: hidden はルートだけ。body はクリップしない。
  */
-export function MobileShell({ header, title, subtitle, largeTitle, actions, onBack, onMenu, initialScrollTop, children, tab, onTabChange, fab, onFab, overlay, fill, banner, onRefresh, refreshing: forceRefreshing }: MobileShellProps) {
+export function MobileShell({ header, title, subtitle, largeTitle, actions, onBack, initialScrollTop, children, tab, today, onTabChange, fab, onFab, overlay, fill, banner, onRefresh, refreshing: forceRefreshing }: MobileShellProps) {
   const pulling = usePullToRefresh(onRefresh);
   const withPull = onRefresh !== undefined || forceRefreshing !== undefined;
-  // 選択中のタブはシェルが持つ (見た目だけ。画面遷移は Story を切り替える)。tab が変わったらそれに合わせる。
-  // onTabChange があるとき (実画面) は持たずに tab をそのまま出す (「一覧」はドロワーを開くだけで選択は移らない)。
-  const [cur, setCur] = useState(tab);
-  useEffect(() => setCur(tab), [tab]);
-  const shownTab = onTabChange ? tab : cur;
   const progress = useMotionValue(titleProgress(initialScrollTop ?? 0));
   const scrollEl = useRef<HTMLDivElement | null>(null);
   const setBody = (el: HTMLDivElement | null) => {
@@ -95,7 +91,7 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
     >
       {header ??
         (title !== undefined && (
-          <MobileHeader title={title} subtitle={subtitle} progress={largeTitle ? progress : undefined} actions={actions} onBack={onBack} onMenu={onMenu} safeArea={fill} />
+          <MobileHeader title={title} subtitle={subtitle} progress={largeTitle ? progress : undefined} actions={actions} onBack={onBack} safeArea={fill} />
         ))}
       {banner && <div style={{ flex: "0 0 auto", maxHeight: "40%", overflowY: "auto" }}>{banner}</div>}
       <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -115,18 +111,12 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
           ) : (
             children
           )}
+          {tab !== undefined && <div aria-hidden style={{ flex: "0 0 auto", height: TAB_BAR.bottom + TAB_BAR.height + 62 + 24 }} />}
         </div>
       </div>
       {tab !== undefined && (
-        <div style={{ position: "relative", zIndex: 1, flex: "0 0 auto" }}>
-          <TabBar
-            safeArea={fill}
-            active={shownTab === "none" ? undefined : shownTab}
-            onChange={(id) => {
-              setCur(id);
-              onTabChange?.(id);
-            }}
-          />
+        <div style={{ position: "absolute", left: TAB_BAR.side, right: TAB_BAR.side, bottom: TAB_BAR.bottom, zIndex: 1 }}>
+          <TabBar active={tab} onChange={onTabChange} day={today ? Number(today.slice(8, 10)) : undefined} />
         </div>
       )}
       {fab && (
@@ -136,19 +126,19 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
           onClick={onFab}
           style={{
             position: "absolute",
-            right: 16,
-            bottom: fill ? "calc(56px + env(safe-area-inset-bottom) + 16px)" : 90 + 16,
+            right: 18,
+            bottom: TAB_BAR.bottom + TAB_BAR.height + 10,
             zIndex: 2,
-            width: 56,
-            height: 56,
+            width: 62,
+            height: 62,
             display: "grid",
             placeItems: "center",
             padding: 0,
             border: 0,
-            borderRadius: 28,
+            borderRadius: 31,
             background: "var(--color-accent)",
             boxShadow: "var(--shadow-fab)",
-            color: "#FFFFFF", // pen と同じ (アクセント上の白)
+            color: "#FFFFFF", // white on accent
             cursor: "pointer",
           }}
         >

@@ -2,7 +2,7 @@ import type React from "react";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
 import { dateLabel } from "../../mock/data";
-import type { TabBarProps } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
 import type { Task } from "../../types/model";
 import { useDone } from "../useDone";
 import { MobileShell } from "./MobileShell";
@@ -19,12 +19,11 @@ export type MobileTodayProps = {
   onToggleDone?: (t: Task, done: boolean) => void;
   onOpenTask?: (t: Task) => void;
   onFab?: () => void;
-  onMenu?: () => void;
   /** Stories: start scrolled by this many px (M-04b). */
   initialScrollTop?: number;
   /** 「再スケジュール」(期限切れをまとめて動かす)。 */
   onReschedule?: () => void;
-  onTabChange?: TabBarProps["onChange"];
+  onTabChange?: (t: MobileTab) => void;
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
@@ -36,7 +35,7 @@ export type MobileTodayProps = {
 };
 
 /** M-04: 今日 (ヘッダーに同期アイコンなし)。期限切れ (再スケジュール付き) + 今日。pen のとおりチェックの色は全行 priority-4。 */
-export function MobileToday({ overdue, todays, today, live, fill, onToggleDone, onOpenTask, onFab, onMenu, initialScrollTop, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu }: MobileTodayProps) {
+export function MobileToday({ overdue, todays, today, live, fill, onToggleDone, onOpenTask, onFab, initialScrollTop, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu }: MobileTodayProps) {
   const local = useDone();
   const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
   const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
@@ -62,7 +61,7 @@ export function MobileToday({ overdue, todays, today, live, fill, onToggleDone, 
     );
   };
   return (
-    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="今日" subtitle={`${overdue.length + todays.length} 件のタスク`} largeTitle onMenu={onMenu} initialScrollTop={initialScrollTop} tab="today" onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
+    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="今日" subtitle={`${overdue.length + todays.length} 件のタスク`} largeTitle initialScrollTop={initialScrollTop} tab="today" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div style={{ padding: "0 16px" }}>
         {(!live || overdue.length > 0) && (
         <section>

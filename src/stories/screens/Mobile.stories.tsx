@@ -3,7 +3,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Banners } from "../../app/Banners";
 import { SaveBanner } from "../../app/SaveBanner";
 import { googleLoggedIn, nasConnected, syncStatuses, tailnets } from "../../mock/sync";
-import { TODAY, projects, sections, tasks } from "../../mock/data";
+import { TODAY, counts, projects, sections, tasks } from "../../mock/data";
+import { MobileBrowse } from "../../views/mobile/MobileBrowse";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
 import { MobileTaskDetail } from "../../views/mobile/MobileTaskDetail";
@@ -42,7 +43,7 @@ export const M01b: Story = {
   render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialExpanded={[1]} />,
 };
 
-// M-02 / M-06 は M-01 の上に層を重ねたもの。FAB / ハンバーガーで開き直せて、scrim をタップすると M-01 に戻る。
+// M-02 は M-01 の上に層を重ねたもの。FAB で開き直せて、scrim をタップすると M-01 に戻る。
 export const M02: Story = {
   name: "M-02 クイック追加",
   render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" />,
@@ -92,13 +93,13 @@ export const M05: Story = {
 };
 
 export const M06: Story = {
-  name: "M-06 ドロワー",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="drawer" swipeTitle="食パン" />,
+  name: "M-06 閲覧",
+  render: () => <MobileBrowse projects={projects} counts={counts} syncState="synced" lastSyncedAt="2 分前" today={TODAY} />,
 };
 
 export const M07: Story = {
   name: "M-07 設定",
-  render: () => <MobileSettings />,
+  render: () => <MobileSettings today={TODAY} />,
 };
 
 // ---- Phase 6: 実データ (live) で動かす画面。チェックは task.progress を書き換えて呼び出し側が持つ。fill は実機と同じ 100dvh / セーフエリア ----
@@ -238,7 +239,7 @@ function LiveSettings({ permission }: { permission: "granted" | "denied" | "prom
   const [enabled, setEnabled] = useState(true);
   const [name, setName] = useState("たろう");
   return (
-    <MobileSettings
+    <MobileSettings today={TODAY}
       sync={syncPane}
       notifications={{ enabled, permission }}
       onToggleNotifications={setEnabled}
@@ -267,7 +268,7 @@ export const M07Denied: Story = {
 export const M07Google: Story = {
   name: "M-07 Google Drive 接続済み",
   render: () => (
-    <MobileSettings
+    <MobileSettings today={TODAY}
       sync={{ ...syncPane, settings: googleLoggedIn, status: syncStatuses.googleAuthRejected, tailnet: null, onGoogleLogin: async () => true }}
       notifications={{ enabled: true, permission: "prompt" }}
       onRequestPermission={noop}

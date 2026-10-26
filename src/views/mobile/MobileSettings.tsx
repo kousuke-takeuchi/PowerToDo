@@ -3,7 +3,7 @@ import { Bell, Calendar, ChevronRight, Cloud, Clock3, Folder, Palette, RefreshCw
 import { NarrowContext } from "../../components/NarrowContext";
 import { Button } from "../../components/Button";
 import { Segmented } from "../../components/Segmented";
-import type { TabBarProps } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
 import type { NotificationPermission } from "../../types/model";
 import { AccountPane, Desc, Row, Section } from "../SettingsPanes";
 import type { AccountPaneProps } from "../SettingsPanes";
@@ -66,7 +66,8 @@ export type MobileSettingsProps = {
   fill?: boolean;
   banner?: React.ReactNode;
   overlay?: React.ReactNode;
-  onTabChange?: TabBarProps["onChange"];
+  onTabChange?: (t: MobileTab) => void;
+  today?: string;
 };
 
 const ON_OFF = [
@@ -76,7 +77,7 @@ const ON_OFF = [
 
 /** M-07: 設定。同期 / 通知 / 外観 / アカウントのグループ (行 44)。ヘッダーの同期アイコンは cloud-off (オフラインの例)。タブは選択なし。 */
 export function MobileSettings(props: MobileSettingsProps = {}) {
-  const { sync, notifications, onToggleNotifications, onRequestPermission, displayName, onDisplayName, displayNameBusy, displayNameError, dataDirHint, onBack, fill, banner, overlay, onTabChange } = props;
+  const { sync, notifications, onToggleNotifications, onRequestPermission, displayName, onDisplayName, displayNameBusy, displayNameError, dataDirHint, onBack, fill, banner, overlay, onTabChange, today } = props;
   // どれかの props があれば実データの画面 (SyncPane などの部品を縦長の幅で並べる)。無ければ Phase 0 の絵のまま。
   const live = !!(sync || notifications || onDisplayName || dataDirHint);
   return (
@@ -86,7 +87,8 @@ export function MobileSettings(props: MobileSettingsProps = {}) {
       overlay={overlay}
       title="設定"
       onBack={onBack}
-      tab="none"
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
     >
       {live ? (

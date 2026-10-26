@@ -1,16 +1,18 @@
 import type React from "react";
 import { Tag } from "lucide-react";
 import { TaskRow } from "../../components/TaskRow";
-import type { TabBarProps } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
 import { TODAY, dateLabel } from "../../mock/data";
 import type { Label, Task } from "../../types/model";
 import { MobileShell } from "./MobileShell";
 
 type Common = {
   fill?: boolean;
-  onMenu?: () => void;
+  /** Back to 閲覧. */
+  onBack?: () => void;
+  today?: string;
   onFab?: () => void;
-  onTabChange?: TabBarProps["onChange"];
+  onTabChange?: (t: MobileTab) => void;
   overlay?: React.ReactNode;
   banner?: React.ReactNode;
 };
@@ -22,15 +24,16 @@ export type MobileLabelsProps = Common & {
 };
 
 /** 「フィルターとラベル」: ラベルの一覧 (件数つき)。タップでそのラベルのタスク (MobileLabelDetail)。 */
-export function MobileLabels({ labels, counts, onOpenLabel, fill, onMenu, onFab, onTabChange, overlay, banner }: MobileLabelsProps) {
+export function MobileLabels({ labels, counts, onOpenLabel, fill, onBack, today, onFab, onTabChange, overlay, banner }: MobileLabelsProps) {
   return (
     <MobileShell
       banner={banner}
       fill={fill}
       title="ラベル"
       largeTitle
-      onMenu={onMenu}
-      tab="list"
+      onBack={onBack}
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
       fab
       onFab={onFab}
@@ -83,7 +86,7 @@ export type MobileLabelDetailProps = Common & {
 };
 
 /** ラベル詳細: そのラベルが付いたタスク (プロジェクトをまたぐ)。 */
-export function MobileLabelDetail({ label, tasks, today = TODAY, onToggleDone, onOpenTask, fill, onMenu, onFab, onTabChange, overlay, banner }: MobileLabelDetailProps) {
+export function MobileLabelDetail({ label, tasks, today = TODAY, onToggleDone, onOpenTask, fill, onBack, onFab, onTabChange, overlay, banner }: MobileLabelDetailProps) {
   return (
     <MobileShell
       banner={banner}
@@ -91,8 +94,9 @@ export function MobileLabelDetail({ label, tasks, today = TODAY, onToggleDone, o
       title={`@${label}`}
       subtitle={`${tasks.length} 件のタスク`}
       largeTitle
-      onMenu={onMenu}
-      tab="list"
+      onBack={onBack}
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
       fab
       onFab={onFab}
