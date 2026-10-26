@@ -6,7 +6,7 @@ export type CheckboxProps = {
   checked: boolean;
   priority?: 1 | 2 | 3 | 4;
   onChange?: (checked: boolean) => void;
-  /** 18 on desktop (Todoist), 22 on iPhone rows; 20 only for the iPhone task screen until Task 9. */
+  /** 18 on desktop (Todoist), 22 on iPhone. 20 is kept only for DesktopTaskRow's mobile branch; iPhone screens do not use it. */
   size?: 18 | 20 | 22;
   ariaLabel?: string;
 };
@@ -35,9 +35,9 @@ export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel
     }
   }, [checked, reduced, animate, scope]);
 
-  // Desktop 18 and iPhone rows 22 (Todoist): a 2 px ring and, for priority 1-3, a 10 % fill of its color. 20 (iPhone task screen until Task 9): 1.5 px, no fill.
-  const ring = size === 20 ? 1.5 : 2;
-  const tint = size !== 20 && !checked && priority < 4;
+  // Todoist: a 2 px ring and, for priority 1-3, a 10 % fill of its color.
+  const ring = 2;
+  const tint = !checked && priority < 4;
   const color = checked ? "var(--color-success)" : priorityVar[priority];
   const fadeIn = t(checked ? 0.15 : 0.12);
   const draw = t(checked ? 0.2 : 0.12);

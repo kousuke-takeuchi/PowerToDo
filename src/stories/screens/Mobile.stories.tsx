@@ -71,6 +71,12 @@ export const M04: Story = {
   ),
 };
 
+export const M10: Story = {
+  name: "M-10 ダークモードの今日",
+  globals: { theme: "dark", viewport: { value: "mobile", isRotated: false } },
+  render: () => <MobileToday overdue={byNo(9, 10)} todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]} today={TODAY} />,
+};
+
 // M-04b: M-04 scrolled by the large title's height: the title sits small in the bar (spec ④ iPhone §3.3).
 // Extra overdue rows give the body more than LARGE_TITLE_HEIGHT of scroll room.
 export const M04b: Story = {
