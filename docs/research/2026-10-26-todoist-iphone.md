@@ -109,3 +109,18 @@ Source: 14 screenshots and one 41 s screen recording from the owner's iPhone (11
 
 ### Not covered by the shots
 - The 閲覧 tab, the dark theme, and swipe actions were not captured.
+
+### Motion (measured from the recording)
+
+The recording runs at up to 60 fps (variable). Times are from the first frame that moves to the frame where it settles, ±17 ms. Positions are the sheet's top edge in points (812 = off screen).
+
+- Task sheet opens: slides up from off screen to its 85% stop (top at 295) in about 0.37 s. It covers 70% of the way in 0.1 s and then slows down with no overshoot, like an iOS spring with no bounce. The list behind dims at the same time.
+- Sheet closes (× or swipe down): slides down and off screen in about 0.13 s, speeding up as it goes (ease-in). The dim fades with it.
+- Sheet pulled to full height: the top moves from 295 to about 60 over about 0.2 s, decelerating.
+- A second sheet over the first (date sheet) opens the same way, in about 0.37 s; the sheet below shrinks back slightly and dims. It closes in about 0.1 s.
+- Move sheet after a menu: the menu fades first (about 0.1 s), then the sheet rises from the bottom to the top (51) in about 0.43 s, decelerating.
+- Long press: after about 0.4 s of holding, the row lifts as a white card with a soft shadow and the rest of the screen dims. The menu grows out from the row (scale and fade) in about 0.2 s with a slight overshoot that settles by about 0.3 s.
+- Dragging a lifted row: the card follows the finger; the other rows do not move. A red line with a dot at the left marks where the row will land, the same as the desktop drag. On release the card settles into place.
+- Selection mode: the top bar changes to 「n 件のタスクを選択中」 and the tab bar is replaced by the action pill in about 0.3 s (fade and slide).
+- Scheduling from a sheet: the sheet closes, and a toast card rises at the bottom with 「元に戻す」; it stays about 3 s.
+- Large title: scrolling the list moves the title into the top bar (the title shrinks and fades while the small centered title fades in), tied to the scroll position, not to a timer.
