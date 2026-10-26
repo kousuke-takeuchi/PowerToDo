@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
@@ -34,7 +34,9 @@ import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { useSearch } from "./useSearch";
+import { useCommentCounts } from "./useComments";
 import { useSummaries } from "./useSummaries";
+import type { RowContext } from "../views/mobile/rowProps";
 import { useSync } from "./useSync";
 import type { SyncConflicts } from "./useSyncConflicts";
 import { formatSynced, syncErrorText, targetName } from "./syncText";
@@ -77,6 +79,12 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const [permission, setPermission] = useState<NotificationPermission>("granted");
 
   const { summaries, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
+
+  const commentCounts = useCommentCounts(summaries.map((s) => s.name));
+  const rowContext = useMemo<Omit<RowContext, "today">>(
+    () => ({ inbox: app.inbox, colors: Object.fromEntries(summaries.map((s) => [s.name, s.color])), comments: commentCounts }),
+    [app.inbox, summaries, commentCounts],
+  );
 
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
   const syncStatus = sync.status;
@@ -523,6 +531,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     if (!d) return frame("今日", "読み込み中…");
     return (
       <MobileToday
+        rowContext={rowContext}
         live
         {...header}
         banner={banner}
@@ -543,6 +552,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     if (!d) return frame("近日", "読み込み中…");
     return (
       <MobileUpcoming
+        rowContext={rowContext}
         live
         {...header}
         banner={banner}
@@ -579,6 +589,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   if (screen.kind === "search") {
     return (
       <MobileSearch
+        rowContext={rowContext}
         {...header}
         banner={banner}
         onBack={back}
@@ -606,6 +617,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     if (!d || !labelName) return frame(`@${screen.name}`, "読み込み中…");
     return (
       <MobileLabelDetail
+        rowContext={rowContext}
         {...header}
         banner={banner}
         onBack={back}
@@ -623,6 +635,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   if (!view) return frame(title, "読み込み中…");
   return (
     <MobileProjectView
+      rowContext={rowContext}
       key={current}
       live
       {...header}

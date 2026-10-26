@@ -3,9 +3,10 @@ import { Search } from "lucide-react";
 import { Segmented } from "../../components/Segmented";
 import { TaskRow } from "../../components/TaskRow";
 import type { MobileTab } from "../../app/mobileNav";
-import { TODAY, dateLabel } from "../../mock/data";
+import { TODAY } from "../../mock/data";
 import type { SearchHit } from "../../types/model";
 import { MobileShell } from "./MobileShell";
+import { mobileRowProps, type RowContext } from "./rowProps";
 
 export type MobileSearchProps = {
   query: string;
@@ -15,6 +16,8 @@ export type MobileSearchProps = {
   hits: SearchHit[];
   busy?: boolean;
   today?: string;
+  /** What a row shows beyond the task itself (inbox name, project colors, comment counts). */
+  rowContext?: Omit<RowContext, "today">;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア。 */
   fill?: boolean;
   onOpenHit?: (hit: SearchHit) => void;
@@ -42,6 +45,7 @@ export function MobileSearch({
   hits,
   busy,
   today = TODAY,
+  rowContext,
   fill,
   onOpenHit,
   onToggleDone,
@@ -64,7 +68,7 @@ export function MobileSearch({
       onFab={onFab}
       overlay={overlay}
     >
-      <div style={{ padding: "0 16px" }}>
+      <div style={{ padding: "0 15px" }}>
         <label
           style={{
             display: "flex",
@@ -112,11 +116,8 @@ export function MobileSearch({
           <TaskRow
             key={`${h.task.project}/${h.task.no}`}
             variant="mobile"
-            title={h.task.title}
+            {...mobileRowProps(h.task, { today, ...rowContext }, { project: true })}
             done={h.task.progress === 100}
-            priority={h.task.priority}
-            date={dateLabel(h.task.due, today)}
-            project={h.task.project}
             onToggleDone={() => onToggleDone?.(h, h.task.progress !== 100)}
             onClick={onOpenHit ? () => onOpenHit(h) : undefined}
           />

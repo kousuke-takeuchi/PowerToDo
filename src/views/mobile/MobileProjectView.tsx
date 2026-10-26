@@ -5,10 +5,13 @@ import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../../components/AddTaskRow";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
+import { MOBILE_ROW } from "../../components/MobileTaskRow";
 import { Collapse } from "../../motion";
-import { TODAY, dateLabel } from "../../mock/data";
+import { TODAY } from "../../mock/data";
 import type { Section, Task } from "../../types/model";
+import { useLeaving } from "../crossList";
 import { useDone } from "../useDone";
+import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
@@ -33,6 +36,8 @@ export type MobileProjectViewProps = {
   live?: boolean;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア (MobileShell の fill)。 */
   fill?: boolean;
+  /** What a row shows beyond the task itself (inbox name, project colors, comment counts). */
+  rowContext?: Omit<RowContext, "today">;
   /** 期限の表示の基準日。省略すると mock の TODAY。 */
   today?: string;
   /** ヘッダーに出す名前。省略すると project。 */
@@ -108,6 +113,7 @@ export function MobileProjectView({
   swipeTitle = "電池を買う",
   live,
   fill,
+  rowContext,
   today = TODAY,
   title,
   onToggleDone,
@@ -128,9 +134,15 @@ export function MobileProjectView({
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
   const local = useDone();
-  const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
-  const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
-  const priorityOf = (t: Task) => (live ? t.priority : 4);
+  const leave = useLeaving(tasks);
+  const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
+  const toggle = (t: Task, group = "", index = 0) => {
+    if (!live) return local.toggle(t);
+    const next = !isDone(t);
+    if (next) leave.begin(t, group, index);
+    else leave.cancel(t);
+    onToggleDone?.(t, next);
+  };
 
   const mine = tasks.filter((t) => t.project === project);
   const childrenOf = (no: number) => mine.filter((t) => t.parentNo === no).sort((a, b) => a.order - b.order);
@@ -143,45 +155,65 @@ export function MobileProjectView({
     });
 
   /** live のとき、行をスワイプ / 長押しのラッパーで包む。 */
-  const swipeable = (t: Task, row: React.ReactNode): React.ReactNode =>
+  const swipeable = (t: Task, row: React.ReactNode, onComplete: () => void): React.ReactNode =>
     live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={t.no} onComplete={() => toggle(t)} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+      <SwipeRow key={t.no} onComplete={onComplete} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
         {row}
       </SwipeRow>
     ) : (
       row
     );
 
-  const renderRow = (t: Task): React.ReactNode => {
+  const renderRow = (t: Task, group = "", index = 0): React.ReactNode => {
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
+    const ctx: RowContext = { today, ...rowContext };
+    const done = () => toggle(t, group, index);
     return (
       <div key={t.no}>
-        {swipeable(t, <TaskRow
-          variant="mobile"
-          title={t.title}
-          done={isDone(t)}
-          priority={priorityOf(t)}
-          date={dateLabel(t.due, today)}
-          subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
-          onToggleDone={() => toggle(t)}
-          onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-          onToggleExpand={() => toggleExpand(t.no)}
-        />)}
-        <AnimatePresence initial={false}>
-          {open && (
-            <Collapse key="subtasks">
-              {kids.map((k) => (
-                swipeable(k, <TaskRow key={k.no} variant="mobile" indent={1} title={k.title} done={isDone(k)} priority={priorityOf(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />)
-              ))}
-              <div style={{ marginLeft: 24 }}>
-                <AddTaskRow label="サブタスクを追加" onClick={onFab ?? (() => setOverlay("quickAdd"))} />
-              </div>
-            </Collapse>
-          )}
-        </AnimatePresence>
+        {swipeable(
+          t,
+          <TaskRow
+            variant="mobile"
+            {...mobileRowProps(t, ctx)}
+            done={isDone(t)}
+            subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
+            onToggleDone={done}
+            onClick={onOpenTask ? () => onOpenTask(t) : undefined}
+            onToggleExpand={() => toggleExpand(t.no)}
+          />,
+          done,
+        )}
+        {open && (
+          <>
+            {kids.map((k) =>
+              swipeable(
+                k,
+                <TaskRow key={k.no} variant="mobile" indent={1} {...mobileRowProps(k, ctx)} done={isDone(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />,
+                () => toggle(k),
+              ),
+            )}
+            <div style={{ marginLeft: MOBILE_ROW.indent }}>
+              <AddTaskRow label="サブタスクを追加" onClick={onFab ?? (() => setOverlay("quickAdd"))} />
+            </div>
+          </>
+        )}
       </div>
     );
+  };
+  /** One list: completed rows stay LEAVE_DELAY_MS, then leave in 0.1 s. */
+  const list = (group: string, rows: Task[]) => {
+    const items = (live ? leave.merge(group, rows) : rows).map((t, i) => {
+      const el = renderRow(t, group, i);
+      return live ? (
+        <Collapse key={t.no} duration={0.1}>
+          {el}
+        </Collapse>
+      ) : (
+        el
+      );
+    });
+    return live ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
   };
 
   const open = mine.filter((t) => t.parentNo === undefined && t.progress !== 100);
@@ -215,14 +247,14 @@ export function MobileProjectView({
         )
       }
     >
-      <div style={{ padding: "0 16px" }}>
-        {unsectioned.map(renderRow)}
+      <div style={{ padding: "0 15px" }}>
+        {list("s:", unsectioned)}
         {projectSections.map((s) => {
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
               <SectionHeader mobile title={s.name} count={rows.length} />
-              {rows.map(renderRow)}
+              {list(`s:${s.name}`, rows)}
             </section>
           );
         })}

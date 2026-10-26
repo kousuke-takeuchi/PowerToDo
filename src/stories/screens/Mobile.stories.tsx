@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Banners } from "../../app/Banners";
 import { SaveBanner } from "../../app/SaveBanner";
 import { googleLoggedIn, nasConnected, syncStatuses, tailnets } from "../../mock/sync";
-import { TODAY, counts, projects, sections, tasks } from "../../mock/data";
+import { LONG_TITLE, TODAY, counts, projects, sections, tasks } from "../../mock/data";
 import { MobileBrowse } from "../../views/mobile/MobileBrowse";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
@@ -35,18 +35,18 @@ const byNo = (...nos: number[]) => nos.map((n) => tasks.find((t) => t.no === n)!
 
 export const M01: Story = {
   name: "M-01 プロジェクト",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} swipeTitle="食パン" onProjectMenu={() => undefined} />,
+  render: () => <MobileProjectView tab="browse" project="買い物" tasks={shopping} sections={sections} swipeTitle="食パン" onProjectMenu={() => undefined} />,
 };
 
 export const M01b: Story = {
   name: "M-01b サブタスク展開",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialExpanded={[1]} />,
+  render: () => <MobileProjectView tab="browse" project="買い物" tasks={shopping} sections={sections} initialExpanded={[1]} />,
 };
 
 // M-02 は M-01 の上に層を重ねたもの。FAB で開き直せて、scrim をタップすると M-01 に戻る。
 export const M02: Story = {
   name: "M-02 クイック追加",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" />,
+  render: () => <MobileProjectView tab="browse" project="買い物" tasks={shopping} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" />,
 };
 
 export const M03: Story = {
@@ -111,7 +111,7 @@ function useTasks(initial: Task[]) {
 
 function LiveProject() {
   const { list, toggle } = useTasks(shopping);
-  return <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
 }
 
 export const M01Live: Story = {
@@ -129,6 +129,18 @@ export const M04NoOverdue: Story = {
   render: () => <LiveTodayNoOverdue />,
 };
 
+// Not on the storyboard: a long title ends in an ellipsis, rows are 48 / 63 / 82 high.
+export const M01Long: Story = {
+  name: "M-01 長い名前 (fill)",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks([...shopping, { ...shopping[1], no: 90, title: LONG_TITLE, category: "今週", order: 9 }]);
+      return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+    };
+    return <Live />;
+  },
+};
+
 // 残る帯 (保存失敗) は header の下に流れ、一覧はその分だけ下がる (上の行が隠れない)
 export const M01Banner: Story = {
   name: "M-01 帯つき (fill)",
@@ -139,6 +151,7 @@ export const M01Banner: Story = {
         <MobileProjectView
           live
           fill
+          tab="browse"
           project="買い物"
           tasks={list}
           sections={sections}
@@ -161,6 +174,7 @@ function LiveWithSheet({ kind }: { kind: "menu" | "date" }) {
     <MobileProjectView
       live
       fill
+      tab="browse"
       project="買い物"
       tasks={list}
       sections={sections}
@@ -287,6 +301,7 @@ export const M01Conflict: Story = {
         <MobileProjectView
           live
           fill
+          tab="browse"
           project="買い物"
           tasks={list}
           sections={sections}
@@ -329,7 +344,7 @@ export const M01Refreshing: Story = {
     const Live = () => {
       const { list, toggle } = useTasks(shopping);
       return (
-        <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} refreshing />
+        <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} refreshing />
       );
     };
     return <Live />;
