@@ -1,10 +1,8 @@
 import type React from "react";
 import { Bell, Calendar, ChevronRight, Cloud, Clock3, Folder, Palette, RefreshCw, User } from "lucide-react";
-import { MobileHeader } from "../../components/MobileHeader";
 import { NarrowContext } from "../../components/NarrowContext";
 import { Button } from "../../components/Button";
 import { Segmented } from "../../components/Segmented";
-import type { SyncState } from "../../components/SyncStatus";
 import type { TabBarProps } from "../../components/TabBar";
 import type { NotificationPermission } from "../../types/model";
 import { AccountPane, Desc, Row, Section } from "../SettingsPanes";
@@ -65,9 +63,6 @@ export type MobileSettingsProps = {
   dataDirHint?: string;
   /** 実機: 戻る (ヘッダーの左を戻るにする)。省略すると M-07 の絵のままメニュー。 */
   onBack?: () => void;
-  /** ヘッダーの同期アイコンの状態と、押したとき。 */
-  headerSync?: SyncState;
-  onHeaderSync?: () => void;
   fill?: boolean;
   banner?: React.ReactNode;
   overlay?: React.ReactNode;
@@ -81,7 +76,7 @@ const ON_OFF = [
 
 /** M-07: 設定。同期 / 通知 / 外観 / アカウントのグループ (行 44)。ヘッダーの同期アイコンは cloud-off (オフラインの例)。タブは選択なし。 */
 export function MobileSettings(props: MobileSettingsProps = {}) {
-  const { sync, notifications, onToggleNotifications, onRequestPermission, displayName, onDisplayName, displayNameBusy, displayNameError, dataDirHint, onBack, headerSync, onHeaderSync, fill, banner, overlay, onTabChange } = props;
+  const { sync, notifications, onToggleNotifications, onRequestPermission, displayName, onDisplayName, displayNameBusy, displayNameError, dataDirHint, onBack, fill, banner, overlay, onTabChange } = props;
   // どれかの props があれば実データの画面 (SyncPane などの部品を縦長の幅で並べる)。無ければ Phase 0 の絵のまま。
   const live = !!(sync || notifications || onDisplayName || dataDirHint);
   return (
@@ -89,7 +84,8 @@ export function MobileSettings(props: MobileSettingsProps = {}) {
       fill={fill}
       banner={banner}
       overlay={overlay}
-      header={<MobileHeader title="設定" safeArea={fill} sync={headerSync ?? "offline"} showBack={!!onBack} onBack={onBack} onSync={onHeaderSync} />}
+      title="設定"
+      onBack={onBack}
       tab="none"
       onTabChange={onTabChange}
     >

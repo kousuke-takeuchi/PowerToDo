@@ -14,6 +14,7 @@ import { BottomSheet } from "../../views/mobile/BottomSheet";
 import { DateSheet } from "../../views/mobile/DateSheet";
 import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
 import { SheetFrame } from "../../views/mobile/SheetFrame";
+import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
 import { insertToken } from "../../app/quickAddInsert";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 
@@ -33,7 +34,7 @@ const byNo = (...nos: number[]) => nos.map((n) => tasks.find((t) => t.no === n)!
 
 export const M01: Story = {
   name: "M-01 プロジェクト",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} swipeTitle="食パン" />,
+  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} swipeTitle="食パン" onProjectMenu={() => undefined} />,
 };
 
 export const M01b: Story = {
@@ -65,6 +66,20 @@ export const M04: Story = {
   render: () => (
     // pen の「ゴミ出し」は括弧書きなし
     <MobileToday overdue={byNo(9, 10)} todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]} today={TODAY} />
+  ),
+};
+
+// M-04b: M-04 scrolled by the large title's height: the title sits small in the bar (spec ④ iPhone §3.3).
+// Extra overdue rows give the body more than LARGE_TITLE_HEIGHT of scroll room.
+export const M04b: Story = {
+  name: "M-04b 今日 (見出しが縮んだところ)",
+  render: () => (
+    <MobileToday
+      overdue={[...byNo(9, 10), ...byNo(9, 10, 9, 10, 9, 10).map((t, i) => ({ ...t, no: 900 + i }))]}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      initialScrollTop={LARGE_TITLE_HEIGHT}
+    />
   ),
 };
 
@@ -234,8 +249,6 @@ function LiveSettings({ permission }: { permission: "granted" | "denied" | "prom
         return true;
       }}
       dataDirHint={dataDirHint}
-      headerSync="synced"
-      onHeaderSync={noop}
       onBack={noop}
     />
   );
@@ -259,8 +272,6 @@ export const M07Google: Story = {
       notifications={{ enabled: true, permission: "prompt" }}
       onRequestPermission={noop}
       dataDirHint={dataDirHint}
-      headerSync="error"
-      onHeaderSync={noop}
       onBack={noop}
     />
   ),
@@ -280,8 +291,6 @@ export const M01Conflict: Story = {
           sections={sections}
           today={TODAY}
           onToggleDone={toggle}
-          sync="synced"
-          onSync={noop}
           banner={
             <Banners
               narrow
@@ -319,7 +328,7 @@ export const M01Refreshing: Story = {
     const Live = () => {
       const { list, toggle } = useTasks(shopping);
       return (
-        <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} sync="syncing" onSync={noop} refreshing />
+        <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} refreshing />
       );
     };
     return <Live />;

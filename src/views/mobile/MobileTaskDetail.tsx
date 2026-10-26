@@ -223,7 +223,6 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
         <MobileHeader
           safeArea={fill}
           title="タスク詳細"
-          showBack
           onBack={onBack}
           breadcrumb={
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)" }}>

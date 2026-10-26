@@ -1,5 +1,5 @@
 import type React from "react";
-import { backdropSupported, glassStyle } from "./glass";
+import { backdropSupported, glassStyle } from "./glassStyle";
 
 const SUPPORTED = typeof CSS !== "undefined" && backdropSupported(CSS);
 

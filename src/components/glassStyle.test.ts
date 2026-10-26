@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backdropSupported, glassStyle, GLASS_BLUR } from "./glass.ts";
+import { backdropSupported, glassStyle, GLASS_BLUR } from "./glassStyle.ts";
 
 test("glass_blurs_when_supported", () => {
   const s = glassStyle(true);

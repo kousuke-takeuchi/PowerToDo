@@ -1,96 +1,98 @@
 import type React from "react";
-import { ChevronLeft, CloudOff, Ellipsis, LoaderCircle, Menu, RefreshCw, TriangleAlert } from "lucide-react";
+import { ChevronLeft, Menu } from "lucide-react";
+import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { Button } from "./Button";
-import type { SyncState } from "./SyncStatus";
+import { Glass } from "./Glass";
+import { titleLook } from "./largeTitle";
+
+export type HeaderAction = { icon: React.ComponentType<{ size?: number }>; label: string; onClick?: () => void };
 
 export type MobileHeaderProps = {
   title: string;
-  onMenu?: () => void;
-  onMore?: () => void;
-  sync?: SyncState;
-  showBack?: boolean;
-  /** showBack のときの戻るボタン。 */
+  /** Under the small title (11): 「n 件のタスク」. */
+  subtitle?: string;
+  /** 0..1 from the list's scroll (screens with a large title). Omitted: the small title shows at once. */
+  progress?: MotionValue<number>;
   onBack?: () => void;
-  /** 指定すると title の代わりに表示する (M-03 のパンくず)。title は aria-label になる。 */
+  /** Hamburger for the drawer. Removed with the drawer in Task 3. */
+  onMenu?: () => void;
+  /** Buttons in the glass pill at the right (spec ④ iPhone §3.4). */
+  actions?: HeaderAction[];
+  /** Replaces the small title, left-aligned (M-03's breadcrumb). `title` becomes its aria-label. */
   breadcrumb?: React.ReactNode;
-  /** 上の空き 47 (StatusBar) を、実機の上のセーフエリア (env(safe-area-inset-top)) に置き換える。 */
+  /** The top gap is the notch's safe area instead of the picture's 47 status bar. */
   safeArea?: boolean;
-  /** 指定すると同期アイコンがボタンになり、押すと呼ぶ (今すぐ同期 / エラーのときは設定の同期を開く: 呼び出し側が決める)。同期済みのときも小さな更新アイコンを出す。同期先がない (off) ときは出さない。 */
-  onSync?: () => void;
-}; // 右端に同期アイコン (syncing 回転 / offline・error アイコン / synced 非表示)
+};
 
-const syncIcon = {
-  syncing: { Icon: LoaderCircle, color: "var(--color-text-secondary)", label: "同期中", spin: true },
-  offline: { Icon: CloudOff, color: "var(--color-text-secondary)", label: "オフライン", spin: false },
-  error: { Icon: TriangleAlert, color: "var(--color-danger)", label: "同期エラー", spin: false },
-} as const;
-/** onSync があるときだけ出す、同期済みの更新アイコン。 */
-const syncedIcon = { Icon: RefreshCw, color: "var(--color-text-secondary)", label: "今すぐ同期", spin: false } as const;
+const actionButton: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
+  border: 0,
+  background: "none",
+  color: "var(--color-text-primary)",
+  cursor: "pointer",
+};
 
-/** モバイルのヘッダー (pen の MobileHeader): StatusBar 47 (空) + Row 44。同期アイコンは More の左 (synced / off は出さない)。 */
-export function MobileHeader({ title, onMenu, onMore, sync, showBack, onBack, breadcrumb, safeArea, onSync }: MobileHeaderProps) {
-  const s = sync === "syncing" || sync === "offline" || sync === "error" ? syncIcon[sync] : onSync && sync === "synced" ? syncedIcon : undefined;
+/** iPhone top bar (spec ④ iPhone §3.3-3.4): back (or menu), the small centered title, the glass pill of actions. */
+export function MobileHeader({ title, subtitle, progress, onBack, onMenu, actions, breadcrumb, safeArea }: MobileHeaderProps) {
+  const one = useMotionValue(1);
+  const smallOpacity = useTransform(progress ?? one, (p) => titleLook(p).smallOpacity);
   return (
-    <header style={{ display: "flex", flexDirection: "column", background: "var(--color-bg)", fontFamily: "var(--font-body)", flex: "0 0 auto" }}>
+    <header style={{ flex: "0 0 auto", background: "var(--color-bg)", fontFamily: "var(--font-body)" }}>
       <div aria-hidden style={{ height: safeArea ? "env(safe-area-inset-top)" : 47 }} />
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "6px 12px" }}>
-        {showBack ? (
+      <div style={{ position: "relative", height: 52, display: "flex", alignItems: "center", gap: 8, padding: "0 15px" }}>
+        {onBack ? (
           <Button variant="icon" icon={ChevronLeft} ariaLabel="戻る" onClick={onBack} />
-        ) : (
+        ) : onMenu ? (
           <Button variant="icon" icon={Menu} ariaLabel="メニュー" onClick={onMenu} />
-        )}
+        ) : null}
         {breadcrumb ? (
           <div aria-label={title} style={{ flex: 1, minWidth: 0 }}>
             {breadcrumb}
           </div>
         ) : (
-          <h1 style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 20, lineHeight: "29px", fontWeight: 700, color: "var(--color-text-primary)" }}>
-            {title}
-          </h1>
-        )}
-        {s && onSync ? (
-          // タップで今すぐ同期。押す範囲は 44 (見た目は 18 のまま)。同期中は押しても重ねない (呼び出し側が busy を見る)
-          <button
-            type="button"
-            aria-label={s.label}
-            onClick={onSync}
-            style={{
-              display: "grid",
-              placeItems: "center",
-              flex: "0 0 auto",
-              width: 44,
-              height: 44,
-              margin: "-6px -4px -6px 0",
-              padding: 0,
-              border: 0,
-              background: "none",
-              color: s.color,
-              cursor: "pointer",
-            }}
-          >
-            <span aria-hidden style={{ display: "inline-flex", animation: s.spin ? "spin 1s linear infinite" : undefined }}>
-              <s.Icon size={18} />
-            </span>
-          </button>
-        ) : (
-          s && (
-            // pen の HeaderSync は x 318 (More の 28 左) にあるので右に 2px の余白を取る
-            <span
-              role="img"
-              aria-label={s.label}
+          <>
+            <motion.div
+              data-small-title=""
+              aria-hidden={progress ? true : undefined}
               style={{
-                display: "inline-flex",
-                flex: "0 0 auto",
-                marginRight: 2,
-                color: s.color,
-                animation: s.spin ? "spin 1s linear infinite" : undefined,
+                position: "absolute",
+                left: 72,
+                right: 72,
+                top: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: smallOpacity,
+                pointerEvents: "none",
               }}
             >
-              <s.Icon size={18} />
-            </span>
-          )
+              <div
+                role={progress ? undefined : "heading"}
+                aria-level={progress ? undefined : 1}
+                style={{ maxWidth: "100%", fontSize: 17, lineHeight: "22px", fontWeight: 700, color: "var(--color-text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                {title}
+              </div>
+              {subtitle && <div style={{ fontSize: 11, lineHeight: "13px", color: "var(--color-text-secondary)" }}>{subtitle}</div>}
+            </motion.div>
+            <div style={{ flex: 1 }} />
+          </>
         )}
-        <Button variant="icon" icon={Ellipsis} ariaLabel="その他" onClick={onMore} />
+        {actions && actions.length > 0 && (
+          <Glass radius={22} style={{ display: "flex", alignItems: "center", height: 44, padding: "0 2px", flex: "0 0 auto" }}>
+            {actions.map((a) => (
+              <button key={a.label} type="button" aria-label={a.label} onClick={a.onClick} style={actionButton}>
+                <a.icon size={20} />
+              </button>
+            ))}
+          </Glass>
+        )}
       </div>
     </header>
   );

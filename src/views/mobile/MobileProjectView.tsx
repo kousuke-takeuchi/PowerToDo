@@ -1,14 +1,12 @@
 import type React from "react";
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Ellipsis } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../../components/AddTaskRow";
-import { MobileHeader } from "../../components/MobileHeader";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
 import { Collapse } from "../../motion";
 import { TODAY, counts as mockCounts, dateLabel, projects as mockProjects } from "../../mock/data";
-import type { SyncState } from "../../components/SyncStatus";
 import type { Project, Section, Task } from "../../types/model";
 import { useDone } from "../useDone";
 import { Drawer } from "./Drawer";
@@ -41,14 +39,12 @@ export type MobileProjectViewProps = {
   today?: string;
   /** ヘッダーに出す名前。省略すると project。 */
   title?: string;
-  /** ヘッダーの同期アイコン。省略すると同期中 (絵)。 */
-  sync?: SyncState;
   onToggleDone?: (t: Task, done: boolean) => void;
   onOpenTask?: (t: Task) => void;
   onFab?: () => void;
   onMenu?: () => void;
-  /** ヘッダーの同期アイコンを押したとき。 */
-  onSync?: () => void;
+  /** The 「…」 pill at the right of the top bar (project menu). Omitted: no pill. */
+  onProjectMenu?: () => void;
   /** 下部タブの選択。省略すると「一覧」。 */
   tab?: TabBarProps["active"];
   onTabChange?: TabBarProps["onChange"];
@@ -116,12 +112,11 @@ export function MobileProjectView({
   fill,
   today = TODAY,
   title,
-  sync = "syncing",
   onToggleDone,
   onOpenTask,
   onFab,
   onMenu,
-  onSync,
+  onProjectMenu,
   tab = "list",
   onTabChange,
   overlay: externalOverlay,
@@ -192,6 +187,7 @@ export function MobileProjectView({
   };
 
   const open = mine.filter((t) => t.parentNo === undefined && t.progress !== 100);
+  const openCount = mine.filter((t) => t.progress !== 100).length;
   const projectSections = sections.filter((s) => s.project === project).sort((a, b) => a.order - b.order);
   // どのセクションにも入っていないタスク (受信トレイなど) は、見出しなしで先頭に並べる
   const sectionNames = new Set(projectSections.map((s) => s.name));
@@ -203,7 +199,11 @@ export function MobileProjectView({
       onRefresh={onRefresh}
       refreshing={refreshing}
       fill={fill}
-      header={<MobileHeader title={title ?? project} safeArea={fill} sync={sync} onMenu={onMenu ?? (() => setOverlay("drawer"))} onSync={onSync} />}
+      title={title ?? project}
+      subtitle={`${openCount} 件のタスク`}
+      largeTitle
+      onMenu={onMenu ?? (() => setOverlay("drawer"))}
+      actions={onProjectMenu ? [{ icon: Ellipsis, label: "その他", onClick: onProjectMenu }] : undefined}
       tab={tab}
       onTabChange={onTabChange}
       fab={externalOverlay !== undefined ? true : overlay === "none"}

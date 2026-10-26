@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
-import { MobileHeader } from "../components/MobileHeader";
 import type { TabBarProps } from "../components/TabBar";
 import type { AppStateDto, Label, NotificationPermission, SearchHit, Task } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
@@ -91,6 +90,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     if (syncNeedsSettings) setSettingsOpen(true);
     else if (syncState !== "syncing") void sync.syncNow(true);
   };
+  void headerSync; // the header icon is gone; Task 3 hands this to the 閲覧 tab's sync row
   const syncErrorMessage =
     syncState === "error" && !syncStatus?.suspect && syncStatus?.message && syncStatus.message !== dismissedSyncError ? syncStatus.message : null;
 
@@ -287,7 +287,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
 
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
   const syncNow = syncClickable ? () => void sync.syncNow(true) : undefined;
-  const header = { fill: true as const, sync: syncState, onSync: headerSync, onMenu: () => setDrawer(true), onFab: openQuickAdd, onTabChange: goTab };
+  const header = { fill: true as const, onMenu: () => setDrawer(true), onFab: openQuickAdd, onTabChange: goTab };
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
@@ -426,7 +426,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const frame = (title: string, text: string, tone: "muted" | "danger" = "muted", retry?: () => void) => (
     <MobileShell
       fill
-      header={<MobileHeader title={title} safeArea sync={syncState} onSync={headerSync} onMenu={header.onMenu} />}
+      title={title}
+      onMenu={header.onMenu}
       tab={tab}
       onTabChange={goTab}
       banner={banner}
@@ -459,8 +460,6 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         fill
         banner={banner}
         overlay={layers}
-        headerSync={syncState}
-        onHeaderSync={headerSync}
         onBack={() => setSettingsOpen(false)}
         onTabChange={goTab}
         sync={sync.pane}
@@ -484,7 +483,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         <MobileShell
           fill
           banner={banner}
-          header={<MobileHeader title="タスク詳細" safeArea showBack onBack={() => setDetail(null)} />}
+          title="タスク詳細"
+          onBack={() => setDetail(null)}
           overlay={layers}
         >
           <div style={{ padding: "var(--space-6) 16px", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>読み込み中…</div>

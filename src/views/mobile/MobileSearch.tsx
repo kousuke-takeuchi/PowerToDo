@@ -1,9 +1,7 @@
 import type React from "react";
 import { Search } from "lucide-react";
-import { MobileHeader } from "../../components/MobileHeader";
 import { Segmented } from "../../components/Segmented";
 import { TaskRow } from "../../components/TaskRow";
-import type { SyncState } from "../../components/SyncStatus";
 import type { TabBarProps } from "../../components/TabBar";
 import { TODAY, dateLabel } from "../../mock/data";
 import type { SearchHit } from "../../types/model";
@@ -19,13 +17,10 @@ export type MobileSearchProps = {
   today?: string;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア。 */
   fill?: boolean;
-  sync?: SyncState;
   onOpenHit?: (hit: SearchHit) => void;
   onToggleDone?: (hit: SearchHit, done: boolean) => void;
   onFab?: () => void;
   onMenu?: () => void;
-  /** ヘッダーの同期アイコンを押したとき。 */
-  onSync?: () => void;
   onTabChange?: TabBarProps["onChange"];
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
@@ -47,12 +42,10 @@ export function MobileSearch({
   busy,
   today = TODAY,
   fill,
-  sync,
   onOpenHit,
   onToggleDone,
   onFab,
   onMenu,
-  onSync,
   onTabChange,
   overlay,
   banner,
@@ -61,7 +54,8 @@ export function MobileSearch({
     <MobileShell
       banner={banner}
       fill={fill}
-      header={<MobileHeader title="検索" safeArea={fill} sync={sync} onMenu={onMenu} onSync={onSync} />}
+      title="検索"
+      onMenu={onMenu}
       tab="search"
       onTabChange={onTabChange}
       fab
