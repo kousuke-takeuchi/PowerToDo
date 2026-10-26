@@ -31,6 +31,11 @@ export const COVERED_SCALE = 0.95;
 
 export type Detent = "auto" | "large" | "full";
 
+/** Gap above a sheet at its full stop (px): 8 below the top safe area (status bar / notch), 8 where there is none. */
+export function sheetTopGap(safeTop: number): number {
+  return Math.max(8, (Number.isFinite(safeTop) ? safeTop : 0) + 8);
+}
+
 /** Where a sheet goes when the finger lets go of its header. Positive y is down (px, px/s). */
 export function sheetDragEnd(detent: Detent, offsetY: number, velocityY: number): "close" | Detent {
   const down = offsetY > 100 || velocityY > 600;

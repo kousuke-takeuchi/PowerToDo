@@ -5,7 +5,7 @@ import { AnimatePresence, PresenceContext, animate, motion, useDragControls, use
 import { useEscLayer } from "../../app/layers";
 import { Glass } from "../../components/Glass";
 import { useMotionTiming } from "../../motion";
-import { sheetDragEnd, sheetTransition, type Detent } from "./sheetMotion";
+import { sheetDragEnd, sheetTopGap, sheetTransition, type Detent } from "./sheetMotion";
 import { useKeyboardInset } from "./useKeyboardInset";
 
 export type BottomSheetProps = {
@@ -22,7 +22,6 @@ export type BottomSheetProps = {
 };
 
 const round: React.CSSProperties = { width: 36, height: 36, display: "grid", placeItems: "center", padding: 0, border: 0, borderRadius: 18, cursor: "pointer", flex: "0 0 auto" };
-const TOP_GAP = 8;
 
 function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: Omit<BottomSheetProps, "open">) {
   const inset = useKeyboardInset(!!fill);
@@ -46,17 +45,25 @@ function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: O
   // The drag needs pixels (a percentage y is read as px by the drag), so measure the room the sheet has.
   const overlay = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
+  // The top safe area (status bar / notch), read from a hidden probe as tall as env(safe-area-inset-top): the full stop stays below it.
+  const safeProbe = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0);
+  const [safeTop, setSafeTop] = useState(0);
   useLayoutEffect(() => {
     const el = overlay.current;
+    const probe = safeProbe.current;
     if (!el) return;
-    const measure = () => setRoom(el.clientHeight - inset);
+    const measure = () => {
+      setRoom(el.clientHeight - inset);
+      setSafeTop(probe ? probe.offsetHeight : 0);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (probe) ro.observe(probe);
     return () => ro.disconnect();
   }, [inset]);
-  const tall = Math.max(0, room - TOP_GAP);
+  const tall = Math.max(0, room - sheetTopGap(safeTop));
   const yLarge = Math.round(tall * 0.15);
   const y = detent === "large" ? yLarge : 0;
   const bottomPad = detent === "large" ? `${yLarge + 16}px` : inset > 0 ? "12px" : "calc(16px + env(safe-area-inset-bottom))";
@@ -123,6 +130,7 @@ function Sheet({ title, onClose, children, fill, confirmForm, size = "auto" }: O
         boxSizing: "border-box",
       }}
     >
+      <div ref={safeProbe} aria-hidden data-safe-top-probe style={{ position: "absolute", top: 0, left: 0, width: 0, height: "env(safe-area-inset-top, 0px)", visibility: "hidden", pointerEvents: "none" }} />
       {room > 0 && (
         <motion.div
           role="dialog"

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SHEET_OMEGA, sheetDragEnd, sheetTransition, springProgress } from "./sheetMotion.ts";
+import { SHEET_OMEGA, sheetDragEnd, sheetTopGap, sheetTransition, springProgress } from "./sheetMotion.ts";
 
 test("open_spring_covers_70_percent_in_0_1_s", () => {
   const p = springProgress(0.1);
@@ -38,4 +38,11 @@ test("sheetDragEnd_rules", () => {
   assert.equal(sheetDragEnd("large", 10, 0), "large");
   assert.equal(sheetDragEnd("full", 150, 0), "large");
   assert.equal(sheetDragEnd("full", -50, 0), "full");
+});
+
+test("full_stop_stays_8_below_the_top_safe_area", () => {
+  assert.equal(sheetTopGap(0), 8); // stories, desktop browser: as before
+  assert.equal(sheetTopGap(47), 55); // 375x812 notch phone: top ≈ 55 (Todoist ≈ 51-60)
+  assert.equal(sheetTopGap(Number.NaN), 8);
+  assert.equal(sheetTopGap(-5), 8);
 });
