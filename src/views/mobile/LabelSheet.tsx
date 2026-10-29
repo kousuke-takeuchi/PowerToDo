@@ -1,6 +1,6 @@
 import { Check, Tag } from "lucide-react";
 import type { Label } from "../../types/model";
-import { SheetRow } from "./BottomSheet";
+import { SheetCard, SheetRow } from "./BottomSheet";
 
 export type LabelSheetProps = {
   /** 選べるラベル (ストアにあるもの)。 */
@@ -16,10 +16,10 @@ export function LabelSheet({ labels, value, onChange }: LabelSheetProps) {
   const extra = value.filter((v) => !labels.some((l) => l.name === v)).map((name) => ({ name, color: "var(--color-text-secondary)", order: 0 }));
   const all = [...labels, ...extra];
   if (all.length === 0) {
-    return <div style={{ padding: "var(--space-3) 8px", fontSize: 14, color: "var(--color-text-secondary)" }}>ラベルがありません</div>;
+    return <div style={{ padding: "var(--space-3) 4px", fontSize: 14, color: "var(--color-text-secondary)" }}>ラベルがありません</div>;
   }
   return (
-    <div role="group" aria-label="ラベル" style={{ display: "flex", flexDirection: "column" }}>
+    <SheetCard label="ラベル">
       {all.map((l) => {
         const on = value.includes(l.name);
         return (
@@ -33,6 +33,6 @@ export function LabelSheet({ labels, value, onChange }: LabelSheetProps) {
           />
         );
       })}
-    </div>
+    </SheetCard>
   );
 }

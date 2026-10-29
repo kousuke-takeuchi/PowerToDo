@@ -1,62 +1,72 @@
-import { useState } from "react";
-import { Button } from "../../components/Button";
+import { useRef, useState } from "react";
+import { SheetCard } from "./BottomSheet";
+
+/** The form id the sheet's red check (BottomSheet confirmForm) submits. */
+export const TEXT_SHEET_FORM = "text-sheet";
 
 export type TextSheetProps = {
   label: string;
   value: string;
-  /** 複数行 (メモ)。省略すると 1 行 (名前)。 */
+  /** Several lines (note). Omitted: one line (name). */
   multiline?: boolean;
   placeholder?: string;
-  /** 保存 (空にしてよいかは呼び出し側が決める)。保存したら onClose を呼ぶ。 */
+  /** Save (the caller decides whether empty is allowed). Calls onClose after saving. */
   onSave: (text: string) => void;
   onClose: () => void;
+  formId?: string;
 };
 
-/** 名前 / メモ / サブタスク名を入力するシートの中身 (BottomSheet の children)。文字は 16px (iOS が拡大しない)。 */
-export function TextSheet({ label, value, multiline, placeholder, onSave, onClose }: TextSheetProps) {
+/** Sheet body for a name / note / subtask name (BottomSheet children). 16 px text (iOS does not zoom). The x cancels and the check saves. */
+export function TextSheet({ label, value, multiline, placeholder, onSave, onClose, formId = TEXT_SHEET_FORM }: TextSheetProps) {
   const [draft, setDraft] = useState(value);
+  // The form lives on through the 0.13 s exit: a second check tap (or Enter) must not save again (a duplicate subtask).
+  const saved = useRef(false);
   const save = () => {
+    if (saved.current) return;
+    saved.current = true;
     if (draft !== value) onSave(draft);
     onClose();
   };
   const style = {
     boxSizing: "border-box",
     width: "100%",
-    padding: "8px 12px",
-    border: "1px solid var(--color-border)",
-    borderRadius: 8,
+    padding: "12px 16px",
+    border: 0,
     outline: "none",
-    background: "var(--color-bg)",
+    background: "transparent",
     fontFamily: "var(--font-body)",
     fontSize: 16,
     lineHeight: "24px",
     color: "var(--color-text-primary)",
   } as const;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-      {multiline ? (
-        <textarea aria-label={label} value={draft} placeholder={placeholder} autoFocus rows={5} onChange={(e) => setDraft(e.target.value)} style={{ ...style, resize: "none" }} />
-      ) : (
-        <input
-          aria-label={label}
-          value={draft}
-          placeholder={placeholder}
-          autoFocus
-          enterKeyHint="done"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            // 変換を確定する Enter では保存しない
-            if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) save();
-          }}
-          style={style}
-        />
-      )}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
-        <Button variant="secondary" onClick={onClose}>
-          キャンセル
-        </Button>
-        <Button onClick={save}>保存</Button>
-      </div>
-    </div>
+    <form
+      id={formId}
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+    >
+      <SheetCard>
+        {multiline ? (
+          <textarea aria-label={label} value={draft} placeholder={placeholder} autoFocus rows={5} onChange={(e) => setDraft(e.target.value)} style={{ ...style, resize: "none" }} />
+        ) : (
+          <input
+            aria-label={label}
+            value={draft}
+            placeholder={placeholder}
+            autoFocus
+            enterKeyHint="done"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault(); // no implicit form submit: the Enter that confirms IME conversion must not save
+              if (!e.nativeEvent.isComposing && e.keyCode !== 229) save();
+            }}
+            style={style}
+          />
+        )}
+      </SheetCard>
+    </form>
   );
 }

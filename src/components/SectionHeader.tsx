@@ -17,8 +17,10 @@ export type SectionHeaderProps = {
   onStartEdit?: () => void;
   /** 渡すとタイトルの代わりにこれ (名前の入力欄) を出す。編集中かどうかは呼び出し側が持つ。 */
   editor?: React.ReactNode;
-  /** Mobile: the earlier look (the chevron inline before the title, turned by 90° with motion). */
+  /** iPhone (spec ④ iPhone §4.3): 15 bold, no line, 36 above. */
   mobile?: boolean;
+  /** iPhone: 16 above instead of 36, for the first header under the title. */
+  tight?: boolean;
   /** Desktop: pressing the grip at the left of the column starts a section drag (spec ③). */
   onHandlePointerDown?: (e: React.PointerEvent) => void;
 };
@@ -56,7 +58,8 @@ const chevronStyle: React.CSSProperties = {
 const titleTextStyle: React.CSSProperties = { fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" };
 const countStyle: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
 
-export function SectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor, mobile, onHandlePointerDown }: SectionHeaderProps) {
+// The `mobile` branches below are dead since the iPhone header moved to MobileSectionHeader; kept so desktop output stays untouched.
+function DesktopSectionHeader({ title, count, collapsed, onToggle, showChevron = true, trailing, onStartEdit, editor, mobile, onHandlePointerDown }: SectionHeaderProps) {
   const { t } = useMotionTiming();
   // Desktop: left of the column, the icon swapped at once (Todoist). Mobile: inline, a right chevron turned by 90°.
   const chevron =
@@ -135,4 +138,21 @@ export function SectionHeader({ title, count, collapsed, onToggle, showChevron =
       {trailing}
     </div>
   );
+}
+
+/** Spec ④ iPhone §4.3: 15 bold, no line, 36 above. `trailing` holds the overdue 「再スケジュール」. */
+function MobileSectionHeader({ title, count, trailing, tight }: SectionHeaderProps) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: `${tight ? 16 : 36}px 0 6px`, fontFamily: "var(--font-body)" }}>
+      <h2 style={{ margin: 0, flex: 1, minWidth: 0, fontSize: 15, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {title}
+      </h2>
+      {count !== undefined && <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{count}</span>}
+      {trailing}
+    </div>
+  );
+}
+
+export function SectionHeader(props: SectionHeaderProps) {
+  return props.mobile ? <MobileSectionHeader {...props} /> : <DesktopSectionHeader {...props} />;
 }

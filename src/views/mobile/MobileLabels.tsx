@@ -1,21 +1,22 @@
 import type React from "react";
 import { Tag } from "lucide-react";
-import { MobileHeader } from "../../components/MobileHeader";
+import { AnimatePresence } from "motion/react";
 import { TaskRow } from "../../components/TaskRow";
-import type { SyncState } from "../../components/SyncStatus";
-import type { TabBarProps } from "../../components/TabBar";
-import { TODAY, dateLabel } from "../../mock/data";
+import type { MobileTab } from "../../app/mobileNav";
+import { Collapse } from "../../motion";
+import { TODAY } from "../../mock/data";
 import type { Label, Task } from "../../types/model";
+import { taskKey, useLeaving } from "../crossList";
 import { MobileShell } from "./MobileShell";
+import { mobileRowProps, type RowContext } from "./rowProps";
 
 type Common = {
   fill?: boolean;
-  sync?: SyncState;
-  onMenu?: () => void;
-  /** ヘッダーの同期アイコンを押したとき。 */
-  onSync?: () => void;
+  /** Back to 閲覧. */
+  onBack?: () => void;
+  today?: string;
   onFab?: () => void;
-  onTabChange?: TabBarProps["onChange"];
+  onTabChange?: (t: MobileTab) => void;
   overlay?: React.ReactNode;
   banner?: React.ReactNode;
 };
@@ -27,19 +28,22 @@ export type MobileLabelsProps = Common & {
 };
 
 /** 「フィルターとラベル」: ラベルの一覧 (件数つき)。タップでそのラベルのタスク (MobileLabelDetail)。 */
-export function MobileLabels({ labels, counts, onOpenLabel, fill, sync, onMenu, onSync, onFab, onTabChange, overlay, banner }: MobileLabelsProps) {
+export function MobileLabels({ labels, counts, onOpenLabel, fill, onBack, today, onFab, onTabChange, overlay, banner }: MobileLabelsProps) {
   return (
     <MobileShell
       banner={banner}
       fill={fill}
-      header={<MobileHeader title="ラベル" safeArea={fill} sync={sync} onMenu={onMenu} onSync={onSync} />}
-      tab="list"
+      title="ラベル"
+      largeTitle
+      onBack={onBack}
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
       fab
       onFab={onFab}
       overlay={overlay}
     >
-      <div style={{ padding: "0 16px" }}>
+      <div style={{ padding: "0 15px" }}>
         {labels.map((l) => (
           <button
             key={l.name}
@@ -81,37 +85,51 @@ export type MobileLabelDetailProps = Common & {
   label: string;
   tasks: Task[];
   today?: string;
+  /** What a row shows beyond the task itself (inbox name, project colors, comment counts). */
+  rowContext?: Omit<RowContext, "today">;
   onToggleDone?: (t: Task, done: boolean) => void;
   onOpenTask?: (t: Task) => void;
 };
 
 /** ラベル詳細: そのラベルが付いたタスク (プロジェクトをまたぐ)。 */
-export function MobileLabelDetail({ label, tasks, today = TODAY, onToggleDone, onOpenTask, fill, sync, onMenu, onSync, onFab, onTabChange, overlay, banner }: MobileLabelDetailProps) {
+export function MobileLabelDetail({ label, tasks, today = TODAY, rowContext, onToggleDone, onOpenTask, fill, onBack, onFab, onTabChange, overlay, banner }: MobileLabelDetailProps) {
+  // Completing leaves like the other lists (the view drops the task a moment later).
+  const leave = useLeaving(tasks);
+  const toggle = (t: Task, index: number) => {
+    const next = !(t.progress === 100 || leave.isLeaving(t));
+    if (next) leave.begin(t, "label", index);
+    else leave.cancel(t);
+    onToggleDone?.(t, next);
+  };
   return (
     <MobileShell
       banner={banner}
       fill={fill}
-      header={<MobileHeader title={`@${label}`} safeArea={fill} sync={sync} onMenu={onMenu} onSync={onSync} />}
-      tab="list"
+      title={`@${label}`}
+      subtitle={`${tasks.length} 件のタスク`}
+      largeTitle
+      onBack={onBack}
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
       fab
       onFab={onFab}
       overlay={overlay}
     >
-      <div style={{ padding: "0 16px" }}>
-        {tasks.map((t) => (
-          <TaskRow
-            key={`${t.project}/${t.no}`}
-            variant="mobile"
-            title={t.title}
-            done={t.progress === 100}
-            priority={t.priority}
-            date={dateLabel(t.due, today)}
-            project={t.project}
-            onToggleDone={() => onToggleDone?.(t, t.progress !== 100)}
-            onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-          />
-        ))}
+      <div style={{ padding: "0 15px" }}>
+        <AnimatePresence initial={false}>
+          {leave.merge("label", tasks).map((t, i) => (
+            <Collapse key={taskKey(t)} duration={0.1}>
+              <TaskRow
+                variant="mobile"
+                {...mobileRowProps(t, { today, ...rowContext }, { project: true })}
+                done={t.progress === 100 || leave.isLeaving(t)}
+                onToggleDone={() => toggle(t, i)}
+                onClick={onOpenTask ? () => onOpenTask(t) : undefined}
+              />
+            </Collapse>
+          ))}
+        </AnimatePresence>
         {tasks.length === 0 && (
           <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>タスクはありません</div>
         )}

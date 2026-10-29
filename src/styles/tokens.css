@@ -26,6 +26,12 @@
   --shadow-drag: 0 8px 24px #00000033; /* D-10 ドラッグ中のカード */
   --shadow-fab: 0 4px 12px #00000044; /* M-01 などのモバイル FAB */
   --color-scrim: #00000055; /* D-02 の背面オーバーレイ */
+  --color-glass: #FFFFFFB3; /* iPhone: tab bar, top-right pill, sheet × (white at 0.7) */
+  --color-glass-edge: #FFFFFF99;
+  --color-glass-solid: #FFFFFF; /* when backdrop-filter is not supported */
+  --shadow-glass: 0 4px 16px #0000001F;
+  --color-sheet-bg: #F2EFED; /* iPhone sheets: the grey ground */
+  --color-sheet-card: #FFFFFF; /* iPhone sheets: cards; quick add; toast */
 }
 html[data-theme="dark"] {
   --color-bg: #1E1E1E;
@@ -38,4 +44,9 @@ html[data-theme="dark"] {
   --color-accent-soft: #3A2321;
   --color-priority-4: #9A9A9A;
   --color-success: #2E9E4F;
+  --color-glass: #333333B3;
+  --color-glass-edge: #FFFFFF1F;
+  --color-glass-solid: #333333;
+  --color-sheet-bg: #1E1E1E;
+  --color-sheet-card: #282828;
 }

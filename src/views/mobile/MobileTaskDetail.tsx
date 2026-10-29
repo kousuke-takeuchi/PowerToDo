@@ -13,13 +13,14 @@ import { RecurrencePicker, recurrenceLabel } from "../RecurrencePicker";
 import type { RecurrenceParse } from "../RecurrencePicker";
 import { reminderLabel } from "../ReminderPicker";
 import { useDone } from "../useDone";
-import { BottomSheet } from "./BottomSheet";
+import { BottomSheet, SheetCard } from "./BottomSheet";
 import { DateSheet } from "./DateSheet";
 import { LabelSheet } from "./LabelSheet";
 import { MobileShell } from "./MobileShell";
+import { mobileRowProps } from "./rowProps";
 import { PrioritySheet } from "./PrioritySheet";
 import { ReminderSheet } from "./ReminderSheet";
-import { TextSheet } from "./TextSheet";
+import { TEXT_SHEET_FORM, TextSheet } from "./TextSheet";
 
 export type MobileTaskDetailProps = {
   task: Task;
@@ -92,15 +93,15 @@ function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)
         display: "flex",
         alignItems: "center",
         gap: "var(--space-2)",
-        padding: "12px 0",
+        padding: "13px 0",
         boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側
       }}
     >
       <span style={{ display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" }}>
         <Icon size={18} />
       </span>
-      <span style={{ width: 96, flex: "0 0 auto", fontSize: 14, lineHeight: "20px", color: "var(--color-text-secondary)" }}>{name}</span>
-      <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: "20px", color: valueColor }}>{value}</span>
+      <span style={{ width: 96, flex: "0 0 auto", fontSize: 15, lineHeight: "22px", color: "var(--color-text-secondary)" }}>{name}</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 16, lineHeight: "22px", color: valueColor }}>{value}</span>
       <span style={{ display: "inline-flex", color: "var(--color-text-muted)", flex: "0 0 auto" }}>
         <ChevronRight size={16} />
       </span>
@@ -134,7 +135,12 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
       overlay={
         <>
           {overlay}
-          <BottomSheet fill={fill} open={sheet !== null} title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}>
+          <BottomSheet
+            fill={fill}
+            confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : undefined}
+            open={sheet !== null}
+            title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}
+          >
             {sheet === "title" && (
               <TextSheet
                 label="名前"
@@ -183,6 +189,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             {sheet === "label" && <LabelSheet labels={labels} value={task.labels} onChange={(l) => onChange?.({ labels: l })} />}
             {sheet === "reminder" && <ReminderSheet value={task.reminders} onChange={(r) => onChange?.({ reminders: r })} />}
             {sheet === "recurrence" && (
+              <SheetCard>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <RecurrencePicker
                   value={task.rrule}
@@ -195,9 +202,11 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
                   }}
                 />
               </div>
+              </SheetCard>
             )}
             {sheet === "delete" && (
-              <div role="alertdialog" aria-label="タスクの削除" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              <SheetCard>
+              <div role="alertdialog" aria-label="タスクの削除" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", padding: 16 }}>
                 <div style={{ fontSize: 14, lineHeight: "20px", color: "var(--color-text-secondary)" }}>
                   {subtasks.length > 0 ? "このタスクとサブタスクを削除します。" : "このタスクを削除します。"}
                 </div>
@@ -215,6 +224,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
                   </Button>
                 </div>
               </div>
+              </SheetCard>
             )}
           </BottomSheet>
         </>
@@ -223,7 +233,6 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
         <MobileHeader
           safeArea={fill}
           title="タスク詳細"
-          showBack
           onBack={onBack}
           breadcrumb={
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)" }}>
@@ -234,18 +243,18 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
         />
       }
     >
-      <div style={{ flex: 1, minHeight: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "8px 16px" }}>
+      <div style={{ flex: 1, minHeight: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "8px 15px" }}>
         <div style={{ display: "flex", gap: "var(--space-3)" }}>
-          <Checkbox checked={done} onChange={setDone} ariaLabel="完了" size={20} />
+          <Checkbox checked={done} onChange={setDone} ariaLabel="完了" size={22} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <Tap onClick={open("title")} label="名前を編集">
-              <div style={{ fontSize: 20, lineHeight: "29px", fontWeight: 600, color: done ? "var(--color-text-muted)" : "var(--color-text-primary)" }}>{task.title}</div>
+              <div style={{ fontSize: 19, lineHeight: "25px", fontWeight: 700, color: done ? "var(--color-text-muted)" : "var(--color-text-primary)" }}>{task.title}</div>
             </Tap>
           </div>
         </div>
         {(task.note || editable) && (
           <Tap onClick={open("note")} label="メモを編集">
-            <div style={{ fontSize: 14, lineHeight: "20px", color: task.note ? "var(--color-text-secondary)" : "var(--color-text-muted)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            <div style={{ fontSize: 13, lineHeight: "18px", color: task.note ? "var(--color-text-secondary)" : "var(--color-text-muted)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
               {task.note || "メモを追加"}
             </div>
           </Tap>
@@ -258,11 +267,11 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           <Tap onClick={open("recurrence")} label="繰り返しを変更"><Prop icon={Repeat} name="繰り返し" value={task.rruleLabel ?? recurrenceLabel(task.rrule)} /></Tap>
         </div>
         <div>
-          <div style={{ fontSize: 13, lineHeight: "19px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+          <div style={{ fontSize: 15, lineHeight: "20px", fontWeight: 700, paddingTop: 16, color: "var(--color-text-primary)" }}>
             サブタスク {subtasks.filter(sub.isDone).length}/{subtasks.length}
           </div>
           {subtasks.map((t) => (
-            <TaskRow key={t.no} variant="mobile" title={t.title} done={sub.isDone(t)} priority={t.priority} onToggleDone={() => sub.toggle(t)} />
+            <TaskRow key={t.no} variant="mobile" {...mobileRowProps(t, { today })} done={sub.isDone(t)} onToggleDone={() => sub.toggle(t)} />
           ))}
           <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => setSheet("subtask") : undefined} />
         </div>
@@ -282,7 +291,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           display: "flex",
           alignItems: "center",
           gap: "var(--space-2)",
-          padding: "8px 16px",
+          padding: "8px 15px",
           boxShadow: "inset 0 1px 0 var(--color-border)",
           flex: "0 0 auto",
         }}

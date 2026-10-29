@@ -14,3 +14,7 @@ test("no second space after trailing whitespace (ASCII or ideographic)", () => {
   assert.equal(insertToken("牛乳 ", "label"), "牛乳 @");
   assert.equal(insertToken("牛乳　", "label"), "牛乳　@");
 });
+test("the project chip inserts #", () => {
+  assert.equal(insertToken("牛乳", "project"), "牛乳 #");
+  assert.equal(insertToken("", "project"), "#");
+});

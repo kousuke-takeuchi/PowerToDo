@@ -1,6 +1,6 @@
 import { Check, Folder, Inbox } from "lucide-react";
 import type { ProjectSummary, Section } from "../../types/model";
-import { SheetRow } from "./BottomSheet";
+import { SheetCard, SheetRow } from "./BottomSheet";
 
 export type MoveSheetProps = {
   projects: ProjectSummary[];
@@ -12,7 +12,7 @@ export type MoveSheetProps = {
   onClose: () => void;
 };
 
-const head = { padding: "8px 8px 0", fontSize: 12, lineHeight: "17px", fontWeight: 600, color: "var(--color-text-muted)" } as const;
+const head = { padding: "8px 4px 4px", fontSize: 13, lineHeight: "18px", fontWeight: 600, color: "var(--color-text-secondary)" } as const;
 
 /** 移動のシートの中身 (BottomSheet の children)。別のプロジェクトを選ぶとその「セクションなし」へ、今のプロジェクトのセクションを選ぶとそこへ。 */
 export function MoveSheet({ projects, sections, current, onMove, onClose }: MoveSheetProps) {
@@ -24,7 +24,7 @@ export function MoveSheet({ projects, sections, current, onMove, onClose }: Move
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       <div style={head}>プロジェクト</div>
-      <div role="group" aria-label="プロジェクト">
+      <SheetCard label="プロジェクト">
         {projects
           .filter((p) => !p.loadError)
           .map((p) => (
@@ -37,16 +37,16 @@ export function MoveSheet({ projects, sections, current, onMove, onClose }: Move
               onClick={() => go(p.name, null)}
             />
           ))}
-      </div>
+      </SheetCard>
       {own.length > 0 && (
         <>
           <div style={head}>{`セクション (${current.project})`}</div>
-          <div role="group" aria-label="セクション">
+          <SheetCard label="セクション">
             <SheetRow label="セクションなし" selected={current.section === null} onClick={() => go(current.project, null)} />
             {own.map((s) => (
               <SheetRow key={s.name} label={s.name} selected={current.section === s.name} onClick={() => go(current.project, s.name)} />
             ))}
-          </div>
+          </SheetCard>
         </>
       )}
     </div>

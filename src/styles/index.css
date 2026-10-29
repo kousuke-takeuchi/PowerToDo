@@ -22,3 +22,6 @@
 html { -webkit-text-size-adjust: 100%; }
 html, body { font-family: var(--font-body); background: var(--color-bg); color: var(--color-text-primary); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* iPhone sheets (spec ④ iPhone §5.1): rows inside a card are split by hairlines. */
+.sheet-card > * + * { box-shadow: inset 0 0.5px 0 var(--color-border); }

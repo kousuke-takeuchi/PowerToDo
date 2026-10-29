@@ -1,21 +1,21 @@
 import type React from "react";
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Ellipsis } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../../components/AddTaskRow";
-import { MobileHeader } from "../../components/MobileHeader";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
+import { MOBILE_ROW } from "../../components/MobileTaskRow";
 import { Collapse } from "../../motion";
-import { TODAY, counts as mockCounts, dateLabel, projects as mockProjects } from "../../mock/data";
-import type { SyncState } from "../../components/SyncStatus";
-import type { Project, Section, Task } from "../../types/model";
+import { TODAY } from "../../mock/data";
+import type { Section, Task } from "../../types/model";
+import { useLeaving } from "../crossList";
 import { useDone } from "../useDone";
-import { Drawer } from "./Drawer";
+import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
-import type { TabBarProps } from "../../components/TabBar";
+import type { MobileTab } from "../../app/mobileNav";
 import type { QuickAddToken } from "../QuickAddDialog";
 
 export type MobileProjectViewProps = {
@@ -24,35 +24,35 @@ export type MobileProjectViewProps = {
   sections: Section[];
   /** 最初から展開しておく親タスクの no (M-01b)。 */
   initialExpanded?: number[];
-  /** 最初から開いておく層 (M-02: quickAdd / M-06: drawer)。 */
-  initialOverlay?: "none" | "quickAdd" | "drawer";
-  projects?: Project[];
+  /** 最初から開いておく層 (M-02: quickAdd)。 */
+  initialOverlay?: "none" | "quickAdd";
   quickAddTokens?: QuickAddToken[];
-  /** スワイプ中の行のタイトル。pen は M-01 / M-02 / M-06 が「食パン」、M-01b が「電池を買う」。 */
+  /** スワイプ中の行のタイトル。pen は M-01 / M-02 が「食パン」、M-01b が「電池を買う」。 */
   swipeTitle?: string;
   /**
    * 実データで動かす (Phase 6): チェックは task.progress を見て onToggleDone を呼び、優先度の色は task.priority、
-   * スワイプの見本は出さず、層 (ドロワー / クイック追加) は呼び出し側の `overlay` で出す。省略すると Story の見た目のまま。
+   * スワイプの見本は出さず、層 (クイック追加) は呼び出し側の `overlay` で出す。省略すると Story の見た目のまま。
    */
   live?: boolean;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア (MobileShell の fill)。 */
   fill?: boolean;
+  /** What a row shows beyond the task itself (inbox name, project colors, comment counts). */
+  rowContext?: Omit<RowContext, "today">;
   /** 期限の表示の基準日。省略すると mock の TODAY。 */
   today?: string;
   /** ヘッダーに出す名前。省略すると project。 */
   title?: string;
-  /** ヘッダーの同期アイコン。省略すると同期中 (絵)。 */
-  sync?: SyncState;
   onToggleDone?: (t: Task, done: boolean) => void;
   onOpenTask?: (t: Task) => void;
   onFab?: () => void;
-  onMenu?: () => void;
-  /** ヘッダーの同期アイコンを押したとき。 */
-  onSync?: () => void;
-  /** 下部タブの選択。省略すると「一覧」。 */
-  tab?: TabBarProps["active"];
-  onTabChange?: TabBarProps["onChange"];
-  /** 呼び出し側が持つ層。ドロワー / クイック追加の内部の状態の代わりに出す。 */
+  /** The back arrow (a project opened from 閲覧). */
+  onBack?: () => void;
+  /** The 「…」 pill at the right of the top bar (project menu). Omitted: no pill. */
+  onProjectMenu?: () => void;
+  /** 下部タブの選択。省略すると「受信トレイ」。 */
+  tab?: MobileTab;
+  onTabChange?: (t: MobileTab) => void;
+  /** 呼び出し側が持つ層。クイック追加の内部の状態の代わりに出す。 */
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
@@ -99,9 +99,9 @@ function SwipeDemo({ title }: { title: string }) {
 }
 
 /**
- * M-01 / M-01b / M-02 / M-06: モバイルのプロジェクト画面。ヘッダー (同期中) + セクション付きの一覧 + SwipeDemo + FAB + 下部タブ (一覧)。
- * 件数バッジのタップで子タスクを展開 / 折りたたみ。FAB でクイック追加シート (M-02)、ハンバーガーでドロワー (M-06) を開き、scrim タップで閉じる。
- * 層が開いている間は FAB を出さない (pen の M-02 / M-06)。pen のとおりチェックの色は全行 priority-4。
+ * M-01 / M-01b / M-02: モバイルのプロジェクト画面。ヘッダー (同期中) + セクション付きの一覧 + SwipeDemo + FAB + 下部タブ。
+ * 件数バッジのタップで子タスクを展開 / 折りたたみ。FAB でクイック追加シート (M-02)、scrim タップで閉じる。
+ * 層が開いている間は FAB を出さない (pen の M-02)。pen のとおりチェックの色は全行 priority-4。
  */
 export function MobileProjectView({
   project,
@@ -109,20 +109,19 @@ export function MobileProjectView({
   sections,
   initialExpanded = [],
   initialOverlay = "none",
-  projects = mockProjects,
   quickAddTokens = defaultTokens,
   swipeTitle = "電池を買う",
   live,
   fill,
+  rowContext,
   today = TODAY,
   title,
-  sync = "syncing",
   onToggleDone,
   onOpenTask,
   onFab,
-  onMenu,
-  onSync,
-  tab = "list",
+  onBack,
+  onProjectMenu,
+  tab = "inbox",
   onTabChange,
   overlay: externalOverlay,
   banner,
@@ -135,9 +134,15 @@ export function MobileProjectView({
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
   const local = useDone();
-  const isDone = (t: Task) => (live ? t.progress === 100 : local.isDone(t));
-  const toggle = (t: Task) => (live ? onToggleDone?.(t, !isDone(t)) : local.toggle(t));
-  const priorityOf = (t: Task) => (live ? t.priority : 4);
+  const leave = useLeaving(tasks);
+  const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
+  const toggle = (t: Task, group = "", index = 0) => {
+    if (!live) return local.toggle(t);
+    const next = !isDone(t);
+    if (next) leave.begin(t, group, index);
+    else leave.cancel(t);
+    onToggleDone?.(t, next);
+  };
 
   const mine = tasks.filter((t) => t.project === project);
   const childrenOf = (no: number) => mine.filter((t) => t.parentNo === no).sort((a, b) => a.order - b.order);
@@ -150,48 +155,69 @@ export function MobileProjectView({
     });
 
   /** live のとき、行をスワイプ / 長押しのラッパーで包む。 */
-  const swipeable = (t: Task, row: React.ReactNode): React.ReactNode =>
+  const swipeable = (t: Task, row: React.ReactNode, onComplete: () => void): React.ReactNode =>
     live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={t.no} onComplete={() => toggle(t)} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+      <SwipeRow key={t.no} onComplete={onComplete} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
         {row}
       </SwipeRow>
     ) : (
       row
     );
 
-  const renderRow = (t: Task): React.ReactNode => {
+  const renderRow = (t: Task, group = "", index = 0): React.ReactNode => {
     const kids = childrenOf(t.no);
     const open = expanded.has(t.no);
+    const ctx: RowContext = { today, ...rowContext };
+    const done = () => toggle(t, group, index);
     return (
       <div key={t.no}>
-        {swipeable(t, <TaskRow
-          variant="mobile"
-          title={t.title}
-          done={isDone(t)}
-          priority={priorityOf(t)}
-          date={dateLabel(t.due, today)}
-          subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
-          onToggleDone={() => toggle(t)}
-          onClick={onOpenTask ? () => onOpenTask(t) : undefined}
-          onToggleExpand={() => toggleExpand(t.no)}
-        />)}
-        <AnimatePresence initial={false}>
-          {open && (
-            <Collapse key="subtasks">
-              {kids.map((k) => (
-                swipeable(k, <TaskRow key={k.no} variant="mobile" indent={1} title={k.title} done={isDone(k)} priority={priorityOf(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />)
-              ))}
-              <div style={{ marginLeft: 24 }}>
-                <AddTaskRow label="サブタスクを追加" onClick={onFab ?? (() => setOverlay("quickAdd"))} />
-              </div>
-            </Collapse>
-          )}
-        </AnimatePresence>
+        {swipeable(
+          t,
+          <TaskRow
+            variant="mobile"
+            {...mobileRowProps(t, ctx)}
+            done={isDone(t)}
+            subtasks={kids.length ? { done: kids.filter(isDone).length, total: kids.length, expanded: open } : undefined}
+            onToggleDone={done}
+            onClick={onOpenTask ? () => onOpenTask(t) : undefined}
+            onToggleExpand={() => toggleExpand(t.no)}
+          />,
+          done,
+        )}
+        {open && (
+          <>
+            {kids.map((k) =>
+              swipeable(
+                k,
+                <TaskRow key={k.no} variant="mobile" indent={1} {...mobileRowProps(k, ctx)} done={isDone(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />,
+                () => toggle(k),
+              ),
+            )}
+            <div style={{ marginLeft: MOBILE_ROW.indent }}>
+              <AddTaskRow label="サブタスクを追加" onClick={onFab ?? (() => setOverlay("quickAdd"))} />
+            </div>
+          </>
+        )}
       </div>
     );
   };
+  /** One list: completed rows stay LEAVE_DELAY_MS, then leave in 0.1 s. */
+  const list = (group: string, rows: Task[]) => {
+    const items = (live ? leave.merge(group, rows) : rows).map((t, i) => {
+      const el = renderRow(t, group, i);
+      return live ? (
+        <Collapse key={t.no} duration={0.1}>
+          {el}
+        </Collapse>
+      ) : (
+        el
+      );
+    });
+    return live ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
+  };
 
   const open = mine.filter((t) => t.parentNo === undefined && t.progress !== 100);
+  const openCount = mine.filter((t) => t.progress !== 100).length;
   const projectSections = sections.filter((s) => s.project === project).sort((a, b) => a.order - b.order);
   // どのセクションにも入っていないタスク (受信トレイなど) は、見出しなしで先頭に並べる
   const sectionNames = new Set(projectSections.map((s) => s.name));
@@ -203,8 +229,13 @@ export function MobileProjectView({
       onRefresh={onRefresh}
       refreshing={refreshing}
       fill={fill}
-      header={<MobileHeader title={title ?? project} safeArea={fill} sync={sync} onMenu={onMenu ?? (() => setOverlay("drawer"))} onSync={onSync} />}
+      title={title ?? project}
+      subtitle={`${openCount} 件のタスク`}
+      largeTitle
+      onBack={onBack}
+      actions={onProjectMenu ? [{ icon: Ellipsis, label: "その他", onClick: onProjectMenu }] : undefined}
       tab={tab}
+      today={today}
       onTabChange={onTabChange}
       fab={externalOverlay !== undefined ? true : overlay === "none"}
       onFab={onFab ?? (() => setOverlay("quickAdd"))}
@@ -212,19 +243,18 @@ export function MobileProjectView({
         externalOverlay !== undefined ? externalOverlay : (
         <AnimatePresence initial={false}>
           {overlay === "quickAdd" && <MobileQuickAddSheet key="quickAdd" tokens={quickAddTokens} onClose={() => setOverlay("none")} />}
-          {overlay === "drawer" && <Drawer key="drawer" counts={mockCounts} projects={projects} syncState="syncing" onClose={() => setOverlay("none")} />}
         </AnimatePresence>
         )
       }
     >
-      <div style={{ padding: "0 16px" }}>
-        {unsectioned.map(renderRow)}
-        {projectSections.map((s) => {
+      <div style={{ padding: "0 15px" }}>
+        {list("s:", unsectioned)}
+        {projectSections.map((s, i) => {
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
-              <SectionHeader mobile title={s.name} count={rows.length} />
-              {rows.map(renderRow)}
+              <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
+              {list(`s:${s.name}`, rows)}
             </section>
           );
         })}

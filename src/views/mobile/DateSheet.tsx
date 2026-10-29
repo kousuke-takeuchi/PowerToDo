@@ -4,7 +4,7 @@ import { Ban, Calendar, CalendarPlus, CalendarSearch, Sofa, Sun } from "lucide-r
 import { TODAY, weekdayShort } from "../../mock/data";
 import { DatePicker } from "../DatePicker";
 import { quickDates } from "../quickDates";
-import { SheetRow } from "./BottomSheet";
+import { SheetCard, SheetRow } from "./BottomSheet";
 
 export type DateSheetProps = {
   value?: string;
@@ -35,7 +35,8 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
     ...(dateOnly ? [] : [{ key: "none", icon: <Ban size={18} />, color: "var(--color-text-secondary)", label: "日付なし", date: undefined }]),
   ];
   return (
-    <div role="group" aria-label="日付" style={{ display: "flex", flexDirection: "column" }}>
+    <>
+      <SheetCard label="日付">
       {rows.map((r) => (
         <SheetRow
           key={r.key}
@@ -47,8 +48,11 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
           onClick={() => pick(r.date)}
         />
       ))}
-      {calendar ? (
-        <div style={{ display: "flex", justifyContent: "center", paddingTop: "var(--space-2)" }}>
+      {!calendar && <SheetRow icon={<CalendarSearch size={18} />} label="カレンダーから選ぶ" onClick={() => setCalendar(true)} />}
+      </SheetCard>
+      {calendar && (
+        <SheetCard>
+        <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
           <DatePicker
             value={value}
             time={time}
@@ -63,9 +67,8 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
             }}
           />
         </div>
-      ) : (
-        <SheetRow icon={<CalendarSearch size={18} />} label="カレンダーから選ぶ" onClick={() => setCalendar(true)} />
+        </SheetCard>
       )}
-    </div>
+    </>
   );
 }

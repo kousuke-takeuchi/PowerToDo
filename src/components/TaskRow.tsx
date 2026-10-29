@@ -7,6 +7,7 @@ import { DateChip } from "./DateChip";
 import { LabelChip } from "./LabelChip";
 import { MoreChip } from "./MoreChip";
 import { Button } from "./Button";
+import { MobileTaskRow } from "./MobileTaskRow";
 import { useMotionTiming } from "../motion";
 
 export type TaskRowProps = {
@@ -24,6 +25,8 @@ export type TaskRowProps = {
   section?: string;
   /** Desktop: color of the `#` after the project (a CSS color, e.g. "var(--color-priority-3)"). */
   projectColor?: string;
+  /** iPhone: the project is the inbox: an inbox icon instead of #. */
+  projectIsInbox?: boolean;
   /** Comments of the task (spec ① §3.3): shown on the meta line when more than 0. */
   commentCount?: number;
   /** Stories: show the drag handle as if hovered. */
@@ -65,7 +68,13 @@ const subCountStyle: React.CSSProperties = {
   color: "var(--color-text-secondary)",
 };
 
+/** Desktop and iPhone rows share the props; the iPhone draws MobileTaskRow (spec ④ iPhone §4.1). */
 export function TaskRow(p: TaskRowProps) {
+  return p.variant === "mobile" ? <MobileTaskRow {...p} /> : <DesktopTaskRow {...p} />;
+}
+
+// The `mobile` branches below are dead for the iPhone (MobileTaskRow draws it); they stay so the desktop output is untouched.
+function DesktopTaskRow(p: TaskRowProps) {
   const mobile = p.variant === "mobile";
   const indentPx = (p.indent ?? 0) * (mobile ? 24 : 28);
   const { t } = useMotionTiming();

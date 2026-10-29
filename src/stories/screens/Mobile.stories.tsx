@@ -3,7 +3,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Banners } from "../../app/Banners";
 import { SaveBanner } from "../../app/SaveBanner";
 import { googleLoggedIn, nasConnected, syncStatuses, tailnets } from "../../mock/sync";
-import { TODAY, projects, sections, tasks } from "../../mock/data";
+import { LONG_TITLE, TODAY, counts, projects, sections, tasks } from "../../mock/data";
+import { MobileBrowse } from "../../views/mobile/MobileBrowse";
 import { MobileProjectView } from "../../views/mobile/MobileProjectView";
 import { MobileSettings } from "../../views/mobile/MobileSettings";
 import { MobileTaskDetail } from "../../views/mobile/MobileTaskDetail";
@@ -14,7 +15,9 @@ import { BottomSheet } from "../../views/mobile/BottomSheet";
 import { DateSheet } from "../../views/mobile/DateSheet";
 import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
 import { SheetFrame } from "../../views/mobile/SheetFrame";
+import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
 import { insertToken } from "../../app/quickAddInsert";
+import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
@@ -33,18 +36,18 @@ const byNo = (...nos: number[]) => nos.map((n) => tasks.find((t) => t.no === n)!
 
 export const M01: Story = {
   name: "M-01 プロジェクト",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} swipeTitle="食パン" />,
+  render: () => <MobileProjectView tab="browse" project="買い物" tasks={shopping} sections={sections} swipeTitle="食パン" onProjectMenu={() => undefined} />,
 };
 
 export const M01b: Story = {
   name: "M-01b サブタスク展開",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialExpanded={[1]} />,
+  render: () => <MobileProjectView tab="browse" project="買い物" tasks={shopping} sections={sections} initialExpanded={[1]} />,
 };
 
-// M-02 / M-06 は M-01 の上に層を重ねたもの。FAB / ハンバーガーで開き直せて、scrim をタップすると M-01 に戻る。
+// M-02 は M-01 の上に層を重ねたもの。FAB で開き直せて、scrim をタップすると M-01 に戻る。
 export const M02: Story = {
   name: "M-02 クイック追加",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" />,
+  render: () => <MobileProjectView tab="browse" project="買い物" tasks={shopping} sections={sections} initialOverlay="quickAdd" swipeTitle="食パン" />,
 };
 
 export const M03: Story = {
@@ -68,6 +71,26 @@ export const M04: Story = {
   ),
 };
 
+export const M10: Story = {
+  name: "M-10 ダークモードの今日",
+  globals: { theme: "dark", viewport: { value: "mobile", isRotated: false } },
+  render: () => <MobileToday overdue={byNo(9, 10)} todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]} today={TODAY} />,
+};
+
+// M-04b: M-04 scrolled by the large title's height: the title sits small in the bar (spec ④ iPhone §3.3).
+// Extra overdue rows give the body more than LARGE_TITLE_HEIGHT of scroll room.
+export const M04b: Story = {
+  name: "M-04b 今日 (見出しが縮んだところ)",
+  render: () => (
+    <MobileToday
+      overdue={[...byNo(9, 10), ...byNo(9, 10, 9, 10, 9, 10).map((t, i) => ({ ...t, no: 900 + i }))]}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      initialScrollTop={LARGE_TITLE_HEIGHT}
+    />
+  ),
+};
+
 export const M05: Story = {
   name: "M-05 近日",
   render: () => (
@@ -77,13 +100,13 @@ export const M05: Story = {
 };
 
 export const M06: Story = {
-  name: "M-06 ドロワー",
-  render: () => <MobileProjectView project="買い物" tasks={shopping} sections={sections} initialOverlay="drawer" swipeTitle="食パン" />,
+  name: "M-06 閲覧",
+  render: () => <MobileBrowse projects={projects} counts={counts} syncState="synced" lastSyncedAt="2 分前" today={TODAY} />,
 };
 
 export const M07: Story = {
   name: "M-07 設定",
-  render: () => <MobileSettings />,
+  render: () => <MobileSettings today={TODAY} />,
 };
 
 // ---- Phase 6: 実データ (live) で動かす画面。チェックは task.progress を書き換えて呼び出し側が持つ。fill は実機と同じ 100dvh / セーフエリア ----
@@ -95,7 +118,7 @@ function useTasks(initial: Task[]) {
 
 function LiveProject() {
   const { list, toggle } = useTasks(shopping);
-  return <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
 }
 
 export const M01Live: Story = {
@@ -113,6 +136,18 @@ export const M04NoOverdue: Story = {
   render: () => <LiveTodayNoOverdue />,
 };
 
+// Not on the storyboard: a long title ends in an ellipsis, rows are 48 / 63 / 82 high.
+export const M01Long: Story = {
+  name: "M-01 長い名前 (fill)",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks([...shopping, { ...shopping[1], no: 90, title: LONG_TITLE, category: "今週", order: 9 }]);
+      return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+    };
+    return <Live />;
+  },
+};
+
 // 残る帯 (保存失敗) は header の下に流れ、一覧はその分だけ下がる (上の行が隠れない)
 export const M01Banner: Story = {
   name: "M-01 帯つき (fill)",
@@ -123,6 +158,7 @@ export const M01Banner: Story = {
         <MobileProjectView
           live
           fill
+          tab="browse"
           project="買い物"
           tasks={list}
           sections={sections}
@@ -145,6 +181,7 @@ function LiveWithSheet({ kind }: { kind: "menu" | "date" }) {
     <MobileProjectView
       live
       fill
+      tab="browse"
       project="買い物"
       tasks={list}
       sections={sections}
@@ -170,8 +207,8 @@ export const M01Menu: Story = {
   render: () => <LiveWithSheet kind="menu" />,
 };
 
-export const M01DateSheet: Story = {
-  name: "M-01 日付のシート (fill)",
+export const M09: Story = {
+  name: "M-09 日付のシート",
   render: () => <LiveWithSheet kind="date" />,
 };
 
@@ -191,6 +228,21 @@ function TypingQuickAdd() {
 export const M02Typing: Story = {
   name: "M-02 入力中 (ツールバーで日付を足した)",
   render: () => <TypingQuickAdd />,
+};
+
+// 長い日付とプロジェクト名: 日付・プロジェクトのチップが縮んで省略され、送信ボタンはカードの内側に残る (375 / 390 幅)。
+export const M02LongChips: Story = {
+  name: "M-02 長い日付とプロジェクト名",
+  render: () => (
+    <SheetFrame>
+      <MobileQuickAddSheet
+        tokens={[{ text: "牛乳 " }, { text: "来週の月曜日", kind: "date" }, { text: " " }, { text: "#とても長いプロジェクトの名前", kind: "project" }]}
+        text="牛乳 来週の月曜日 #とても長いプロジェクトの名前"
+        onTextChange={() => undefined}
+        onSubmit={() => undefined}
+      />
+    </SheetFrame>
+  ),
 };
 
 export const M03DateSheet: Story = {
@@ -223,7 +275,7 @@ function LiveSettings({ permission }: { permission: "granted" | "denied" | "prom
   const [enabled, setEnabled] = useState(true);
   const [name, setName] = useState("たろう");
   return (
-    <MobileSettings
+    <MobileSettings today={TODAY}
       sync={syncPane}
       notifications={{ enabled, permission }}
       onToggleNotifications={setEnabled}
@@ -234,8 +286,6 @@ function LiveSettings({ permission }: { permission: "granted" | "denied" | "prom
         return true;
       }}
       dataDirHint={dataDirHint}
-      headerSync="synced"
-      onHeaderSync={noop}
       onBack={noop}
     />
   );
@@ -254,13 +304,11 @@ export const M07Denied: Story = {
 export const M07Google: Story = {
   name: "M-07 Google Drive 接続済み",
   render: () => (
-    <MobileSettings
+    <MobileSettings today={TODAY}
       sync={{ ...syncPane, settings: googleLoggedIn, status: syncStatuses.googleAuthRejected, tailnet: null, onGoogleLogin: async () => true }}
       notifications={{ enabled: true, permission: "prompt" }}
       onRequestPermission={noop}
       dataDirHint={dataDirHint}
-      headerSync="error"
-      onHeaderSync={noop}
       onBack={noop}
     />
   ),
@@ -275,13 +323,12 @@ export const M01Conflict: Story = {
         <MobileProjectView
           live
           fill
+          tab="browse"
           project="買い物"
           tasks={list}
           sections={sections}
           today={TODAY}
           onToggleDone={toggle}
-          sync="synced"
-          onSync={noop}
           banner={
             <Banners
               narrow
@@ -319,9 +366,21 @@ export const M01Refreshing: Story = {
     const Live = () => {
       const { list, toggle } = useTasks(shopping);
       return (
-        <MobileProjectView live fill project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} sync="syncing" onSync={noop} refreshing />
+        <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} refreshing />
       );
     };
     return <Live />;
   },
+};
+
+export const M08: Story = {
+  name: "M-08 お知らせ",
+  render: () => (
+    <MobileToday
+      overdue={byNo(9, 10)}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      overlay={<MobileToast id={1} text="今日 にスケジュールしました" onAction={() => undefined} onClose={() => undefined} />}
+    />
+  ),
 };

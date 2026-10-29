@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Calendar, Flag, FolderInput, Trash2 } from "lucide-react";
 import type { Task } from "../../types/model";
-import { SheetRow } from "./BottomSheet";
+import { SheetCard, SheetRow } from "./BottomSheet";
 
 export type TaskMenuSheetProps = {
   task: Task;
@@ -22,17 +22,19 @@ export function TaskMenuSheet({ task, onDate, onPriority, onMove, onDelete, onCl
         <div style={{ fontSize: 14, lineHeight: "20px", color: "var(--color-text-secondary)" }}>
           「{task.title}」を削除します。元に戻せません。
         </div>
-        <SheetRow icon={<Trash2 size={18} />} label="本当に削除" danger onClick={() => { onDelete(); onClose(); }} />
-        <SheetRow label="キャンセル" onClick={() => setConfirm(false)} />
+        <SheetCard>
+          <SheetRow icon={<Trash2 size={18} />} label="本当に削除" danger onClick={() => { onDelete(); onClose(); }} />
+          <SheetRow label="キャンセル" onClick={() => setConfirm(false)} />
+        </SheetCard>
       </div>
     );
   }
   return (
-    <div role="group" aria-label="タスクのメニュー" style={{ display: "flex", flexDirection: "column" }}>
+    <SheetCard label="タスクのメニュー">
       <SheetRow icon={<Calendar size={18} />} label="日付" value={task.due} onClick={onDate} />
       <SheetRow icon={<Flag size={18} />} iconColor={`var(--color-priority-${task.priority})`} label="優先度" value={`P${task.priority}`} onClick={onPriority} />
       {onMove && <SheetRow icon={<FolderInput size={18} />} label="移動" onClick={onMove} />}
       <SheetRow icon={<Trash2 size={18} />} label="削除" danger onClick={() => setConfirm(true)} />
-    </div>
+    </SheetCard>
   );
 }

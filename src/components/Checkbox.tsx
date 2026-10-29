@@ -6,8 +6,8 @@ export type CheckboxProps = {
   checked: boolean;
   priority?: 1 | 2 | 3 | 4;
   onChange?: (checked: boolean) => void;
-  /** 18 on desktop (Todoist), 20 on mobile. */
-  size?: 18 | 20;
+  /** 18 on desktop (Todoist), 22 on iPhone. 20 is kept only for DesktopTaskRow's mobile branch; iPhone screens do not use it. */
+  size?: 18 | 20 | 22;
   ariaLabel?: string;
 };
 
@@ -35,6 +35,9 @@ export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel
     }
   }, [checked, reduced, animate, scope]);
 
+  // Todoist: a 2 px ring and, for priority 1-3, a 10 % fill of its color.
+  const ring = 2;
+  const tint = !checked && priority < 4;
   const color = checked ? "var(--color-success)" : priorityVar[priority];
   const fadeIn = t(checked ? 0.15 : 0.12);
   const draw = t(checked ? 0.2 : 0.12);
@@ -52,9 +55,8 @@ export function Checkbox({ checked, priority = 4, onChange, size = 18, ariaLabel
         width: size,
         height: size,
         borderRadius: size / 2,
-        // Desktop (18, Todoist): a 2 px ring and, for priority 1-3, a light fill of its color. Mobile (20) keeps 1.5 px, no fill.
-        border: `${desktop ? 2 : 1.5}px solid ${color}`,
-        background: desktop && !checked && priority < 4 ? `color-mix(in srgb, ${priorityVar[priority]} 10%, transparent)` : "transparent",
+        border: `${ring}px solid ${color}`,
+        background: tint ? `color-mix(in srgb, ${priorityVar[priority]} 10%, transparent)` : "transparent",
         display: "grid",
         placeItems: "center",
         padding: 0,

@@ -1,13 +1,12 @@
 import type React from "react";
 import { Search } from "lucide-react";
-import { MobileHeader } from "../../components/MobileHeader";
 import { Segmented } from "../../components/Segmented";
 import { TaskRow } from "../../components/TaskRow";
-import type { SyncState } from "../../components/SyncStatus";
-import type { TabBarProps } from "../../components/TabBar";
-import { TODAY, dateLabel } from "../../mock/data";
+import type { MobileTab } from "../../app/mobileNav";
+import { TODAY } from "../../mock/data";
 import type { SearchHit } from "../../types/model";
 import { MobileShell } from "./MobileShell";
+import { mobileRowProps, type RowContext } from "./rowProps";
 
 export type MobileSearchProps = {
   query: string;
@@ -17,16 +16,16 @@ export type MobileSearchProps = {
   hits: SearchHit[];
   busy?: boolean;
   today?: string;
+  /** What a row shows beyond the task itself (inbox name, project colors, comment counts). */
+  rowContext?: Omit<RowContext, "today">;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア。 */
   fill?: boolean;
-  sync?: SyncState;
   onOpenHit?: (hit: SearchHit) => void;
   onToggleDone?: (hit: SearchHit, done: boolean) => void;
   onFab?: () => void;
-  onMenu?: () => void;
-  /** ヘッダーの同期アイコンを押したとき。 */
-  onSync?: () => void;
-  onTabChange?: TabBarProps["onChange"];
+  /** Back to 閲覧. */
+  onBack?: () => void;
+  onTabChange?: (t: MobileTab) => void;
   overlay?: React.ReactNode;
   /** header の下に流す帯 (MobileShell の banner)。 */
   banner?: React.ReactNode;
@@ -46,13 +45,12 @@ export function MobileSearch({
   hits,
   busy,
   today = TODAY,
+  rowContext,
   fill,
-  sync,
   onOpenHit,
   onToggleDone,
   onFab,
-  onMenu,
-  onSync,
+  onBack,
   onTabChange,
   overlay,
   banner,
@@ -61,14 +59,16 @@ export function MobileSearch({
     <MobileShell
       banner={banner}
       fill={fill}
-      header={<MobileHeader title="検索" safeArea={fill} sync={sync} onMenu={onMenu} onSync={onSync} />}
-      tab="search"
+      title="検索"
+      onBack={onBack}
+      tab="browse"
+      today={today}
       onTabChange={onTabChange}
       fab
       onFab={onFab}
       overlay={overlay}
     >
-      <div style={{ padding: "0 16px" }}>
+      <div style={{ padding: "0 15px" }}>
         <label
           style={{
             display: "flex",
@@ -116,11 +116,8 @@ export function MobileSearch({
           <TaskRow
             key={`${h.task.project}/${h.task.no}`}
             variant="mobile"
-            title={h.task.title}
+            {...mobileRowProps(h.task, { today, ...rowContext }, { project: true })}
             done={h.task.progress === 100}
-            priority={h.task.priority}
-            date={dateLabel(h.task.due, today)}
-            project={h.task.project}
             onToggleDone={() => onToggleDone?.(h, h.task.progress !== 100)}
             onClick={onOpenHit ? () => onOpenHit(h) : undefined}
           />
