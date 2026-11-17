@@ -8,7 +8,7 @@ Windows / macOS / Ubuntu のデスクトップと、iOS / Android のモバイ�
 - 技術: Tauri 2 (Rust コア) + React / TypeScript / Tailwind
 - 設計書: `docs/superpowers/specs/`
 - 調査メモ: `docs/research/`
-- デザイン: `design/` (pen.dev)
+- デザイン: `design/opendesign/` (OpenDesign)
 
 ## アプリの起動 (Phase 1)
 

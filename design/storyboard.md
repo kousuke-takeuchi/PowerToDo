@@ -1,11 +1,10 @@
 # PowerToDo storyboard メモ
 
-操作性の確認は Storybook で行う (`npm run storybook`、http://localhost:6006)。Story 名は本書の画面名 (pen のノード名) と同じ。pen は見た目の参照用。
+操作性の確認は Storybook で行う (`npm run storybook`、http://localhost:6006)。Story 名は本書の画面名と同じ。OpenDesign の画面は見た目の参照用。
 
-pen.dev の `design.pen` で画面ごとの見た目を確認するための手引き。
-画面間リンクは pen の API では張れないため、必要なものだけ pen.dev 上で手で張る。
+OpenDesign の画面 (`design/opendesign/screens/<No>.html`) で画面ごとの見た目を確認するための手引き。
 
-画面は全部で 49 枚 (デスクトップ 37 枚 = 通常 34 枚 + ダーク 3 枚、モバイル 12 枚)。id は pen のノード id。
+画面は全部で 49 枚 (デスクトップ 37 枚 = 通常 34 枚 + ダーク 3 枚、モバイル 12 枚)。id は移行元 `design.pen` のノード id。
 
 ## 画面一覧
 

@@ -1,0 +1,63 @@
+/* Design tokens exported from design.pen variables. */
+:root {
+  --bg: #FFFFFF;
+  --bg-sidebar: #FCFAF8;
+  --bg-hover: #F2EFED;
+  --text-primary: #202020;
+  --text-secondary: #666666;
+  --text-muted: #A0A0A0;
+  --border: #EEEEEE;
+  --accent: #DC4C3E;
+  --accent-soft: #FDEDEB;
+  --priority-1: #D1453B;
+  --priority-2: #EB8909;
+  --priority-3: #246FE0;
+  --priority-4: #808080;
+  --success: #058527;
+  --danger: #D1453B;
+  --font-body: "Noto Sans JP";
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius: 8px;
+  --glass: #FFFFFFD9;
+  --glass-sel: #F1EEEC;
+  --bg-grouped: #F5F5F5;
+  --bg-card: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1E1E1E;
+    --bg-sidebar: #282828;
+    --bg-hover: #333333;
+    --text-primary: #FFFFFF;
+    --text-secondary: #A6A6A6;
+    --text-muted: #8F8F8F;
+    --border: #3A3A3A;
+    --accent-soft: #3A2321;
+    --priority-4: #9A9A9A;
+    --success: #2E9E4F;
+    --glass: #262626D9;
+    --glass-sel: #383838;
+    --bg-grouped: #121212;
+    --bg-card: #252525;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1E1E1E;
+  --bg-sidebar: #282828;
+  --bg-hover: #333333;
+  --text-primary: #FFFFFF;
+  --text-secondary: #A6A6A6;
+  --text-muted: #8F8F8F;
+  --border: #3A3A3A;
+  --accent-soft: #3A2321;
+  --priority-4: #9A9A9A;
+  --success: #2E9E4F;
+  --glass: #262626D9;
+  --glass-sel: #383838;
+  --bg-grouped: #121212;
+  --bg-card: #252525;
+}

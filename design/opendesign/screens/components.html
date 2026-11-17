@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>コンポーネント</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP%3Awght%40100..900&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      *, ::before, ::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="height: 426px; position: relative; width: 2418px">
+      <div
+        data-pencil-name="Checkbox"
+        style="align-items: center; border-radius: 9px; box-sizing: border-box; display: flex; flex-direction: column; gap: 0px; height: 18px; justify-content: center; left: 0px; outline-offset: -1px; outline: 2px solid #808080; position: absolute; top: 0px; width: 18px"
+      >
+        <div
+          data-pencil-name="Ring"
+          style="background-color: #808080; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 10px; opacity: 0; width: 10px"
+        ></div>
+      </div>
+      <div
+        data-pencil-name="PriorityChip"
+        style="align-items: center; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; gap: 4px; height: fit-content; justify-content: flex-start; left: 64px; padding: 2px 6px; position: absolute; top: 0px; width: fit-content"
+      >
+        <svg
+          data-pencil-name="Dot"
+          viewBox="0 0 12 12"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="flag"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 12px; overflow: visible; width: 12px"
+        >
+          <path
+            d="M3.876 .504q-.492 .012-.979 .176-.486 .161-.881 .448-.167 .108-.258 .211-.091 .102-.161 .246l-.024 .035q-.038 .073-.05 .24-.011 .229-.023 1.02l.012 8.244 .035 .085q.038 .07 .097 .138 .061 .064 .12 .096 .061 .03 .155 .041 .193 .036 .36-.079 .17-.114 .205-.316 .024-.085 .024-1.585v-1.512l.12-.085q.349-.228 .756-.328 .407-.102 .829-.067 .36 .035 .659 .12 .299 .085 .961 .337 .744 .287 1.078 .384 .566 .143 1.087 .143 .522 0 .99-.143 .613-.182 1.128-.578 .229-.167 .349-.492 .023-.07 .023-.419l.012-4.415q-.012-.48-.023-.636-.012-.108-.062-.193l-.012-.035q-.143-.325-.468-.481-.118-.061-.203-.079-.084-.017-.228-.017-.193 0-.314 .044-.117 .041-.31 .161-.144 .094-.264 .143-.287 .109-.674 .132-.383 .024-.682-.035-.191-.05-.396-.12-.205-.073-.791-.325-.542-.229-.914-.337-.659-.191-1.283-.167zM4.248 1.512q.337 .035 .665 .132 .331 .096 .894 .336 .805 .349 1.224 .446 .422 .094 .914 .07 .9-.061 1.439-.419l.108-.061v2.484q0 2.484-.006 2.502-.005 .018-.12 .091-.114 .07-.222 .132-.803 .419-1.837 .19-.214-.047-.454-.129-.241-.085-.745-.278-.588-.24-.949-.334-.36-.097-.744-.147-.143-.023-.419-.023-.275 0-.395 .023-.554 .062-.985 .264l-.108 .05v-4.849l.085-.061q.287-.179 .568-.282 .284-.102 .63-.137 .193-.024 .457 0z"
+            fill="#d1453b"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          P1
+        </div>
+      </div>
+      <div
+        data-pencil-name="LabelChip"
+        style="align-items: center; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; gap: 4px; height: fit-content; justify-content: flex-start; left: 164px; padding: 2px 6px; position: absolute; top: 0px; width: fit-content"
+      >
+        <svg
+          data-pencil-name="Tag"
+          viewBox="0 0 12 12"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="tag"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 12px; overflow: visible; width: 12px"
+        >
+          <path
+            d="M1.849 .516q-.252 .023-.504 .143-.252 .12-.434 .314-.264 .275-.372 .671l-.035 .143v1.896q-.012 1.488 0 1.813 .012 .325 .047 .492 .073 .241 .228 .457 .05 .082 2.274 2.315 2.226 2.232 2.358 2.352 .445 .361 1.02 .378 .577 .018 1.069-.319 .108-.07 1.849-1.811 1.74-1.74 1.81-1.842 .073-.103 .132-.197 .24-.457 .19-.978-.046-.522-.369-.932-.085-.094-2.335-2.338-2.25-2.244-2.358-2.317-.322-.205-.706-.24-.158-.024-1.934-.024-1.775 0-1.93 .024zM5.795 1.547q.061 .038 .439 .404 .378 .366 1.902 1.89 1.561 1.558 1.907 1.913 .349 .354 .372 .425 .158 .301 .012 .612-.024 .073-.281 .337-.258 .264-1.471 1.488-1.726 1.729-1.787 1.764-.144 .108-.361 .114-.216 .006-.383-.091-.071-.047-2.315-2.279-1.526-1.523-1.887-1.895-.357-.373-.395-.434l-.035-.082v-3.829l.035-.085q.073-.155 .193-.214l.012-.012q.059-.038 .144-.05 .12-.011 .492-.023l3.325 .012zM3.551 3.023q-.191 .05-.334 .2-.144 .149-.194 .342-.07 .276 .062 .539 .035 .071 .138 .173 .102 .103 .173 .138 .169 .085 .354 .085 .185 0 .355-.085 .07-.035 .172-.138 .103-.102 .138-.173 .108-.216 .079-.451-.029-.234-.199-.401-.226-.252-.539-.252-.097 0-.205 .023z"
+            fill="#a0a0a0"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          @買い物
+        </div>
+      </div>
+      <div
+        data-pencil-name="DateChip"
+        style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; gap: 4px; height: fit-content; justify-content: flex-start; left: 284px; position: absolute; top: 0px; width: fit-content"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 12 12"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="calendar"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 12px; overflow: visible; width: 12px"
+        >
+          <path
+            d="M3.923 .516q-.106 .011-.208 .085-.103 .07-.164 .167-.035 .073-.047 .175-.012 .1-.012 .305v.252l-1.139 .012q-.121 .011-.206 .023-.43 .12-.732 .434-.299 .31-.384 .756-.023 .082-.023 .694v6.853l.047 .131q.134 .446 .48 .739 .349 .293 .806 .342 .132 .024 3.659 .024 3.527 0 3.659-.024 .264-.023 .504-.143 .278-.132 .481-.378 .205-.246 .301-.56l.047-.131v-6.853q0-.612-.023-.694-.085-.446-.387-.756-.299-.314-.729-.434-.085-.012-.205-.023l-1.14-.012v-.252q0-.275-.029-.39-.03-.114-.126-.211-.121-.12-.308-.137-.185-.018-.322 .079-.138 .094-.188 .252-.023 .047-.029 .114-.006 .065-.006 .258v.287h-3v-.299q0-.205-.006-.264-.006-.061-.029-.108-.073-.182-.217-.264-.143-.085-.325-.049zM3.492 2.807q.012 .216 .018 .272 .006 .053 .029 .126 .05 .082 .12 .155 .182 .167 .434 .126 .252-.041 .36-.269 .024-.073 .029-.12 .006-.05 .018-.276v-.313h3v.313q.012 .226 .018 .276 .005 .047 .029 .12 .108 .228 .36 .269 .252 .041 .434-.126 .07-.073 .12-.155 .023-.073 .029-.126 .006-.056 .018-.272v-.299h1.128l.073 .035q.07 .038 .135 .105 .067 .065 .102 .138 .038 .07 .05 .24 .012 .167 .012 .73v.744h-8.016l.012-1.477q.012-.143 .023-.178 .085-.229 .302-.314 .047-.011 .144-.023h1.019zM9.996 7.799q0 1.62-.006 1.974-.006 .355-.017 .39-.085 .217-.302 .302l-.082 .035h-7.178l-.082-.035q-.132-.05-.228-.17l-.024-.023q-.038-.047-.05-.132-.023-.12-.023-.516l-.012-4.116h8.016z"
+            fill="#058527"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #058527; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          明日
+        </div>
+      </div>
+      <div
+        data-pencil-name="MoreChip"
+        style="align-items: flex-start; background-color: #F2EFED; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; gap: 0px; height: fit-content; justify-content: flex-start; left: 404px; padding: 2px 6px; position: absolute; top: 0px; width: fit-content"
+      >
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          +2
+        </div>
+      </div>
+      <div
+        data-pencil-name="Button"
+        style="align-items: center; background-color: #DC4C3E; border-radius: 8px; box-sizing: border-box; display: flex; flex-direction: row; gap: 0px; height: fit-content; justify-content: flex-start; left: 484px; padding: 8px 16px; position: absolute; top: 0px; width: fit-content"
+      >
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #FFFFFF; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 600; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          タスクを追加
+        </div>
+      </div>
+      <div
+        data-pencil-name="ButtonSecondary"
+        style="align-items: center; background-color: #F2EFED; border-radius: 8px; box-sizing: border-box; display: flex; flex-direction: row; gap: 0px; height: fit-content; justify-content: flex-start; left: 624px; padding: 8px 16px; position: absolute; top: 0px; width: fit-content"
+      >
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          キャンセル
+        </div>
+      </div>
+      <div
+        data-pencil-name="IconButton"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: column; gap: 0px; height: 32px; justify-content: center; left: 764px; position: absolute; top: 0px; width: 32px"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 18 18"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="ellipsis"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 18px; overflow: visible; width: 18px"
+        >
+          <path
+            d="M3.564 7.523q-.343 .018-.646 .233-.435 .29-.589 .769-.149 .475 .009 .954 .162 .475 .598 .782 .338 .233 .808 .233 .325 0 .567-.097 .242-.101 .483-.342 .247-.246 .343-.488 .101-.242 .101-.567 0-.325-.101-.567-.096-.242-.329-.479-.198-.198-.378-.286-.396-.197-.866-.145zM8.837 7.523q-.268 .018-.483 .128-.308 .145-.514 .404-.207 .259-.299 .567-.035 .145-.035 .378 0 .233 .035 .378 .11 .395 .396 .685 .29 .286 .685 .396 .145 .035 .378 .035 .233 0 .378-.035 .395-.11 .681-.396 .29-.29 .4-.685 .035-.145 .035-.378 0-.233-.035-.378-.092-.308-.299-.567-.206-.259-.514-.404-.338-.18-.809-.128zM14.076 7.523q-.506 .036-.901 .431-.215 .237-.317 .479-.096 .242-.096 .567 0 .325 .096 .576 .102 .25 .343 .487 .246 .233 .488 .334 .242 .097 .567 .097 .47 0 .809-.233 .435-.307 .593-.782 .162-.479 .009-.954-.15-.479-.594-.773-.439-.299-.997-.229z"
+            fill="#666666"
+          />
+        </svg>
+      </div>
+      <div
+        data-pencil-name="TaskRow"
+        style="align-items: flex-start; border-color: #EEEEEE; border-style: solid; border-width: 0px 0px 1px 0px; box-sizing: border-box; display: flex; flex-direction: row; gap: 10px; height: 80.5px; justify-content: flex-start; left: 0px; margin: 0px 0px -0.5px 0px; padding: 12px 0px 11px 0px; position: absolute; top: 80px; width: 800px"
+      >
+        <div
+          data-pencil-name="Checkbox"
+          style="align-items: center; border-radius: 9px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 0px; height: 18px; justify-content: center; outline-offset: -1px; outline: 2px solid #808080; width: 18px"
+        >
+          <div
+            data-pencil-name="Ring"
+            style="background-color: #808080; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 10px; opacity: 0; width: 10px"
+          ></div>
+        </div>
+        <div
+          data-pencil-name="Body"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-start"
+        >
+          <div
+            data-pencil-name="Title"
+            style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; width: 100%'
+          >
+            牛乳と卵を買う
+          </div>
+          <div
+            data-pencil-name="Description"
+            style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; width: 100%'
+          >
+            近所のスーパーで。卵は 10 個入り
+          </div>
+          <div
+            data-pencil-name="Meta"
+            style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="Date"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; width: fit-content"
+            >
+              <svg
+                data-pencil-name="Icon"
+                viewBox="0 0 12 12"
+                preserveAspectRatio="xMidYMid meet"
+                data-icon-name="calendar"
+                data-icon-set="lucide"
+                xmlns="http://www.w3.org/2000/svg"
+                style="box-sizing: border-box; flex-shrink: 0; height: 12px; overflow: visible; width: 12px"
+              >
+                <path
+                  d="M3.923 .516q-.106 .011-.208 .085-.103 .07-.164 .167-.035 .073-.047 .175-.012 .1-.012 .305v.252l-1.139 .012q-.121 .011-.206 .023-.43 .12-.732 .434-.299 .31-.384 .756-.023 .082-.023 .694v6.853l.047 .131q.134 .446 .48 .739 .349 .293 .806 .342 .132 .024 3.659 .024 3.527 0 3.659-.024 .264-.023 .504-.143 .278-.132 .481-.378 .205-.246 .301-.56l.047-.131v-6.853q0-.612-.023-.694-.085-.446-.387-.756-.299-.314-.729-.434-.085-.012-.205-.023l-1.14-.012v-.252q0-.275-.029-.39-.03-.114-.126-.211-.121-.12-.308-.137-.185-.018-.322 .079-.138 .094-.188 .252-.023 .047-.029 .114-.006 .065-.006 .258v.287h-3v-.299q0-.205-.006-.264-.006-.061-.029-.108-.073-.182-.217-.264-.143-.085-.325-.049zM3.492 2.807q.012 .216 .018 .272 .006 .053 .029 .126 .05 .082 .12 .155 .182 .167 .434 .126 .252-.041 .36-.269 .024-.073 .029-.12 .006-.05 .018-.276v-.313h3v.313q.012 .226 .018 .276 .005 .047 .029 .12 .108 .228 .36 .269 .252 .041 .434-.126 .07-.073 .12-.155 .023-.073 .029-.126 .006-.056 .018-.272v-.299h1.128l.073 .035q.07 .038 .135 .105 .067 .065 .102 .138 .038 .07 .05 .24 .012 .167 .012 .73v.744h-8.016l.012-1.477q.012-.143 .023-.178 .085-.229 .302-.314 .047-.011 .144-.023h1.019zM9.996 7.799q0 1.62-.006 1.974-.006 .355-.017 .39-.085 .217-.302 .302l-.082 .035h-7.178l-.082-.035q-.132-.05-.228-.17l-.024-.023q-.038-.047-.05-.132-.023-.12-.023-.516l-.012-4.116h8.016z"
+                  fill="#058527"
+                />
+              </svg>
+              <div
+                data-pencil-name="Label"
+                style='box-sizing: border-box; color: #058527; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                明日
+              </div>
+            </div>
+            <div
+              data-pencil-name="Label1"
+              style="align-items: center; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; padding: 2px 6px; width: fit-content"
+            >
+              <svg
+                data-pencil-name="Tag"
+                viewBox="0 0 12 12"
+                preserveAspectRatio="xMidYMid meet"
+                data-icon-name="tag"
+                data-icon-set="lucide"
+                xmlns="http://www.w3.org/2000/svg"
+                style="box-sizing: border-box; flex-shrink: 0; height: 12px; overflow: visible; width: 12px"
+              >
+                <path
+                  d="M1.849 .516q-.252 .023-.504 .143-.252 .12-.434 .314-.264 .275-.372 .671l-.035 .143v1.896q-.012 1.488 0 1.813 .012 .325 .047 .492 .073 .241 .228 .457 .05 .082 2.274 2.315 2.226 2.232 2.358 2.352 .445 .361 1.02 .378 .577 .018 1.069-.319 .108-.07 1.849-1.811 1.74-1.74 1.81-1.842 .073-.103 .132-.197 .24-.457 .19-.978-.046-.522-.369-.932-.085-.094-2.335-2.338-2.25-2.244-2.358-2.317-.322-.205-.706-.24-.158-.024-1.934-.024-1.775 0-1.93 .024zM5.795 1.547q.061 .038 .439 .404 .378 .366 1.902 1.89 1.561 1.558 1.907 1.913 .349 .354 .372 .425 .158 .301 .012 .612-.024 .073-.281 .337-.258 .264-1.471 1.488-1.726 1.729-1.787 1.764-.144 .108-.361 .114-.216 .006-.383-.091-.071-.047-2.315-2.279-1.526-1.523-1.887-1.895-.357-.373-.395-.434l-.035-.082v-3.829l.035-.085q.073-.155 .193-.214l.012-.012q.059-.038 .144-.05 .12-.011 .492-.023l3.325 .012zM3.551 3.023q-.191 .05-.334 .2-.144 .149-.194 .342-.07 .276 .062 .539 .035 .071 .138 .173 .102 .103 .173 .138 .169 .085 .354 .085 .185 0 .355-.085 .07-.035 .172-.138 .103-.102 .138-.173 .108-.216 .079-.451-.029-.234-.199-.401-.226-.252-.539-.252-.097 0-.205 .023z"
+                  fill="#a0a0a0"
+                />
+              </svg>
+              <div
+                data-pencil-name="Label"
+                style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                @買い物
+              </div>
+            </div>
+            <div
+              data-pencil-name="More"
+              style="align-items: flex-start; background-color: #F2EFED; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 6px; width: fit-content"
+            >
+              <div
+                data-pencil-name="Label"
+                style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                +2
+              </div>
+            </div>
+            <div
+              data-pencil-name="Spacer"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: 1px; justify-content: flex-start"
+            ></div>
+            <div
+              data-pencil-name="Project"
+              style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              受信トレイ
+            </div>
+            <svg
+              data-pencil-name="ProjectHash"
+              viewBox="0 0 12 12"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="hash"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 12px; overflow: visible; width: 12px"
+            >
+              <path
+                d="M4.849 1.02q-.132 .049-.217 .146-.085 .094-.12 .214-.012 .061-.144 1.295l-.155 1.333h-2.162q-.167 0-.24 .032-.071 .029-.15 .103-.076 .07-.114 .14-.024 .062-.029 .097-.006 .035-.006 .12 0 .132 .035 .217 .097 .179 .278 .252 .059 .023 .214 .023h2.077l-.228 2.004q0 .012-.996 .012h-.865q-.143 0-.216 .032-.071 .029-.15 .103-.076 .07-.114 .14-.024 .062-.029 .097-.006 .035-.006 .12 0 .132 .035 .217 .097 .179 .278 .252 .059 .023 .191 .023h1.752v.047q0 .038-.144 1.26l-.097 .937q-.023 .252-.017 .331 .006 .077 .041 .15v.012q.085 .143 .228 .216 .05 .024 .091 .035 .041 .012 .138 .012 .143 0 .205-.035 .228-.12 .275-.337 .012-.073 .144-1.295l.155-1.333h1.981v.047q0 .038-.144 1.26l-.097 .937q-.023 .252-.017 .331 .006 .077 .041 .15v.012q.085 .143 .228 .216 .05 .024 .091 .035 .041 .012 .138 .012 .143 0 .205-.035 .228-.12 .275-.337 .012-.073 .144-1.295l.155-1.333h2.174q.155 0 .214-.023 .181-.073 .278-.252 .035-.085 .035-.217 0-.085-.006-.12-.005-.035-.029-.097-.038-.07-.117-.14-.076-.074-.149-.103-.071-.032-.226-.032h-2.077l.228-2.004q0-.012 .996-.012h.865q.143 0 .202-.023 .181-.073 .278-.252 .035-.085 .035-.217 0-.085-.006-.12-.005-.035-.029-.097-.038-.07-.117-.14-.076-.074-.149-.103-.071-.032-.203-.032h-1.752v-.047q0-.038 .144-1.26l.097-.961q.023-.252 .017-.322-.006-.073-.055-.158l-.012-.012q-.059-.12-.185-.185-.126-.067-.284-.055-.155 .012-.281 .114-.126 .103-.161 .258-.012 .073-.144 1.295l-.155 1.333h-1.981v-.047q0-.038 .144-1.26l.097-.961q.023-.252 .017-.322-.006-.073-.055-.158l-.012-.012q-.035-.073-.114-.132-.077-.061-.15-.085-.07-.023-.167-.023-.096 0-.143 .012zM7.105 5.051q-.012 .038-.109 .984l-.108 .961q0 .012-.996 .012h-1.008l.228-2.004q0-.012 .996-.012h1.008z"
+                fill="#a0a0a0"
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="SidebarItem"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: fit-content; justify-content: flex-start; left: 0px; padding: 7px 10px; position: absolute; top: 180px; width: 248px"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 18 18"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="inbox"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 18px; overflow: visible; width: 18px"
+        >
+          <path
+            d="M5.111 2.268q-.448 .07-.875 .334-.422 .259-.654 .619-.128 .18-1.459 2.865-1.332 2.681-1.358 2.782-.027 .097-.009 2.527v2.052q.017 .413 .035 .519 .163 .685 .655 1.156 .496 .465 1.182 .593 .215 .035 6.372 .035 6.157 0 6.372-.035 .686-.128 1.178-.593 .496-.471 .659-1.156 .018-.106 .035-.519v-2.052q.018-2.43-.009-2.527-.026-.101-1.357-2.782-1.332-2.685-1.442-2.847-.25-.378-.685-.646-.431-.273-.879-.325-.181-.018-3.89-.018-3.709 0-3.871 .018zM12.832 3.797q.128 .057 .237 .162 .088 .075 .251 .392 .162 .312 .918 1.788 1.042 2.088 1.042 2.105 0 .018-1.71 .018h-1.494q-.25 0-.36 .048-.106 .044-.207 .136-.096 .088-.747 1.077l-.663 .989h-2.198l-.663-.989q-.651-.989-.752-1.077-.096-.092-.206-.136-.106-.048-.356-.048h-1.494q-1.714 0-1.714-.018 0-.017 1.046-2.105 .756-1.476 .918-1.788 .163-.317 .251-.392 .11-.105 .206-.14 .101-.04 .607-.057h3.256 3.256q.488 0 .576 .035zM6.262 10.727q.651 .989 .747 1.081 .101 .088 .207 .136 .11 .044 .343 .044h1.441 1.441q.233 0 .339-.044 .11-.048 .206-.136 .101-.092 .752-1.081l.663-.989h3.349l-.018 3.96-.052 .127q-.145 .268-.418 .378l-.123 .035h-12.278l-.123-.035q-.273-.11-.418-.378l-.052-.127-.018-3.96h3.349z"
+            fill="#666666"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #202020; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          受信トレイ
+        </div>
+        <div
+          data-pencil-name="Count"
+          style='box-sizing: border-box; color: #A0A0A0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          12
+        </div>
+      </div>
+      <div
+        data-pencil-name="ProjectItem"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: fit-content; justify-content: flex-start; left: 0px; padding: 7px 10px; position: absolute; top: 230px; width: 248px"
+      >
+        <svg
+          data-pencil-name="Hash"
+          viewBox="0 0 18 18"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="hash"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 18px; overflow: visible; width: 18px"
+        >
+          <path
+            d="M7.273 1.529q-.198 .075-.325 .22-.128 .141-.18 .321-.018 .092-.216 1.942l-.233 2h-3.243q-.25 0-.36 .048-.106 .044-.224 .154-.115 .105-.172 .211-.035 .092-.044 .145-.008 .053-.008 .18 0 .198 .052 .325 .145 .268 .418 .378 .088 .035 .321 .035h3.115l-.342 3.006q0 .018-1.495 .018h-1.296q-.215 0-.325 .048-.106 .044-.224 .154-.115 .105-.172 .211-.035 .092-.044 .145-.008 .053-.008 .18 0 .198 .052 .325 .145 .268 .418 .378 .088 .035 .285 .035h2.628v.071q0 .057-.215 1.889l-.145 1.407q-.035 .377-.026 .496 .008 .114 .061 .224v.018q.128 .215 .343 .325 .075 .035 .136 .053 .062 .017 .207 .017 .215 0 .307-.052 .343-.181 .413-.506 .018-.11 .216-1.942l.233-2h2.97v.071q0 .057-.215 1.889l-.145 1.407q-.035 .377-.026 .496 .008 .114 .061 .224v.018q.128 .215 .343 .325 .075 .035 .136 .053 .062 .017 .207 .017 .215 0 .307-.052 .343-.181 .413-.506 .018-.11 .216-1.942l.233-2h3.26q.233 0 .321-.035 .273-.11 .418-.378 .052-.127 .052-.325 0-.127-.008-.18-.009-.053-.044-.145-.057-.106-.176-.211-.114-.11-.224-.154-.106-.048-.339-.048h-3.115l.343-3.006q0-.018 1.494-.018h1.296q.215 0 .303-.035 .273-.11 .418-.378 .052-.127 .052-.325 0-.127-.008-.18-.009-.053-.044-.145-.057-.106-.176-.211-.114-.11-.224-.154-.106-.048-.303-.048h-2.628v-.071q0-.057 .215-1.889l.145-1.442q.035-.378 .026-.483-.008-.11-.083-.237l-.018-.018q-.088-.18-.277-.277-.188-.101-.426-.083-.233 .017-.422 .171-.189 .154-.241 .387-.018 .11-.216 1.942l-.233 2h-2.97v-.071q0-.057 .215-1.889l.145-1.442q.035-.378 .026-.483-.008-.11-.083-.237l-.018-.018q-.052-.11-.171-.198-.114-.092-.224-.127-.106-.035-.251-.035-.145 0-.215 .017zM10.657 7.576q-.018 .057-.163 1.477l-.162 1.441q0 .018-1.495 .018h-1.511l.342-3.006q0-.018 1.495-.018h1.511z"
+            fill="#246fe0"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #202020; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          仕事
+        </div>
+        <div
+          data-pencil-name="Count"
+          style='box-sizing: border-box; color: #A0A0A0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          8
+        </div>
+      </div>
+      <div
+        data-pencil-name="SectionHeader"
+        style="align-items: center; border-color: #EEEEEE; border-style: solid; border-width: 0px 0px 1px 0px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: 39.5px; justify-content: flex-start; left: 0px; margin: 0px 0px -0.5px 0px; padding: 12px 0px 8px 0px; position: absolute; top: 280px; width: 800px"
+      >
+        <svg
+          data-pencil-name="Chevron"
+          viewBox="0 0 16 16"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="chevron-down"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; height: 16px; left: -28px; overflow: visible; position: absolute; top: 14px; width: 16px; z-index: 0"
+        >
+          <path
+            d="M3.824 5.359q-.289 .098-.433 .352-.047 .098-.047 .289 0 .191 .054 .297 .059 .101 2.129 2.176 2.075 2.07 2.176 2.129 .106 .054 .297 .054 .191 0 .293-.054 .105-.059 2.176-2.129 2.074-2.075 2.129-2.176 .058-.106 .058-.297 0-.191-.047-.289-.113-.191-.32-.305-.066-.031-.113-.047-.047-.015-.176-.015-.129 0-.176 .015-.047 .016-.129 .047-.113 .067-1.902 1.86l-1.793 1.789-3.23-3.215q-.356-.336-.481-.434-.098-.062-.226-.062h-.032q-.16 0-.207 .015z"
+            fill="#666666"
+          />
+        </svg>
+        <div
+          data-pencil-name="Title"
+          style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; position: relative; text-align: left; white-space: nowrap; z-index: 1'
+        >
+          今週
+        </div>
+        <div
+          data-pencil-name="Count"
+          style='box-sizing: border-box; color: #A0A0A0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; position: relative; text-align: left; white-space: nowrap; z-index: 2'
+        >
+          3
+        </div>
+      </div>
+      <div
+        data-pencil-name="AddTaskRow"
+        style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; gap: 12px; height: fit-content; justify-content: flex-start; left: 0px; padding: 10px 0px; position: absolute; top: 340px; width: 800px"
+      >
+        <svg
+          data-pencil-name="Plus"
+          viewBox="0 0 18 18"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="plus"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 18px; overflow: visible; width: 18px"
+        >
+          <path
+            d="M8.873 3.023q-.123 .018-.225 .066-.096 .044-.197 .163-.097 .114-.145 .215-.044 .097-.044 .422v4.373h-4.716l-.109 .052q-.286 .145-.387 .436-.097 .285 .009 .558 .074 .123 .18 .233 .11 .105 .215 .153 .11 .044 .435 .044h4.373v4.373q0 .325 .044 .435 .048 .105 .154 .215 .109 .106 .241 .172 .136 .061 .299 .061 .163 0 .294-.061 .137-.066 .242-.172 .11-.11 .154-.215 .048-.11 .048-.435v-4.373h4.373q.325 0 .431-.044 .109-.048 .215-.153 .11-.11 .171-.242 .066-.136 .066-.299 0-.163-.053-.308-.127-.25-.377-.378l-.11-.052h-4.716v-4.355q0-.343-.035-.413-.092-.255-.325-.387-.233-.136-.505-.084z"
+            fill="#dc4c3e"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+        >
+          タスクを追加
+        </div>
+      </div>
+      <div
+        data-pencil-name="TextField"
+        style="align-items: center; border-radius: 8px; box-sizing: border-box; display: flex; flex-direction: row; gap: 0px; height: fit-content; justify-content: flex-start; left: 0px; outline-offset: -0.5px; outline: 1px solid #EEEEEE; padding: 8px 12px; position: absolute; top: 390px; width: 400px"
+      >
+        <div
+          data-pencil-name="Placeholder"
+          style='box-sizing: border-box; color: #A0A0A0; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          タスク名
+        </div>
+      </div>
+      <div
+        data-pencil-name="TabBar"
+        style="background-color: #00000000; border-color: #EEEEEE; border-style: solid; border-width: 1px 0px 0px 0px; box-sizing: border-box; height: 80.5px; left: 856px; margin: -0.5px 0px 0px 0px; position: absolute; top: 0px; width: 390px"
+      >
+        <div
+          data-pencil-name="Pill"
+          style="align-items: center; backdrop-filter: blur(10px); background-color: #FFFFFFD9; border-radius: 29px; box-sizing: border-box; display: flex; flex-direction: row; gap: 0px; height: 58px; justify-content: flex-start; left: 28px; outline-offset: -0.5px; outline: 1px solid #EEEEEE; padding: 4px; position: absolute; top: 0px; width: 334px; z-index: 0"
+        >
+          <div
+            data-pencil-name="Tab-受信トレイ"
+            style="align-items: center; border-radius: 25px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 3px; height: 50px; justify-content: center"
+          >
+            <svg
+              data-pencil-name="Icon"
+              viewBox="0 0 22 22"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="inbox"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 22px; overflow: visible; width: 22px"
+            >
+              <path
+                d="M6.247 2.771q-.548 .086-1.069 .409-.516 .317-.801 .757-.155 .22-1.783 3.502-1.627 3.276-1.659 3.4-.033 .118-.011 3.088v2.509q.021 .504 .043 .633 .199 .838 .8 1.413 .607 .569 1.445 .725 .263 .043 7.788 .043 7.525 0 7.788-.043 .838-.156 1.44-.725 .607-.575 .805-1.413 .022-.129 .043-.633v-2.509q.022-2.97-.01-3.088-.033-.124-1.66-3.4-1.628-3.282-1.762-3.481-.306-.461-.838-.789-.526-.333-1.074-.398-.22-.021-4.753-.021-4.534 0-4.732 .021zM15.684 4.641q.155 .069 .29 .198 .107 .092 .306 .478 .199 .382 1.122 2.186 1.273 2.552 1.273 2.573 0 .022-2.089 .022h-1.826q-.306 0-.441 .059-.129 .053-.252 .166-.118 .108-.913 1.316l-.811 1.209h-2.686l-.811-1.209q-.795-1.208-.918-1.316-.118-.113-.253-.166-.129-.059-.435-.059h-1.826q-2.095 0-2.095-.022 0-.021 1.279-2.573 .924-1.804 1.122-2.186 .199-.386 .306-.478 .135-.129 .253-.172 .123-.048 .741-.069h3.98 3.98q.596 0 .704 .043zM7.654 13.111q.795 1.208 .913 1.321 .123 .108 .252 .167 .135 .053 .419 .053h1.762 1.762q.284 0 .413-.053 .135-.059 .253-.167 .123-.113 .918-1.321l.811-1.209h4.093l-.021 4.84-.065 .155q-.177 .328-.51 .462l-.151 .043h-15.006l-.151-.043q-.333-.134-.51-.462l-.065-.155-.021-4.84h4.093z"
+                fill="#202020"
+              />
+            </svg>
+            <div
+              data-pencil-name="Label"
+              style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 600; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              受信トレイ
+            </div>
+          </div>
+          <div
+            data-pencil-name="Tab-今日"
+            style="align-items: center; border-radius: 25px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 3px; height: 50px; justify-content: center"
+          >
+            <svg
+              data-pencil-name="Icon"
+              viewBox="0 0 22 22"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="calendar-days"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 22px; overflow: visible; width: 22px"
+            >
+              <path
+                d="M7.192 .945q-.193 .022-.381 .156-.188 .129-.301 .306-.065 .134-.086 .322-.022 .183-.022 .559v.462l-2.089 .021q-.22 .022-.376 .043-.79 .221-1.343 .795-.548 .57-.703 1.386-.043 .15-.043 1.273v12.563l.086 .242q.247 .816 .88 1.353 .64 .537 1.478 .629 .241 .043 6.708 .043 6.467 0 6.709-.043 .483-.043 .923-.263 .511-.242 .881-.693 .376-.452 .553-1.026l.086-.242v-12.563q0-1.123-.043-1.273-.155-.816-.709-1.386-.547-.574-1.337-.795-.156-.021-.376-.043l-2.089-.021v-.462q0-.505-.054-.714-.054-.21-.231-.387-.22-.22-.564-.252-.338-.033-.591 .145-.252 .171-.343 .461-.043 .086-.054 .21-.011 .118-.011 .473v.526h-5.5v-.548q0-.376-.011-.483-.01-.113-.053-.199-.135-.333-.398-.483-.263-.156-.596-.092zM6.402 5.145q.022 .398 .033 .5 .01 .097 .053 .231 .092 .15 .221 .285 .333 .306 .794 .231 .462-.076 .661-.495 .043-.134 .054-.22 .011-.091 .032-.505v-.574h5.5v.574q.022 .414 .032 .505 .011 .086 .054 .22 .199 .419 .661 .495 .462 .075 .795-.231 .128-.135 .22-.285 .043-.134 .053-.231 .011-.102 .033-.5v-.547h2.068l.134 .064q.129 .07 .247 .193 .123 .119 .188 .253 .07 .129 .091 .44 .022 .306 .022 1.338v1.364h-14.696l.022-2.707q.021-.263 .043-.328 .156-.419 .553-.574 .086-.022 .263-.043h1.869zM18.326 14.298q0 2.97-.01 3.62-.011 .65-.033 .714-.155 .398-.553 .554l-.15 .064h-13.16l-.15-.064q-.242-.092-.419-.312l-.043-.043q-.07-.086-.091-.242-.043-.22-.043-.945l-.022-7.546h14.696zM7.192 11.945q-.371 .043-.602 .366-.231 .316-.145 .692 .043 .285 .242 .462 .263 .264 .661 .264 .22 0 .376-.065 .327-.156 .445-.462 .124-.311 .049-.628-.075-.323-.365-.505-.285-.188-.661-.124zM10.844 11.945q-.284 .043-.505 .264-.327 .333-.241 .794 .086 .462 .505 .661 .155 .065 .397 .065 .398 0 .661-.264 .198-.198 .241-.483 .086-.462-.247-.79-.327-.333-.811-.247zM14.497 11.945q-.285 .043-.505 .285-.22 .242-.242 .553-.021 .371 .253 .672 .273 .295 .671 .295 .306 0 .548-.188 .241-.188 .327-.483 .092-.296-.032-.591-.118-.301-.392-.451-.274-.156-.628-.092zM7.042 15.641q-.291 .091-.457 .333-.161 .241-.161 .526 0 .376 .274 .65 .274 .274 .66 .252 .387-.021 .629-.263 .156-.156 .199-.284 .043-.135 .043-.376 0-.242-.065-.376-.134-.285-.419-.419-.134-.065-.365-.086-.231-.022-.338 .043zM10.758 15.619q-.397 .134-.596 .484-.064 .134-.064 .376 0 .241 .053 .376 .059 .128 .21 .284 .242 .242 .628 .263 .387 .022 .661-.252 .274-.274 .274-.65 0-.376-.263-.628-.263-.253-.618-.274-.22 0-.285 .021zM14.346 15.641q-.156 .069-.301 .204-.139 .129-.198 .252-.054 .118-.065 .183-.01 .064-.01 .22 0 .242 .064 .397 .113 .242 .344 .376 .231 .129 .494 .129 .263 0 .483-.129 .221-.134 .355-.376 .064-.155 .064-.397 0-.156-.011-.22-.01-.065-.053-.177-.092-.129-.226-.258-.129-.135-.284-.188-.151-.059-.339-.059-.188 0-.317 .043z"
+                fill="#202020"
+              />
+            </svg>
+            <div
+              data-pencil-name="Label"
+              style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 600; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              今日
+            </div>
+          </div>
+          <div
+            data-pencil-name="Tab-近日"
+            style="align-items: center; border-radius: 25px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 3px; height: 50px; justify-content: center"
+          >
+            <svg
+              data-pencil-name="Icon"
+              viewBox="0 0 22 22"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="calendar"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 22px; overflow: visible; width: 22px"
+            >
+              <path
+                d="M7.192 .945q-.193 .022-.381 .156-.188 .129-.301 .306-.065 .134-.086 .322-.022 .183-.022 .559v.462l-2.089 .021q-.22 .022-.376 .043-.79 .221-1.343 .795-.548 .57-.703 1.386-.043 .15-.043 1.273v12.563l.086 .242q.247 .816 .88 1.353 .64 .537 1.478 .629 .241 .043 6.708 .043 6.467 0 6.709-.043 .483-.043 .923-.263 .511-.242 .881-.693 .376-.452 .553-1.026l.086-.242v-12.563q0-1.123-.043-1.273-.155-.816-.709-1.386-.547-.574-1.337-.795-.156-.021-.376-.043l-2.089-.021v-.462q0-.505-.054-.714-.054-.21-.231-.387-.22-.22-.564-.252-.338-.033-.591 .145-.252 .171-.343 .461-.043 .086-.054 .21-.011 .118-.011 .473v.526h-5.5v-.548q0-.376-.011-.483-.01-.113-.053-.199-.135-.333-.398-.483-.263-.156-.596-.092zM6.402 5.145q.022 .398 .033 .5 .01 .097 .053 .231 .092 .15 .221 .285 .333 .306 .794 .231 .462-.076 .661-.495 .043-.134 .054-.22 .011-.091 .032-.505v-.574h5.5v.574q.022 .414 .032 .505 .011 .086 .054 .22 .199 .419 .661 .495 .462 .075 .795-.231 .128-.135 .22-.285 .043-.134 .053-.231 .011-.102 .033-.5v-.547h2.068l.134 .064q.129 .07 .247 .193 .123 .119 .188 .253 .07 .129 .091 .44 .022 .306 .022 1.338v1.364h-14.696l.022-2.707q.021-.263 .043-.328 .156-.419 .553-.574 .086-.022 .263-.043h1.869zM18.326 14.298q0 2.97-.01 3.62-.011 .65-.033 .714-.155 .398-.553 .554l-.15 .064h-13.16l-.15-.064q-.242-.092-.419-.312l-.043-.043q-.07-.086-.091-.242-.043-.22-.043-.945l-.022-7.546h14.696z"
+                fill="#202020"
+              />
+            </svg>
+            <div
+              data-pencil-name="Label"
+              style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 600; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              近日
+            </div>
+          </div>
+          <div
+            data-pencil-name="Tab-閲覧"
+            style="align-items: center; border-radius: 25px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 3px; height: 50px; justify-content: center"
+          >
+            <svg
+              data-pencil-name="Icon"
+              viewBox="0 0 22 22"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="layout-grid"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 22px; overflow: visible; width: 22px"
+            >
+              <path
+                d="M3.19 1.891q-.354 .112-.671 .365-.317 .252-.473 .58l-.043 .048q-.091 .194-.112 .328-.043 .199-.043 .703v1.649 2.622q0 .392 .043 .547 .112 .441 .505 .817 .177 .172 .354 .284 .177 .108 .419 .178l.199 .064h4.818q.392-.021 .526-.043 .483-.134 .832-.483 .355-.355 .489-.838 .022-.134 .043-.526v-4.818l-.064-.199q-.07-.263-.183-.43-.107-.166-.301-.365-.241-.242-.462-.349l-.026-.022q-.194-.091-.35-.112-.198-.043-.746-.043h-1.805-2.401q-.392 .021-.548 .043zM13.31 1.891q-.441 .091-.838 .483-.194 .199-.306 .365-.108 .167-.178 .43l-.064 .199v4.818q.021 .418 .043 .526 .134 .483 .483 .838 .355 .349 .838 .483 .108 .022 .527 .043h4.817l.199-.064q.263-.07 .43-.178 .166-.112 .365-.306 .371-.376 .483-.838 .043-.198 .054-2.739 .011-2.54-.054-2.718-.112-.483-.478-.843-.359-.365-.843-.499-.156-.043-.526-.043h-2.224q-2.551 0-2.728 .043zM8.25 5.962v2.288h-4.598v-4.598h4.598zM18.348 5.962v2.288h-4.598v-4.598h4.598zM3.454 11.924q-.618 .064-1.08 .548-.371 .354-.483 .795-.043 .155-.043 .547v2.224 2.047q0 .504 .043 .703 .021 .134 .112 .328l.043 .048q.156 .349 .484 .602 .327 .252 .703 .343 .178 .065 2.718 .054 2.541-.011 2.739-.054 .462-.112 .838-.483 .194-.199 .301-.365 .113-.167 .183-.43l.064-.199v-4.818q-.021-.392-.043-.526-.134-.483-.499-.832-.36-.355-.822-.489-.107-.022-.548-.043h-2.068q-2.444-.022-2.642 0zM13.551 11.924q-.349 .043-.59 .177-.376 .177-.629 .483-.252 .307-.365 .704-.022 .108-.043 .526v4.818l.064 .199q.07 .263 .178 .43 .112 .166 .306 .365 .376 .371 .838 .483 .198 .043 2.739 .054 2.54 .011 2.718-.054 .376-.091 .703-.343 .328-.253 .484-.602l.043-.048q.091-.194 .112-.328 .043-.199 .043-.703v-4.072q0-.526-.043-.725-.021-.134-.112-.328l-.022-.048q-.107-.199-.349-.44-.242-.242-.462-.349l-.048-.022q-.194-.113-.328-.134-.177-.022-.66-.043h-1.934q-2.465 0-2.643 .021zM8.25 16.038v2.31h-4.598v-4.598h4.598zM18.348 16.038v2.31h-4.598v-4.598h4.598z"
+                fill="#202020"
+              />
+            </svg>
+            <div
+              data-pencil-name="Label"
+              style='box-sizing: border-box; color: #202020; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 600; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              閲覧
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="MobileHeader"
+        style="align-items: flex-start; background-color: #FFFFFF; box-sizing: border-box; display: flex; flex-direction: column; gap: 0px; height: fit-content; justify-content: flex-start; left: 856px; position: absolute; top: 120px; width: 390px"
+      >
+        <div
+          data-pencil-name="StatusBar"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 47px; justify-content: flex-start; width: 100%"
+        ></div>
+        <div
+          data-pencil-name="Row"
+          style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; padding: 6px 12px; width: 100%"
+        >
+          <div
+            data-pencil-name="Menu"
+            style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 0px; height: 32px; justify-content: center; width: 32px"
+          >
+            <svg
+              data-pencil-name="Icon"
+              viewBox="0 0 18 18"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="menu"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 18px; overflow: visible; width: 18px"
+            >
+              <path
+                d="M2.861 3.023q-.233 .036-.413 .233-.18 .198-.198 .453 0 .18 .079 .36 .084 .18 .246 .286l.035 .035q.071 .057 .268 .075 .29 .017 1.332 .035h9.58q1.042-.018 1.332-.035 .197-.018 .268-.075l.035-.035q.272-.18 .316-.475 .044-.298-.127-.558-.172-.263-.492-.299-.145-.035-6.14-.035-5.994 0-6.121 .035zM2.738 8.297q-.128 .057-.246 .167-.115 .105-.163 .206-.044 .097-.053 .15-.008 .053-.008 .18 0 .198 .052 .325 .145 .268 .418 .378l.123 .035h12.278l.123-.035q.273-.11 .418-.378 .052-.127 .052-.325 0-.127-.008-.18-.009-.053-.044-.145-.057-.106-.176-.211-.114-.11-.224-.154-.106-.048-.897-.048h-5.383-5.383q-.809 .017-.879 .035zM2.826 13.518q-.11 .035-.238 .118-.123 .079-.193 .172-.163 .215-.145 .496 .018 .277 .233 .475 .163 .162 .378 .198 .145 .035 6.139 .035 5.994 0 6.139-.035 .216-.036 .378-.198 .286-.29 .215-.668-.07-.378-.452-.558l-.106-.035-6.121-.018q-6.135 0-6.227 .018z"
+                fill="#666666"
+              />
+            </svg>
+          </div>
+          <div
+            data-pencil-name="Title"
+            style='box-sizing: border-box; color: #202020; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 20px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left'
+          >
+            買い物
+          </div>
+          <div
+            data-pencil-name="More"
+            style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 0px; height: 32px; justify-content: center; width: 32px"
+          >
+            <svg
+              data-pencil-name="Icon"
+              viewBox="0 0 18 18"
+              preserveAspectRatio="xMidYMid meet"
+              data-icon-name="ellipsis"
+              data-icon-set="lucide"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 18px; overflow: visible; width: 18px"
+            >
+              <path
+                d="M3.564 7.523q-.343 .018-.646 .233-.435 .29-.589 .769-.149 .475 .009 .954 .162 .475 .598 .782 .338 .233 .808 .233 .325 0 .567-.097 .242-.101 .483-.342 .247-.246 .343-.488 .101-.242 .101-.567 0-.325-.101-.567-.096-.242-.329-.479-.198-.198-.378-.286-.396-.197-.866-.145zM8.837 7.523q-.268 .018-.483 .128-.308 .145-.514 .404-.207 .259-.299 .567-.035 .145-.035 .378 0 .233 .035 .378 .11 .395 .396 .685 .29 .286 .685 .396 .145 .035 .378 .035 .233 0 .378-.035 .395-.11 .681-.396 .29-.29 .4-.685 .035-.145 .035-.378 0-.233-.035-.378-.092-.308-.299-.567-.206-.259-.514-.404-.338-.18-.809-.128zM14.076 7.523q-.506 .036-.901 .431-.215 .237-.317 .479-.096 .242-.096 .567 0 .325 .096 .576 .102 .25 .343 .487 .246 .233 .488 .334 .242 .097 .567 .097 .47 0 .809-.233 .435-.307 .593-.782 .162-.479 .009-.954-.15-.479-.594-.773-.439-.299-.997-.229z"
+                fill="#666666"
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="SyncStatus"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: fit-content; justify-content: flex-start; left: 1306px; padding: 6px 10px; position: absolute; top: 0px; width: 248px"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 14 14"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="circle-check"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 14px; overflow: visible; width: 14px"
+        >
+          <path
+            d="M6.692 .602q-1.162 .041-2.228 .505-1.063 .462-1.904 1.268-.837 .804-1.343 1.853-.489 1.008-.602 2.157-.027 .195-.027 .615 0 .42 .027 .615 .113 1.149 .602 2.157 .659 1.401 1.897 2.338 1.241 .936 2.751 1.203 .533 .099 1.135 .099 .755 0 1.432-.154 .68-.153 1.354-.475 1.261-.618 2.163-1.702 .903-1.083 1.255-2.444 .294-1.117 .181-2.252-.113-1.135-.602-2.171-.588-1.203-1.62-2.085-1.029-.881-2.314-1.275-1.008-.307-2.157-.252zM7.66 1.791q1.076 .14 1.992 .68 .916 .54 1.562 1.408 .828 1.104 1.009 2.547 .013 .167 .013 .574 0 .407-.013 .574-.14 1.162-.721 2.13-.582 .963-1.535 1.623-.475 .335-1.049 .561-.575 .222-1.19 .307-.253 .041-.728 .041-.475 0-.728-.041-1.077-.153-1.959-.687-.881-.533-1.527-1.387-.827-1.104-1.009-2.547-.013-.167-.013-.574 0-.407 .013-.574 .14-1.121 .67-2.051 .533-.93 1.432-1.589 .544-.407 1.207-.67 .666-.267 1.326-.325l.253-.027q.096-.014 .475 0 .38 .013 .52 .027zM8.61 5.264q-.068 .027-.127 .051-.054 .02-1.063 1.025l-.994 .995-.407-.403q-.267-.267-.362-.339-.127-.113-.198-.14-.069-.027-.195-.027-.127 0-.168 .013-.041 .014-.099 .041-.181 .1-.28 .267-.041 .086-.041 .253v.014q0 .14 .034 .212 .038 .068 .178 .222 .095 .113 .488 .506l.042 .041q.42 .42 .553 .547 .134 .123 .202 .153 .14 .069 .294 .055 .154-.014 .28-.099 .072-.055 1.289-1.272 .868-.868 1.049-1.063 .185-.198 .212-.27 .096-.276-.058-.523-.154-.246-.448-.259-.126-.014-.181 0z"
+            fill="#058527"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          同期済み 09:41
+        </div>
+      </div>
+      <div
+        data-pencil-name="SyncStatus-同期中"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: fit-content; justify-content: flex-start; left: 1594px; padding: 6px 10px; position: absolute; top: 0px; width: 248px"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 14 14"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="loader-circle"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 14px; overflow: visible; width: 14px"
+        >
+          <path
+            d="M6.467 1.189q-1.497 .141-2.752 .995-1.251 .855-1.924 2.198-.448 .895-.588 1.931-.027 .167-.027 .687 0 .52 .027 .687 .168 1.217 .756 2.239 .587 1.022 1.555 1.75 .601 .461 1.35 .748 .748 .287 1.521 .373 .236 .027 .615 .027 .379 0 .615-.027 1.121-.127 2.106-.643 .988-.519 1.716-1.367 .728-.848 1.093-1.924 .14-.448 .222-.916 .086-.472 .072-.862 0-.17-.007-.225-.006-.055-.034-.113-.099-.167-.28-.267-.058-.027-.099-.041-.041-.013-.154-.013-.113 0-.154 .013-.041 .014-.099 .041-.181 .1-.26 .253-.075 .154-.082 .472-.007 .315-.092 .732-.28 1.387-1.302 2.396-1.118 1.104-2.759 1.302-.181 .027-.533 .027-.348 0-.543-.027-.783-.113-1.477-.448-.694-.338-1.24-.882-.657-.659-1.016-1.514-.355-.854-.355-1.791 0-.561 .12-1.056 .119-.499 .355-1.002 .338-.673 .882-1.223 .547-.554 1.247-.906 .503-.236 .998-.356 .499-.119 1.06-.119 .362 0 .663 .044 .304 .041 .667 .151 .239 .058 .335 .058 .212-.028 .365-.175 .154-.146 .168-.358 .013-.154-.051-.294-.062-.14-.171-.223-.158-.099-.592-.205-.43-.106-.882-.147-.167-.013-.516-.013-.348 0-.519 .013z"
+            fill="#666666"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          同期中…
+        </div>
+      </div>
+      <div
+        data-pencil-name="SyncStatus-オフライン"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: fit-content; justify-content: flex-start; left: 1882px; padding: 6px 10px; position: absolute; top: 0px; width: 248px"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 14 14"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="cloud-off"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 14px; overflow: visible; width: 14px"
+        >
+          <path
+            d="M1.077 .602q-.294 .027-.428 .3-.129 .274 .011 .54 .027 .069 .902 .951 .875 .881 .861 .898l-.112 .083q-.575 .461-.981 1.093-.407 .629-.588 1.33-.38 1.456 .154 2.898 .112 .281 .314 .622 .205 .342 .4 .595 .099 .127 .266 .308 1.163 1.203 2.854 1.428 .199 .014 2.964 .014 2.765 0 2.933-.027l.153-.014 .855 .838q.854 .854 .923 .881 .181 .099 .379 .072 .294-.055 .417-.321 .127-.267 .003-.533-.044-.055-5.882-5.907-5.838-5.855-5.964-5.937-.181-.153-.434-.112zM6.146 2.546q-.154 .072-.247 .212-.088 .14-.095 .322-.007 .181 .119 .335 .055 .085 .137 .143 .086 .055 .28 .109 .619 .212 1.094 .602 .127 .099 .308 .28 .181 .181 .28 .308 .349 .461 .547 1.036 .068 .211 .143 .311 .079 .095 .219 .167l.113 .041 .742 .014q.741 .013 .854 .041 .615 .14 1.036 .581 .42 .441 .547 1.059 .013 .123 .013 .376 0 .182-.02 .315-.021 .133-.079 .331-.126 .404 .127 .657 .181 .181 .441 .16 .259-.02 .413-.215 .099-.113 .181-.414 .086-.3 .113-.622 .041-.42-.055-.868-.112-.533-.393-1.001-.28-.469-.673-.807-.308-.249-.694-.437-.383-.192-.728-.26-.342-.072-.916-.072h-.376l-.085-.195q-.407-.882-1.156-1.548-.748-.667-1.685-.961-.311-.095-.505 0zM7.379 10.5q-2.283 0-2.464-.014-.827-.085-1.5-.519-.349-.209-.657-.523-.307-.315-.506-.653-.557-.923-.495-1.986 .061-1.066 .707-1.917 .154-.199 .363-.407 .212-.212 .379-.321l.068-.045 6.385 6.371z"
+            fill="#666666"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #666666; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          オフライン · 最終同期 09:41
+        </div>
+      </div>
+      <div
+        data-pencil-name="SyncStatus-エラー"
+        style="align-items: center; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; gap: 8px; height: fit-content; justify-content: flex-start; left: 2170px; padding: 6px 10px; position: absolute; top: 0px; width: 248px"
+      >
+        <svg
+          data-pencil-name="Icon"
+          viewBox="0 0 14 14"
+          preserveAspectRatio="xMidYMid meet"
+          data-icon-name="triangle-alert"
+          data-icon-set="lucide"
+          xmlns="http://www.w3.org/2000/svg"
+          style="box-sizing: border-box; flex-shrink: 0; height: 14px; overflow: visible; width: 14px"
+        >
+          <path
+            d="M6.874 1.162q-.462 .027-.882 .308-.113 .085-.246 .225-.134 .14-.202 .236-.113 .168-2.451 4.266-2.338 4.095-2.379 4.19-.126 .294-.126 .646-.014 .195 .007 .328 .02 .134 .078 .301 .154 .434 .503 .735 .348 .301 .813 .4 .082 .027 .896 .027h4.115 4.228q.687 0 .796-.027 .506-.113 .869-.479 .519-.516 .519-1.23 0-.421-.181-.783-.058-.099-2.369-4.142-2.307-4.047-2.392-4.187-.181-.294-.496-.503-.314-.212-.653-.284-.236-.041-.447-.027zM7.253 2.379q.096 .058 .157 .137 .065 .075 2.424 4.204 2.361 4.129 2.389 4.214 .068 .226-.052 .434-.116 .209-.355 .28-.068 .014-.855 .014h-8.763l-.113-.055q-.195-.085-.294-.294-.041-.099-.041-.232 0-.133 .048-.229 .051-.099 2.358-4.153 2.311-4.054 2.369-4.136 .113-.153 .328-.208 .215-.058 .4 .038zM6.846 4.689q-.253 .086-.379 .308l-.041 .086v2.464q0 .181 .034 .266 .038 .083 .12 .168 .085 .082 .188 .133 .106 .048 .232 .048 .126 0 .229-.048 .106-.051 .188-.133 .085-.085 .12-.168 .037-.085 .037-.266v-2.464l-.041-.086q-.099-.181-.28-.267-.085-.041-.226-.047-.14-.007-.181 .006zM6.901 9.352q-.181 .027-.321 .167-.209 .212-.154 .506 .054 .294 .321 .42 .099 .041 .253 .041 .253 0 .42-.167 .127-.127 .154-.308 .055-.294-.157-.502-.208-.212-.516-.157z"
+            fill="#d1453b"
+          />
+        </svg>
+        <div
+          data-pencil-name="Label"
+          style='box-sizing: border-box; color: #D1453B; flex: 1 1 0; font-family: "Noto Sans JP", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left'
+        >
+          同期エラー · クリックで再試行
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
