@@ -157,15 +157,21 @@ pub fn note_view(lines: &[Line]) -> Vec<NoteFile> {
 }
 
 /// Both sides' lines, one per id, in id order (with a trailing newline). Two different lines with one id keep
-/// the smaller text, so the result does not depend on which side is which.
+/// the smaller text, so the result does not depend on which side is which. A line is kept as written
+/// whenever it is a JSON object with a string `id`, even when this version cannot read it (an `op` of
+/// a later version): the merged copy goes to both sides, so dropping it would lose it for good.
 pub fn merge(a: &str, b: &str) -> String {
     let mut by_id: BTreeMap<String, String> = BTreeMap::new();
     for raw in a.lines().chain(b.lines()) {
-        let Ok(line) = serde_json::from_str::<Line>(raw) else {
+        let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(raw)
+        else {
+            continue;
+        };
+        let Some(id) = obj.get("id").and_then(serde_json::Value::as_str) else {
             continue;
         };
         by_id
-            .entry(line.id)
+            .entry(id.to_string())
             .and_modify(|cur| {
                 if raw < cur.as_str() {
                     *cur = raw.to_string();
@@ -718,6 +724,18 @@ mod tests {
             to_line(&add("0003", "b"))
         );
         assert_eq!(parse(&text).len(), 2);
+    }
+
+    #[test]
+    fn merge_keeps_lines_of_an_unknown_op_and_unknown_fields_as_written() {
+        let future = r#"{"id":"0002","op":"pin","at":"t","author":"x","extra":[1]}"#;
+        let a = format!("{}{future}\n", to_line(&add("0001", "a")));
+        let b = to_line(&add("0003", "b"));
+        let m = merge(&a, &b);
+        assert!(m.contains(&format!("{future}\n")), "{m}");
+        assert_eq!(m.lines().count(), 3);
+        assert_eq!(parse(&m).len(), 2, "this version still skips it when reading");
+        assert!(!merge("not json\n[1]\n{\"op\":\"add\"}\n", "").contains('{'));
     }
 
     #[test]
