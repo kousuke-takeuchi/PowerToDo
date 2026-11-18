@@ -9,7 +9,7 @@ import { isTypingTarget } from "../app/shortcuts";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Checkbox } from "../components/Checkbox";
-import { TaskRow } from "../components/TaskRow";
+import { ActionRow } from "./ActionRow";
 import { TODAY, dateLabel } from "../mock/data";
 import type { Comment, Project, Task, TaskPatch } from "../types/model";
 import { CommentsSection } from "./CommentsSection";
@@ -17,6 +17,7 @@ import { DatePicker } from "./DatePicker";
 import { LabelPicker } from "./LabelPicker";
 import { ProjectPicker } from "./ProjectPicker";
 import { PopRow, PopoverShell } from "./PopoverShell";
+import { useFitPopover } from "./useFitPopover";
 import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
 import { SubtaskForm } from "./SubtaskForm";
@@ -64,6 +65,10 @@ export type TaskDialogProps = {
   // ---- ダイアログ (spec ① §2) ----
   /** ヘッダーの「プロジェクト / セクション」を押したとき (そのプロジェクトの画面へ)。 */
   onOpenProject?: () => void;
+  /** サブタスク行を押したとき、そのサブタスクをこのダイアログで開く。渡すと行にホバーの操作 (編集・日付・コメント・「…」) も出る。 */
+  onOpenSubtask?: (no: number) => void;
+  /** このタスクがサブタスクのとき、親のタスク。ヘッダーに「プロジェクト / 親」と出し、親を押すと戻る。 */
+  parent?: { title: string; onOpen: () => void };
   /** 前 / 次のタスク。undefined なら矢印は押せない。 */
   onPrev?: () => void;
   onNext?: () => void;
@@ -178,6 +183,8 @@ export function TaskDialog({
   onParseRecurrence,
   today = TODAY,
   onOpenProject,
+  onOpenSubtask,
+  parent,
   onPrev,
   onNext,
   layout = "wide",
@@ -242,6 +249,7 @@ export function TaskDialog({
     setPopover((cur) => (cur === p ? null : p));
   };
   const popoverRef = useRef<HTMLDivElement>(null);
+  useFitPopover(popoverRef, popover !== null, `${popover}:${anchorTop}`); // 下からはみ出さない (spec ② §7)
   const { reduced, t } = useMotionTiming();
   // 閉じるアニメーション中 (AppShell の AnimatePresence で退場中) は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
   const present = useIsPresent();
@@ -303,6 +311,7 @@ export function TaskDialog({
         boxShadow: "inset 0 -1px 0 var(--color-border)",
       }}
     >
+      <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
       <button
         type="button"
         onClick={onOpenProject}
@@ -325,6 +334,35 @@ export function TaskDialog({
         <Folder size={14} color={project.color} aria-hidden />
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{section ? `${project.name} / ${section}` : project.name}</span>
       </button>
+        {parent && (
+          <>
+            <span aria-hidden style={{ color: "var(--color-text-muted)", fontSize: 13 }}>/</span>
+            <button
+              type="button"
+              aria-label={`親のタスク ${parent.title}`}
+              onClick={parent.onOpen}
+              className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+              style={{
+                minWidth: 0,
+                maxWidth: 260,
+                padding: "4px 6px",
+                border: 0,
+                borderRadius: 6,
+                fontFamily: "var(--font-body)",
+                fontSize: 13,
+                lineHeight: "19px",
+                color: "var(--color-text-secondary)",
+                cursor: "pointer",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {parent.title}
+            </button>
+          </>
+        )}
+      </div>
       <div style={{ display: "flex", gap: 2, position: "relative" }}>
         <Button variant="icon" icon={ChevronUp} ariaLabel="前のタスク" onClick={onPrev} disabled={!onPrev && editable} />
         <Button variant="icon" icon={ChevronDown} ariaLabel="次のタスク" onClick={onNext} disabled={!onNext && editable} />
@@ -418,13 +456,19 @@ export function TaskDialog({
           サブタスク {subtasks.filter(subDone).length}/{subtasks.length}
         </div>
         {subtasks.map((t) => (
-          <TaskRow
+          <ActionRow
             key={t.no}
-            title={t.title}
-            done={subDone(t)}
-            priority={t.priority}
-            hideActions
-            onToggleDone={() => (onToggleSubtask ? onToggleSubtask(t.no, !subDone(t)) : sub.toggle(t))}
+            task={t}
+            canInsert
+            rowProps={{
+              title: t.title,
+              done: subDone(t),
+              priority: t.priority,
+              date: onOpenSubtask ? dateLabel(t.due, today) : undefined,
+              hideActions: !onOpenSubtask,
+              onClick: onOpenSubtask ? () => onOpenSubtask(t.no) : undefined,
+              onToggleDone: () => (onToggleSubtask ? onToggleSubtask(t.no, !subDone(t)) : sub.toggle(t)),
+            }}
           />
         ))}
         {addingSub && onAddSubtask ? (
@@ -465,7 +509,7 @@ export function TaskDialog({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: reduced ? 0 : 8 }}
             transition={t(0.15)}
-            style={{ position: "absolute", right: 8, top: editable && anchorTop !== null ? anchorTop : POPOVER_TOP[popover], zIndex: 10 }}
+            style={{ position: "absolute", right: 8, top: editable && anchorTop !== null ? anchorTop : POPOVER_TOP[popover], zIndex: 10, display: "flex", flexDirection: "column" }}
           >
             {popover === "date" && (
               <DatePicker
@@ -474,12 +518,14 @@ export function TaskDialog({
                 today={today}
                 recurrenceLabel={rruleText}
                 onChange={(v) => {
-                  if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null });
+                  if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null, ...(v.rrule ? { rrule: v.rrule } : {}) });
                   else {
                     setDue(v.date);
                     setTime(v.time);
+                    if (v.rrule) setRrule(v.rrule);
                   }
                 }}
+                onDone={() => setPopover(null)}
                 onOpenRecurrence={() => setPopover("recurrence")}
               />
             )}

@@ -1,6 +1,6 @@
 import type React from "react";
 import { useContext, useEffect, useRef, useState } from "react";
-import { Bell, CalendarCheck, CalendarDays, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
+import { Bell, CalendarCheck, CalendarDays, ChevronDown, ChevronRight, Inbox, LayoutGrid, PanelLeftClose, Plus, Search } from "lucide-react";
 import { DragCtx } from "../app/drag/DragContext";
 import { isImeKey } from "../app/keys";
 import { useEscLayer } from "../app/layers";
@@ -43,6 +43,8 @@ export type SidebarProps = {
   displayName?: string;
   /** Stories only: draw this project as the drop target (drop-highlight, D-01r). */
   dropPreview?: string;
+  /** Stories: the 「アーカイブ済み」 group starts open. */
+  initialArchivedOpen?: boolean;
 };
 
 const heading: React.CSSProperties = {
@@ -71,6 +73,7 @@ export function Sidebar({
   onClose,
   displayName = "たろう",
   dropPreview,
+  initialArchivedOpen = false,
 }: SidebarProps) {
   // 選択行のハイライトだけ内部で持つ (画面遷移は Story を切り替える)。active が変わったらそれに合わせる。
   const [current, setCurrent] = useState(active);
@@ -94,8 +97,16 @@ export function Sidebar({
   const isActive = (kind: SidebarProps["active"]["kind"]) => current.kind === kind || (kind === "labels" && current.kind === "label");
   const drag = useContext(DragCtx);
   const inboxName = projects.find((p) => p.inbox)?.name;
-  const mine = projects.filter((p) => !p.inbox);
-  const favorites = projects.filter((p) => p.favorite);
+  // アーカイブ済みは専用の欄だけ (お気に入りにもマイプロジェクトにも出さない)。
+  const mine = projects.filter((p) => !p.inbox && !p.archived);
+  const favorites = projects.filter((p) => p.favorite && !p.archived);
+  const archivedList = projects.filter((p) => p.archived);
+  const [archivedOpen, setArchivedOpen] = useState(initialArchivedOpen);
+  // 開いているプロジェクトがアーカイブ済みなら、その欄を開いて見せる。
+  const currentArchived = current.kind === "project" && archivedList.some((p) => p.name === current.name);
+  useEffect(() => {
+    if (currentArchived) setArchivedOpen(true);
+  }, [currentArchived]);
   return (
     <div
       style={{
@@ -255,6 +266,31 @@ export function Sidebar({
             </div>
           ))}
         </div>
+        {archivedList.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <button
+              type="button"
+              aria-expanded={archivedOpen}
+              onClick={() => setArchivedOpen((v) => !v)}
+              className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+              style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", padding: "6px 10px", border: 0, borderRadius: 6, fontFamily: "var(--font-body)", textAlign: "left", cursor: "pointer", ...heading }}
+            >
+              {archivedOpen ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+              アーカイブ済み ({archivedList.length})
+            </button>
+            {archivedOpen &&
+              archivedList.map((p) => (
+                <div key={p.name} data-archived-item={p.name}>
+                  <ProjectItem
+                    color={p.color}
+                    label={p.name}
+                    active={current.kind === "project" && current.name === p.name}
+                    onClick={() => go({ kind: "project", name: p.name })}
+                  />
+                </div>
+              ))}
+          </div>
+        )}
       </section>
 
       <div style={{ flex: 1 }} />

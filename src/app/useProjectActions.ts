@@ -16,7 +16,7 @@ export const PALETTE = [
   "var(--color-priority-1)",
 ];
 
-/** プロジェクトの作成 / 改名 / 削除とラベルの改名 / 削除 (受信トレイは改名・削除できない)。 */
+/** プロジェクトの作成 / 編集 / お気に入り / アーカイブ / 削除とラベルの改名 / 削除。 */
 export function useProjectActions({
   current,
   summaries,
@@ -48,14 +48,15 @@ export function useProjectActions({
     }
   };
 
-  // ---- プロジェクトの改名 / 削除 (受信トレイは不可) ----
-  const renameProject = async (newName: string) => {
-    views.forget(viewKey("project", current));
+  // ---- プロジェクトの編集 (名前と色) / お気に入り / アーカイブ / ファイル (受信トレイは改名・アーカイブ・削除できない) ----
+  const saveProject = async (newName: string, color: string) => {
+    const renaming = newName !== current;
+    if (renaming) views.forget(viewKey("project", current));
     try {
-      const renamed = await api.renameProject(current, newName);
-      views.reload();
+      const saved = await api.updateProject(current, newName, color);
+      if (renaming) views.reload();
       await refreshSummaries();
-      navigate({ kind: "project", name: renamed.name });
+      if (renaming) navigate({ kind: "project", name: saved.name });
     } catch (e) {
       showError(e);
     } finally {
@@ -63,6 +64,33 @@ export function useProjectActions({
       void ext.refresh();
     }
   };
+
+  const setFavorite = async (favorite: boolean) => {
+    try {
+      await api.setProjectFavorite(current, favorite);
+      await refreshSummaries();
+    } catch (e) {
+      showError(e);
+    } finally {
+      void ext.refresh();
+    }
+  };
+
+  /** アーカイブする (受信トレイへ戻る) / アーカイブから戻す (その場に残る)。ファイルはそのまま。 */
+  const setArchived = async (archived: boolean) => {
+    try {
+      await api.setProjectArchived(current, archived);
+      await refreshSummaries();
+      if (archived) navigate({ kind: "inbox" });
+    } catch (e) {
+      showError(e);
+    } finally {
+      void ext.refresh();
+    }
+  };
+
+  const openFile = () => void api.openProjectFile(current).catch(showError);
+  const revealFile = () => void api.revealProjectFile(current).catch(showError);
 
   const deleteProject = async () => {
     const ok = await confirmAction(`プロジェクト「${current}」を削除します (archive フォルダに移動)。`, {
@@ -110,5 +138,5 @@ export function useProjectActions({
     }
   };
 
-  return { createProject, renameProject, deleteProject, deleteLabel, renameLabel };
+  return { createProject, saveProject, setFavorite, setArchived, openFile, revealFile, deleteProject, deleteLabel, renameLabel };
 }

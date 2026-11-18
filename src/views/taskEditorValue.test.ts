@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blankValue, changed, editBase, editorValueOf, insertTarget, moveOf, submitKey, toInput, toPatch } from "./taskEditorValue.ts";
-import type { Task } from "../types/model.ts";
+import { applyParsed, shouldParse, blankValue, changed, editBase, editorValueOf, insertTarget, moveOf, submitKey, toInput, toPatch } from "./taskEditorValue.ts";
+import type { QuickAddResult, Task } from "../types/model.ts";
 
 const task: Task = {
   no: 3, project: "仕事", category: "会議", title: "資料を作る", assignee: "たろう", priority: 2, progress: 0,
@@ -60,4 +60,55 @@ test("edit_base_is_the_value_when_editing_began", () => {
   assert.equal(editBase(first, true, synced), first);
   assert.equal(editBase(first, true, synced).due, "2026-10-26");
   assert.equal(editBase(first, false, synced), null);
+});
+
+const none: QuickAddResult = { title: "牛乳を買う", due: null, dueTime: null, rrule: null, priority: null, project: null, labels: [], spans: [] };
+
+test("applyParsed_without_tokens_only_sets_the_title", () => {
+  const v = { ...blankValue("受信トレイ", null), title: "牛乳を買う", due: "2026-10-26", priority: 2 as const, labels: ["a"] };
+  assert.deepEqual(applyParsed(v, none), v);
+});
+
+test("applyParsed_replaces_only_fields_with_a_token", () => {
+  const v = { ...blankValue("受信トレイ", "S"), title: "牛乳を買う 毎週水曜 10:00 p1 @急ぎ", due: "2026-10-26", dueTime: "09:00", priority: 3 as const, labels: ["a"], rrule: "FREQ=DAILY" };
+  const r: QuickAddResult = { ...none, due: "2026-11-25", dueTime: "10:00", rrule: "FREQ=WEEKLY;BYDAY=WE", priority: 1, labels: ["急ぎ", "a"] };
+  const o = applyParsed(v, r);
+  assert.deepEqual([o.title, o.due, o.dueTime, o.rrule, o.priority, o.labels, o.section], ["牛乳を買う", "2026-11-25", "10:00", "FREQ=WEEKLY;BYDAY=WE", 1, ["a", "急ぎ"], "S"]);
+});
+
+test("applyParsed_keeps_chip_values_the_text_does_not_mention", () => {
+  const v = { ...blankValue("受信トレイ", null), title: "x 明日", due: "2026-10-26", dueTime: "09:00", priority: 2 as const, rrule: "FREQ=DAILY" };
+  const o = applyParsed(v, { ...none, title: "x", due: "2026-10-27" });
+  assert.deepEqual([o.due, o.dueTime, o.priority, o.rrule], ["2026-10-27", "09:00", 2, "FREQ=DAILY"]);
+});
+
+test("applyParsed_moves_to_a_known_project_and_ignores_unknown_ones", () => {
+  const v = { ...blankValue("受信トレイ", "S"), title: "x #仕事" };
+  const o = applyParsed(v, { ...none, title: "x", project: "仕事" }, ["受信トレイ", "仕事"]);
+  assert.deepEqual([o.project, o.section], ["仕事", null]);
+  assert.deepEqual(applyParsed(v, { ...none, title: "x", project: "ない" }, ["仕事"]).project, "受信トレイ");
+});
+
+test("applyParsed_keeps_a_project_word_it_cannot_move_to_in_the_title", () => {
+  // "買う #仕事 明日 p1": a subtask editor (no project list) strips the date and priority but keeps "#仕事".
+  const v = { ...blankValue("受信トレイ", null), title: "買う #仕事 明日 p1" };
+  const r: QuickAddResult = {
+    ...none, title: "買う", project: "仕事", due: "2026-10-27", priority: 1,
+    spans: [{ start: 3, end: 6, kind: "project" }, { start: 7, end: 9, kind: "date" }, { start: 10, end: 12, kind: "priority" }],
+  };
+  const o = applyParsed(v, r);
+  assert.deepEqual([o.title, o.project, o.due, o.priority], ["買う #仕事", "受信トレイ", "2026-10-27", 1]);
+  assert.equal(applyParsed(v, r, ["受信トレイ", "仕事"]).title, "買う");
+});
+
+test("applyParsed_keeps_the_text_when_nothing_would_be_left", () => {
+  const v = { ...blankValue("受信トレイ", null), title: "明日" };
+  assert.equal(applyParsed(v, { ...none, title: "", due: "2026-10-27" }), v);
+});
+
+test("shouldParse_always_when_adding_and_only_for_a_changed_title_when_editing", () => {
+  assert.equal(shouldParse("add", "x", ""), true);
+  assert.equal(shouldParse("add", "  ", ""), false);
+  assert.equal(shouldParse("edit", "資料", "資料"), false);
+  assert.equal(shouldParse("edit", "資料 明日", "資料"), true);
 });

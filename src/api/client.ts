@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Comment,
   AutostartDto,
+  DueTextDto,
+  StartView,
   AppError,
   AppErrorKind,
   AppStateDto,
@@ -74,6 +76,11 @@ export const api = {
   createProject: (name: string, color: string) => invoke<ProjectSummary>("create_project", { name, color }),
   renameProject: (name: string, newName: string) => invoke<ProjectSummary>("rename_project", { name, newName }),
   deleteProject: (name: string) => invoke<null>("delete_project", { name }),
+  updateProject: (name: string, newName: string, color: string) => invoke<ProjectSummary>("update_project", { name, newName, color }),
+  setProjectFavorite: (name: string, favorite: boolean) => invoke<ProjectSummary>("set_project_favorite", { name, favorite }),
+  setProjectArchived: (name: string, archived: boolean) => invoke<ProjectSummary>("set_project_archived", { name, archived }),
+  openProjectFile: (name: string) => invoke<null>("open_project_file", { name }),
+  revealProjectFile: (name: string) => invoke<null>("reveal_project_file", { name }),
 
   addSection: (project: string, name: string) => invoke<ProjectView>("add_section", { project, name }),
   renameSection: (project: string, name: string, newName: string) => invoke<ProjectView>("rename_section", { project, name, newName }),
@@ -81,7 +88,8 @@ export const api = {
 
   addTask: (project: string, input: TaskInput, position?: Position) => invoke<ProjectView>("add_task", { project, input, position: position ?? null }),
   updateTask: (project: string, no: number, patch: TaskPatch) => invoke<ProjectView>("update_task", { project, no, patch }),
-  completeTask: (project: string, no: number, done: boolean) => invoke<ProjectView>("complete_task", { project, no, done }),
+  /** `withSubtasks`: 完了の取り消しで、親と同時に完了になったサブタスクも未完了に戻す。 */
+  completeTask: (project: string, no: number, done: boolean, withSubtasks = false) => invoke<ProjectView>("complete_task", { project, no, done, withSubtasks }),
   // ---- comments (spec ① §3) ----
   listComments: (project: string, no: number) => invoke<Comment[]>("list_comments", { project, no }),
   commentCounts: (project: string) => invoke<Record<string, number>>("comment_counts", { project }),
@@ -99,6 +107,7 @@ export const api = {
 
   quickAdd: (text: string, defaultProject: string) => invoke<QuickAddOutcome>("quick_add", { text, defaultProject }),
   parseQuickAdd: (text: string) => invoke<QuickAddResult>("parse_quick_add", { text }),
+  parseDueText: (text: string, today: string) => invoke<DueTextDto | null>("parse_due_text", { text, today }),
   parseRecurrence: (text: string) => invoke<RecurrenceDto>("parse_recurrence", { text }),
   summarizeRecurrence: (rrule: string) => invoke<RecurrenceLabelDto>("summarize_recurrence", { rrule }),
 
@@ -170,6 +179,9 @@ export const api = {
    */
   updateInstall: () => invoke<null>("update_install"),
   setUpdateAutoCheck: (enabled: boolean) => invoke<null>("set_update_auto_check", { enabled }),
+  /** 起動時に開く画面 (この端末の settings.json)。 */
+  startView: () => invoke<StartView>("start_view"),
+  setStartView: (view: StartView) => invoke<null>("set_start_view", { view }),
   /** ログイン時に起動するか (OS の登録の状態)。 */
   autostartStatus: () => invoke<AutostartDto>("autostart_status"),
   /** ログイン時に起動するかを OS に登録 / 解除する。返るのは OS の状態。失敗は日本語の文で reject する。 */

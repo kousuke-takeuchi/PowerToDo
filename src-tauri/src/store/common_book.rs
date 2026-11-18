@@ -3,7 +3,7 @@
 //!
 //! | sheet | columns |
 //! | --- | --- |
-//! | プロジェクト | 名前 / 色 / 並び順 / お気に入り / 受信トレイ |
+//! | プロジェクト | 名前 / 色 / 並び順 / お気に入り / 受信トレイ / アーカイブ |
 //! | ラベル | 名前 / 色 / 並び順 |
 //! | フィルター | 名前 / クエリ / 並び順 (written empty; not read yet) |
 //! | 祝日 | 日付 / 名称 |
@@ -41,7 +41,14 @@ const SHEET_FILTERS: &str = "フィルター";
 const SHEET_HOLIDAYS: &str = "祝日";
 const SHEET_SETTINGS: &str = "設定";
 
-const PROJECT_HEADERS: &[&str] = &["名前", "色", "並び順", "お気に入り", "受信トレイ"];
+const PROJECT_HEADERS: &[&str] = &[
+    "名前",
+    "色",
+    "並び順",
+    "お気に入り",
+    "受信トレイ",
+    "アーカイブ",
+];
 const LABEL_HEADERS: &[&str] = &["名前", "色", "並び順"];
 const HOLIDAY_HEADERS: &[&str] = &["日付", "名称"];
 const SETTINGS_HEADERS: &[&str] = &["キー", "値"];
@@ -130,6 +137,7 @@ impl CommonBook {
                 order: 0,
                 favorite: false,
                 inbox: true,
+                archived: false,
             }],
             labels: Vec::new(),
             holidays: Vec::new(),
@@ -292,6 +300,7 @@ pub fn read_common_book(path: &Path) -> AppResult<CommonBook> {
             color: color_or_default(&r[1]),
             order: order_or(&r[2], i),
             favorite: truthy(&r[3]),
+            archived: truthy(&r[5]),
         });
     }
 
@@ -444,6 +453,7 @@ fn build_workbook(book: &CommonBook) -> Result<Workbook, XlsxError> {
         ws.write_number(r, 2, p.order)?;
         ws.write_boolean(r, 3, p.favorite)?;
         ws.write_boolean(r, 4, p.name == INBOX)?;
+        ws.write_boolean(r, 5, p.archived)?;
         write_extra_cells(
             ws,
             r,
@@ -558,6 +568,7 @@ mod tests {
             order,
             favorite,
             inbox: name == INBOX,
+            archived: false,
         }
     }
 
@@ -775,12 +786,76 @@ mod tests {
                 "並び順",
                 "お気に入り",
                 "受信トレイ",
+                "アーカイブ",
                 "メモ",
                 "担当者"
             ]
         );
         let rows = sheet_text(&out, "設定");
         assert!(rows.contains(&vec!["通知音".to_string(), "オン".to_string()]));
+    }
+
+    #[test]
+    fn archived_column_round_trips_and_a_book_without_it_reads_as_not_archived() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(COMMON_FILE);
+        let mut b = CommonBook::new_default();
+        let mut old = project("古い", 1, false);
+        old.archived = true;
+        b.projects.push(old);
+        b.projects.push(project("新しい", 2, false));
+        write_common_book(&p, &b).unwrap();
+        let read = read_common_book(&p).unwrap();
+        assert!(read.projects[1].archived && !read.projects[2].archived);
+        assert!(
+            read.project_columns.is_empty(),
+            "known column, not an extra one"
+        );
+        assert_eq!(read, b);
+
+        // A book from before the column existed.
+        let old_book = dir.path().join("old.xlsx");
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(
+            ws,
+            "プロジェクト",
+            &["名前", "色", "並び順", "お気に入り", "受信トレイ"],
+        );
+        ws.write_string(1, 0, INBOX).unwrap();
+        ws.write_string(2, 0, "仕事").unwrap();
+        wb.save(&old_book).unwrap();
+        assert!(
+            read_common_book(&old_book)
+                .unwrap()
+                .projects
+                .iter()
+                .all(|p| !p.archived)
+        );
+
+        // What an older app does: the column is unknown to it, so it keeps it as text; a
+        // newer app reads that text back as the mark.
+        let text_book = dir.path().join("text.xlsx");
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        header(
+            ws,
+            "プロジェクト",
+            &[
+                "名前",
+                "色",
+                "並び順",
+                "お気に入り",
+                "受信トレイ",
+                "アーカイブ",
+            ],
+        );
+        ws.write_string(1, 0, INBOX).unwrap();
+        ws.write_string(2, 0, "仕事").unwrap();
+        ws.write_string(2, 5, "TRUE").unwrap();
+        wb.save(&text_book).unwrap();
+        let read = read_common_book(&text_book).unwrap();
+        assert!(!read.projects[0].archived && read.projects[1].archived);
     }
 
     #[test]

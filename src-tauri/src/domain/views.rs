@@ -23,9 +23,41 @@ pub struct DayGroup {
     pub tasks: Vec<Task>,
 }
 
-/// Unfinished and not a subtask: what the cross-project lists show (仕様 §3.1, §3.2).
-fn open_top_level(t: &Task) -> bool {
-    t.parent_no.is_none() && t.progress < 100
+/// For each task (same index): is it a "visible open row"? Open, and every ancestor (within the
+/// same project) exists and is open. A subtask whose parent is finished or missing is hidden in
+/// every list, so it is not counted or shown anywhere (仕様 2026-11-18 §2).
+pub fn visible_open(tasks: &[Task]) -> Vec<bool> {
+    let index: std::collections::HashMap<(&str, u32), usize> = tasks
+        .iter()
+        .enumerate()
+        .map(|(i, t)| ((t.project.as_str(), t.no), i))
+        .collect();
+    tasks
+        .iter()
+        .map(|t| {
+            let mut cur = t;
+            // The step cap guards against a parent cycle in a hand-edited book.
+            for _ in 0..=tasks.len() {
+                if cur.progress >= 100 {
+                    return false;
+                }
+                match cur.parent_no {
+                    None => return true,
+                    Some(p) => match index.get(&(cur.project.as_str(), p)) {
+                        Some(&i) => cur = &tasks[i],
+                        None => return false,
+                    },
+                }
+            }
+            false
+        })
+        .collect()
+}
+
+/// The visible open rows of `tasks`, in their given order.
+pub fn visible_open_rows(tasks: &[Task]) -> impl Iterator<Item = &Task> {
+    let vis = visible_open(tasks);
+    tasks.iter().zip(vis).filter(|(_, v)| *v).map(|(t, _)| t)
 }
 
 /// Due date (None last), then priority (1 first), then No.
@@ -39,15 +71,13 @@ fn by_priority_no(a: &Task, b: &Task) -> std::cmp::Ordering {
 }
 
 pub fn today_view(tasks: &[Task], today: NaiveDate) -> TodayView {
-    let mut overdue: Vec<Task> = tasks
-        .iter()
-        .filter(|t| open_top_level(t) && t.due.is_some_and(|d| d < today))
+    let mut overdue: Vec<Task> = visible_open_rows(tasks)
+        .filter(|t| t.due.is_some_and(|d| d < today))
         .cloned()
         .collect();
     overdue.sort_by(by_due_priority_no);
-    let mut todays: Vec<Task> = tasks
-        .iter()
-        .filter(|t| open_top_level(t) && t.due == Some(today))
+    let mut todays: Vec<Task> = visible_open_rows(tasks)
+        .filter(|t| t.due == Some(today))
         .cloned()
         .collect();
     todays.sort_by(|a, b| {
@@ -67,21 +97,21 @@ pub fn today_view(tasks: &[Task], today: NaiveDate) -> TodayView {
 }
 
 pub fn today_count(tasks: &[Task], today: NaiveDate) -> u32 {
-    tasks
-        .iter()
-        .filter(|t| open_top_level(t) && t.due.is_some_and(|d| d <= today))
+    visible_open_rows(tasks)
+        .filter(|t| t.due.is_some_and(|d| d <= today))
         .count() as u32
 }
 
 /// `days` groups starting at `from`; days without tasks are included (the view shows an add row).
 pub fn upcoming(tasks: &[Task], from: NaiveDate, days: u32) -> Vec<DayGroup> {
+    let rows: Vec<&Task> = visible_open_rows(tasks).collect();
     (0..days)
         .filter_map(|i| from.checked_add_days(Days::new(i as u64)))
         .map(|date| {
-            let mut day: Vec<Task> = tasks
+            let mut day: Vec<Task> = rows
                 .iter()
-                .filter(|t| open_top_level(t) && t.due == Some(date))
-                .cloned()
+                .filter(|t| t.due == Some(date))
+                .map(|t| (*t).clone())
                 .collect();
             day.sort_by(by_priority_no);
             DayGroup { date, tasks: day }
@@ -89,21 +119,20 @@ pub fn upcoming(tasks: &[Task], from: NaiveDate, days: u32) -> Vec<DayGroup> {
         .collect()
 }
 
-/// Every unfinished task (subtasks too, flat) carrying `label`.
+/// Every visible open row (subtasks too, flat) carrying `label`.
 pub fn label_tasks(tasks: &[Task], label: &str) -> Vec<Task> {
-    let mut out: Vec<Task> = tasks
-        .iter()
-        .filter(|t| t.progress < 100 && t.labels.iter().any(|l| l == label))
+    let mut out: Vec<Task> = visible_open_rows(tasks)
+        .filter(|t| t.labels.iter().any(|l| l == label))
         .cloned()
         .collect();
     out.sort_by(by_due_priority_no);
     out
 }
 
-/// Unfinished tasks per label name (subtasks included).
+/// Visible open rows per label name (subtasks included).
 pub fn label_counts(tasks: &[Task]) -> BTreeMap<String, u32> {
     let mut counts = BTreeMap::new();
-    for t in tasks.iter().filter(|t| t.progress < 100) {
+    for t in visible_open_rows(tasks) {
         for l in &t.labels {
             *counts.entry(l.clone()).or_insert(0) += 1;
         }
@@ -198,7 +227,7 @@ mod tests {
             task(4, "b", Some("2026-10-01"), 4, 0, None), // overdue, oldest -> first
             task(5, "b", Some("2026-10-10"), 1, 0, None), // overdue same day, p1 before p3
             task(6, "a", Some("2026-10-13"), 1, 100, None), // done: hidden
-            task(7, "a", Some("2026-10-13"), 1, 0, Some(1)), // subtask: hidden
+            task(7, "a", Some("2026-10-13"), 1, 0, Some(1)), // open subtask of an open parent: shown
             task(8, "a", Some("2026-10-14"), 1, 0, None), // tomorrow: hidden
             task(9, "a", None, 1, 0, None),               // no due: hidden
         ];
@@ -207,8 +236,8 @@ mod tests {
             v.overdue.iter().map(|t| t.no).collect::<Vec<_>>(),
             vec![4, 5, 3]
         );
-        assert_eq!(v.today.iter().map(|t| t.no).collect::<Vec<_>>(), vec![2, 1]);
-        assert_eq!(today_count(&tasks, d("2026-10-13")), 5);
+        assert_eq!(v.today.iter().map(|t| t.no).collect::<Vec<_>>(), vec![2, 7, 1]);
+        assert_eq!(today_count(&tasks, d("2026-10-13")), 6);
     }
 
     #[test]
@@ -240,7 +269,7 @@ mod tests {
     fn label_tasks_are_flat_and_sorted_by_due_then_priority() {
         let mut a = task(1, "a", None, 2, 0, None);
         a.labels = vec!["食品".into()];
-        let mut b = task(2, "b", Some("2026-10-20"), 4, 0, Some(1));
+        let mut b = task(2, "a", Some("2026-10-20"), 4, 0, Some(1));
         b.labels = vec!["食品".into()]; // subtask: included
         let mut c = task(3, "b", Some("2026-10-15"), 4, 0, None);
         c.labels = vec!["食品".into(), "急ぎ".into()];
@@ -253,5 +282,42 @@ mod tests {
         let counts = label_counts(&tasks);
         assert_eq!(counts["食品"], 3);
         assert_eq!(counts["急ぎ"], 1);
+    }
+
+    #[test]
+    fn visible_open_needs_every_ancestor_open_and_present() {
+        let tasks = vec![
+            task(1, "a", None, 4, 0, None),       // open top
+            task(2, "a", None, 4, 100, None),     // done top
+            task(3, "a", None, 4, 0, Some(1)),    // under open: visible
+            task(4, "a", None, 4, 0, Some(2)),    // under done: hidden
+            task(5, "a", None, 4, 0, Some(4)),    // grandchild under hidden: hidden
+            task(6, "a", None, 4, 0, Some(3)),    // grandchild under open chain: visible
+            task(7, "a", None, 4, 0, Some(99)),   // missing parent: hidden
+            task(1, "b", None, 4, 100, None),     // same No. in another project: done
+            task(8, "b", None, 4, 0, Some(1)),    // parent is b#1 (done), not a#1: hidden
+        ];
+        assert_eq!(
+            visible_open(&tasks),
+            [true, false, true, false, false, true, false, false, false]
+        );
+    }
+
+    #[test]
+    fn today_and_upcoming_include_due_subtasks_but_not_under_done_parents() {
+        let t = d("2026-10-13");
+        let tasks = vec![
+            task(1, "a", None, 4, 0, None),
+            task(2, "a", Some("2026-10-13"), 4, 0, Some(1)),
+            task(3, "a", Some("2026-10-14"), 4, 0, Some(1)),
+            task(4, "a", None, 4, 100, None),
+            task(5, "a", Some("2026-10-13"), 4, 0, Some(4)),
+            task(6, "a", Some("2026-10-14"), 4, 0, Some(4)),
+        ];
+        let v = today_view(&tasks, t);
+        assert_eq!(v.today.iter().map(|x| x.no).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(today_count(&tasks, t), 1);
+        let g = upcoming(&tasks, t, 2);
+        assert_eq!(g[1].tasks.iter().map(|x| x.no).collect::<Vec<_>>(), vec![3]);
     }
 }

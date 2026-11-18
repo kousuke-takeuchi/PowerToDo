@@ -137,6 +137,40 @@ function isLinux(): boolean {
   return ua.includes("Linux") && !ua.includes("Android");
 }
 
+const START_VIEW_OPTIONS = [
+  { value: "today", label: "今日" },
+  { value: "inbox", label: "受信トレイ" },
+] as const;
+
+export type GeneralPaneProps = {
+  /** 起動時に開く画面。 */
+  startView: "today" | "inbox";
+  onChangeStartView?: (v: "today" | "inbox") => void;
+  /** 設定を読み込むまで操作できない。 */
+  loading?: boolean;
+  busy?: boolean;
+  error?: string | null;
+};
+
+/** 「全般」ペイン: 起動時に開く画面。端末ごとの設定で、同期しない。 */
+export function GeneralPane({ startView, onChangeStartView, loading = false, busy = false, error }: GeneralPaneProps) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+      <Section label="起動時に開く画面">
+        <Segmented
+          options={[...START_VIEW_OPTIONS]}
+          value={startView}
+          onChange={(v) => !busy && onChangeStartView?.(v)}
+          ariaLabel="起動時に開く画面"
+          disabled={loading}
+        />
+        <Desc>アプリを起動したときに最初に開く画面です。この端末だけの設定です。</Desc>
+      </Section>
+      {error && <ErrorText>{error}</ErrorText>}
+    </div>
+  );
+}
+
 export type NotificationsPaneProps = {
   enabled: boolean;
   onToggle?: (v: boolean) => void;
@@ -379,6 +413,7 @@ const SHORTCUTS: { keys: string[][]; action: string; note?: string }[] = [
   { keys: [["Delete"], ["Backspace"]], action: "フォーカス行を削除", note: "確認あり" },
   { keys: [["1 - 4"]], action: "優先度" },
   { keys: [["t"], ["m"]], action: "期限を今日 / 明日", note: "時刻は保つ" },
+  { keys: [["s"]], action: "セクションを追加", note: "プロジェクト画面" },
   { keys: [["→"], ["←"]], action: "サブタスクの展開 / 折りたたみ", note: "プロジェクト画面" },
   { keys: [["Esc"]], action: "最上位のレイヤーを閉じる", note: "レイヤーが無ければ行フォーカスを外す" },
 ];

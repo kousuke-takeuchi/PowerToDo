@@ -113,6 +113,32 @@ pub struct AppSettings {
     /// OS's registration is the truth (see `commands::autostart`). Per device.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
+    /// Which screen the app opens on at launch (spec ② §8). Per device. Left out of the file
+    /// while it is the default.
+    #[serde(default, deserialize_with = "lenient_start_view", skip_serializing_if = "StartView::is_default")]
+    pub start_view: StartView,
+}
+
+/// The screen opened at launch. An unknown value (a newer version's) reads as the default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartView {
+    #[default]
+    Today,
+    Inbox,
+}
+
+fn lenient_start_view<'de, D: serde::Deserializer<'de>>(d: D) -> Result<StartView, D::Error> {
+    Ok(serde_json::Value::deserialize(d)
+        .ok()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default())
+}
+
+impl StartView {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The update part of `settings.json`.
@@ -263,6 +289,35 @@ mod tests {
             s.save(dir.path()).unwrap();
             assert_eq!(AppSettings::load(dir.path()).unwrap().autostart, Some(v));
         }
+    }
+
+    #[test]
+    fn start_view_defaults_to_today_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        AppSettings::default().save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
+        assert!(!text.contains("startView"), "{text}");
+        assert_eq!(
+            AppSettings::load(dir.path()).unwrap().start_view,
+            StartView::Today
+        );
+        let s = AppSettings {
+            start_view: StartView::Inbox,
+            ..AppSettings::default()
+        };
+        s.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
+        assert!(text.contains("\"startView\": \"inbox\""), "{text}");
+        assert_eq!(
+            AppSettings::load(dir.path()).unwrap().start_view,
+            StartView::Inbox
+        );
+        std::fs::write(dir.path().join("settings.json"), r#"{"startView":"week"}"#).unwrap();
+        assert_eq!(
+            AppSettings::load(dir.path()).unwrap().start_view,
+            StartView::Today,
+            "an unknown value reads as the default"
+        );
     }
 
     #[test]

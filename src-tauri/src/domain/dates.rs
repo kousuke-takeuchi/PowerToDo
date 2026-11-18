@@ -65,6 +65,23 @@ pub fn parse_date_word(word: &str) -> Option<RelDate> {
     parse_numeric_date(w)
 }
 
+/// A bare weekday (金曜 / 金曜日 / fri / friday), which quick add leaves in the title but the date
+/// picker's text field takes as a date.
+pub fn parse_bare_weekday(word: &str) -> Option<Weekday> {
+    let w = word.trim();
+    if w.ends_with('曜') || w.ends_with("曜日") {
+        parse_ja_weekday(w)
+    } else {
+        parse_en_weekday(&w.to_lowercase())
+    }
+}
+
+/// The next `day` after `today` (a week ahead when today is that day).
+pub fn next_weekday_after(day: Weekday, today: NaiveDate) -> NaiveDate {
+    let ahead = (day.num_days_from_monday() + 7 - today.weekday().num_days_from_monday() - 1) % 7 + 1;
+    today + Duration::days(ahead as i64)
+}
+
 fn parse_ja_weekday(s: &str) -> Option<Weekday> {
     let s = s
         .strip_suffix("曜日")
@@ -239,6 +256,18 @@ mod tests {
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+    #[test]
+    fn bare_weekday_is_the_next_such_day() {
+        let wed = d("2026-11-18");
+        let day = |w: &str| next_weekday_after(parse_bare_weekday(w).unwrap(), wed);
+        assert_eq!(day("金曜"), d("2026-11-20"));
+        assert_eq!(day("金曜日"), d("2026-11-20"));
+        assert_eq!(day("friday"), d("2026-11-20"));
+        assert_eq!(day("水曜"), d("2026-11-25"));
+        assert_eq!(day("mon"), d("2026-11-23"));
+        assert_eq!(parse_bare_weekday("金"), None);
+        assert_eq!(parse_bare_weekday("明日"), None);
     }
     fn t(h: u32, m: u32) -> NaiveTime {
         NaiveTime::from_hms_opt(h, m, 0).unwrap()

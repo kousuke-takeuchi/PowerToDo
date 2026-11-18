@@ -12,13 +12,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::domain::model::{INBOX, Placement, Position, TaskInput, TaskPatch};
-use crate::domain::quick_add::{QuickAddResult, parse};
+use crate::domain::model::serde_time;
+use crate::domain::quick_add::{QuickAddResult, parse, parse_schedule};
 use crate::domain::recurrence;
 use crate::domain::recurrence_words;
 use crate::domain::reminders;
@@ -31,7 +32,7 @@ use crate::platform;
 use crate::store::common_book::Settings;
 use crate::store::external::{FileKind, Verdict, classify_path, fingerprint, verdict};
 use crate::store::fired::{Fired, ReminderItem, ReminderKey};
-use crate::store::paths::{AppSettings, Paths};
+use crate::store::paths::{AppSettings, Paths, StartView};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
 #[cfg(desktop)]
 use crate::store::watcher;
@@ -347,6 +348,8 @@ pub struct AppStateDto {
     /// The tray icon could not be created; the settings pane notes that closing quits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tray_error: Option<String>,
+    /// The screen to open first (this device's `settings.json`); decided with the first paint.
+    pub start_view: StartView,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -362,6 +365,8 @@ pub struct QuickAddOutcome {
 pub struct MoveOutcome {
     pub from: ProjectView,
     pub to: ProjectView,
+    /// The moved task's No. in `to` (another project renumbers it; the same project keeps it).
+    pub no: u32,
 }
 
 /// `settings` / `update_settings`: the common workbook's settings plus the local data folder.
@@ -472,6 +477,19 @@ pub struct RecurrenceDto {
     pub label: Option<String>,
 }
 
+/// `parse_due_text`: what the date picker's text field read (spec ② §9). `due` is the date to set
+/// (for a recurrence, its first occurrence on or after today), `time` and `rrule` are set when the
+/// text had them, `label` is a short line to show, e.g. 毎週水曜 (11/25 から).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DueTextDto {
+    pub due: Option<NaiveDate>,
+    #[serde(with = "serde_time::option")]
+    pub time: Option<NaiveTime>,
+    pub rrule: Option<String>,
+    pub label: String,
+}
+
 /// `summarize_recurrence`: the label for a stored RRULE, and whether the rule computes without
 /// error (a finished COUNT / UNTIL rule is valid; only an unreadable one is not).
 #[derive(Debug, Clone, Serialize)]
@@ -527,6 +545,7 @@ fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateD
         warning,
         watch_error: None,
         tray_error: None,
+        start_view: StartView::default(),
     }
 }
 
@@ -1185,7 +1204,12 @@ fn start_watching(app: &AppHandle, state: &AppState) {
 // ---- quick add ----
 
 pub fn parse_quick_add_in(store: &ProjectStore, text: &str, today: NaiveDate) -> QuickAddResult {
-    let projects: Vec<String> = store.summaries().into_iter().map(|p| p.name).collect();
+    let projects: Vec<String> = store
+        .summaries()
+        .into_iter()
+        .filter(|p| !p.archived)
+        .map(|p| p.name)
+        .collect();
     let labels: Vec<String> = store.labels().into_iter().map(|l| l.name).collect();
     let mut parsed = parse(text, today, &projects, &labels);
     // A recurrence without a date starts on its first occurrence on or after today. An
@@ -1207,6 +1231,12 @@ pub fn quick_add_in(
     today: NaiveDate,
 ) -> AppResult<QuickAddOutcome> {
     let parsed = parse_quick_add_in(store, text, today);
+    // An archived project takes no new tasks: the inbox stands in for it.
+    let default_project = if store.is_archived(default_project) {
+        INBOX
+    } else {
+        default_project
+    };
     let project = parsed
         .project
         .clone()
@@ -1255,6 +1285,7 @@ pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     Ok(AppStateDto {
         watch_error: state.watch_error(),
         tray_error: state.tray_error(),
+        start_view: state.lock_settings().start_view,
         ..dto
     })
 }
@@ -1275,8 +1306,35 @@ pub async fn set_data_dir(
     Ok(AppStateDto {
         watch_error: state.watch_error(),
         tray_error: state.tray_error(),
+        start_view: state.lock_settings().start_view,
         ..dto
     })
+}
+
+/// The screen opened at launch (spec ② §8).
+#[tauri::command]
+pub async fn start_view(state: State<'_, AppState>) -> AppResult<StartView> {
+    Ok(state.lock_settings().start_view)
+}
+
+/// Sets the screen opened at launch. Per device, so it goes to `settings.json`, not the data folder.
+#[tauri::command]
+pub async fn set_start_view(view: StartView, app: AppHandle) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let _writer = state.sync_rt.lock_settings_write();
+        let next = AppSettings {
+            start_view: view,
+            ..state.lock_settings().clone()
+        };
+        next.save(state.app_data_dir())?;
+        *state.lock_settings() = next;
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::Io {
+        message: format!("内部エラー: {e}"),
+    })?
 }
 
 /// Why watching the data folder could not start, or `None` while it runs (仕様 §7).
@@ -1453,6 +1511,69 @@ pub async fn rename_project(
 }
 
 #[tauri::command]
+pub async fn update_project(
+    name: String,
+    new_name: String,
+    color: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectSummary> {
+    let summary = mutate_structure(&app, state.inner(), &[&new_name], |s| {
+        s.update_project(&name, &new_name, &color)
+    })?;
+    if new_name != name {
+        state.update_fired(|f| f.rename_project(&name, &new_name));
+    }
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn set_project_favorite(
+    name: String,
+    favorite: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectSummary> {
+    mutate_structure(&app, state.inner(), &[], |s| {
+        s.set_project_favorite(&name, favorite)
+    })
+}
+
+#[tauri::command]
+pub async fn set_project_archived(
+    name: String,
+    archived: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectSummary> {
+    mutate_structure(&app, state.inner(), &[], |s| {
+        s.set_project_archived(&name, archived)
+    })
+}
+
+/// Opens `<name>.xlsx` in the OS's default app.
+#[tauri::command]
+pub async fn open_project_file(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let path = with_store(state.inner(), |s| s.project_file(&name))?;
+    platform::open_file(&app, &path)
+}
+
+/// Shows `<name>.xlsx` selected in Finder / Explorer.
+#[tauri::command]
+pub async fn reveal_project_file(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let path = with_store(state.inner(), |s| s.project_file(&name))?;
+    platform::reveal_file(&app, &path)
+}
+
+#[tauri::command]
 pub async fn delete_project(
     name: String,
     app: AppHandle,
@@ -1550,9 +1671,10 @@ fn complete_task_in(
     project: &str,
     no: u32,
     done: bool,
+    with_subtasks: bool,
 ) -> AppResult<ProjectView> {
     let view = mutate(app, state, &[project], false, |s| {
-        s.complete_task(project, no, done)
+        s.complete_task_with(project, no, done, with_subtasks)
     })?;
     state.forget_fired(project, no);
     Ok(view)
@@ -1563,7 +1685,7 @@ fn complete_task_in(
 /// window back and tells the UI (`notification-error { message }`), which shows it.
 pub(crate) fn complete_from_notification(app: &AppHandle, project: &str, no: u32) {
     let state = app.state::<AppState>();
-    match complete_task_in(app, &state, project, no, true) {
+    match complete_task_in(app, &state, project, no, true, false) {
         Ok(_) => emit_changed(app, &[project.to_string()], ChangeReason::Bulk),
         Err(e) => {
             eprintln!("could not complete {project}#{no} from a notification: {e}");
@@ -1589,10 +1711,18 @@ pub async fn complete_task(
     project: String,
     no: u32,
     done: bool,
+    with_subtasks: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    complete_task_in(&app, state.inner(), &project, no, done)
+    complete_task_in(
+        &app,
+        state.inner(),
+        &project,
+        no,
+        done,
+        with_subtasks.unwrap_or(false),
+    )
 }
 
 #[tauri::command]
@@ -1630,7 +1760,7 @@ pub async fn move_task(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<MoveOutcome> {
-    let (from, to) = mutate(&app, state.inner(), &[&project, &to_project], false, |s| {
+    let (from, to, new_no) = mutate(&app, state.inner(), &[&project, &to_project], false, |s| {
         s.move_task(&project, no, &to_project, to_section.as_deref())
     })?;
     if project != to_project {
@@ -1638,7 +1768,11 @@ pub async fn move_task(
         state.forget_fired(&project, no);
         emit_changed(&app, &[project, to_project], ChangeReason::Move);
     }
-    Ok(MoveOutcome { from, to })
+    Ok(MoveOutcome {
+        from,
+        to,
+        no: new_no,
+    })
 }
 
 #[tauri::command]
@@ -1931,6 +2065,55 @@ pub fn parse_recurrence_in(text: &str) -> RecurrenceDto {
     RecurrenceDto { rrule, label }
 }
 
+/// The date, time and recurrence in `text`, when the whole text is made of such words. A
+/// recurrence takes its first occurrence on or after `today` as the date, as quick add does.
+pub fn parse_due_text_in(text: &str, today: NaiveDate) -> Option<DueTextDto> {
+    let s = parse_schedule(text, today)?;
+    let due = match (&s.due, &s.rrule) {
+        (None, Some(rrule)) => recurrence::first_on_or_after(rrule, today, s.time)
+            .ok()
+            .flatten(),
+        (due, _) => *due,
+    };
+    let day = due.map(|d| {
+        if d.year() == today.year() {
+            format!("{}/{}", d.month(), d.day())
+        } else {
+            format!("{}/{}/{}", d.year(), d.month(), d.day())
+        }
+    });
+    let at = s.time.map(|t| t.format("%H:%M").to_string());
+    let label = match (&s.rrule, &day) {
+        (Some(rrule), day) => {
+            let mut l = recurrence::summarize(rrule).unwrap_or_else(|| rrule.clone());
+            if let Some(a) = &at {
+                l = format!("{l} {a}");
+            }
+            match day {
+                Some(day) => format!("{l} ({day} から)"),
+                None => l,
+            }
+        }
+        (None, day) => {
+            let wd = due.map(|d| ["月", "火", "水", "木", "金", "土", "日"][d.weekday().num_days_from_monday() as usize]);
+            [
+                day.as_ref().zip(wd).map(|(d, w)| format!("{d} ({w})")),
+                at,
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ")
+        }
+    };
+    Some(DueTextDto {
+        due,
+        time: s.time,
+        rrule: s.rrule,
+        label,
+    })
+}
+
 /// `valid` is true when the rule computes without error (`next_due` is `Ok`). A finished rule
 /// (COUNT / UNTIL used up, `Ok(None)`) is still well-formed, so it is valid; only an unreadable
 /// rule (`Err`) is not.
@@ -1939,6 +2122,11 @@ pub fn summarize_recurrence_in(rrule: &str, today: NaiveDate) -> RecurrenceLabel
         label: recurrence::summarize(rrule).unwrap_or_else(|| rrule.to_string()),
         valid: recurrence::next_due(rrule, None, None, today).is_ok(),
     }
+}
+
+#[tauri::command]
+pub async fn parse_due_text(text: String, today: String) -> AppResult<Option<DueTextDto>> {
+    Ok(parse_due_text_in(&text, parse_ymd(&today)?))
 }
 
 #[tauri::command]
@@ -2115,6 +2303,7 @@ mod tests {
         let json = serde_json::to_value(state_dto(Some(&store), None)).unwrap();
         assert_eq!(json["dataDir"], tmp.path().to_string_lossy().as_ref());
         assert_eq!(json["inbox"], "受信トレイ");
+        assert_eq!(json["startView"], "today");
         assert_eq!(json["projects"][0]["name"], "受信トレイ");
         assert_eq!(json["projects"][0]["taskCount"], 0);
         assert!(json.get("warning").is_none());
@@ -2320,6 +2509,41 @@ mod tests {
     }
 
     #[test]
+    fn parse_due_text_examples() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap(); // a Wednesday
+        let p = |t: &str| parse_due_text_in(t, today);
+        let r = p("明日").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 19));
+        assert_eq!((r.time, r.rrule.as_deref(), r.label.as_str()), (None, None, "11/19 (木)"));
+        let r = p("11/20").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 20));
+        let r = p("金曜 15:00").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 20));
+        assert_eq!(r.time, NaiveTime::from_hms_opt(15, 0, 0));
+        assert_eq!(r.label, "11/20 (金) 15:00");
+        // A weekly rule starts today when today matches (a Wednesday).
+        let r = p("毎週水曜").unwrap();
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=WE"));
+        assert_eq!(r.due, Some(today));
+        assert_eq!(r.label, "毎週水曜 (11/18 から)");
+        let r = p("毎週金曜 10:00").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 20));
+        assert_eq!(r.time, NaiveTime::from_hms_opt(10, 0, 0));
+        assert_eq!(r.label, "毎週金曜 10:00 (11/20 から)");
+        let r = p("毎月 1 日").unwrap();
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=1"));
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 12, 1));
+        assert_eq!(p("毎月1日").unwrap().due, NaiveDate::from_ymd_opt(2026, 12, 1));
+        // A year other than this one is shown.
+        assert_eq!(p("2027/1/5").map(|r| r.label), Some("2027/1/5 (火)".to_string()));
+        // Mixed with other words, or nothing readable.
+        assert!(p("買い物 明日").is_none());
+        assert!(p("毎週水曜 買い物").is_none());
+        assert!(p("").is_none());
+        assert!(p("あああ").is_none());
+    }
+
+    #[test]
     fn parse_recurrence_dto() {
         let r = parse_recurrence_in("毎週月曜");
         assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO"));
@@ -2336,6 +2560,19 @@ mod tests {
         // A finished rule (COUNT used up) is still well-formed.
         let s = summarize_recurrence_in("FREQ=DAILY;COUNT=1", d("2026-10-15"));
         assert!(s.valid);
+    }
+
+    #[test]
+    fn quick_add_skips_archived_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("古い", "c").unwrap();
+        store.set_project_archived("古い", true).unwrap();
+        // Not a candidate for "#古い", and the default falls back to the inbox.
+        let parsed = parse_quick_add_in(&store, "x #古い", d("2026-10-14"));
+        assert_eq!(parsed.project, None);
+        let out = quick_add_in(&mut store, "y", "古い", d("2026-10-14")).unwrap();
+        assert_eq!(out.view.project.name, INBOX);
     }
 
     #[test]

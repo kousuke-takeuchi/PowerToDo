@@ -79,9 +79,9 @@ export function useCrossActions(refresh: () => void, onError: (e: unknown) => vo
     [refresh, onError],
   );
   /** Complete / undo the task `project/no` (also used by the reminder banner, which has no Task). Resolves true when done; a repeated completion in flight resolves false. */
-  const setDone = (project: string, no: number, done: boolean): Promise<boolean> => {
+  const setDone = (project: string, no: number, done: boolean, withSubtasks = false): Promise<boolean> => {
     const call = async () => {
-      const v = await api.completeTask(project, no, done);
+      const v = await api.completeTask(project, no, done, withSubtasks);
       if (v.warnings?.length) onWarnings?.(v.warnings);
     };
     // Only a repeated completion is dropped; an undo (done=false) goes through as before.

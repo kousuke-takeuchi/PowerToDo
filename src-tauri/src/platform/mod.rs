@@ -68,6 +68,30 @@ pub fn reveal_path(app: &AppHandle, path: &Path) -> AppResult<()> {
     }
 }
 
+/// Opens a file with the OS's default app. On iPhone there is no such thing to open.
+pub fn open_file(app: &AppHandle, path: &Path) -> AppResult<()> {
+    reveal_path(app, path)
+}
+
+/// Shows a file selected in Finder / Explorer. On iPhone there is no such thing to open.
+pub fn reveal_file(app: &AppHandle, path: &Path) -> AppResult<()> {
+    #[cfg(mobile)]
+    {
+        let _ = (app, path);
+        Err(AppError::Invalid {
+            message: "iPhone では「ファイル」アプリで開いてください".into(),
+        })
+    }
+    #[cfg(desktop)]
+    {
+        app.opener()
+            .reveal_item_in_dir(path)
+            .map_err(|e| AppError::Io {
+                message: e.to_string(),
+            })
+    }
+}
+
 /// Opens `url` in the default browser. Through the plugin's handle: on iOS the free function
 /// `tauri_plugin_opener::open_url` fails with `os error 2` (it spawns a desktop opener).
 pub fn open_url(app: &AppHandle, url: &str) -> AppResult<()> {

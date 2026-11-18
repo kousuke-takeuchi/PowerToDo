@@ -54,6 +54,7 @@ pub struct ProjectSummary {
     pub order: u32,
     pub favorite: bool,
     pub inbox: bool,
+    pub archived: bool,
     /// Tasks that are not finished (progress < 100); 0 when the project failed to load.
     pub task_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,6 +84,11 @@ pub struct ProjectStore {
     /// What each workbook looked like on disk right after we last wrote or read it, keyed by
     /// project name or `"_common"`. A watcher event whose file still matches is our own write.
     last_written: BTreeMap<String, Fingerprint>,
+    /// The subtasks that completing a recurring parent reset (spec §12), keyed by project and
+    /// parent No., with their previous completion time. The undo of that completion reads them
+    /// back, so it re-completes exactly those. In memory only; the next recurring completion of
+    /// the same parent replaces it.
+    recurring_resets: BTreeMap<(String, u32), Vec<(u32, Option<NaiveDateTime>)>>,
     /// Projects (or `"_common"`) whose file changed on disk while they had unsaved edits. Not
     /// written until the user chooses to reload or overwrite.
     held: BTreeSet<String>,
@@ -381,6 +387,7 @@ impl ProjectStore {
             common_dirty: is_new,
             high_water: BTreeMap::new(),
             last_written: BTreeMap::new(),
+            recurring_resets: BTreeMap::new(),
             held: BTreeSet::new(),
             clock: Box::new(clock),
         };
@@ -397,6 +404,7 @@ impl ProjectStore {
                     order: 0,
                     favorite: false,
                     inbox: true,
+                    archived: false,
                 },
             );
             store.common_dirty = true;
@@ -449,6 +457,7 @@ impl ProjectStore {
                 order,
                 favorite: false,
                 inbox: false,
+                archived: false,
             });
             self.common_dirty = true;
         }
@@ -547,7 +556,14 @@ impl ProjectStore {
     fn summary(&self, p: &Project) -> ProjectSummary {
         let (task_count, load_error) = match self.books.get(&p.name) {
             Some(LoadedProject::Ok(b)) => {
-                (b.tasks.iter().filter(|t| t.progress < 100).count(), None)
+                // The rows the list shows: open, under open ancestors only.
+                (
+                    crate::domain::views::visible_open(&b.tasks)
+                        .into_iter()
+                        .filter(|v| *v)
+                        .count(),
+                    None,
+                )
             }
             Some(LoadedProject::Failed(m)) => (0, Some(m.clone())),
             None => (0, None),
@@ -558,6 +574,7 @@ impl ProjectStore {
             order: p.order,
             favorite: p.favorite,
             inbox: p.inbox,
+            archived: p.archived,
             task_count: task_count as u32,
             load_error,
         }
@@ -652,6 +669,7 @@ impl ProjectStore {
             order: self.next_project_order(),
             favorite: false,
             inbox: false,
+            archived: false,
         };
         self.common.projects.push(project.clone());
         self.books.insert(name.to_string(), LoadedProject::Ok(book));
@@ -719,10 +737,93 @@ impl ProjectStore {
         if let Some(h) = self.high_water.remove(name) {
             self.high_water.insert(new_name.to_string(), h);
         }
+        // The old name may be reused for a new project whose numbers start again.
+        let resets = std::mem::take(&mut self.recurring_resets);
+        self.recurring_resets = resets
+            .into_iter()
+            .map(|((p, n), r)| ((if p == name { new_name.to_string() } else { p }, n), r))
+            .collect();
         self.follow_view_option(super::view_options::PROJECT, name, Some(new_name));
         self.common_dirty = true;
         self.save_common_unless_held();
         Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    /// Renames (when `new_name` differs) and recolors a project. A blank color keeps the old one.
+    pub fn update_project(
+        &mut self,
+        name: &str,
+        new_name: &str,
+        color: &str,
+    ) -> AppResult<ProjectSummary> {
+        if new_name != name {
+            self.rename_project(name, new_name)?;
+        }
+        let idx = self.project_index(new_name)?;
+        if let Some(c) = non_empty(color) {
+            self.common.projects[idx].color = c;
+            self.common_dirty = true;
+            self.save_common_unless_held();
+        }
+        Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    pub fn set_project_favorite(
+        &mut self,
+        name: &str,
+        favorite: bool,
+    ) -> AppResult<ProjectSummary> {
+        let idx = self.project_index(name)?;
+        self.common.projects[idx].favorite = favorite;
+        self.common_dirty = true;
+        self.save_common_unless_held();
+        Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    /// Hides (or brings back) a project: only a mark in the common workbook, the file stays.
+    /// The inbox cannot be archived.
+    pub fn set_project_archived(
+        &mut self,
+        name: &str,
+        archived: bool,
+    ) -> AppResult<ProjectSummary> {
+        if name == INBOX && archived {
+            return Err(invalid("受信トレイはアーカイブできません"));
+        }
+        let idx = self.project_index(name)?;
+        self.common.projects[idx].archived = archived;
+        self.common_dirty = true;
+        self.save_common_unless_held();
+        Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    /// The project's workbook path, for "open in Excel" / "show in Finder": only a listed
+    /// project whose file exists (the name goes through `Paths::project`'s safe-name check).
+    pub fn project_file(&self, name: &str) -> AppResult<PathBuf> {
+        self.project_index(name)?;
+        let path = self.paths.project(name)?;
+        if !path.is_file() {
+            return Err(not_found(format!(
+                "「{}」のファイルがありません",
+                path.display()
+            )));
+        }
+        Ok(path)
+    }
+
+    pub fn is_archived(&self, name: &str) -> bool {
+        self.common
+            .projects
+            .iter()
+            .any(|p| p.name == name && p.archived)
+    }
+
+    fn project_index(&self, name: &str) -> AppResult<usize> {
+        self.common
+            .projects
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| not_found(format!("プロジェクト「{name}」がありません")))
     }
 
     /// Moves `<name>.xlsx` to `archive/<name> (YYYYMMDD-HHMM).xlsx` (never deletes it) and
@@ -763,6 +864,7 @@ impl ProjectStore {
         self.books.remove(name);
         self.dirty.remove(name);
         self.high_water.remove(name);
+        self.recurring_resets.retain(|(p, _), _| p != name);
         self.last_written.remove(name);
         self.held.remove(name);
         self.follow_view_option(super::view_options::PROJECT, name, None);
@@ -1201,16 +1303,57 @@ impl ProjectStore {
     /// Completes (or reopens) a task. A repeating task is not finished: its due date moves to
     /// the next occurrence and it starts over. A recurrence that has run out is dropped and the
     /// task completes normally; one that cannot be read completes normally with a warning.
+    /// Finishing a task also finishes its open descendants at the same time. Reopening leaves
+    /// the subtasks alone, unless `with_subtasks` (the undo of a completion): then the
+    /// descendants completed at the parent's completion time are reopened too. Completing a
+    /// repeating parent reopens its done descendants (spec §12); its undo re-completes exactly
+    /// those, with their previous completion times.
     pub fn complete_task(&mut self, project: &str, no: u32, done: bool) -> AppResult<ProjectView> {
+        self.complete_task_with(project, no, done, false)
+    }
+
+    pub fn complete_task_with(
+        &mut self,
+        project: &str,
+        no: u32,
+        done: bool,
+        with_subtasks: bool,
+    ) -> AppResult<ProjectView> {
         let mut warning: Option<String> = None;
+        let key = (project.to_string(), no);
+        let undo_resets = if !done && with_subtasks {
+            self.recurring_resets.remove(&key).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut new_resets: Option<Vec<(u32, Option<NaiveDateTime>)>> = None;
         self.mutate(project, |book, ctx| {
             let idx = find_task(book, no)?;
-            let t = &mut book.tasks[idx];
             if !done {
-                t.progress = 0;
-                t.completed_at = None;
+                // The undo of a recurring completion: put back the subtasks it reopened.
+                for (n, at) in &undo_resets {
+                    if let Some(s) = book.tasks.iter_mut().find(|t| t.no == *n) {
+                        if s.progress == 0 && s.completed_at.is_none() {
+                            s.progress = 100;
+                            s.completed_at = *at;
+                        }
+                    }
+                }
+                let stamp = book.tasks[idx].completed_at;
+                book.tasks[idx].progress = 0;
+                book.tasks[idx].completed_at = None;
+                if with_subtasks && stamp.is_some() {
+                    for i in subtree(book, no) {
+                        let s = &mut book.tasks[i];
+                        if s.progress == 100 && s.completed_at == stamp {
+                            s.progress = 0;
+                            s.completed_at = None;
+                        }
+                    }
+                }
                 return Ok(());
             }
+            let t = &mut book.tasks[idx];
             if let Some(rrule) = t.rrule.clone() {
                 let today = ctx.now.date();
                 let base = if recurrence::split(&rrule).from_completed {
@@ -1224,6 +1367,17 @@ impl ProjectStore {
                         t.progress = 0;
                         t.completed_at = None;
                         t.reminders.retain(|c| !reminders::is_absolute(c));
+                        // Start the routine fresh: done descendants become open again.
+                        let mut reset = Vec::new();
+                        for i in subtree(book, no) {
+                            let s = &mut book.tasks[i];
+                            if s.no != no && s.progress == 100 {
+                                reset.push((s.no, s.completed_at));
+                                s.progress = 0;
+                                s.completed_at = None;
+                            }
+                        }
+                        new_resets = Some(reset);
                         return Ok(());
                     }
                     Ok(None) => t.rrule = None,
@@ -1234,9 +1388,22 @@ impl ProjectStore {
                 t.completed_at = None;
             }
             t.progress = 100;
-            t.completed_at.get_or_insert(ctx.now);
+            let stamp = *t.completed_at.get_or_insert(ctx.now);
+            for i in subtree(book, no) {
+                let s = &mut book.tasks[i];
+                if s.progress < 100 {
+                    s.progress = 100;
+                    s.completed_at = Some(stamp);
+                }
+            }
             Ok(())
         })?;
+        if done {
+            match new_resets.filter(|r| !r.is_empty()) {
+                Some(r) => self.recurring_resets.insert(key, r),
+                None => self.recurring_resets.remove(&key),
+            };
+        }
         let mut view = self.view(project)?;
         view.warnings.extend(warning);
         Ok(view)
@@ -1313,14 +1480,14 @@ impl ProjectStore {
     /// Moves the task and its descendants. In another project they get new numbers (appended
     /// after the target's highest), the moved task is detached from its old parent, the rest
     /// keep their tree, and their assignees join the target's assignee list. Within the same
-    /// project only the section changes.
+    /// project only the section changes. Also returns the moved task's No. in the target.
     pub fn move_task(
         &mut self,
         project: &str,
         no: u32,
         to_project: &str,
         to_section: Option<&str>,
-    ) -> AppResult<(ProjectView, ProjectView)> {
+    ) -> AppResult<(ProjectView, ProjectView, u32)> {
         let to_section = to_section.and_then(non_empty);
         let source = self.ok_book(project)?;
         let target = self.ok_book(to_project)?;
@@ -1346,7 +1513,7 @@ impl ProjectStore {
                 Ok(())
             })?;
             let v = self.view(project)?;
-            return Ok((v.clone(), v));
+            return Ok((v.clone(), v, no));
         }
 
         let indices = subtree(source, no);
@@ -1406,7 +1573,7 @@ impl ProjectStore {
                 (to_project, *new),
             ));
         }
-        Ok((self.view(project)?, self.view(to_project)?))
+        Ok((self.view(project)?, self.view(to_project)?, renumber[&no]))
     }
 
     /// Spec ③ §8: moves the task and its subtree to `to` in the same project. The new siblings
@@ -1642,10 +1809,12 @@ impl ProjectStore {
         labels
     }
 
-    /// Tasks of every project that loaded, in project order (仕様 §2). Failed projects are left out.
+    /// Tasks of every project that loaded, in project order (仕様 §2). Failed and archived
+    /// projects are left out: this feeds every cross view, search, counts and reminders.
     pub fn all_tasks(&self) -> Vec<Task> {
         self.summaries()
             .iter()
+            .filter(|p| !p.archived)
             .filter_map(|p| match self.books.get(&p.name) {
                 Some(LoadedProject::Ok(b)) => Some(b.tasks.iter().cloned()),
                 _ => None,
@@ -1934,6 +2103,7 @@ impl ProjectStore {
                 order,
                 favorite: false,
                 inbox: false,
+                archived: false,
             });
             self.common_dirty = true;
         }
@@ -2282,7 +2452,8 @@ mod tests {
         e.store.save("A").unwrap();
         e.store.save("B").unwrap();
 
-        let (from, to) = e.store.move_task("A", 2, "B", Some("来週")).unwrap();
+        let (from, to, new_no) = e.store.move_task("A", 2, "B", Some("来週")).unwrap();
+        assert_eq!(new_no, 3, "the moved root's No. in B");
         assert_eq!(nos(&from), vec![1]);
         assert_eq!(nos(&to), vec![1, 2, 3, 4, 5]);
         let root = task(&to, 3);
@@ -2528,6 +2699,126 @@ mod tests {
         .unwrap();
         assert!(store.reload("壊れ").is_ok());
         assert!(store.summaries().iter().all(|s| s.load_error.is_none()));
+    }
+
+    #[test]
+    fn update_project_renames_and_recolors() {
+        let mut e = env();
+        e.store.create_project("旧", "red").unwrap();
+        let s = e.store.update_project("旧", "新", "blue").unwrap();
+        assert_eq!((s.name.as_str(), s.color.as_str()), ("新", "blue"));
+        // Same name, blank color: nothing changes.
+        let s = e.store.update_project("新", "新", " ").unwrap();
+        assert_eq!(s.color, "blue");
+        let again = e.reopen();
+        let p = again
+            .summaries()
+            .into_iter()
+            .find(|p| p.name == "新")
+            .unwrap();
+        assert_eq!(p.color, "blue");
+        // The inbox can be recolored, not renamed.
+        e.store.update_project(INBOX, INBOX, "green").unwrap();
+        assert!(e.store.update_project(INBOX, "x", "green").is_err());
+    }
+
+    #[test]
+    fn favorite_toggle_persists() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        assert!(e.store.set_project_favorite("仕事", true).unwrap().favorite);
+        let again = e.reopen();
+        assert!(
+            again
+                .summaries()
+                .iter()
+                .find(|p| p.name == "仕事")
+                .unwrap()
+                .favorite
+        );
+        assert!(
+            !e.store
+                .set_project_favorite("仕事", false)
+                .unwrap()
+                .favorite
+        );
+        assert!(matches!(
+            e.store.set_project_favorite("無い", true),
+            Err(AppError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn archived_projects_leave_every_cross_view() {
+        let mut e = env();
+        e.store.create_project("古い", "c").unwrap();
+        e.store.add_task("古い", input("old task")).unwrap();
+        e.store.add_task(INBOX, input("inbox task")).unwrap();
+        assert_eq!(e.store.all_tasks().len(), 2);
+
+        assert!(e.store.set_project_archived("古い", true).unwrap().archived);
+        let titles: Vec<String> = e.store.all_tasks().into_iter().map(|t| t.title).collect();
+        assert_eq!(titles, vec!["inbox task".to_string()]);
+        // Still listed (the sidebar shows it in its own group) and still readable.
+        assert!(
+            e.store
+                .summaries()
+                .iter()
+                .any(|p| p.name == "古い" && p.archived)
+        );
+        assert_eq!(e.store.view("古い").unwrap().tasks.len(), 1);
+        // The mark is in the common workbook; the project file is untouched.
+        assert!(e.data().join("古い.xlsx").exists());
+        assert!(
+            e.reopen()
+                .summaries()
+                .iter()
+                .any(|p| p.name == "古い" && p.archived)
+        );
+
+        assert!(matches!(
+            e.store.set_project_archived(INBOX, true),
+            Err(AppError::Invalid { .. })
+        ));
+        // Rescheduling overdue tasks leaves an archived project alone.
+        let mut overdue = input("late");
+        overdue.due = NaiveDate::from_ymd_opt(2026, 10, 1);
+        e.store.add_task("古い", overdue).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        assert!(e.store.reschedule_overdue(today, today).unwrap().is_empty());
+
+        assert!(
+            !e.store
+                .set_project_archived("古い", false)
+                .unwrap()
+                .archived
+        );
+        assert_eq!(e.store.all_tasks().len(), 3);
+    }
+
+    #[test]
+    fn project_file_is_a_listed_safe_path() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        assert_eq!(
+            e.store.project_file("仕事").unwrap(),
+            e.data().join("仕事.xlsx")
+        );
+        assert!(matches!(
+            e.store.project_file("無い"),
+            Err(AppError::NotFound { .. })
+        ));
+        assert!(e.store.project_file("../x").is_err());
+        assert!(
+            e.store
+                .project_file(COMMON_FILE.trim_end_matches(".xlsx"))
+                .is_err()
+        );
+        std::fs::remove_file(e.data().join("仕事.xlsx")).unwrap();
+        assert!(matches!(
+            e.store.project_file("仕事"),
+            Err(AppError::NotFound { .. })
+        ));
     }
 
     #[test]
@@ -3424,6 +3715,183 @@ mod tests {
         assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);
     }
 
+    fn open_count(e: &Env) -> u32 {
+        e.store
+            .summaries()
+            .iter()
+            .find(|p| p.name == INBOX)
+            .unwrap()
+            .task_count
+    }
+
+    /// Parent 1 with child 2 and grandchild 3 (plus an unrelated top-level 4).
+    fn family(e: &mut Env) {
+        e.store.add_task(INBOX, input("p")).unwrap();
+        e.store.add_task(INBOX, child_of("c", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("g", 2)).unwrap();
+        e.store.add_task(INBOX, input("other")).unwrap();
+    }
+
+    #[test]
+    fn completing_a_parent_completes_its_open_descendants() {
+        let mut e = env();
+        family(&mut e);
+        assert_eq!(open_count(&e), 4);
+        e.store.complete_task(INBOX, 2, true).unwrap(); // the child alone: grandchild follows
+        let v = e.store.complete_task(INBOX, 1, true).unwrap();
+        let by = |n: u32| v.tasks.iter().find(|t| t.no == n).unwrap().clone();
+        assert!(by(1).progress == 100 && by(2).progress == 100 && by(3).progress == 100);
+        assert_eq!(by(1).completed_at, by(3).completed_at);
+        assert_eq!(by(4).progress, 0);
+        assert_eq!(open_count(&e), 1);
+    }
+
+    #[test]
+    fn counts_skip_rows_under_a_completed_parent() {
+        let mut e = env();
+        family(&mut e);
+        // Finish the child (grandchild follows), reopen only the child: the grandchild stays done.
+        e.store.complete_task(INBOX, 2, true).unwrap();
+        e.store.complete_task(INBOX, 2, false).unwrap();
+        assert_eq!(open_count(&e), 3); // p, c, other (g stays done)
+    }
+
+    #[test]
+    fn reopening_a_parent_leaves_subtasks_and_undo_restores_them() {
+        let mut e = env();
+        family(&mut e);
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task(INBOX, 1, false).unwrap();
+        assert_eq!(v.tasks.iter().find(|t| t.no == 2).unwrap().progress, 100);
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        assert!(
+            v.tasks
+                .iter()
+                .filter(|t| t.no <= 3)
+                .all(|t| t.progress == 0)
+        );
+    }
+
+    #[test]
+    fn undo_keeps_subtasks_finished_earlier() {
+        let mut e = env();
+        family(&mut e);
+        e.store.complete_task(INBOX, 3, true).unwrap();
+        *e.clock.lock().unwrap() = dt("2026-10-14T10:30");
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        let by = |n: u32| v.tasks.iter().find(|t| t.no == n).unwrap().progress;
+        assert_eq!((by(1), by(2), by(3)), (0, 0, 100));
+    }
+
+    #[test]
+    fn a_recurring_parent_moves_on_and_leaves_subtasks() {
+        let mut e = env();
+        let mut i = input("p");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        e.store.add_task(INBOX, i).unwrap();
+        e.store.add_task(INBOX, child_of("c", 1)).unwrap();
+        let v = e.store.complete_task(INBOX, 1, true).unwrap();
+        assert_eq!(v.tasks.iter().find(|t| t.no == 1).unwrap().progress, 0);
+        assert_eq!(v.tasks.iter().find(|t| t.no == 2).unwrap().progress, 0);
+    }
+
+    /// Recurring parent 1 with done child 2, its done grandchild 3, open child 4, and an
+    /// unrelated done 5. Returns after finishing 2 (so 3 follows) and 5.
+    fn recurring_family(e: &mut Env) {
+        let mut i = input("p");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        e.store.add_task(INBOX, i).unwrap();
+        e.store.add_task(INBOX, child_of("c", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("g", 2)).unwrap();
+        e.store.add_task(INBOX, child_of("open", 1)).unwrap();
+        e.store.add_task(INBOX, input("other")).unwrap();
+        e.store.complete_task(INBOX, 2, true).unwrap();
+        e.store.complete_task(INBOX, 5, true).unwrap();
+    }
+
+    #[test]
+    fn completing_a_recurring_parent_reopens_done_descendants() {
+        let mut e = env();
+        recurring_family(&mut e);
+        let v = e.store.complete_task(INBOX, 1, true).unwrap();
+        let by = |n: u32| v.tasks.iter().find(|t| t.no == n).unwrap().clone();
+        assert_eq!(by(1).due, Some(ymd(2026, 10, 20)));
+        for n in [1, 2, 3, 4] {
+            assert_eq!((by(n).progress, by(n).completed_at), (0, None), "task {n}");
+        }
+        assert_eq!(by(5).progress, 100); // not a descendant
+    }
+
+    #[test]
+    fn undo_of_a_recurring_completion_recompletes_exactly_the_reset_ones() {
+        let mut e = env();
+        recurring_family(&mut e);
+        let before = |v: &ProjectView, n: u32| {
+            let t = v.tasks.iter().find(|t| t.no == n).unwrap();
+            (t.progress, t.completed_at)
+        };
+        let v0 = e.store.view(INBOX).unwrap();
+        let (c0, g0) = (before(&v0, 2), before(&v0, 3));
+        assert_eq!(c0.0, 100);
+        *e.clock.lock().unwrap() = dt("2026-10-14T10:30");
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        assert_eq!(before(&v, 2), c0);
+        assert_eq!(before(&v, 3), g0);
+        assert_eq!(before(&v, 4).0, 0); // was open, stays open
+        assert_eq!(before(&v, 1).0, 0);
+        // The log is used up: a second undo changes nothing more.
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        assert_eq!(before(&v, 2), c0);
+    }
+
+    #[test]
+    fn recurring_resets_follow_a_rename_and_go_with_a_delete() {
+        let mut e = env();
+        e.store.create_project("旧", "c").unwrap();
+        let mut i = input("p");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        e.store.add_task("旧", i).unwrap();
+        e.store.add_task("旧", child_of("c", 1)).unwrap();
+        e.store.complete_task("旧", 2, true).unwrap();
+        e.store.complete_task("旧", 1, true).unwrap();
+        e.store.save("旧").unwrap();
+        e.store.rename_project("旧", "新").unwrap();
+        assert!(e.store.recurring_resets.keys().all(|(p, _)| p == "新"));
+        let v = e.store.complete_task_with("新", 1, false, true).unwrap();
+        assert_eq!(task(&v, 2).progress, 100);
+        e.store.complete_task("新", 1, true).unwrap();
+        assert!(!e.store.recurring_resets.is_empty());
+        e.store.save("新").unwrap();
+        e.store.delete_project("新").unwrap();
+        assert!(e.store.recurring_resets.is_empty());
+    }
+
+    #[test]
+    fn undo_does_not_touch_a_subtask_the_user_changed_meanwhile() {
+        let mut e = env();
+        recurring_family(&mut e);
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        e.store.complete_task(INBOX, 2, true).unwrap(); // finished again by hand
+        let at = e
+            .store
+            .view(INBOX)
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|t| t.no == 2)
+            .unwrap()
+            .completed_at;
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        let c = v.tasks.iter().find(|t| t.no == 2).unwrap();
+        assert_eq!((c.progress, c.completed_at), (100, at));
+    }
+
     #[test]
     fn completion_based_recurrence_counts_from_today() {
         let mut e = env();
@@ -3882,7 +4350,7 @@ mod tests {
         e.store.add_task("A", child_of("a2", 1)).unwrap();
         comment(&e, "A", 1);
         comment(&e, "A", 2);
-        let (_, to) = e.store.move_task("A", 1, "B", None).unwrap();
+        let (_, to, _) = e.store.move_task("A", 1, "B", None).unwrap();
         assert_eq!(nos(&to), vec![1, 2, 3]);
         assert!(has_comments(&e, "B", 2) && has_comments(&e, "B", 3));
         assert!(!has_comments(&e, "A", 1) && !has_comments(&e, "A", 2));

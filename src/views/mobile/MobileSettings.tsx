@@ -5,8 +5,8 @@ import { Button } from "../../components/Button";
 import { Segmented } from "../../components/Segmented";
 import type { MobileTab } from "../../app/mobileNav";
 import type { NotificationPermission } from "../../types/model";
-import { AccountPane, Desc, Row, Section } from "../SettingsPanes";
-import type { AccountPaneProps } from "../SettingsPanes";
+import { AccountPane, Desc, GeneralPane, Row, Section } from "../SettingsPanes";
+import type { AccountPaneProps, GeneralPaneProps } from "../SettingsPanes";
 import { SyncPane } from "../SyncPane";
 import type { SyncPaneProps } from "../SyncPane";
 import { MobileShell } from "./MobileShell";
@@ -59,6 +59,8 @@ export type MobileSettingsProps = {
   onDisplayName?: AccountPaneProps["onSaveDisplayName"];
   displayNameBusy?: boolean;
   displayNameError?: string | null;
+  /** 「全般」(起動時に開く画面)。 */
+  general?: GeneralPaneProps;
   /** 「ファイル」アプリの案内。 */
   dataDirHint?: string;
   /** 実機: 戻る (ヘッダーの左を戻るにする)。省略すると M-07 の絵のままメニュー。 */
@@ -77,9 +79,9 @@ const ON_OFF = [
 
 /** M-07: 設定。同期 / 通知 / 外観 / アカウントのグループ (行 44)。ヘッダーの同期アイコンは cloud-off (オフラインの例)。タブは選択なし。 */
 export function MobileSettings(props: MobileSettingsProps = {}) {
-  const { sync, notifications, onToggleNotifications, onRequestPermission, displayName, onDisplayName, displayNameBusy, displayNameError, dataDirHint, onBack, fill, banner, overlay, onTabChange, today } = props;
+  const { sync, notifications, onToggleNotifications, onRequestPermission, displayName, onDisplayName, displayNameBusy, displayNameError, general, dataDirHint, onBack, fill, banner, overlay, onTabChange, today } = props;
   // どれかの props があれば実データの画面 (SyncPane などの部品を縦長の幅で並べる)。無ければ Phase 0 の絵のまま。
-  const live = !!(sync || notifications || onDisplayName || dataDirHint);
+  const live = !!(sync || notifications || onDisplayName || general || dataDirHint);
   return (
     <MobileShell
       fill={fill}
@@ -94,6 +96,7 @@ export function MobileSettings(props: MobileSettingsProps = {}) {
       {live ? (
         <NarrowContext.Provider value>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)", padding: "var(--space-4) 16px var(--space-6)" }}>
+            {general && <GeneralPane {...general} />}
             {sync && (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
                 <SyncPane {...sync} narrow />

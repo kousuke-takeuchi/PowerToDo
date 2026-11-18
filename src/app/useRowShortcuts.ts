@@ -33,6 +33,7 @@ export function useRowShortcuts({
   navigate,
   openQuickAdd,
   openSearch,
+  addSection,
   onCompleted,
   requestDelete,
   edit,
@@ -64,6 +65,8 @@ export function useRowShortcuts({
   navigate: (target: Nav) => void;
   openQuickAdd: () => void;
   openSearch: () => void;
+  /** S (プロジェクトの画面だけ)。 */
+  addSection?: () => void;
   /** A task was completed with `e` (for the undo toast). */
   onCompleted?: (t: Task) => void;
   /** Delete / Backspace / ⌘⌫: show the delete confirmation (spec ② §4.3). */
@@ -169,6 +172,7 @@ export function useRowShortcuts({
     goUpcoming: () => navigate({ kind: "upcoming" }),
     goInbox: () => navigate({ kind: "inbox" }),
     goLabels: () => navigate({ kind: "labels" }),
+    addSection,
     row,
     enabled,
   });

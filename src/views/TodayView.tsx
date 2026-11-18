@@ -7,6 +7,7 @@ import { useMotionTiming } from "../motion";
 import type { Task } from "../types/model";
 import { useView } from "../app/view/ViewOptionsContext";
 import { arrangeFlat, firstOccurrences } from "../app/view/arrange";
+import { visibleOpen } from "./visibleOpen";
 import { AddSlot, FilterNote, HiddenNote, dupKeysOf, useCrossRows, useOutsideClose } from "./crossList";
 import { DatePicker } from "./DatePicker";
 import { PageHeader, TitleGroup } from "./HeaderActions";
@@ -97,7 +98,9 @@ function RescheduleButton({ today, onReschedule }: { today: string; onReschedule
 export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects, focusedKey, onVisibleKeys, weekStart = "mon", labelOrder = [], projectOrder = [], onReorderLocked }: TodayViewProps) {
   const [view, setView] = useView("today");
   const [overdueCollapsed, setOverdueCollapsed] = useState(false);
-  const open = tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due !== undefined);
+  // サブタスクも 1 行として出す。完了した親の下の行は出さない (Rust の today_view と同じ)。
+  // 実データは today_view が選んだ行だけで、親の行 (期限が今日でない) は入っていないので、親をたどらずにそのまま使う。
+  const open = (onToggleDone ? tasks.filter((t) => t.progress !== 100) : visibleOpen(tasks)).filter((t) => t.due !== undefined);
   // Rust (today_view) already orders the groups (due, priority, No.); only the mock data needs sorting here.
   const overdue = open.filter((t) => t.due! < today);
   const todays = open.filter((t) => t.due === today);

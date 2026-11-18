@@ -1,11 +1,12 @@
 import type React from "react";
 import { useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpDown, CircleCheck, Ellipsis, LayoutList } from "lucide-react";
+import { ArchiveRestore, ArrowUpDown, ChevronRight, CircleCheck, Ellipsis, LayoutList } from "lucide-react";
 import { useEscLayer } from "../app/layers";
 import { TopBarSlot } from "./TopBar";
 import { isDefault, type Screen, type ViewOptions } from "../app/view/viewOptions";
 import { ViewMenuPanel } from "./ViewMenuPanel";
+import type { MenuEntry } from "./projectMenu";
 
 /** What a screen passes to its header to get the working 表示 menu. */
 export type HeaderView = { screen: Screen; options: ViewOptions; onChange: (o: ViewOptions) => void };
@@ -56,11 +57,14 @@ function HeaderAction({
   );
 }
 
-/** 「その他」メニューの項目。渡した項目だけが出る。 */
-export type HeaderMenu = { rename?: () => void; delete?: () => void };
+/** 「その他」メニューの項目 (区切り線・「›」のサブメニューを含む)。空なら「…」のボタンは出さない。 */
+export type HeaderMenu = MenuEntry[];
 
 const menuItem: React.CSSProperties = {
-  display: "block",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 16,
   width: "100%",
   padding: "6px 12px",
   border: 0,
@@ -73,9 +77,74 @@ const menuItem: React.CSSProperties = {
   cursor: "pointer",
 };
 
-/** 「その他」ボタン + 小さなポップオーバー (名前を変更 / 削除)。外側クリックと Esc で閉じる。 */
-function MoreMenu({ menu }: { menu: HeaderMenu }) {
-  const [open, setOpen] = useState(false);
+const popover: React.CSSProperties = {
+  minWidth: 200,
+  padding: "4px 0",
+  background: "var(--color-bg)",
+  border: "1px solid var(--color-border)",
+  borderRadius: 8,
+  boxShadow: "var(--shadow-popover)",
+};
+
+const hint: React.CSSProperties = { fontSize: 12, color: "var(--color-text-muted)" };
+
+function Separator() {
+  return <div role="separator" style={{ height: 1, margin: "4px 0", background: "var(--color-border)" }} />;
+}
+
+/** メニューの 1 行。サブメニューは「›」で、ホバー / クリック / → で右に開く。 */
+function EntryRow({ entry, run }: { entry: MenuEntry; run: (fn: () => void) => () => void }) {
+  const [sub, setSub] = useState(false);
+  if (entry.kind === "separator") return <Separator />;
+  if (entry.kind === "item") {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+        style={entry.danger ? { ...menuItem, color: "var(--color-danger)" } : menuItem}
+        onClick={run(entry.onSelect)}
+      >
+        {entry.label}
+        {entry.shortcut && <span style={hint}>{entry.shortcut}</span>}
+      </button>
+    );
+  }
+  return (
+    <div style={{ position: "relative" }} onMouseEnter={() => setSub(true)} onMouseLeave={() => setSub(false)}>
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={sub}
+        className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+        style={menuItem}
+        onClick={() => setSub((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight") setSub(true);
+          else if (e.key === "ArrowLeft") setSub(false);
+        }}
+      >
+        {entry.label}
+        <ChevronRight size={14} aria-hidden style={{ color: "var(--color-text-muted)" }} />
+      </button>
+      {sub && (
+        // The padding bridges the gap to the row: crossing it keeps the pointer inside this row, so hover does not close it.
+        <div style={{ position: "absolute", top: -5, right: "100%", paddingRight: 2 }}>
+          <div role="menu" aria-label={entry.label} style={popover}>
+            {entry.items.map((e, i) => (
+              <EntryRow key={e.kind === "separator" ? `sep${i}` : e.id} entry={e} run={run} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 「その他」ボタン + 小さなポップオーバー。外側クリックと Esc で閉じる。 */
+function MoreMenu({ entries, initialOpen = false }: { entries: MenuEntry[]; initialOpen?: boolean }) {
+  const [open, setOpen] = useState(initialOpen);
   const ref = useRef<HTMLDivElement>(null);
   useEscLayer(open, () => setOpen(false));
   useEffect(() => {
@@ -94,38 +163,10 @@ function MoreMenu({ menu }: { menu: HeaderMenu }) {
     <div ref={ref} style={{ position: "relative" }}>
       <HeaderAction icon={Ellipsis} menuOpen={open} onClick={() => setOpen((v) => !v)} />
       {open && (
-        <div
-          role="menu"
-          aria-label="プロジェクトの操作"
-          style={{
-            position: "absolute",
-            top: "100%",
-            right: 0,
-            zIndex: 10,
-            minWidth: 160,
-            padding: "4px 0",
-            background: "var(--color-bg)",
-            border: "1px solid var(--color-border)",
-            borderRadius: 8,
-            boxShadow: "var(--shadow-popover)",
-          }}
-        >
-          {menu.rename && (
-            <button type="button" role="menuitem" className="bg-transparent hover:bg-[var(--color-bg-hover)]" style={menuItem} onClick={run(menu.rename)}>
-              名前を変更
-            </button>
-          )}
-          {menu.delete && (
-            <button
-              type="button"
-              role="menuitem"
-              className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-              style={{ ...menuItem, color: "var(--color-danger)" }}
-              onClick={run(menu.delete)}
-            >
-              削除
-            </button>
-          )}
+        <div role="menu" aria-label="プロジェクトの操作" style={{ ...popover, position: "absolute", top: "100%", right: 0, zIndex: 10 }}>
+          {entries.map((e, i) => (
+            <EntryRow key={e.kind === "separator" ? `sep${i}` : e.id} entry={e} run={run} />
+          ))}
         </div>
       )}
     </div>
@@ -180,19 +221,52 @@ function ViewMenu({ label, view, initialOpen = false }: { label: string; view?: 
 }
 
 /** 上の帯の右の 表示 / その他 (Todoist)。viewLabel は 表示 ボタンの文言 (ボード画面では「ボード」)。 */
-export function HeaderActions({ viewLabel = "表示", onMenu, view, initialViewMenuOpen }: { viewLabel?: string; onMenu?: HeaderMenu; view?: HeaderView; initialViewMenuOpen?: boolean }) {
+export function HeaderActions({
+  viewLabel = "表示",
+  onMenu,
+  onRestore,
+  view,
+  initialViewMenuOpen,
+  initialMenuOpen,
+}: {
+  viewLabel?: string;
+  onMenu?: HeaderMenu;
+  /** アーカイブ済みのプロジェクトで「アーカイブから戻す」を出す。 */
+  onRestore?: () => void;
+  view?: HeaderView;
+  initialViewMenuOpen?: boolean;
+  /** Stories: the 「…」 menu starts open. */
+  initialMenuOpen?: boolean;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
+      {onRestore && <HeaderAction icon={ArchiveRestore} label="アーカイブから戻す" onClick={onRestore} />}
       <ViewMenu label={viewLabel} view={view} initialOpen={initialViewMenuOpen} />
-      {onMenu && (onMenu.rename || onMenu.delete) ? <MoreMenu menu={onMenu} /> : <HeaderAction icon={Ellipsis} />}
+      {onMenu && onMenu.length > 0 && <MoreMenu entries={onMenu} initialOpen={initialMenuOpen} />}
     </div>
   );
 }
 
 /** 画面ヘッダー: children (タイトル群) をここに、HeaderActions は上の帯の右へ (AppShell の外では横に並べる)。 */
-export function PageHeader({ children, viewLabel, onMenu, view, initialViewMenuOpen }: { children: React.ReactNode; viewLabel?: string; onMenu?: HeaderMenu; view?: HeaderView; initialViewMenuOpen?: boolean }) {
+export function PageHeader({
+  children,
+  viewLabel,
+  onMenu,
+  onRestore,
+  view,
+  initialViewMenuOpen,
+  initialMenuOpen,
+}: {
+  children: React.ReactNode;
+  viewLabel?: string;
+  onMenu?: HeaderMenu;
+  onRestore?: () => void;
+  view?: HeaderView;
+  initialViewMenuOpen?: boolean;
+  initialMenuOpen?: boolean;
+}) {
   const slot = useContext(TopBarSlot);
-  const actions = <HeaderActions viewLabel={viewLabel} onMenu={onMenu} view={view} initialViewMenuOpen={initialViewMenuOpen} />;
+  const actions = <HeaderActions viewLabel={viewLabel} onMenu={onMenu} onRestore={onRestore} view={view} initialViewMenuOpen={initialViewMenuOpen} initialMenuOpen={initialMenuOpen} />;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "var(--font-body)" }}>
       {children}

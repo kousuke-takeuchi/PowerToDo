@@ -1,5 +1,5 @@
 import { createContext } from "react";
-import type { Position, Task } from "../types/model";
+import type { Position, QuickAddResult, Task } from "../types/model";
 import type { PickerProject } from "../views/ProjectPicker";
 import type { EditorValue } from "../views/taskEditorValue";
 
@@ -9,6 +9,8 @@ export type RowActionsApi = {
   inbox: string;
   projects: PickerProject[];
   allLabels: string[];
+  /** Reads a title like quick add (`parse_quick_add`); the row editors use it (spec §13). Absent: no parsing. */
+  parse?: (text: string) => Promise<QuickAddResult>;
   /** taskKey being edited inline, or null. */
   editing: string | null;
   setEditing: (key: string | null) => void;

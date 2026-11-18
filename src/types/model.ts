@@ -4,7 +4,7 @@ export type { SyncState };
 
 export type Priority = 1 | 2 | 3 | 4;
 export interface Task { no: number; project: string; category: string | null; title: string; assignee: string; priority: Priority; progress: number; start?: string; due?: string; dueTime?: string; days?: number; note?: string; parentNo?: number; labels: string[]; rrule?: string; /** 表示用 (要約、読めなければ RRULE 文字列)。保存されない。 */ rruleLabel?: string; reminders: string[]; order: number; createdAt: string; completedAt?: string; }
-export interface Project { name: string; color: string; order: number; favorite: boolean; inbox: boolean; }
+export interface Project { name: string; color: string; order: number; favorite: boolean; inbox: boolean; archived?: boolean; }
 export interface Label { name: string; color: string; order: number; }
 export interface Section { project: string; name: string; order: number; collapsed?: boolean; }
 export interface SyncInfo { state: SyncState; lastSyncedAt?: string; target: "google" | "nas" | "none"; account?: string; }
@@ -13,7 +13,7 @@ export interface Comment { id: string; at: string; author: string; text: string;
 
 // ---- Rust command DTOs (src-tauri: commands/mod.rs, store/project_store.rs, domain/*) ----
 
-export interface ProjectSummary { name: string; color: string; order: number; favorite: boolean; inbox: boolean; taskCount: number; loadError?: string; }
+export interface ProjectSummary { name: string; color: string; order: number; favorite: boolean; inbox: boolean; /** アーカイブ済み: サイドバーの「アーカイブ済み」に入り、横断ビューには出ない。 */ archived?: boolean; taskCount: number; loadError?: string; }
 /** A row whose cell types are broken in the xlsx (reported, never rewritten). */
 export interface InvalidRow { row: number; no?: number; column: string; value: string; message: string; }
 export interface ProjectView { project: Project; sections: Section[]; tasks: Task[]; invalidRows: InvalidRow[]; /** 操作についての通知 (例: 繰り返しが読めず通常の完了になった)。 */ warnings?: string[]; }
@@ -49,7 +49,7 @@ export interface Span { start: number; end: number; kind: TokenKind; }
 export interface QuickAddResult { title: string; due: string | null; dueTime: string | null; rrule: string | null; priority: Priority | null; project: string | null; labels: string[]; spans: Span[]; }
 /** `no`: the number of the task just added (in `view.project`). */
 export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; no: number; }
-export interface MoveOutcome { from: ProjectView; to: ProjectView; }
+export interface MoveOutcome { from: ProjectView; to: ProjectView; /** 移した先でのタスクの No. */ no: number; }
 /** `parse_recurrence`: rrule and label are both null when the text is not a recurrence. */
 export interface RecurrenceDto { rrule: string | null; label: string | null; }
 /** `summarize_recurrence`: label is the RRULE itself when it has no short form; valid = the rule computes without error (a finished COUNT/UNTIL rule is valid; only an unreadable one is not). */
@@ -82,7 +82,11 @@ export type SaveState = "saving" | "saved" | "error";
 export interface SaveStatus { project: string; state: SaveState; message?: string; }
 
 /** `watchError`: watching the data folder could not start (the reason). Shown once by the main screen. */
-export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; trayError?: string; }
+/** 起動時に開く画面 (この端末の設定)。 */
+export type StartView = "today" | "inbox";
+export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; trayError?: string; startView: StartView; }
+/** `parse_due_text`: 日付欄の文字の解釈。`due` は繰り返しのときその最初の日。 */
+export interface DueTextDto { due: string | null; time: string | null; rrule: string | null; label: string; }
 export interface SettingsDto {
   displayName: string;
   weekStart: "mon" | "sun";

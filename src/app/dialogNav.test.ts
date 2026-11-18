@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav.ts";
+import { stillOpenAfterComplete, afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav.ts";
 
 const keys = ["仕事/1", "仕事/3", "買い物/2"];
 
@@ -38,4 +38,10 @@ test("afterRemoval_skips_the_removed_subtree", () => {
   const rows = ["仕事/1", "仕事/2", "仕事/3", "仕事/4"]; // 2 and 3 are subtasks of 1
   assert.equal(afterRemoval(rows, "仕事/1", new Set(["仕事/2", "仕事/3"])), "仕事/4");
   assert.equal(afterRemoval(["仕事/1", "仕事/2"], "仕事/1", new Set(["仕事/2"])), null);
+});
+
+test("stillOpenAfterComplete_is_decided_by_the_refreshed_view", () => {
+  assert.equal(stillOpenAfterComplete({ tasks: [{ no: 1, progress: 0 }] }, 1), true);
+  assert.equal(stillOpenAfterComplete({ tasks: [{ no: 1, progress: 100 }] }, 1), false);
+  assert.equal(stillOpenAfterComplete({ tasks: [] }, 1), false);
 });

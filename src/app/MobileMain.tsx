@@ -18,7 +18,7 @@ import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
 import { ProjectMenuSheet } from "../views/mobile/ProjectMenuSheet";
 import { TEXT_SHEET_FORM, TextSheet } from "../views/mobile/TextSheet";
-import { INITIAL_NAV, crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
+import { crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
 import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
@@ -27,7 +27,6 @@ import { Banners } from "./Banners";
 import { MobileToast } from "../components/MobileToast";
 import { pushUndo, undoSteps, undoText, type MobileUndo } from "./mobileUndo";
 import { completedOf } from "./completionToast";
-import { movedRootNo } from "./drag/movedRoot";
 import { dateLabel } from "../mock/data";
 import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
@@ -37,6 +36,7 @@ import { insertToken } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
+import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { useSearch } from "./useSearch";
 import { useCommentCounts } from "./useComments";
@@ -66,8 +66,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const today = useToday();
   const { errors: saveErrors } = useSaveErrors();
 
-  // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は受信トレイ。
-  const [nav, dispatchNav] = useReducer(reduceNav, INITIAL_NAV);
+  // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は設定の「起動時に開く画面」(既定は今日)。
+  const [nav, dispatchNav] = useReducer(reduceNav, app.startView, initialMobileNav);
   const screen = screenOf(nav);
   const settingsOpen = screen.kind === "settings";
   const goTab = (id: MobileTab) => dispatchNav({ type: "tab", tab: id });
@@ -195,7 +195,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     setUndo(null);
     try {
       for (const s of undoSteps(u)) {
-        if (s.op === "complete") await (onScreen(s.project) ? p.completeTask(s.no, false) : cross.setDone(s.project, s.no, false));
+        if (s.op === "complete") await (onScreen(s.project) ? p.completeTask(s.no, false, true) : cross.setDone(s.project, s.no, false, true));
         else if (s.op === "update") await (onScreen(s.project) ? p.updateTask(s.no, s.patch) : api.updateTask(s.project, s.no, s.patch));
         else await api.moveTask(s.project, s.no, s.toProject, s.toSection);
       }
@@ -225,9 +225,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const moveTask = async (t: Task, toProject: string, toSection: string | null) => {
     try {
       const out = await api.moveTask(t.project, t.no, toProject, toSection);
-      // Same project: only the section changes. Another project renumbers the subtree; its root is the highest parentless No.
-      const no = toProject === t.project ? t.no : movedRootNo(out.to.tasks, 1);
-      if (no !== undefined) offer({ kind: "move", to: { project: toProject, no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
+      const no = out.no; // another project renumbers the subtree; the outcome carries the root's new No.
+      offer({ kind: "move", to: { project: toProject, no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
     } catch (e) {
       showError(e);
     }
@@ -510,6 +509,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         notifications={{ ...settingsPanes.notifications, permission }}
         onToggleNotifications={toggleNotifications}
         onRequestPermission={requestPermission}
+        general={settingsPanes.general}
         displayName={settingsPanes.account.displayName}
         onDisplayName={settingsPanes.account.onSaveDisplayName}
         displayNameBusy={settingsPanes.account.busy}

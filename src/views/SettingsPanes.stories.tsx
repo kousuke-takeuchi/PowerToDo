@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { DateTimePane, NotificationsPane } from "./SettingsPanes";
+import { DateTimePane, GeneralPane, NotificationsPane } from "./SettingsPanes";
 import type { DateTimePaneProps, NotificationsPaneProps } from "./SettingsPanes";
 
 const frame = (node: React.ReactNode) => (
@@ -67,3 +67,10 @@ export const 日付と時刻: Story = { render: () => <DateTime /> };
 export const 日付と時刻_保存エラー: Story = { render: () => <DateTime error="設定を保存できませんでした" /> };
 export const 日付と時刻_一覧にないリマインダー: Story = { render: () => <DateTime defaultReminder="-2h" /> };
 export const 日付と時刻_読み込み中: Story = { render: () => <DateTime loading /> };
+
+function General() {
+  const [startView, setStartView] = useState<"today" | "inbox">("today");
+  return frame(<GeneralPane startView={startView} onChangeStartView={setStartView} />);
+}
+
+export const 全般: Story = { render: () => <General /> };

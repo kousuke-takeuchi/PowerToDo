@@ -1,7 +1,10 @@
 import type React from "react";
-import { useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { isImeKey } from "../app/keys";
 import { Ban, Calendar, CalendarPlus, ChevronLeft, ChevronRight, Circle, Clock3, Repeat, Sofa, Sun } from "lucide-react";
 import { TextField } from "../components/TextField";
+import type { DueTextDto } from "../types/model";
+import { DueParserContext } from "./DueParserContext";
 import { TODAY, addDays, dateLabel, weekdayIndex, weekdayShort } from "../mock/data";
 import { PopRow, PopoverShell } from "./PopoverShell";
 import { quickDates } from "./quickDates";
@@ -9,7 +12,10 @@ import { quickDates } from "./quickDates";
 export type DatePickerProps = {
   value?: string;
   time?: string;
-  onChange?: (v: { date?: string; time?: string }) => void;
+  /** `rrule` は日付欄に繰り返しの言葉を打って確定したときだけ付く (無ければ繰り返しは変えない)。 */
+  onChange?: (v: { date?: string; time?: string; rrule?: string }) => void;
+  /** 日付欄の Enter で確定した後 (閉じるのは呼び出し側)。 */
+  onDone?: () => void;
   onOpenRecurrence?: () => void;
   /** 繰り返し行に出す現在値 (既定 "毎週土曜")。 */
   recurrenceLabel?: string;
@@ -22,6 +28,8 @@ export type DatePickerProps = {
   /** 時刻と繰り返しの行を出さない (値は変えず、日付だけ選ばせる)。 */
   hideTimeRepeat?: boolean;
 };
+
+const PARSE_DELAY_MS = 300;
 
 const WEEKDAY_HEAD = ["月", "火", "水", "木", "金", "土", "日"] as const;
 
@@ -49,10 +57,60 @@ const shiftMonth = (ymd: string, delta: number) => {
 };
 
 /** D-07: 日付ポップオーバーの中身。選択状態は内部で持ち、onChange で通知する。 */
-export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY, dateOnly, hideQuickPicks, hideTimeRepeat }: DatePickerProps) {
+export function DatePicker({ value, time, onChange, onDone, onOpenRecurrence, recurrenceLabel = "毎週土曜", today = TODAY, dateOnly, hideQuickPicks, hideTimeRepeat }: DatePickerProps) {
   const [date, setDate] = useState<string | undefined>(value);
   const [typed, setTyped] = useState<string | null>(null);
   const [month, setMonth] = useState(monthStart(value ?? today));
+
+  // 日付欄の文字の解釈 (RecurrencePicker と同じ: 300ms 止まったら解釈、IME の変換中は待つ、古い応答は捨てる)。
+  const parser = useContext(DueParserContext);
+  const parserRef = useRef(parser);
+  parserRef.current = parser;
+  const recurrenceOk = !dateOnly && !hideTimeRepeat && !!onOpenRecurrence;
+  const [preview, setPreview] = useState<DueTextDto | "invalid" | null>(null);
+  const [composing, setComposing] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const seq = useRef(0);
+  const run = async (text: string): Promise<DueTextDto | "invalid" | null> => {
+    const parse = parserRef.current;
+    if (!parse) return null;
+    const n = ++seq.current;
+    let r: DueTextDto | null;
+    try {
+      r = await parse(text, today);
+    } catch {
+      r = null;
+    }
+    if (n !== seq.current) return null;
+    // この呼び出し元が繰り返しを受け取れないときは、繰り返しの言葉を解釈できないものとして扱う。
+    return r && (recurrenceOk || !r.rrule) ? r : "invalid";
+  };
+  useEffect(() => {
+    seq.current += 1;
+    setPreview(null);
+    if (!parserRef.current || typed === null || typed.trim() === "" || composing) return;
+    timer.current = window.setTimeout(() => void run(typed).then((r) => r && setPreview(r)), PARSE_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer.current);
+      seq.current += 1;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typed, composing]);
+  const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!parser || e.key !== "Enter" || isImeKey(e) || typed === null || typed.trim() === "") return;
+    e.preventDefault();
+    window.clearTimeout(timer.current);
+    void run(typed).then((r) => {
+      if (!r) return;
+      if (r === "invalid") return setPreview(r);
+      setDate(r.due ?? undefined);
+      setTyped(null);
+      if (r.due) setMonth(monthStart(r.due));
+      const t = dateOnly ? undefined : (r.time ?? time);
+      onChange?.({ date: r.due ?? undefined, ...(t ? { time: t } : {}), ...(r.rrule ? { rrule: r.rrule } : {}) });
+      onDone?.();
+    });
+  };
 
   const select = (d: string | undefined) => {
     setDate(d);
@@ -86,7 +144,22 @@ export function DatePicker({ value, time, onChange, onOpenRecurrence, recurrence
 
   return (
     <PopoverShell label="日付">
-      <TextField value={typed ?? derived} placeholder="日付を入力" onChange={setTyped} />
+      <TextField
+        value={typed ?? derived}
+        placeholder="日付を入力"
+        onChange={setTyped}
+        onKeyDown={parser ? onEnter : undefined}
+        onCompositionStart={parser ? () => setComposing(true) : undefined}
+        onCompositionEnd={parser ? () => setComposing(false) : undefined}
+      />
+      {preview && (
+        <div
+          aria-live="polite"
+          style={{ fontSize: 12, lineHeight: "17px", color: preview === "invalid" ? "var(--color-text-muted)" : "var(--color-text-secondary)" }}
+        >
+          {preview === "invalid" ? "解釈できません" : `→ ${preview.label}`}
+        </div>
+      )}
       {!hideQuickPicks && (
       <div style={{ display: "flex", flexDirection: "column" }}>
         {picks.map((p) => (

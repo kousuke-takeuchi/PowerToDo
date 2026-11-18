@@ -192,6 +192,9 @@ pub struct Project {
     pub order: u32,
     pub favorite: bool,
     pub inbox: bool,
+    /// Hidden from the sidebar and every cross view; the file stays as it is.
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -533,6 +536,7 @@ mod tests {
             order: 0,
             favorite: false,
             inbox: true,
+            archived: false,
         })
         .unwrap();
         assert_eq!(v["inbox"], true);

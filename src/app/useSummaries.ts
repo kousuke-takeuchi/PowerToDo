@@ -9,10 +9,12 @@ import { useCrossView } from "./useCrossView";
  * 件数は project-changed / 保存完了でも更新される (useCrossView)。
  */
 export function useSummaries(app: AppStateDto, today: string) {
-  const [summaries, setSummaries] = useState<ProjectSummary[]>(app.projects);
+  const [allSummaries, setSummaries] = useState<ProjectSummary[]>(app.projects);
+  // アーカイブ済みはサイドバーの専用の欄だけ。一覧・移動先・クイック追加の候補は `summaries` (アーカイブを除く)。
+  const summaries = useMemo(() => allSummaries.filter((s) => !s.archived), [allSummaries]);
   const [displayName, setDisplayName] = useState<string | undefined>();
 
-  // 「今日」の件数 (期限が今日以前の未完了)。
+  // 「今日」の件数 (期限が今日以前の見えている未完了の行。サブタスクを含み、完了した親の下の行は除く) とラベルの件数。
   const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
   const refreshCounts = countsData.refresh;
 
@@ -38,10 +40,10 @@ export function useSummaries(app: AppStateDto, today: string) {
   }, [refreshSummaries, loadDisplayName]);
 
   const counts: Counts = useMemo(() => {
-    const byName = Object.fromEntries(summaries.map((s) => [s.name, s.taskCount]));
-    const inbox = summaries.find((s) => s.inbox);
+    const byName = Object.fromEntries(allSummaries.map((s) => [s.name, s.taskCount]));
+    const inbox = allSummaries.find((s) => s.inbox);
     return { ...byName, inbox: inbox?.taskCount ?? 0, today: countsData.data?.today ?? 0 };
-  }, [summaries, countsData.data]);
+  }, [allSummaries, countsData.data]);
 
-  return { summaries, displayName, setDisplayName, countsData, refreshSummaries, loadDisplayName, counts };
+  return { summaries, allSummaries, displayName, setDisplayName, countsData, refreshSummaries, loadDisplayName, counts };
 }

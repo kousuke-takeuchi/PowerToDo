@@ -365,6 +365,7 @@ pub fn merge_common(
             order: pick(&b.order, &l.order, &r.order, newer),
             favorite: pick(&b.favorite, &l.favorite, &r.favorite, newer),
             inbox: pick(&b.inbox, &l.inbox, &r.inbox, newer),
+            archived: pick(&b.archived, &l.archived, &r.archived, newer),
         },
     );
     // Only one inbox: the newer side's.
@@ -739,6 +740,7 @@ mod tests {
             order: 0,
             favorite: false,
             inbox,
+            archived: false,
         }
     }
 
