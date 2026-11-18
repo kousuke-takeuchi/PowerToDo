@@ -2,7 +2,7 @@ import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useMotionTiming } from "../motion";
-import { Bell, Calendar, ChevronDown, ChevronRight, ChevronUp, Ellipsis, Flag, Folder, Repeat, Tag, X } from "lucide-react";
+import { Bell, Calendar, ChevronDown, ChevronRight, ChevronUp, Ellipsis, Flag, Folder, Paperclip, Repeat, Tag, X } from "lucide-react";
 import { AddTaskRow } from "../components/AddTaskRow";
 import { isImeKey } from "../app/keys";
 import { isTypingTarget } from "../app/shortcuts";
@@ -11,7 +11,10 @@ import { Button } from "../components/Button";
 import { Checkbox } from "../components/Checkbox";
 import { ActionRow } from "./ActionRow";
 import { TODAY, dateLabel } from "../mock/data";
-import type { Comment, Project, Task, TaskPatch } from "../types/model";
+import { noteInfos } from "../app/attachments/list";
+import { pasteFiles, useFileDrop } from "../app/useFileDrop";
+import type { AttachmentInfo, Comment, NoteFile, Project, Task, TaskPatch } from "../types/model";
+import { AttachmentList } from "./Attachments";
 import { CommentsSection } from "./CommentsSection";
 import { DatePicker } from "./DatePicker";
 import { LabelPicker } from "./LabelPicker";
@@ -39,11 +42,21 @@ export type TaskDialogProps = {
   /** 今の表示名 (自分のコメントだけ編集・削除できる)。 */
   me?: string;
   /** 渡すと入力欄を出す。true で保存できた (入力欄を空にする)。 */
-  onAddComment?: (text: string) => Promise<boolean>;
-  onEditComment?: (id: string, text: string) => Promise<boolean>;
+  onAddComment?: (text: string, files: AttachmentInfo[]) => Promise<boolean>;
+  onEditComment?: (id: string, text: string, files?: AttachmentInfo[]) => Promise<boolean>;
   onDeleteComment?: (id: string) => void;
   /** Stories: this comment starts in edit mode. */
   initialCommentEdit?: string;
+  /** コメントの入力欄に付ける、保存して返すファイル処理 (縮小は中で。spec 添付 §4)。渡すとクリップのボタンが出る。 */
+  onAttachComment?: (files: File[]) => Promise<AttachmentInfo[]>;
+  /** Stories: 送る前の添付。 */
+  initialPending?: AttachmentInfo[];
+  /** 説明の添付 (spec 添付 §5)。 */
+  noteFiles?: NoteFile[];
+  /** 渡すと「+ 添付」、説明欄への貼り付け、ダイアログへのドロップが説明の添付になる。 */
+  onAttachNote?: (files: File[]) => void | Promise<void>;
+  /** 渡すと説明の添付にホバーの × が出る (確かめずに外す。「元に戻す」は呼び出し側)。 */
+  onDetachNote?: (id: string) => void;
   // ---- 実アプリ用 (onChange を渡すと編集モード。無ければ Storybook と同じ、見た目だけのローカル挙動) ----
   /**
    * 編集の確定 (タイトル / 説明は blur・Enter、優先度・期限・繰り返し・リマインダーは選択時)。
@@ -196,6 +209,11 @@ export function TaskDialog({
   onEditComment,
   onDeleteComment,
   initialCommentEdit,
+  onAttachComment,
+  initialPending,
+  noteFiles,
+  onAttachNote,
+  onDetachNote,
 }: TaskDialogProps) {
   const editable = onChange !== undefined;
   const [popover, setPopover] = useState<Popover | null>(initialPopover ?? null);
@@ -297,6 +315,10 @@ export function TaskDialog({
   }, [onPrev, onNext, present]);
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => boxRef.current?.focus(), []);
+  // Files dropped anywhere in the dialog go to the description; the comment composer takes its own (spec 添付 §5).
+  const noteDrop = useFileDrop((files) => void onAttachNote?.(files));
+  const notePicker = useRef<HTMLInputElement>(null);
+  const note = noteInfos(noteFiles ?? []);
   const [menuOpen, setMenuOpen] = useState(false);
   const narrow = layout === "narrow";
 
@@ -441,12 +463,41 @@ export function TaskDialog({
               placeholder="説明"
               rows={2}
               onChange={(e) => setNoteDraft(e.target.value)}
+              onPaste={onAttachNote ? (e) => pasteFiles(e, (f) => void onAttachNote(f)) : undefined}
               onBlur={commitNote}
               className="placeholder:text-[var(--color-text-muted)]"
               style={{ ...bareField, resize: "vertical", fontSize: 14, lineHeight: "20px", color: "var(--color-text-secondary)" }}
             />
           ) : (
             <div style={{ fontSize: 14, lineHeight: "20px", color: task.note ? "var(--color-text-secondary)" : "var(--color-text-muted)" }}>{task.note ?? "説明"}</div>
+          )}
+          {(note.files.length > 0 || onAttachNote) && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-2)", marginTop: 4 }}>
+              <AttachmentList files={note.files} ids={note.ids} onRemove={onDetachNote ? (i) => onDetachNote(note.ids[i]) : undefined} />
+              {onAttachNote && (
+                <>
+                  <input
+                    ref={notePicker}
+                    type="file"
+                    multiple
+                    hidden
+                    aria-label="説明に添付するファイルを選ぶ"
+                    onChange={(e) => {
+                      void onAttachNote(Array.from(e.target.files ?? []));
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => notePicker.current?.click()}
+                    className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px", border: 0, borderRadius: 6, fontFamily: "var(--font-body)", fontSize: 12, lineHeight: "17px", color: "var(--color-text-secondary)", cursor: "pointer" }}
+                  >
+                    <Paperclip size={12} aria-hidden />+ 添付
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -494,6 +545,8 @@ export function TaskDialog({
         onAdd={onAddComment}
         onEdit={onEditComment}
         onDelete={onDeleteComment}
+        onAttach={onAttachComment}
+        initialPending={initialPending}
         initialEditId={initialCommentEdit}
       />
     </div>
@@ -641,6 +694,7 @@ export function TaskDialog({
       style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--color-scrim)", pointerEvents: "auto" }}
     >
       <div
+        {...noteDrop.props}
         ref={boxRef}
         role="dialog"
         aria-modal="true"
@@ -648,7 +702,8 @@ export function TaskDialog({
         tabIndex={-1}
         style={{
           position: "relative",
-          outline: "none",
+          outline: noteDrop.over && onAttachNote ? "2px dashed var(--color-accent)" : "none",
+          outlineOffset: -2,
           width: "min(864px, calc(100vw - 32px))",
           height: "min(820px, calc(100vh - 64px))",
           display: "grid",

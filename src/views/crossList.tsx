@@ -7,6 +7,7 @@ import { Collapse } from "../motion";
 import type { Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { CommentCounts } from "../app/useComments";
+import { AttachmentCounts } from "../app/attachments/env";
 import { DragCtx } from "../app/drag/DragContext";
 import { RowActions } from "../app/rowActions";
 import { ActionRow } from "./ActionRow";
@@ -145,6 +146,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
   const { isDone: fakeDone, toggle: fakeToggle } = useDone();
   const colors = useContext(ProjectColors);
   const commentCounts = useContext(CommentCounts);
+  const attachmentCounts = useContext(AttachmentCounts);
   const leave = useLeaving(tasks);
   // `rows()` を呼んだ順 (= 表示順) に積む。描画ごとに作り直し、コミット後に useReportKeys が読む。
   const shown: string[] = [];
@@ -181,6 +183,7 @@ export function useCrossRows({ tasks, onToggleDone, onOpenTask, date, focusedKey
           section: t.category ?? undefined,
           projectColor: colors[t.project],
           commentCount: commentCounts[taskKey(t)],
+          attachmentCount: attachmentCounts[taskKey(t)],
           focused: !dup && focusedKey === taskKey(t),
           onClick: onOpenTask ? () => onOpenTask(t) : undefined,
           onToggleDone: () => toggle(t, group, index),

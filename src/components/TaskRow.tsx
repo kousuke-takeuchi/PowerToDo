@@ -1,7 +1,7 @@
 import type React from "react";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { ChevronDown, ChevronRight, GripVertical, Hash, Pencil, Calendar, MessageSquare, Ellipsis, ListTree, Repeat } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, Hash, Pencil, Calendar, MessageSquare, Ellipsis, ListTree, Paperclip, Repeat } from "lucide-react";
 import { Checkbox } from "./Checkbox";
 import { DateChip } from "./DateChip";
 import { LabelChip } from "./LabelChip";
@@ -29,6 +29,8 @@ export type TaskRowProps = {
   projectIsInbox?: boolean;
   /** Comments of the task (spec ① §3.3): shown on the meta line when more than 0. */
   commentCount?: number;
+  /** Attachments of the task (comments' and description's; spec attachments §5): shown next to the comment count when more than 0. */
+  attachmentCount?: number;
   /** Stories: show the drag handle as if hovered. */
   showHandle?: boolean;
   subtasks?: { done: number; total: number; expanded: boolean };
@@ -182,7 +184,7 @@ function DesktopTaskRow(p: TaskRowProps) {
         {p.description && (
           <div style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-secondary)" }}>{p.description}</div>
         )}
-        {(p.date || p.recurring || p.labels?.length || p.moreCount || p.project || p.subtasks || p.commentCount) && (
+        {(p.date || p.recurring || p.labels?.length || p.moreCount || p.project || p.subtasks || p.commentCount || p.attachmentCount) && (
           <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "nowrap" }}>
             {p.date && <DateChip label={p.date.label} tone={p.date.tone} />}
             {p.recurring && (
@@ -223,6 +225,12 @@ function DesktopTaskRow(p: TaskRowProps) {
               <span style={subCountStyle} aria-label={`コメント ${p.commentCount} 件`}>
                 <MessageSquare size={12} color="var(--color-text-muted)" aria-hidden />
                 {p.commentCount}
+              </span>
+            ) : null}
+            {p.attachmentCount ? (
+              <span style={subCountStyle} aria-label={`添付 ${p.attachmentCount} 件`}>
+                <Paperclip size={12} color="var(--color-text-muted)" aria-hidden />
+                {p.attachmentCount}
               </span>
             ) : null}
             {p.project && !mobile && (
