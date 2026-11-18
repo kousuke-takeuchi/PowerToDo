@@ -82,7 +82,9 @@ export type SaveState = "saving" | "saved" | "error";
 export interface SaveStatus { project: string; state: SaveState; message?: string; }
 
 /** `watchError`: watching the data folder could not start (the reason). Shown once by the main screen. */
-export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; trayError?: string; }
+/** 起動時に開く画面 (この端末の設定)。 */
+export type StartView = "today" | "inbox";
+export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; trayError?: string; startView: StartView; }
 export interface SettingsDto {
   displayName: string;
   weekStart: "mon" | "sun";

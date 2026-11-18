@@ -54,6 +54,7 @@ import { useSaveErrors } from "./useSaveStatus";
 import { formatSynced, syncErrorText, syncPausedText, targetName } from "./syncText";
 import { useSync } from "./useSync";
 import type { SyncConflicts } from "./useSyncConflicts";
+import { initialNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { useUpdates } from "./useUpdates";
 import type { UpdateOffer } from "./useUpdates";
@@ -72,7 +73,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const viewStore = useViewOptionsStore();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
 
-  const [nav, setNav] = useState<Nav>({ kind: "inbox" });
+  const [nav, setNav] = useState<Nav>(() => initialNav(app.startView));
   // The task open in the task dialog (spec ① §2): over whatever view is shown.
   const [dialog, setDialog] = useState<{ project: string; no: number } | null>(null);
   // 通知 / 帯から開いたタスク: プロジェクトが読み込まれたら、そのタスクがあるか一度だけ確かめる
@@ -1080,6 +1081,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         initialPane="account"
         onClose={() => setSettingsOpen(false)}
         dataPane={settingsPanes.data}
+        generalPane={settingsPanes.general}
         accountPane={settingsPanes.account}
         notificationsPane={{ ...settingsPanes.notifications, trayError: app.trayError }}
         datetimePane={settingsPanes.datetime}

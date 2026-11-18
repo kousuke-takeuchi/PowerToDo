@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Comment,
   AutostartDto,
+  StartView,
   AppError,
   AppErrorKind,
   AppStateDto,
@@ -176,6 +177,9 @@ export const api = {
    */
   updateInstall: () => invoke<null>("update_install"),
   setUpdateAutoCheck: (enabled: boolean) => invoke<null>("set_update_auto_check", { enabled }),
+  /** 起動時に開く画面 (この端末の settings.json)。 */
+  startView: () => invoke<StartView>("start_view"),
+  setStartView: (view: StartView) => invoke<null>("set_start_view", { view }),
   /** ログイン時に起動するか (OS の登録の状態)。 */
   autostartStatus: () => invoke<AutostartDto>("autostart_status"),
   /** ログイン時に起動するかを OS に登録 / 解除する。返るのは OS の状態。失敗は日本語の文で reject する。 */

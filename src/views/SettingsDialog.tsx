@@ -1,4 +1,4 @@
-import { Bell, Calendar, Cloud, Download, Folder, Keyboard, Palette, User } from "lucide-react";
+import { Bell, Calendar, Cloud, Download, Folder, Keyboard, Palette, SlidersHorizontal, User } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
@@ -6,8 +6,8 @@ import { useMotionTiming } from "../motion";
 import { useEscLayer } from "../app/layers";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
-import { AccountPane, DataPane, DateTimePane, Desc, KeyboardPane, LaterPane, NotificationsPane, Row, Section } from "./SettingsPanes";
-import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "./SettingsPanes";
+import { AccountPane, DataPane, DateTimePane, Desc, GeneralPane, KeyboardPane, LaterPane, NotificationsPane, Row, Section } from "./SettingsPanes";
+import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, GeneralPaneProps, NotificationsPaneProps } from "./SettingsPanes";
 import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, syncTargetOptions } from "./SyncFields";
 import { isNasConnected } from "../app/syncText";
@@ -17,7 +17,7 @@ import { UpdatesPane } from "./UpdatesPane";
 import type { UpdatesPaneProps } from "./UpdatesPane";
 
 export type SyncTarget = "google" | "nas" | "none";
-export type SettingsPane = "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard" | "updates";
+export type SettingsPane = "general" | "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard" | "updates";
 export type SettingsDialogProps = {
   open: boolean;
   initialTarget?: SyncTarget;
@@ -34,6 +34,8 @@ export type SettingsDialogProps = {
   dataPane?: DataPaneProps;
   /** 「アカウント」ペインに渡す値とハンドラ。無ければ見た目だけ。 */
   accountPane?: AccountPaneProps;
+  /** 「全般」ペイン。渡したときだけ左の一覧に「全般」が出る。 */
+  generalPane?: GeneralPaneProps;
   /** 「通知」ペイン。無ければ従来の「実装予定」の表示。 */
   notificationsPane?: NotificationsPaneProps;
   /** 「日付と時刻」ペイン。無ければ従来の「実装予定」の表示。 */
@@ -45,6 +47,7 @@ export type SettingsDialogProps = {
 type Icon = React.ComponentType<{ size?: number }>;
 
 const navItems: { pane: SettingsPane; label: string; icon: Icon }[] = [
+  { pane: "general", label: "全般", icon: SlidersHorizontal },
   { pane: "account", label: "アカウント", icon: User },
   { pane: "sync", label: "同期", icon: Cloud },
   { pane: "data", label: "データ", icon: Folder },
@@ -89,6 +92,7 @@ export function SettingsDialog({
   notificationsPane,
   datetimePane,
   updatesPane,
+  generalPane,
 }: SettingsDialogProps) {
   const [pane, setPane] = useState<SettingsPane>(initialPane);
   const [target, setTarget] = useState<SyncTarget>(initialTarget);
@@ -263,7 +267,7 @@ export function SettingsDialog({
               }}
             >
               <div style={{ fontSize: 16, lineHeight: "23px", fontWeight: 700, color: "var(--color-text-primary)" }}>設定</div>
-              {navItems.filter((n) => n.pane !== "updates" || updatesPane).map(({ pane: p, label, icon: I }) => {
+              {navItems.filter((n) => (n.pane !== "updates" || updatesPane) && (n.pane !== "general" || generalPane)).map(({ pane: p, label, icon: I }) => {
                 const active = p === pane;
                 return (
                 <button
@@ -322,6 +326,7 @@ export function SettingsDialog({
                   {localCache}
                 </>
               )}
+              {pane === "general" && generalPane && <GeneralPane {...generalPane} />}
               {pane === "account" && <AccountPane {...accountPane} />}
               {pane === "data" && <DataPane {...dataPane} />}
               {pane === "keyboard" && <KeyboardPane />}

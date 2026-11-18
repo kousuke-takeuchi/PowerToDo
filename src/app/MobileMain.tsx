@@ -18,7 +18,7 @@ import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
 import { ProjectMenuSheet } from "../views/mobile/ProjectMenuSheet";
 import { TEXT_SHEET_FORM, TextSheet } from "../views/mobile/TextSheet";
-import { INITIAL_NAV, crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
+import { crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
 import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
@@ -36,6 +36,7 @@ import { insertToken } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
+import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { useSearch } from "./useSearch";
 import { useCommentCounts } from "./useComments";
@@ -66,7 +67,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const { errors: saveErrors } = useSaveErrors();
 
   // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は受信トレイ。
-  const [nav, dispatchNav] = useReducer(reduceNav, INITIAL_NAV);
+  const [nav, dispatchNav] = useReducer(reduceNav, app.startView, initialMobileNav);
   const screen = screenOf(nav);
   const settingsOpen = screen.kind === "settings";
   const goTab = (id: MobileTab) => dispatchNav({ type: "tab", tab: id });
@@ -508,6 +509,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         notifications={{ ...settingsPanes.notifications, permission }}
         onToggleNotifications={toggleNotifications}
         onRequestPermission={requestPermission}
+        general={settingsPanes.general}
         displayName={settingsPanes.account.displayName}
         onDisplayName={settingsPanes.account.onSaveDisplayName}
         displayNameBusy={settingsPanes.account.busy}

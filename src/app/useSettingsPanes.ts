@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
-import type { AutostartDto, SettingsDto } from "../types/model";
-import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, NotificationsPaneProps } from "../views/SettingsPanes";
+import type { AutostartDto, SettingsDto, StartView } from "../types/model";
+import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, GeneralPaneProps, NotificationsPaneProps } from "../views/SettingsPanes";
 
 /** `trayError` は呼び出し側 (AppStateDto) が足す。 */
 export type SettingsPanes = {
+  general: GeneralPaneProps;
   data: DataPaneProps;
   account: AccountPaneProps;
   notifications: Omit<NotificationsPaneProps, "trayError">;
@@ -34,6 +35,9 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   const [notifError, setNotifError] = useState<string | null>(null);
   const [dateBusy, setDateBusy] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
+  const [startView, setStartView] = useState<StartView | null>(null);
+  const [startViewBusy, setStartViewBusy] = useState(false);
+  const [startViewError, setStartViewError] = useState<string | null>(null);
   const [autostart, setAutostart] = useState<AutostartDto | null>(null);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
@@ -73,6 +77,13 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
         setNotifError(errorMessage(e));
         setDateError(errorMessage(e));
       });
+    setStartView(null);
+    setStartViewBusy(false);
+    setStartViewError(null);
+    api
+      .startView()
+      .then((v) => g === gen.current && setStartView(v))
+      .catch((e) => g === gen.current && setStartViewError(errorMessage(e)));
     setAutostart(null);
     setAutostartBusy(false);
     setAutostartError(null);
@@ -84,6 +95,17 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
       gen.current++;
     };
   }, [open]);
+
+  const onChangeStartView = (v: StartView) => {
+    const g = gen.current;
+    setStartViewBusy(true);
+    setStartViewError(null);
+    api
+      .setStartView(v)
+      .then(() => g === gen.current && setStartView(v))
+      .catch((e) => g === gen.current && setStartViewError(errorMessage(e)))
+      .finally(() => g === gen.current && setStartViewBusy(false));
+  };
 
   const onToggleAutostart = (v: boolean) => {
     const g = gen.current;
@@ -174,6 +196,13 @@ export function useSettingsPanes(open: boolean, { onDataDirChanged, onDisplayNam
   const saveDate = (patch: Partial<SettingsDto>) => save(patch, setDateBusy, setDateError);
 
   return {
+    general: {
+      startView: startView ?? "today",
+      onChangeStartView,
+      loading: startView === null && !startViewError,
+      busy: startViewBusy,
+      error: startViewError,
+    },
     data: {
       dataDir: settings?.dataDir ?? "",
       onReveal,

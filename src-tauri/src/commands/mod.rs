@@ -31,7 +31,7 @@ use crate::platform;
 use crate::store::common_book::Settings;
 use crate::store::external::{FileKind, Verdict, classify_path, fingerprint, verdict};
 use crate::store::fired::{Fired, ReminderItem, ReminderKey};
-use crate::store::paths::{AppSettings, Paths};
+use crate::store::paths::{AppSettings, Paths, StartView};
 use crate::store::project_store::{ProjectStore, ProjectSummary, ProjectView};
 #[cfg(desktop)]
 use crate::store::watcher;
@@ -347,6 +347,8 @@ pub struct AppStateDto {
     /// The tray icon could not be created; the settings pane notes that closing quits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tray_error: Option<String>,
+    /// The screen to open first (this device's `settings.json`); decided with the first paint.
+    pub start_view: StartView,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -529,6 +531,7 @@ fn state_dto(store: Option<&ProjectStore>, warning: Option<String>) -> AppStateD
         warning,
         watch_error: None,
         tray_error: None,
+        start_view: StartView::default(),
     }
 }
 
@@ -1268,6 +1271,7 @@ pub async fn app_state(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     Ok(AppStateDto {
         watch_error: state.watch_error(),
         tray_error: state.tray_error(),
+        start_view: state.lock_settings().start_view,
         ..dto
     })
 }
@@ -1288,8 +1292,35 @@ pub async fn set_data_dir(
     Ok(AppStateDto {
         watch_error: state.watch_error(),
         tray_error: state.tray_error(),
+        start_view: state.lock_settings().start_view,
         ..dto
     })
+}
+
+/// The screen opened at launch (spec ② §8).
+#[tauri::command]
+pub async fn start_view(state: State<'_, AppState>) -> AppResult<StartView> {
+    Ok(state.lock_settings().start_view)
+}
+
+/// Sets the screen opened at launch. Per device, so it goes to `settings.json`, not the data folder.
+#[tauri::command]
+pub async fn set_start_view(view: StartView, app: AppHandle) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let _writer = state.sync_rt.lock_settings_write();
+        let next = AppSettings {
+            start_view: view,
+            ..state.lock_settings().clone()
+        };
+        next.save(state.app_data_dir())?;
+        *state.lock_settings() = next;
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::Io {
+        message: format!("内部エラー: {e}"),
+    })?
 }
 
 /// Why watching the data folder could not start, or `None` while it runs (仕様 §7).
@@ -2204,6 +2235,7 @@ mod tests {
         let json = serde_json::to_value(state_dto(Some(&store), None)).unwrap();
         assert_eq!(json["dataDir"], tmp.path().to_string_lossy().as_ref());
         assert_eq!(json["inbox"], "受信トレイ");
+        assert_eq!(json["startView"], "today");
         assert_eq!(json["projects"][0]["name"], "受信トレイ");
         assert_eq!(json["projects"][0]["taskCount"], 0);
         assert!(json.get("warning").is_none());
