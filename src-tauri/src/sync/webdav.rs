@@ -27,6 +27,9 @@ const COMMENTS_DIR: &str = "_comments";
 /// `COMMENTS_DIR` as the `dir` of `child_url`.
 const COMMENTS_SUB: &str = "_comments/";
 const COMMENTS_ID_PREFIX: &str = "_comments/";
+/// The attachment blobs' folder (spec attachments §7); ids carry it like the comment files' do.
+const ATTACHMENTS_DIR: &str = "_attachments";
+const ATTACHMENTS_SUB: &str = "_attachments/";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// No byte for this long on a read (including waiting for the answer) ends the request.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
@@ -248,6 +251,10 @@ impl WebDavBackend {
         Url::parse(&format!("{}{COMMENTS_DIR}/", self.base)).expect("base plus a plain segment")
     }
 
+    fn attachments_url(&self) -> Url {
+        Url::parse(&format!("{}{ATTACHMENTS_DIR}/", self.base)).expect("base plus a plain segment")
+    }
+
     fn archive_url(&self) -> Url {
         Url::parse(&format!("{}{ARCHIVE_DIR}/", self.base)).expect("base plus a plain segment")
     }
@@ -310,7 +317,7 @@ impl WebDavBackend {
             .propfind(self.base.clone(), "1")
             .await?
             .ok_or_else(folder_missing)?;
-        self.files_of(self.base.clone(), entries, ".xlsx")
+        self.files_of(self.base.clone(), entries, |n| n.ends_with(".xlsx"))
     }
 
     /// The comment files, `None` when `_comments/` does not exist.
@@ -319,16 +326,79 @@ impl WebDavBackend {
         let Some(entries) = self.propfind(url.clone(), "1").await? else {
             return Ok(None);
         };
-        let files = self.files_of(url, entries, ".jsonl")?;
+        let files = self.files_of(url, entries, |n| n.ends_with(".jsonl"))?;
         Ok(Some(files.into_iter().map(in_comments).collect()))
     }
 
-    /// The files directly in the folder `url` whose name ends in `suffix`, from its PROPFIND entries.
+    /// The blobs, empty when `_attachments/` does not exist. Temporary names (`<name>.part-…`) are not blobs.
+    async fn list_attachment_files(&self) -> Result<Vec<RemoteFile>, BackendError> {
+        let url = self.attachments_url();
+        let Some(entries) = self.propfind(url.clone(), "1").await? else {
+            return Ok(Vec::new());
+        };
+        let files = self.files_of(url, entries, |n| {
+            crate::store::attachments::parse_file_name(n).is_some()
+        })?;
+        Ok(files.into_iter().map(in_attachments).collect())
+    }
+
+    /// Writes the blob under a temporary name and moves it into place, so a connection that breaks
+    /// mid-file leaves nothing under the real name (a half file there would be refused for good by
+    /// the hash check, as blobs are never overwritten). A server without MOVE cannot take blobs;
+    /// that is reported, there is no direct-PUT fallback.
+    async fn upload_attachment_file(
+        &self,
+        name: &str,
+        bytes: Vec<u8>,
+    ) -> Result<RemoteFile, BackendError> {
+        self.make_folder(self.attachments_url()).await?;
+        let dest = self.file_url_in(ATTACHMENTS_SUB, name)?;
+        let temp = format!("{name}.part-{:016x}", rand::random::<u64>());
+        let temp_url = self.file_url_in(ATTACHMENTS_SUB, &temp)?;
+        let moved = async {
+            let put = self
+                .send(
+                    "PUT",
+                    temp_url.clone(),
+                    &[("Content-Type", OCTET_STREAM)],
+                    Some(bytes),
+                )
+                .await?;
+            check_status(put)?;
+            let resp = self
+                .send(
+                    "MOVE",
+                    temp_url.clone(),
+                    &[("Destination", dest.as_str()), ("Overwrite", "F")],
+                    None,
+                )
+                .await?;
+            // 412: the name exists (another PC put the same blob meanwhile).
+            if resp.status().as_u16() == 412 {
+                return Err(BackendError::Precondition);
+            }
+            check_status(resp).map(|_| ())
+        }
+        .await;
+        if let Err(e) = moved {
+            // Best effort; a temporary name is never read as a blob, so a leftover only wastes space.
+            let _ = self.send("DELETE", temp_url, &[], None).await;
+            return Err(e);
+        }
+        let entry = self
+            .stat_in(ATTACHMENTS_SUB, name)
+            .await?
+            .ok_or_else(|| BackendError::Other(format!("「{name}」を書き込めませんでした")))?;
+        remote_file(name, entry).map(in_attachments)
+    }
+
+    /// The files directly in the folder `url` whose name (as the server wrote it) `accept`s, from its
+    /// PROPFIND entries.
     fn files_of(
         &self,
         url: Url,
         entries: Vec<Entry>,
-        suffix: &str,
+        accept: impl Fn(&str) -> bool,
     ) -> Result<Vec<RemoteFile>, BackendError> {
         let folder = norm(
             percent_decode_str(url.path())
@@ -345,7 +415,7 @@ impl WebDavBackend {
             // Only workbooks matter, and `is_sync_target` takes the exact lower-case `.xlsx`.
             // Checked before decoding so an oddly encoded file of another kind cannot fail
             // the whole listing.
-            if !raw.ends_with(suffix) {
+            if !accept(raw.rsplit('/').next().unwrap_or_default()) {
                 continue;
             }
             let path = percent_decode_str(&raw)
@@ -548,6 +618,8 @@ impl StorageBackend for WebDavBackend {
             // A comment file's id carries its folder (see `in_comments`).
             let dir = if file.id.starts_with(COMMENTS_ID_PREFIX) {
                 COMMENTS_SUB
+            } else if file.id.starts_with(ATTACHMENTS_SUB) {
+                ATTACHMENTS_SUB
             } else {
                 ""
             };
@@ -590,6 +662,22 @@ impl StorageBackend for WebDavBackend {
 
     fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
         Box::pin(self.archive_in(COMMENTS_SUB, file))
+    }
+
+    fn list_attachments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(self.list_attachment_files())
+    }
+
+    fn upload_attachment<'a>(&'a self, name: &'a str, bytes: Vec<u8>) -> BoxFut<'a, RemoteFile> {
+        Box::pin(self.upload_attachment_file(name, bytes))
+    }
+}
+
+/// A blob of `_attachments/`: its id carries the folder, so `download` finds it.
+fn in_attachments(f: RemoteFile) -> RemoteFile {
+    RemoteFile {
+        id: format!("{ATTACHMENTS_SUB}{}", f.name),
+        ..f
     }
 }
 
@@ -1104,6 +1192,176 @@ mod tests {
             size: 5,
         };
         assert_eq!(backend(&s).download(&f).await.unwrap(), b"line\n");
+    }
+
+    // --- the _attachments folder (spec attachments §7) ------------------------------------
+
+    const BLOB: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png";
+
+    async fn mount_re(server: &MockServer, verb: &str, re: &str, status: u16) {
+        Mock::given(method(verb))
+            .and(wiremock::matchers::path_regex(re))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn attachment_listing_of_a_missing_folder_is_empty() {
+        let s = MockServer::start().await;
+        mount(&s, "PROPFIND", "/powertodo/_attachments/", 404, "").await;
+        assert!(backend(&s).list_attachments().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn attachment_listing_reads_blobs_and_not_temporary_files() {
+        let s = MockServer::start().await;
+        let body = multistatus(&[
+            collection_response("/powertodo/_attachments/"),
+            file_response(
+                &format!("/powertodo/_attachments/{BLOB}"),
+                Some("&quot;e&quot;"),
+                LM,
+                4,
+            ),
+            file_response(
+                &format!("/powertodo/_attachments/{BLOB}.part-0123"),
+                None,
+                LM,
+                2,
+            ),
+            file_response("/powertodo/_attachments/notes.txt", None, LM, 1),
+        ]);
+        mount(&s, "PROPFIND", "/powertodo/_attachments/", 207, &body).await;
+        let files = backend(&s).list_attachments().await.unwrap();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].name, BLOB);
+        assert_eq!(files[0].id, format!("_attachments/{BLOB}"));
+    }
+
+    #[tokio::test]
+    async fn attachment_upload_puts_a_temporary_name_then_moves_it_without_overwriting() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/_attachments/", 201, "").await;
+        mount_re(
+            &s,
+            "PUT",
+            r"/powertodo/_attachments/.+\.part-[0-9a-f]+$",
+            201,
+        )
+        .await;
+        mount_re(
+            &s,
+            "MOVE",
+            r"/powertodo/_attachments/.+\.part-[0-9a-f]+$",
+            201,
+        )
+        .await;
+        let stat = multistatus(&[file_response(
+            &format!("/powertodo/_attachments/{BLOB}"),
+            Some("&quot;v1&quot;"),
+            LM,
+            4,
+        )]);
+        mount(
+            &s,
+            "PROPFIND",
+            &format!("/powertodo/_attachments/{BLOB}"),
+            207,
+            &stat,
+        )
+        .await;
+        let f = backend(&s)
+            .upload_attachment(BLOB, b"data".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(f.id, format!("_attachments/{BLOB}"));
+        let reqs = requests(&s).await;
+        let put = reqs.iter().find(|r| r.method.as_str() == "PUT").unwrap();
+        assert!(put.url.path().contains(".part-"), "not the real name");
+        assert_eq!(put.body, b"data");
+        let mv = reqs.iter().find(|r| r.method.as_str() == "MOVE").unwrap();
+        assert_eq!(header_of(mv, "overwrite").as_deref(), Some("F"));
+        assert!(
+            header_of(mv, "destination")
+                .unwrap()
+                .ends_with(&format!("/powertodo/_attachments/{BLOB}"))
+        );
+        assert!(reqs.iter().all(|r| r.method.as_str() != "DELETE"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_move_deletes_the_temporary_file() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/_attachments/", 201, "").await;
+        mount_re(&s, "PUT", r"\.part-[0-9a-f]+$", 201).await;
+        mount_re(&s, "MOVE", r"\.part-[0-9a-f]+$", 500).await;
+        mount_re(&s, "DELETE", r"\.part-[0-9a-f]+$", 204).await;
+        assert!(
+            backend(&s)
+                .upload_attachment(BLOB, b"x".to_vec())
+                .await
+                .is_err()
+        );
+        let reqs = requests(&s).await;
+        assert!(reqs.iter().any(|r| r.method.as_str() == "DELETE"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_put_deletes_the_temporary_file_and_an_existing_name_is_a_precondition() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/_attachments/", 405, "").await;
+        mount_re(&s, "PUT", r"\.part-[0-9a-f]+$", 507).await;
+        mount_re(&s, "DELETE", r"\.part-[0-9a-f]+$", 204).await;
+        let e = backend(&s)
+            .upload_attachment(BLOB, b"x".to_vec())
+            .await
+            .unwrap_err();
+        assert!(matches!(e, BackendError::Full), "{e:?}");
+        assert!(
+            requests(&s)
+                .await
+                .iter()
+                .any(|r| r.method.as_str() == "DELETE")
+        );
+
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/_attachments/", 405, "").await;
+        mount_re(&s, "PUT", r"\.part-[0-9a-f]+$", 201).await;
+        mount_re(&s, "MOVE", r"\.part-[0-9a-f]+$", 412).await;
+        mount_re(&s, "DELETE", r"\.part-[0-9a-f]+$", 204).await;
+        let e = backend(&s)
+            .upload_attachment(BLOB, b"x".to_vec())
+            .await
+            .unwrap_err();
+        assert!(matches!(e, BackendError::Precondition), "{e:?}");
+        assert!(
+            requests(&s)
+                .await
+                .iter()
+                .any(|r| r.method.as_str() == "DELETE")
+        );
+    }
+
+    #[tokio::test]
+    async fn attachment_download_reads_from_the_folder() {
+        let s = MockServer::start().await;
+        mount(
+            &s,
+            "GET",
+            &format!("/powertodo/_attachments/{BLOB}"),
+            200,
+            "data",
+        )
+        .await;
+        let f = RemoteFile {
+            id: format!("_attachments/{BLOB}"),
+            name: BLOB.into(),
+            version: "v".into(),
+            modified: local(LM),
+            size: 4,
+        };
+        assert_eq!(backend(&s).download(&f).await.unwrap(), b"data");
     }
 
     #[tokio::test]

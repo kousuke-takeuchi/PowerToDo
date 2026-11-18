@@ -6,15 +6,25 @@
 //! blob URL from them. The asset protocol is not used: it needs a static path scope, and the data
 //! folder is chosen at run time (and may be anywhere, on iPhone inside the app's container).
 
-use tauri::AppHandle;
-use tauri::State;
+use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
+use tauri::{AppHandle, Emitter, State};
 
 use super::{AppState, with_store};
 use crate::error::{AppError, AppResult};
 use crate::platform;
 use crate::store::attachments::{self, AttachmentInfo, Usage};
 use crate::store::paths::Paths;
+
+/// Payload of `attachments-changed`: blob file names (`<sha256>.<ext>`) a sync wrote here.
+#[derive(Debug, Clone, Serialize)]
+pub struct AttachmentsChanged {
+    pub files: Vec<String>,
+}
+
+pub fn emit_attachments_changed(app: &AppHandle, files: Vec<String>) {
+    let _ = app.emit("attachments-changed", AttachmentsChanged { files });
+}
 
 fn paths_of(state: &AppState) -> AppResult<Paths> {
     with_store(state, |s| Ok(s.paths().clone()))

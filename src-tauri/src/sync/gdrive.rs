@@ -31,6 +31,10 @@ const PROP_ARCHIVE: &str = "archive";
 /// The comment files' folder in the root (spec ① §3.4).
 const COMMENTS_FOLDER_NAME: &str = "_comments";
 const PROP_COMMENTS: &str = "comments";
+/// The attachment blobs' folder in the root (spec attachments §7).
+const ATTACHMENTS_FOLDER_NAME: &str = "_attachments";
+const PROP_ATTACHMENTS: &str = "attachments";
+const BLOB_MIME: &str = "application/octet-stream";
 const JSONL_MIME: &str = "application/x-ndjson";
 /// The metadata every returned file carries.
 const FILE_FIELDS: &str = "id,name,md5Checksum,modifiedTime,size";
@@ -273,6 +277,34 @@ impl GoogleDriveBackend {
             }
         }
         Ok(Some(files))
+    }
+
+    /// The `_attachments` folders of the root (several when two PCs made it at the same moment: files
+    /// are read from all, new ones go to the smallest id).
+    async fn attachment_folders(&self) -> Result<Vec<String>, BackendError> {
+        let root = self.resolve_root().await?;
+        self.find_folders(PROP_ATTACHMENTS, Some(&root)).await
+    }
+
+    /// The blobs of every `_attachments`; empty when the root has no such folder.
+    async fn list_attachment_files(&self) -> Result<Vec<RemoteFile>, BackendError> {
+        let mut files = Vec::new();
+        for folder in self.attachment_folders().await? {
+            let q = format!(
+                "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}'",
+                escape_q(&folder)
+            );
+            for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
+                let is_blob = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|n| crate::store::attachments::parse_file_name(n).is_some());
+                if is_blob {
+                    files.push(remote_file(&item)?);
+                }
+            }
+        }
+        Ok(files)
     }
 
     /// The `_comments` folder that holds `file`: the only one, or the one its parents name.
@@ -617,6 +649,21 @@ impl StorageBackend for GoogleDriveBackend {
         Box::pin(async move {
             let folder = self.comment_folder_of(file).await?;
             self.archive_in(&folder, file).await
+        })
+    }
+
+    fn list_attachments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(self.list_attachment_files())
+    }
+
+    /// A Drive file shows up in the listing only once its upload has finished, so no temporary name.
+    fn upload_attachment<'a>(&'a self, name: &'a str, bytes: Vec<u8>) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            let root = self.root_id().await?;
+            let folder = self
+                .find_or_create_folder(ATTACHMENTS_FOLDER_NAME, PROP_ATTACHMENTS, Some(&root))
+                .await?;
+            self.create_in(&folder, name, bytes, BLOB_MIME).await
         })
     }
 }
@@ -1025,6 +1072,72 @@ mod tests {
         let body = String::from_utf8_lossy(&post[0].body).to_string();
         assert!(
             body.contains("\"parents\":[\"com1\"]") && body.contains("application/x-ndjson"),
+            "{body}"
+        );
+    }
+
+    const ATT_FOLDER_Q: &str = "mimeType='application/vnd.google-apps.folder' and appProperties has { key='powertodo' and value='attachments' } and trashed=false and 'root1' in parents";
+    const ATT_LIST_Q: &str =
+        "'att1' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'";
+    const BLOB: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png";
+
+    #[tokio::test]
+    async fn attachment_listing_without_the_folder_is_empty_and_creates_nothing() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, ATT_FOLDER_Q, json!({"files": []})).await;
+        assert!(b.list_attachments().await.unwrap().is_empty());
+        assert!(sent(&server, "POST").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn attachment_listing_reads_every_attachments_folder_and_only_blobs() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(
+            &server,
+            ATT_FOLDER_Q,
+            json!({"files": [{"id": "att1"}, {"id": "att2"}]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            ATT_LIST_Q,
+            json!({"files": [file_json("b1", BLOB, "m1"), file_json("x", "notes.txt", "m2")]}),
+        )
+        .await;
+        mount_list(
+            &server,
+            "'att2' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
+            json!({"files": [file_json("b2", &BLOB.replace('a', "b"), "m3")]}),
+        )
+        .await;
+        let files = b.list_attachments().await.unwrap();
+        let ids: Vec<&str> = files.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, ["b1", "b2"]);
+    }
+
+    #[tokio::test]
+    async fn attachment_upload_creates_inside_the_attachments_folder() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, ATT_FOLDER_Q, json!({"files": [{"id": "att1"}]})).await;
+        let exists_q = format!("{ATT_LIST_Q} and name='{BLOB}'");
+        mount_list(&server, &exists_q, json!({"files": []})).await;
+        Mock::given(method("POST"))
+            .and(path("/upload/drive/v3/files"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(file_json("b9", BLOB, "m9")))
+            .mount(&server)
+            .await;
+        let f = b.upload_attachment(BLOB, b"x".to_vec()).await.unwrap();
+        assert_eq!(f.id, "b9");
+        let post = sent(&server, "POST").await;
+        let body = String::from_utf8_lossy(&post[0].body).to_string();
+        assert!(
+            body.contains("\"parents\":[\"att1\"]") && body.contains("application/octet-stream"),
             "{body}"
         );
     }

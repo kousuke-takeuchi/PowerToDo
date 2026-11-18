@@ -107,10 +107,29 @@ pub trait StorageBackend: Send + Sync {
             ))
         })
     }
+
+    // ---- the `_attachments` folder (spec attachments §7). A file is named by its content, so a
+    // name that exists is never written again and a deletion is never passed on. ----
+
+    /// The blobs directly in `_attachments/` (names as [`crate::store::attachments::parse_file_name`]
+    /// reads them); empty when the folder does not exist. Complete or `Err`.
+    fn list_attachments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    /// Creates `name` in `_attachments/` (the folder is made when needed). Never overwrites:
+    /// [`BackendError::Precondition`] when the name exists. A failed write must not leave a file
+    /// under that name, nor a temporary one that [`StorageBackend::list_attachments`] reads.
+    fn upload_attachment<'a>(&'a self, _name: &'a str, _bytes: Vec<u8>) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async {
+            Err(BackendError::Other("この同期先は添付を扱えません".into()))
+        })
+    }
 }
 
 /// Where comment files live inside the target, as a name prefix of [`MemoryBackend`] entries.
 const COMMENTS_PREFIX: &str = "_comments/";
+/// The same for attachment blobs.
+const ATTACHMENTS_PREFIX: &str = "_attachments/";
 
 struct Entry {
     name: String,
@@ -205,6 +224,33 @@ impl MemoryBackend {
             .files
             .retain(|_, e| !e.name.starts_with(COMMENTS_PREFIX));
         inner.comments_folder = false;
+    }
+
+    /// Test setup: a blob appears in `_attachments/` under `name`, whatever its content.
+    pub fn put_attachment(&self, name: &str, bytes: &[u8]) {
+        self.put_entry(
+            &format!("{ATTACHMENTS_PREFIX}{name}"),
+            None,
+            bytes.to_vec(),
+            (self.clock)(),
+        );
+    }
+
+    /// The content of the blob `name` in `_attachments/`.
+    pub fn attachment(&self, name: &str) -> Option<Vec<u8>> {
+        self.get(&format!("{ATTACHMENTS_PREFIX}{name}"))
+    }
+
+    /// The names in `_attachments/`, in order.
+    pub fn attachment_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .lock()
+            .files
+            .values()
+            .filter_map(|e| e.name.strip_prefix(ATTACHMENTS_PREFIX).map(str::to_string))
+            .collect();
+        names.sort();
+        names
     }
 
     /// Ends every injected failure.
@@ -314,7 +360,7 @@ impl StorageBackend for MemoryBackend {
             let mut files: Vec<RemoteFile> = inner
                 .files
                 .iter()
-                .filter(|(_, e)| e.name.to_lowercase().ends_with(".xlsx"))
+                .filter(|(_, e)| !e.name.contains('/') && e.name.to_lowercase().ends_with(".xlsx"))
                 .map(|(id, e)| Self::remote_file(id, e))
                 .collect();
             files.sort_by(|a, b| a.name.cmp(&b.name));
@@ -422,6 +468,40 @@ impl StorageBackend for MemoryBackend {
             });
             let f = self.upload(&full, existing.as_ref(), bytes).await?;
             self.lock().comments_folder = true;
+            Ok(RemoteFile {
+                name: name.to_string(),
+                ..f
+            })
+        })
+    }
+
+    fn list_attachments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+        Box::pin(async move {
+            let inner = self.lock();
+            if let Some(f) = inner.list_failure {
+                return Err(f.error());
+            }
+            let mut files: Vec<RemoteFile> = inner
+                .files
+                .iter()
+                .filter_map(|(id, e)| {
+                    let leaf = e.name.strip_prefix(ATTACHMENTS_PREFIX)?;
+                    Some(RemoteFile {
+                        name: leaf.to_string(),
+                        ..Self::remote_file(id, e)
+                    })
+                })
+                .collect();
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(files)
+        })
+    }
+
+    fn upload_attachment<'a>(&'a self, name: &'a str, bytes: Vec<u8>) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            self.check(name)?;
+            let full = format!("{ATTACHMENTS_PREFIX}{name}");
+            let f = self.upload(&full, None, bytes).await?;
             Ok(RemoteFile {
                 name: name.to_string(),
                 ..f
@@ -639,6 +719,25 @@ mod tests {
         b.archive_comment(&g).await.unwrap();
         // Archiving the last file leaves the folder.
         assert_eq!(b.list_comments().await.unwrap(), Some(Vec::new()));
+    }
+
+    #[tokio::test]
+    async fn attachments_round_trip_and_never_overwrite() {
+        let b = MemoryBackend::new(chrono::NaiveDateTime::default);
+        assert!(b.list_attachments().await.unwrap().is_empty());
+        let f = b.upload_attachment("x.png", b"a".to_vec()).await.unwrap();
+        assert_eq!(f.name, "x.png");
+        assert!(matches!(
+            b.upload_attachment("x.png", b"b".to_vec()).await,
+            Err(BackendError::Precondition)
+        ));
+        assert_eq!(b.attachment("x.png").unwrap(), b"a");
+        let listed = b.list_attachments().await.unwrap();
+        assert_eq!(b.download(&listed[0]).await.unwrap(), b"a");
+        assert!(
+            b.list().await.unwrap().is_empty(),
+            "not in the root listing"
+        );
     }
 
     #[tokio::test]

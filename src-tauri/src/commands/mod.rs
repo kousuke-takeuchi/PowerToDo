@@ -695,6 +695,10 @@ impl SyncHost for TauriSyncHost {
         comments::emit_comments_changed(&self.app, files.to_vec());
     }
 
+    fn attachments_changed(&self, files: &[String]) {
+        attachments::emit_attachments_changed(&self.app, files.to_vec());
+    }
+
     fn projects_reloaded(&self, names: &[String]) {
         emit_changed(&self.app, names, ChangeReason::Sync);
         // A re-read file can come back normalized (dirty).
