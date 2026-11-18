@@ -143,6 +143,31 @@ pub fn exists(paths: &Paths, hash: &str, ext: &str) -> bool {
     path(paths, hash, ext).is_ok_and(|p| p.is_file())
 }
 
+/// A file name to show the blob under when it is opened with another app (spec attachments §5: the app
+/// should show the name the user knows, not the hash): the original name with path separators, control
+/// characters and characters Windows refuses replaced, and the blob's extension kept so the right app
+/// opens it. Falls back to the blob's own name.
+pub fn display_file_name(name: &str, hash: &str, ext: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let cleaned = cleaned.trim().trim_matches('.').trim();
+    let cleaned: String = cleaned.chars().take(120).collect();
+    if cleaned.is_empty() {
+        return file_name(hash, ext);
+    }
+    if ext.is_empty() || ext_of(&cleaned) == ext {
+        cleaned
+    } else {
+        format!("{cleaned}.{ext}")
+    }
+}
+
 /// Number and total size of the blobs on this device (spec §8). Other files in the folder do not count.
 pub fn usage(paths: &Paths) -> AppResult<Usage> {
     let entries = match std::fs::read_dir(paths.attachments_dir()) {
@@ -273,6 +298,20 @@ mod tests {
             read(&p, &"a".repeat(64), "png"),
             Err(AppError::NotFound { .. })
         ));
+    }
+
+    #[test]
+    fn the_display_name_is_safe_and_keeps_the_extension() {
+        let h = "a".repeat(64);
+        assert_eq!(display_file_name("見積.PDF", &h, "pdf"), "見積.PDF");
+        assert_eq!(display_file_name("../../x.png", &h, "png"), "_.._x.png");
+        assert_eq!(display_file_name("a/b:c.png", &h, "png"), "a_b_c.png");
+        assert_eq!(display_file_name("写真.heic", &h, "jpg"), "写真.heic.jpg");
+        assert_eq!(display_file_name("memo", &h, ""), "memo");
+        assert_eq!(display_file_name("  ..  ", &h, "png"), format!("{h}.png"));
+        assert_eq!(display_file_name("", &h, ""), h);
+        let long = format!("{}.png", "あ".repeat(300));
+        assert!(display_file_name(&long, &h, "png").ends_with(".png"));
     }
 
     #[test]

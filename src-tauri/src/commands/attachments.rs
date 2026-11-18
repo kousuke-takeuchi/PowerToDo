@@ -86,15 +86,50 @@ fn existing_path(state: &AppState, hash: &str, ext: &str) -> AppResult<std::path
     Ok(p)
 }
 
-/// Opens the blob with the default app (iPhone: refused, the page previews it itself).
+/// Opens the blob with the default app (iPhone: refused, the page previews it itself). On a desktop
+/// the blob is first copied to the temp folder under `name` (the name the user knows, made safe), so
+/// the app's title bar and its "save" show that and not the hash; the copy also keeps an app that
+/// edits in place away from the blob, which must never change.
 #[tauri::command]
 pub async fn open_attachment(
     hash: String,
     ext: String,
+    name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    platform::open_file(&app, &existing_path(state.inner(), &hash, &ext)?)
+    let blob = existing_path(state.inner(), &hash, &ext)?;
+    #[cfg(desktop)]
+    let blob = match name.as_deref() {
+        Some(n) => named_copy(&std::env::temp_dir(), &blob, n, &hash, &ext)?,
+        None => blob,
+    };
+    #[cfg(mobile)]
+    let _ = name;
+    platform::open_file(&app, &blob)
+}
+
+/// `<base>/PowerToDo-attachments/<hash>/<display name>`, copied from `blob` unless it is there already
+/// with the same size. One folder per blob, so two files that share a name do not clash.
+#[cfg_attr(mobile, allow(dead_code))]
+fn named_copy(
+    base: &std::path::Path,
+    blob: &std::path::Path,
+    name: &str,
+    hash: &str,
+    ext: &str,
+) -> AppResult<std::path::PathBuf> {
+    let dir = base.join("PowerToDo-attachments").join(hash);
+    let dest = dir.join(attachments::display_file_name(name, hash, ext));
+    let same_size = match (std::fs::metadata(&dest), std::fs::metadata(blob)) {
+        (Ok(a), Ok(b)) => a.len() == b.len(),
+        _ => false,
+    };
+    if !same_size {
+        std::fs::create_dir_all(&dir)?;
+        crate::store::paths::write_atomic(&dest, &std::fs::read(blob)?)?;
+    }
+    Ok(dest)
 }
 
 /// Shows the blob in Finder / Explorer (iPhone: refused).
@@ -126,4 +161,30 @@ pub async fn save_attachment_as(
 pub async fn attachment_usage(state: State<'_, AppState>) -> AppResult<Usage> {
     let paths = paths_of(state.inner())?;
     attachments::usage(&paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_named_copy_is_made_once_under_the_display_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blob = tmp.path().join("blob");
+        std::fs::write(&blob, b"data").unwrap();
+        let h = "a".repeat(64);
+        let p = named_copy(tmp.path(), &blob, "../見積.pdf", &h, "pdf").unwrap();
+        assert_eq!(
+            p,
+            tmp.path()
+                .join("PowerToDo-attachments")
+                .join(&h)
+                .join("_見積.pdf")
+        );
+        assert_eq!(std::fs::read(&p).unwrap(), b"data");
+        assert_eq!(
+            named_copy(tmp.path(), &blob, "../見積.pdf", &h, "pdf").unwrap(),
+            p
+        );
+    }
 }

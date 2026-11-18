@@ -117,7 +117,8 @@ export const api = {
   },
   /** The blob's bytes; rejects with kind "not_found" while it has not arrived by sync. */
   readAttachment: (f: Pick<AttachmentInfo, "hash" | "ext">) => invoke<ArrayBuffer>("read_attachment", { hash: f.hash, ext: f.ext }),
-  openAttachment: (f: Pick<AttachmentInfo, "hash" | "ext">) => invoke<void>("open_attachment", { hash: f.hash, ext: f.ext }),
+  /** Desktop: opens a copy named `f.name` (made safe) so the other app shows that, not the hash. */
+  openAttachment: (f: Pick<AttachmentInfo, "hash" | "ext" | "name">) => invoke<void>("open_attachment", { hash: f.hash, ext: f.ext, name: f.name }),
   revealAttachment: (f: Pick<AttachmentInfo, "hash" | "ext">) => invoke<void>("reveal_attachment", { hash: f.hash, ext: f.ext }),
   /** `dest` is the path the dialog plugin's `save()` returned. */
   saveAttachmentAs: (f: Pick<AttachmentInfo, "hash" | "ext">, dest: string) => invoke<void>("save_attachment_as", { hash: f.hash, ext: f.ext, dest }),
