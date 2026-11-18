@@ -530,9 +530,17 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [dialogOpen]);
   /** A change of task `t`: through the open project when it is on screen, else through the API, then the rest catch up. */
   const onScreen = (project: string) => projectScreen && project === current;
+  /**
+   * The dialog's own rows (its subtasks) act through the row actions too. When the dialog reads its project through the
+   * second source, a change made through the API leaves that view stale (no event comes back), so it is re-read.
+   */
+  const followDialog = (project: string) => {
+    if (target === "other" && dialog?.project === project) void other.refresh();
+  };
   const afterChange = (project: string) => {
     refreshAll();
     if (!onScreen(project) && projectScreen) void p.refresh();
+    followDialog(project);
   };
   const patchTask = (t: Task, patch: TaskPatch): Promise<boolean> =>
     onScreen(t.project)
@@ -570,6 +578,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         }
         refreshAll();
         if (projectScreen) void p.refresh();
+        followDialog(t.project);
         void refreshSummaries();
       }
       focus.set(`${t.project}/${t.no}`);
@@ -580,6 +589,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         const out = await api.addTask(v.project, toInput(v, opts?.parentNo), opts?.position);
         const no = Math.max(...out.tasks.map((x) => x.no));
         if (onScreen(v.project)) void p.refresh();
+        followDialog(v.project);
         refreshAll();
         void refreshSummaries();
         const added = out.tasks.find((x) => x.no === no);
@@ -604,6 +614,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       void api.moveTask(t.project, t.no, project, section).then(() => {
         refreshAll();
         if (projectScreen) void p.refresh();
+        followDialog(t.project);
         void refreshSummaries();
       }, showError),
     duplicate: (t) =>
@@ -694,6 +705,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         goDialog(after);
       }
       if (onScreen(t.project)) refreshAll();
+      // A subtask deleted from its parent's dialog row leaves that dialog's list.
+      followDialog(t.project);
     });
   };
 
