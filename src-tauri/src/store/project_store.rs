@@ -84,6 +84,11 @@ pub struct ProjectStore {
     /// What each workbook looked like on disk right after we last wrote or read it, keyed by
     /// project name or `"_common"`. A watcher event whose file still matches is our own write.
     last_written: BTreeMap<String, Fingerprint>,
+    /// The subtasks that completing a recurring parent reset (spec §12), keyed by project and
+    /// parent No., with their previous completion time. The undo of that completion reads them
+    /// back, so it re-completes exactly those. In memory only; the next recurring completion of
+    /// the same parent replaces it.
+    recurring_resets: BTreeMap<(String, u32), Vec<(u32, Option<NaiveDateTime>)>>,
     /// Projects (or `"_common"`) whose file changed on disk while they had unsaved edits. Not
     /// written until the user chooses to reload or overwrite.
     held: BTreeSet<String>,
@@ -382,6 +387,7 @@ impl ProjectStore {
             common_dirty: is_new,
             high_water: BTreeMap::new(),
             last_written: BTreeMap::new(),
+            recurring_resets: BTreeMap::new(),
             held: BTreeSet::new(),
             clock: Box::new(clock),
         };
@@ -1292,7 +1298,9 @@ impl ProjectStore {
     /// task completes normally; one that cannot be read completes normally with a warning.
     /// Finishing a task also finishes its open descendants at the same time. Reopening leaves
     /// the subtasks alone, unless `with_subtasks` (the undo of a completion): then the
-    /// descendants completed at the parent's completion time are reopened too.
+    /// descendants completed at the parent's completion time are reopened too. Completing a
+    /// repeating parent reopens its done descendants (spec §12); its undo re-completes exactly
+    /// those, with their previous completion times.
     pub fn complete_task(&mut self, project: &str, no: u32, done: bool) -> AppResult<ProjectView> {
         self.complete_task_with(project, no, done, false)
     }
@@ -1305,9 +1313,25 @@ impl ProjectStore {
         with_subtasks: bool,
     ) -> AppResult<ProjectView> {
         let mut warning: Option<String> = None;
+        let key = (project.to_string(), no);
+        let undo_resets = if !done && with_subtasks {
+            self.recurring_resets.remove(&key).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut new_resets: Option<Vec<(u32, Option<NaiveDateTime>)>> = None;
         self.mutate(project, |book, ctx| {
             let idx = find_task(book, no)?;
             if !done {
+                // The undo of a recurring completion: put back the subtasks it reopened.
+                for (n, at) in &undo_resets {
+                    if let Some(s) = book.tasks.iter_mut().find(|t| t.no == *n) {
+                        if s.progress == 0 && s.completed_at.is_none() {
+                            s.progress = 100;
+                            s.completed_at = *at;
+                        }
+                    }
+                }
                 let stamp = book.tasks[idx].completed_at;
                 book.tasks[idx].progress = 0;
                 book.tasks[idx].completed_at = None;
@@ -1336,6 +1360,17 @@ impl ProjectStore {
                         t.progress = 0;
                         t.completed_at = None;
                         t.reminders.retain(|c| !reminders::is_absolute(c));
+                        // Start the routine fresh: done descendants become open again.
+                        let mut reset = Vec::new();
+                        for i in subtree(book, no) {
+                            let s = &mut book.tasks[i];
+                            if s.no != no && s.progress == 100 {
+                                reset.push((s.no, s.completed_at));
+                                s.progress = 0;
+                                s.completed_at = None;
+                            }
+                        }
+                        new_resets = Some(reset);
                         return Ok(());
                     }
                     Ok(None) => t.rrule = None,
@@ -1356,6 +1391,12 @@ impl ProjectStore {
             }
             Ok(())
         })?;
+        if done {
+            match new_resets.filter(|r| !r.is_empty()) {
+                Some(r) => self.recurring_resets.insert(key, r),
+                None => self.recurring_resets.remove(&key),
+            };
+        }
         let mut view = self.view(project)?;
         view.warnings.extend(warning);
         Ok(view)
@@ -3748,6 +3789,77 @@ mod tests {
         let v = e.store.complete_task(INBOX, 1, true).unwrap();
         assert_eq!(v.tasks.iter().find(|t| t.no == 1).unwrap().progress, 0);
         assert_eq!(v.tasks.iter().find(|t| t.no == 2).unwrap().progress, 0);
+    }
+
+    /// Recurring parent 1 with done child 2, its done grandchild 3, open child 4, and an
+    /// unrelated done 5. Returns after finishing 2 (so 3 follows) and 5.
+    fn recurring_family(e: &mut Env) {
+        let mut i = input("p");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        e.store.add_task(INBOX, i).unwrap();
+        e.store.add_task(INBOX, child_of("c", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("g", 2)).unwrap();
+        e.store.add_task(INBOX, child_of("open", 1)).unwrap();
+        e.store.add_task(INBOX, input("other")).unwrap();
+        e.store.complete_task(INBOX, 2, true).unwrap();
+        e.store.complete_task(INBOX, 5, true).unwrap();
+    }
+
+    #[test]
+    fn completing_a_recurring_parent_reopens_done_descendants() {
+        let mut e = env();
+        recurring_family(&mut e);
+        let v = e.store.complete_task(INBOX, 1, true).unwrap();
+        let by = |n: u32| v.tasks.iter().find(|t| t.no == n).unwrap().clone();
+        assert_eq!(by(1).due, Some(ymd(2026, 10, 20)));
+        for n in [1, 2, 3, 4] {
+            assert_eq!((by(n).progress, by(n).completed_at), (0, None), "task {n}");
+        }
+        assert_eq!(by(5).progress, 100); // not a descendant
+    }
+
+    #[test]
+    fn undo_of_a_recurring_completion_recompletes_exactly_the_reset_ones() {
+        let mut e = env();
+        recurring_family(&mut e);
+        let before = |v: &ProjectView, n: u32| {
+            let t = v.tasks.iter().find(|t| t.no == n).unwrap();
+            (t.progress, t.completed_at)
+        };
+        let v0 = e.store.view(INBOX).unwrap();
+        let (c0, g0) = (before(&v0, 2), before(&v0, 3));
+        assert_eq!(c0.0, 100);
+        *e.clock.lock().unwrap() = dt("2026-10-14T10:30");
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        assert_eq!(before(&v, 2), c0);
+        assert_eq!(before(&v, 3), g0);
+        assert_eq!(before(&v, 4).0, 0); // was open, stays open
+        assert_eq!(before(&v, 1).0, 0);
+        // The log is used up: a second undo changes nothing more.
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        assert_eq!(before(&v, 2), c0);
+    }
+
+    #[test]
+    fn undo_does_not_touch_a_subtask_the_user_changed_meanwhile() {
+        let mut e = env();
+        recurring_family(&mut e);
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        e.store.complete_task(INBOX, 2, true).unwrap(); // finished again by hand
+        let at = e
+            .store
+            .view(INBOX)
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|t| t.no == 2)
+            .unwrap()
+            .completed_at;
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        let c = v.tasks.iter().find(|t| t.no == 2).unwrap();
+        assert_eq!((c.progress, c.completed_at), (100, at));
     }
 
     #[test]
