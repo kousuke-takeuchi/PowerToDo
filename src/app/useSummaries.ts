@@ -14,7 +14,7 @@ export function useSummaries(app: AppStateDto, today: string) {
   const summaries = useMemo(() => allSummaries.filter((s) => !s.archived), [allSummaries]);
   const [displayName, setDisplayName] = useState<string | undefined>();
 
-  // 「今日」の件数 (期限が今日以前の未完了)。
+  // 「今日」の件数 (期限が今日以前の見えている未完了の行。サブタスクを含み、完了した親の下の行は除く) とラベルの件数。
   const countsData = useCrossView<CountsDto>(() => api.counts(today), [today]);
   const refreshCounts = countsData.refresh;
 

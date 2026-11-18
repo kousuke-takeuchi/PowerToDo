@@ -15,6 +15,7 @@ import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
 import { ProjectEditDialog } from "./ProjectEditDialog";
 import { projectMenuEntries } from "./projectMenu";
+import { visibleOpen } from "./visibleOpen";
 import { useView } from "../app/view/ViewOptionsContext";
 import { arrange, firstOccurrences } from "../app/view/arrange";
 import type { ViewOptions } from "../app/view/viewOptions";
@@ -302,8 +303,8 @@ export function ProjectView({
   const rowCtx = useContext(RowActions);
   const drag = useContext(DragCtx);
   const mine = tasks.filter((t) => t.project === project);
-  // Open tasks of this project, for the line under the title.
-  const openCount = mine.filter((t) => t.progress !== 100).length;
+  // The line under the title counts what the sidebar counts: open rows under open parents (spec 2026-11-18 §2).
+  const openCount = visibleOpen(mine).length;
   const nosKey = mine.map((t) => t.no).join(",");
   useEffect(() => {
     const now = new Set(nosKey ? nosKey.split(",").map(Number) : []);

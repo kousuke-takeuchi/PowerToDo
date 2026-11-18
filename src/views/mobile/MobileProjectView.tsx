@@ -11,6 +11,7 @@ import { TODAY } from "../../mock/data";
 import type { Section, Task } from "../../types/model";
 import { useLeaving } from "../crossList";
 import { useDone } from "../useDone";
+import { visibleOpen } from "../visibleOpen";
 import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
@@ -217,7 +218,8 @@ export function MobileProjectView({
   };
 
   const open = mine.filter((t) => t.parentNo === undefined && t.progress !== 100);
-  const openCount = mine.filter((t) => t.progress !== 100).length;
+  // サイドバーの件数と同じ (完了した親の下の行は数えない)。
+  const openCount = visibleOpen(mine).length;
   const projectSections = sections.filter((s) => s.project === project).sort((a, b) => a.order - b.order);
   // どのセクションにも入っていないタスク (受信トレイなど) は、見出しなしで先頭に並べる
   const sectionNames = new Set(projectSections.map((s) => s.name));
