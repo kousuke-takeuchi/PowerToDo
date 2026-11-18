@@ -85,24 +85,35 @@ export function CommentsSection({
     return c ? { id: c.id, text: c.text, files: c.files ?? [] } : null;
   });
   // Files are stored as soon as they are picked; the comment only points at them.
+  // An edit's files go to the comment that was being edited when they were picked (not one opened since).
   const attach = (files: File[], into: "pending" | "editing") => {
     if (!onAttach || files.length === 0) return;
+    const editId = editing?.id;
     setUploading((n) => n + 1);
     void onAttach(files)
       .then((stored) => {
         if (into === "pending") setPending((cur) => [...cur, ...stored]);
-        else setEditing((cur) => (cur ? { ...cur, files: [...cur.files, ...stored] } : cur));
+        else setEditing((cur) => (cur && cur.id === editId ? { ...cur, files: [...cur.files, ...stored] } : cur));
       })
       .finally(() => setUploading((n) => n - 1));
   };
+  // One send at a time (a second Enter before the first is saved would post the comment twice). Files added while
+  // it is being saved stay for the next comment.
+  const sending = useRef(false);
   const send = () => {
     const text = draft.trim();
-    if ((!text && pending.length === 0) || !onAdd || uploading > 0) return;
-    void onAdd(text, pending).then((ok) => {
-      if (!ok) return;
-      setDraft("");
-      setPending([]);
-    });
+    if ((!text && pending.length === 0) || !onAdd || uploading > 0 || sending.current) return;
+    const sent = pending;
+    sending.current = true;
+    void onAdd(text, sent)
+      .then((ok) => {
+        if (!ok) return;
+        setDraft("");
+        setPending((cur) => cur.filter((f) => !sent.includes(f)));
+      })
+      .finally(() => {
+        sending.current = false;
+      });
   };
   const saveEdit = () => {
     if (!editing || !onEdit || uploading > 0) return;
