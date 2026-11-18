@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Comment,
+  AttachmentInfo,
+  AttachmentUsage,
+  NoteFile,
   AutostartDto,
   DueTextDto,
   StartView,
@@ -93,9 +96,32 @@ export const api = {
   // ---- comments (spec ① §3) ----
   listComments: (project: string, no: number) => invoke<Comment[]>("list_comments", { project, no }),
   commentCounts: (project: string) => invoke<Record<string, number>>("comment_counts", { project }),
-  addComment: (project: string, no: number, text: string) => invoke<Comment[]>("add_comment", { project, no, text }),
-  editComment: (project: string, no: number, id: string, text: string) => invoke<Comment[]>("edit_comment", { project, no, id, text }),
+  /** `files` (stored with `addAttachment` first) may be given with an empty text. */
+  addComment: (project: string, no: number, text: string, files?: AttachmentInfo[]) => invoke<Comment[]>("add_comment", { project, no, text, files }),
+  /** `files` given replaces the comment's attachments (`[]` takes all off); left out keeps them. */
+  editComment: (project: string, no: number, id: string, text: string, files?: AttachmentInfo[]) => invoke<Comment[]>("edit_comment", { project, no, id, text, files }),
   deleteComment: (project: string, no: number, id: string) => invoke<Comment[]>("delete_comment", { project, no, id }),
+
+  // ---- attachments (spec attachments §3, §8) ----
+  /** The description's files. */
+  listNoteFiles: (project: string, no: number) => invoke<NoteFile[]>("list_note_files", { project, no }),
+  /** Attachments per task No. (comments' plus description's); tasks without any are left out. */
+  attachmentCounts: (project: string) => invoke<Record<string, number>>("attachment_counts", { project }),
+  attachToNote: (project: string, no: number, file: AttachmentInfo) => invoke<NoteFile[]>("attach_to_note", { project, no, file }),
+  detachFromNote: (project: string, no: number, id: string) => invoke<NoteFile[]>("detach_from_note", { project, no, id }),
+  /** Stores the bytes as they are (shrink images before). Over 50 MB is refused. */
+  addAttachment: (bytes: Uint8Array | ArrayBuffer, meta: { name: string; type: string; w?: number; h?: number }) => {
+    const headers: Record<string, string> = { name: encodeURIComponent(meta.name), type: meta.type };
+    if (meta.w !== undefined && meta.h !== undefined) { headers.w = String(meta.w); headers.h = String(meta.h); }
+    return invoke<AttachmentInfo>("add_attachment", bytes, { headers });
+  },
+  /** The blob's bytes; rejects with kind "not_found" while it has not arrived by sync. */
+  readAttachment: (f: Pick<AttachmentInfo, "hash" | "ext">) => invoke<ArrayBuffer>("read_attachment", { hash: f.hash, ext: f.ext }),
+  openAttachment: (f: Pick<AttachmentInfo, "hash" | "ext">) => invoke<void>("open_attachment", { hash: f.hash, ext: f.ext }),
+  revealAttachment: (f: Pick<AttachmentInfo, "hash" | "ext">) => invoke<void>("reveal_attachment", { hash: f.hash, ext: f.ext }),
+  /** `dest` is the path the dialog plugin's `save()` returned. */
+  saveAttachmentAs: (f: Pick<AttachmentInfo, "hash" | "ext">, dest: string) => invoke<void>("save_attachment_as", { hash: f.hash, ext: f.ext, dest }),
+  attachmentUsage: () => invoke<AttachmentUsage>("attachment_usage"),
   deleteTask: (project: string, no: number) => invoke<ProjectView>("delete_task", { project, no }),
   duplicateTask: (project: string, no: number) => invoke<[ProjectView, number]>("duplicate_task", { project, no }),
   moveTask: (project: string, no: number, toProject: string, toSection?: string | null) =>

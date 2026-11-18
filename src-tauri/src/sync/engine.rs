@@ -2712,6 +2712,7 @@ mod tests {
             at: "2026-10-25T21:00:00+09:00".into(),
             author: "たろう".into(),
             text: Some(text.into()),
+            files: None,
         };
         append(&Paths::new(&pc.data), project, no, &line).unwrap();
     }
@@ -2830,6 +2831,7 @@ mod tests {
                 at: "2026-10-25T21:00:00+09:00".into(),
                 author: "たろう".into(),
                 text: Some(text.into()),
+                files: None,
             };
             crate::store::comments::append(&Paths::new(&data), "仕事", 1, &line).unwrap();
         }

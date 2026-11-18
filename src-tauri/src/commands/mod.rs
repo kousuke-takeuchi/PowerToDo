@@ -2,6 +2,7 @@
 //! changed for the debounced [`Saver`], and return the new view. The few non-trivial bits
 //! (start-up, quick add) live in plain functions so they can be tested without Tauri.
 
+pub mod attachments;
 pub mod autostart;
 pub mod comments;
 pub mod saver;

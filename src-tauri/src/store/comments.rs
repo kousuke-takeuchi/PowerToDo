@@ -9,6 +9,7 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
+use crate::store::attachments::AttachmentInfo;
 use crate::store::paths::{Paths, write_atomic};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +18,12 @@ pub enum Op {
     Add,
     Edit,
     Delete,
+    /// A file attached to the description (`files` holds one).
+    #[serde(rename = "note-attach")]
+    NoteAttach,
+    /// `target` is the `note-attach` line to take off.
+    #[serde(rename = "note-detach")]
+    NoteDetach,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +36,9 @@ pub struct Line {
     pub author: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Attachments: of an `add`, of an `edit` that replaces them (none keeps them), of a `note-attach`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<AttachmentInfo>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -39,6 +49,17 @@ pub struct Comment {
     pub author: String,
     pub text: String,
     pub edited: bool,
+    pub files: Vec<AttachmentInfo>,
+}
+
+/// A file of the description: the id of its `note-attach` line is what `note-detach` names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteFile {
+    pub id: String,
+    pub at: String,
+    pub author: String,
+    pub file: AttachmentInfo,
 }
 
 pub const DIR: &str = "_comments";
@@ -81,11 +102,17 @@ pub fn view(lines: &[Line]) -> Vec<Comment> {
                     author: l.author.clone(),
                     text: l.text.clone().unwrap_or_default(),
                     edited: false,
+                    files: l.files.clone().unwrap_or_default(),
                 });
             }
             Op::Edit => {
                 if let Some(c) = l.target.as_ref().and_then(|t| by_id.get_mut(t)) {
-                    c.text = l.text.clone().unwrap_or_default();
+                    if let Some(t) = &l.text {
+                        c.text = t.clone();
+                    }
+                    if let Some(f) = &l.files {
+                        c.files = f.clone();
+                    }
                     c.edited = true;
                 }
             }
@@ -94,6 +121,36 @@ pub fn view(lines: &[Line]) -> Vec<Comment> {
                     by_id.remove(t);
                 }
             }
+            Op::NoteAttach | Op::NoteDetach => {}
+        }
+    }
+    by_id.into_values().collect()
+}
+
+/// The description's files in id order: `note-attach` adds the first of its `files`, `note-detach` takes
+/// that line off again.
+pub fn note_view(lines: &[Line]) -> Vec<NoteFile> {
+    let mut sorted: Vec<&Line> = lines.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut by_id: BTreeMap<String, NoteFile> = BTreeMap::new();
+    for l in sorted {
+        match l.op {
+            Op::NoteAttach => {
+                if let Some(file) = l.files.as_ref().and_then(|f| f.first()) {
+                    by_id.entry(l.id.clone()).or_insert_with(|| NoteFile {
+                        id: l.id.clone(),
+                        at: l.at.clone(),
+                        author: l.author.clone(),
+                        file: file.clone(),
+                    });
+                }
+            }
+            Op::NoteDetach => {
+                if let Some(t) = &l.target {
+                    by_id.remove(t);
+                }
+            }
+            _ => {}
         }
     }
     by_id.into_values().collect()
@@ -151,6 +208,11 @@ pub fn read(paths: &Paths, project: &str, no: u32) -> AppResult<Vec<Comment>> {
     Ok(view(&parse(&read_text(&path(paths, project, no)?)?)))
 }
 
+/// The description's files of one task (a missing file has none).
+pub fn read_notes(paths: &Paths, project: &str, no: u32) -> AppResult<Vec<NoteFile>> {
+    Ok(note_view(&parse(&read_text(&path(paths, project, no)?)?)))
+}
+
 /// Appends one line (creates `_comments/` and the file when needed) and flushes it to disk.
 pub fn append(paths: &Paths, project: &str, no: u32, line: &Line) -> AppResult<()> {
     let file = path(paths, project, no)?;
@@ -198,6 +260,24 @@ pub fn counts(paths: &Paths, project: &str) -> AppResult<BTreeMap<u32, u32>> {
         let n = view(&parse(&read_text(&p)?)).len() as u32;
         if n > 0 {
             out.insert(no, n);
+        }
+    }
+    Ok(out)
+}
+
+/// Attachments per task No. of `project`: the files of visible comments plus the description's (tasks
+/// without any are left out).
+pub fn attachment_counts(paths: &Paths, project: &str) -> AppResult<BTreeMap<u32, u32>> {
+    let mut out = BTreeMap::new();
+    for (pj, no, p) in files(paths)? {
+        if pj != project {
+            continue;
+        }
+        let lines = parse(&read_text(&p)?);
+        let n: usize =
+            view(&lines).iter().map(|c| c.files.len()).sum::<usize>() + note_view(&lines).len();
+        if n > 0 {
+            out.insert(no, n as u32);
         }
     }
     Ok(out)
@@ -293,6 +373,7 @@ mod tests {
             at: "2026-10-25T21:04:05+09:00".into(),
             author: "たろう".into(),
             text: Some(text.into()),
+            files: None,
         }
     }
 
@@ -314,6 +395,7 @@ mod tests {
             at: "t".into(),
             author: "たろう".into(),
             text: Some("直した".into()),
+            files: None,
         };
         let d = Line {
             id: "0004".into(),
@@ -322,6 +404,7 @@ mod tests {
             at: "t".into(),
             author: "たろう".into(),
             text: None,
+            files: None,
         };
         let v = view(&[
             d.clone(),
@@ -434,6 +517,7 @@ mod tests {
             at: "t".into(),
             author: "たろう".into(),
             text: None,
+            files: None,
         };
         append(&p, "仕事", 12, &del).unwrap();
         append(&p, "仕事2", 1, &add("0004", "c")).unwrap();
@@ -523,5 +607,169 @@ mod tests {
         let (_t, p) = paths();
         assert!(append(&p, "../x", 1, &add("0001", "a")).is_err());
         assert!(read(&p, "../x", 1).is_err());
+    }
+
+    // ---- attachments (spec attachments §3) ----
+
+    fn info(n: u8) -> AttachmentInfo {
+        AttachmentInfo {
+            hash: format!("{n:064x}"),
+            ext: "png".into(),
+            name: format!("{n}.png"),
+            mime: "image/png".into(),
+            size: 10,
+            w: Some(4),
+            h: Some(3),
+        }
+    }
+
+    fn with_files(mut l: Line, files: Vec<AttachmentInfo>) -> Line {
+        l.files = Some(files);
+        l
+    }
+
+    fn edit(
+        id: &str,
+        target: &str,
+        text: Option<&str>,
+        files: Option<Vec<AttachmentInfo>>,
+    ) -> Line {
+        Line {
+            id: id.into(),
+            op: Op::Edit,
+            target: Some(target.into()),
+            at: "t".into(),
+            author: "たろう".into(),
+            text: text.map(Into::into),
+            files,
+        }
+    }
+
+    fn note(id: &str, op: Op, target: Option<&str>, files: Option<Vec<AttachmentInfo>>) -> Line {
+        Line {
+            id: id.into(),
+            op,
+            target: target.map(Into::into),
+            at: "t".into(),
+            author: "たろう".into(),
+            text: None,
+            files,
+        }
+    }
+
+    #[test]
+    fn an_add_carries_its_files_and_may_have_no_text() {
+        let v = view(&[with_files(add("0001", ""), vec![info(1), info(2)])]);
+        assert_eq!(v[0].files, [info(1), info(2)]);
+        assert_eq!(v[0].text, "");
+    }
+
+    #[test]
+    fn an_edit_without_files_keeps_them_and_one_with_files_replaces_them() {
+        let a = with_files(add("0001", "a"), vec![info(1)]);
+        let v = view(&[a.clone(), edit("0002", "0001", Some("b"), None)]);
+        assert_eq!(
+            (v[0].text.as_str(), v[0].files.clone()),
+            ("b", vec![info(1)])
+        );
+        let v = view(&[
+            a.clone(),
+            edit("0002", "0001", Some("b"), Some(vec![info(2), info(3)])),
+        ]);
+        assert_eq!(v[0].files, [info(2), info(3)]);
+        let v = view(&[a, edit("0002", "0001", Some("b"), Some(vec![]))]);
+        assert!(v[0].files.is_empty(), "an empty array takes them all off");
+    }
+
+    #[test]
+    fn note_files_attach_and_detach_in_id_order() {
+        let lines = vec![
+            note("0003", Op::NoteDetach, Some("0001"), None),
+            note("0002", Op::NoteAttach, None, Some(vec![info(2)])),
+            note("0001", Op::NoteAttach, None, Some(vec![info(1)])),
+            note("0004", Op::NoteAttach, None, Some(vec![info(4)])),
+            note("0005", Op::NoteDetach, Some("9999"), None),
+        ];
+        let ids: Vec<String> = note_view(&lines).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, ["0002", "0004"]);
+        assert!(view(&lines).is_empty(), "they are not comments");
+    }
+
+    #[test]
+    fn old_lines_without_files_mix_with_new_ones() {
+        let old = r#"{"id":"0001","op":"add","at":"t","author":"たろう","text":"古い"}"#;
+        let new = to_line(&with_files(add("0002", "新しい"), vec![info(1)]));
+        let lines = parse(&format!("{old}\n{new}"));
+        let v = view(&lines);
+        assert_eq!(v.len(), 2);
+        assert!(v[0].files.is_empty());
+        assert_eq!(v[1].files.len(), 1);
+        assert!(
+            !to_line(&add("0003", "x")).contains("files"),
+            "none is not written"
+        );
+    }
+
+    #[test]
+    fn an_unknown_op_is_skipped_and_the_rest_reads() {
+        let text = format!(
+            "{}{{\"id\":\"0002\",\"op\":\"pin\",\"at\":\"t\",\"author\":\"x\"}}\n{}",
+            to_line(&add("0001", "a")),
+            to_line(&add("0003", "b"))
+        );
+        assert_eq!(parse(&text).len(), 2);
+    }
+
+    #[test]
+    fn the_new_ops_use_their_kebab_names() {
+        let l = to_line(&note("0001", Op::NoteAttach, None, Some(vec![info(1)])));
+        assert!(l.contains(r#""op":"note-attach""#), "{l}");
+        assert_eq!(parse(&l).len(), 1);
+    }
+
+    #[test]
+    fn attachment_counts_cover_comments_and_the_description() {
+        let (_t, p) = paths();
+        append(
+            &p,
+            "仕事",
+            1,
+            &with_files(add("0001", "a"), vec![info(1), info(2)]),
+        )
+        .unwrap();
+        append(
+            &p,
+            "仕事",
+            1,
+            &note("0002", Op::NoteAttach, None, Some(vec![info(3)])),
+        )
+        .unwrap();
+        append(&p, "仕事", 2, &add("0003", "plain")).unwrap();
+        append(
+            &p,
+            "仕事",
+            3,
+            &with_files(add("0004", "gone"), vec![info(4)]),
+        )
+        .unwrap();
+        append(&p, "仕事", 3, &note("0005", Op::Delete, Some("0004"), None)).unwrap();
+        append(&p, "別", 1, &with_files(add("0006", "x"), vec![info(5)])).unwrap();
+        assert_eq!(
+            attachment_counts(&p, "仕事").unwrap(),
+            BTreeMap::from([(1, 3)])
+        );
+        assert_eq!(read_notes(&p, "仕事", 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_file_with_attachments_moves_and_archives_like_any_other() {
+        let (_t, p) = paths();
+        append(&p, "仕事", 1, &with_files(add("0001", "a"), vec![info(1)])).unwrap();
+        move_task(&p, ("仕事", 1), ("仕事", 7)).unwrap();
+        assert_eq!(read(&p, "仕事", 7).unwrap()[0].files.len(), 1);
+        rename_project(&p, "仕事", "業務").unwrap();
+        assert_eq!(read(&p, "業務", 7).unwrap()[0].files.len(), 1);
+        archive(&p, "業務", Some(7), at()).unwrap();
+        assert!(read(&p, "業務", 7).unwrap().is_empty());
     }
 }

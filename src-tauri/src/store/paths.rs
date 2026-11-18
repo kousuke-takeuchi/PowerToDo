@@ -48,6 +48,11 @@ impl Paths {
     pub fn comments_dir(&self) -> PathBuf {
         self.data_dir.join(crate::store::comments::DIR)
     }
+
+    /// `_attachments/`: the blobs of every comment and description (spec attachments §2).
+    pub fn attachments_dir(&self) -> PathBuf {
+        self.data_dir.join(crate::store::attachments::DIR)
+    }
 }
 
 pub fn validate_project_name(name: &str) -> AppResult<()> {
@@ -115,7 +120,11 @@ pub struct AppSettings {
     pub autostart: Option<bool>,
     /// Which screen the app opens on at launch (spec ② §8). Per device. Left out of the file
     /// while it is the default.
-    #[serde(default, deserialize_with = "lenient_start_view", skip_serializing_if = "StartView::is_default")]
+    #[serde(
+        default,
+        deserialize_with = "lenient_start_view",
+        skip_serializing_if = "StartView::is_default"
+    )]
     pub start_view: StartView,
 }
 
