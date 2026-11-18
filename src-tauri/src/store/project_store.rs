@@ -737,6 +737,12 @@ impl ProjectStore {
         if let Some(h) = self.high_water.remove(name) {
             self.high_water.insert(new_name.to_string(), h);
         }
+        // The old name may be reused for a new project whose numbers start again.
+        let resets = std::mem::take(&mut self.recurring_resets);
+        self.recurring_resets = resets
+            .into_iter()
+            .map(|((p, n), r)| ((if p == name { new_name.to_string() } else { p }, n), r))
+            .collect();
         self.follow_view_option(super::view_options::PROJECT, name, Some(new_name));
         self.common_dirty = true;
         self.save_common_unless_held();
@@ -858,6 +864,7 @@ impl ProjectStore {
         self.books.remove(name);
         self.dirty.remove(name);
         self.high_water.remove(name);
+        self.recurring_resets.retain(|(p, _), _| p != name);
         self.last_written.remove(name);
         self.held.remove(name);
         self.follow_view_option(super::view_options::PROJECT, name, None);
@@ -3840,6 +3847,29 @@ mod tests {
         // The log is used up: a second undo changes nothing more.
         let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
         assert_eq!(before(&v, 2), c0);
+    }
+
+    #[test]
+    fn recurring_resets_follow_a_rename_and_go_with_a_delete() {
+        let mut e = env();
+        e.store.create_project("旧", "c").unwrap();
+        let mut i = input("p");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        e.store.add_task("旧", i).unwrap();
+        e.store.add_task("旧", child_of("c", 1)).unwrap();
+        e.store.complete_task("旧", 2, true).unwrap();
+        e.store.complete_task("旧", 1, true).unwrap();
+        e.store.save("旧").unwrap();
+        e.store.rename_project("旧", "新").unwrap();
+        assert!(e.store.recurring_resets.keys().all(|(p, _)| p == "新"));
+        let v = e.store.complete_task_with("新", 1, false, true).unwrap();
+        assert_eq!(task(&v, 2).progress, 100);
+        e.store.complete_task("新", 1, true).unwrap();
+        assert!(!e.store.recurring_resets.is_empty());
+        e.store.save("新").unwrap();
+        e.store.delete_project("新").unwrap();
+        assert!(e.store.recurring_resets.is_empty());
     }
 
     #[test]
