@@ -77,7 +77,7 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
   const [busy, setBusy] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
-  useFitPopover(popRef, pop !== null); // 下からはみ出さない (spec ② §7)
+  useFitPopover(popRef, pop !== null, pop); // 下からはみ出さない (spec ② §7)
   const set = (patch: Partial<EditorValue>) => setV((cur) => ({ ...cur, ...patch }));
   const canSubmit = v.title.trim() !== "" && !busy;
 

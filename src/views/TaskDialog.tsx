@@ -243,7 +243,7 @@ export function TaskDialog({
     setPopover((cur) => (cur === p ? null : p));
   };
   const popoverRef = useRef<HTMLDivElement>(null);
-  useFitPopover(popoverRef, popover !== null); // 下からはみ出さない (spec ② §7)
+  useFitPopover(popoverRef, popover !== null, `${popover}:${anchorTop}`); // 下からはみ出さない (spec ② §7)
   const { reduced, t } = useMotionTiming();
   // 閉じるアニメーション中 (AppShell の AnimatePresence で退場中) は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
   const present = useIsPresent();

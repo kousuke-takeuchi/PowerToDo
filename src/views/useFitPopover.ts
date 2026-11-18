@@ -5,9 +5,10 @@ import { fitPopover } from "./popoverFit";
  * Keeps the absolutely positioned popover `ref` inside the window (spec ② §7): after it opens, on content changes
  * and on window resize it measures the popover, shifts it up with `translate` (the entrance animation owns
  * `transform`) and, if it is still too tall, caps `max-height` so a PopoverShell scrolls its middle.
- * The popover must be a flex column so its shell can shrink.
+ * The popover must be a flex column so its shell can shrink. `content` names what is shown (which picker, where):
+ * a change refits even when the box keeps its size (a capped popover swapped for another tall one at a new top).
  */
-export function useFitPopover(ref: RefObject<HTMLElement | null>, active: boolean): void {
+export function useFitPopover(ref: RefObject<HTMLElement | null>, active: boolean, content?: unknown): void {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!active || !el) return;
@@ -29,5 +30,5 @@ export function useFitPopover(ref: RefObject<HTMLElement | null>, active: boolea
       window.removeEventListener("resize", fit);
       ro?.disconnect();
     };
-  }, [ref, active]);
+  }, [ref, active, content]);
 }
