@@ -117,7 +117,8 @@ export function MobileAttachmentViewer({ files, index, onIndex, onClose }: { fil
       setView(pinch(s.startView, s.pinchStart[0], s.pinchStart[1], a, b, viewport(), content()));
       return;
     }
-    if (!s.start || s.pinched) return;
+    // After a pinch the finger left down only pans (a zoomed picture); it never steps or closes.
+    if (!s.start || (s.pinched && s.startView.scale <= 1.02)) return;
     const dx = p.x - s.start.x;
     const dy = p.y - s.start.y;
     if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) s.moved = true;
