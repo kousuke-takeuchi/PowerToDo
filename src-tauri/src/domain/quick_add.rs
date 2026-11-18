@@ -1,7 +1,7 @@
 use chrono::{NaiveDate, NaiveTime};
 use serde::Serialize;
 
-use super::dates::{parse_date_word, parse_time_word, resolve};
+use super::dates::{next_weekday_after, parse_bare_weekday, parse_date_word, parse_time_word, resolve};
 use super::model::{Priority, serde_time};
 use super::recurrence_words::parse_recurrence;
 
@@ -119,6 +119,53 @@ fn recurrence_at(tokens: &[Token], i: usize) -> Option<(String, usize)> {
     parse_recurrence(&words)
 }
 
+/// The date, time and recurrence of a text made only of those words (the date field of the date
+/// picker). `None` when any word is something else, or when nothing was recognised. Reads the
+/// words the way [`parse`] does (plus a bare weekday, the next such day); like there, a recurrence leaves `due` empty and a time must
+/// follow a date or a recurrence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Schedule {
+    pub due: Option<NaiveDate>,
+    pub time: Option<NaiveTime>,
+    pub rrule: Option<String>,
+}
+
+pub fn parse_schedule(text: &str, today: NaiveDate) -> Option<Schedule> {
+    let tokens = tokenize(text);
+    let mut out = Schedule {
+        due: None,
+        time: None,
+        rrule: None,
+    };
+    let mut after_date = false;
+    let mut i = 0;
+    while i < tokens.len() {
+        let was_after_date = std::mem::replace(&mut after_date, false);
+        if let Some((rrule, used)) = recurrence_at(&tokens, i) {
+            out.rrule = Some(rrule);
+            after_date = true;
+            i += used;
+        } else if let Some((date, used)) = date_at(&tokens, i, today) {
+            out.due = Some(date);
+            // A new date replaces the earlier date together with its time.
+            out.time = None;
+            after_date = true;
+            i += used;
+        } else if let Some(day) = parse_bare_weekday(&tokens[i].text) {
+            out.due = Some(next_weekday_after(day, today));
+            out.time = None;
+            after_date = true;
+            i += 1;
+        } else if was_after_date && let Some(time) = parse_time_word(&tokens[i].text) {
+            out.time = Some(time);
+            i += 1;
+        } else {
+            return None;
+        }
+    }
+    (out.due.is_some() || out.rrule.is_some()).then_some(out)
+}
+
 pub fn parse(
     text: &str,
     today: NaiveDate,
@@ -232,6 +279,28 @@ mod tests {
 
     fn run(text: &str) -> QuickAddResult {
         case(text, "2026-10-13", &["買い物", "家 の こと", "Work"], &[])
+    }
+
+    #[test]
+    fn schedule_reads_only_date_time_and_recurrence_words() {
+        let sch = |text: &str| parse_schedule(text, d("2026-10-13"));
+        let s = sch("金曜 15:00").unwrap();
+        assert_eq!((s.due, s.time, s.rrule), (Some(d("2026-10-16")), Some(t(15, 0)), None));
+        let s = sch("毎週水曜 10:00").unwrap();
+        assert_eq!(s.due, None);
+        assert_eq!(s.time, Some(t(10, 0)));
+        assert_eq!(s.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=WE"));
+        assert_eq!(
+            sch("毎月 1 日").unwrap().rrule.as_deref(),
+            Some("FREQ=MONTHLY;BYMONTHDAY=1")
+        );
+        assert_eq!(sch("next week").unwrap().due, Some(d("2026-10-19")));
+        // Anything else, a lone time, or nothing: no result.
+        assert_eq!(sch("買い物 明日"), None);
+        assert_eq!(sch("15:00"), None);
+        assert_eq!(sch("明日 p1"), None);
+        assert_eq!(sch("  "), None);
+        assert_eq!(sch("明日 会議 15:00"), None);
     }
 
     #[test]

@@ -162,6 +162,7 @@ pub fn run() {
             commands::set_today_order,
             commands::quick_add,
             commands::parse_quick_add,
+            commands::parse_due_text,
             commands::parse_recurrence,
             commands::summarize_recurrence,
             commands::settings,

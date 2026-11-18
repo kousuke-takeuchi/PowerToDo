@@ -476,12 +476,14 @@ export function TaskDialog({
                 today={today}
                 recurrenceLabel={rruleText}
                 onChange={(v) => {
-                  if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null });
+                  if (onChange) onChange({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null, ...(v.rrule ? { rrule: v.rrule } : {}) });
                   else {
                     setDue(v.date);
                     setTime(v.time);
+                    if (v.rrule) setRrule(v.rrule);
                   }
                 }}
+                onDone={() => setPopover(null)}
                 onOpenRecurrence={() => setPopover("recurrence")}
               />
             )}

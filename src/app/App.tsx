@@ -1,3 +1,5 @@
+import { api } from "../api/client";
+import { DueParserContext } from "../views/DueParserContext";
 import { Onboarding } from "../views/Onboarding";
 import { ErrorState } from "../views/ErrorState";
 import { Main } from "./Main";
@@ -46,6 +48,10 @@ export default function App() {
     case "syncStep":
       return <OnboardingSync onDone={finishSyncStep} />;
     case "ready":
-      return mobile ? <MobileMain app={state.app} syncConflicts={syncConflicts} /> : <Main app={state.app} syncConflicts={syncConflicts} />;
+      return (
+        <DueParserContext.Provider value={api.parseDueText}>
+          {mobile ? <MobileMain app={state.app} syncConflicts={syncConflicts} /> : <Main app={state.app} syncConflicts={syncConflicts} />}
+        </DueParserContext.Provider>
+      );
   }
 }

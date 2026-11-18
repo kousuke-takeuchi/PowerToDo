@@ -12,13 +12,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::domain::model::{INBOX, Placement, Position, TaskInput, TaskPatch};
-use crate::domain::quick_add::{QuickAddResult, parse};
+use crate::domain::model::serde_time;
+use crate::domain::quick_add::{QuickAddResult, parse, parse_schedule};
 use crate::domain::recurrence;
 use crate::domain::recurrence_words;
 use crate::domain::reminders;
@@ -474,6 +475,19 @@ pub struct CountsDto {
 pub struct RecurrenceDto {
     pub rrule: Option<String>,
     pub label: Option<String>,
+}
+
+/// `parse_due_text`: what the date picker's text field read (spec ② §9). `due` is the date to set
+/// (for a recurrence, its first occurrence on or after today), `time` and `rrule` are set when the
+/// text had them, `label` is a short line to show, e.g. 毎週水曜 (11/25 から).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DueTextDto {
+    pub due: Option<NaiveDate>,
+    #[serde(with = "serde_time::option")]
+    pub time: Option<NaiveTime>,
+    pub rrule: Option<String>,
+    pub label: String,
 }
 
 /// `summarize_recurrence`: the label for a stored RRULE, and whether the rule computes without
@@ -2051,6 +2065,55 @@ pub fn parse_recurrence_in(text: &str) -> RecurrenceDto {
     RecurrenceDto { rrule, label }
 }
 
+/// The date, time and recurrence in `text`, when the whole text is made of such words. A
+/// recurrence takes its first occurrence on or after `today` as the date, as quick add does.
+pub fn parse_due_text_in(text: &str, today: NaiveDate) -> Option<DueTextDto> {
+    let s = parse_schedule(text, today)?;
+    let due = match (&s.due, &s.rrule) {
+        (None, Some(rrule)) => recurrence::first_on_or_after(rrule, today, s.time)
+            .ok()
+            .flatten(),
+        (due, _) => *due,
+    };
+    let day = due.map(|d| {
+        if d.year() == today.year() {
+            format!("{}/{}", d.month(), d.day())
+        } else {
+            format!("{}/{}/{}", d.year(), d.month(), d.day())
+        }
+    });
+    let at = s.time.map(|t| t.format("%H:%M").to_string());
+    let label = match (&s.rrule, &day) {
+        (Some(rrule), day) => {
+            let mut l = recurrence::summarize(rrule).unwrap_or_else(|| rrule.clone());
+            if let Some(a) = &at {
+                l = format!("{l} {a}");
+            }
+            match day {
+                Some(day) => format!("{l} ({day} から)"),
+                None => l,
+            }
+        }
+        (None, day) => {
+            let wd = due.map(|d| ["月", "火", "水", "木", "金", "土", "日"][d.weekday().num_days_from_monday() as usize]);
+            [
+                day.as_ref().zip(wd).map(|(d, w)| format!("{d} ({w})")),
+                at,
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ")
+        }
+    };
+    Some(DueTextDto {
+        due,
+        time: s.time,
+        rrule: s.rrule,
+        label,
+    })
+}
+
 /// `valid` is true when the rule computes without error (`next_due` is `Ok`). A finished rule
 /// (COUNT / UNTIL used up, `Ok(None)`) is still well-formed, so it is valid; only an unreadable
 /// rule (`Err`) is not.
@@ -2059,6 +2122,11 @@ pub fn summarize_recurrence_in(rrule: &str, today: NaiveDate) -> RecurrenceLabel
         label: recurrence::summarize(rrule).unwrap_or_else(|| rrule.to_string()),
         valid: recurrence::next_due(rrule, None, None, today).is_ok(),
     }
+}
+
+#[tauri::command]
+pub async fn parse_due_text(text: String, today: String) -> AppResult<Option<DueTextDto>> {
+    Ok(parse_due_text_in(&text, parse_ymd(&today)?))
 }
 
 #[tauri::command]
@@ -2438,6 +2506,41 @@ mod tests {
             permission_str(PermissionState::PromptWithRationale),
             "prompt"
         );
+    }
+
+    #[test]
+    fn parse_due_text_examples() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap(); // a Wednesday
+        let p = |t: &str| parse_due_text_in(t, today);
+        let r = p("明日").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 19));
+        assert_eq!((r.time, r.rrule.as_deref(), r.label.as_str()), (None, None, "11/19 (木)"));
+        let r = p("11/20").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 20));
+        let r = p("金曜 15:00").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 20));
+        assert_eq!(r.time, NaiveTime::from_hms_opt(15, 0, 0));
+        assert_eq!(r.label, "11/20 (金) 15:00");
+        // A weekly rule starts today when today matches (a Wednesday).
+        let r = p("毎週水曜").unwrap();
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=WE"));
+        assert_eq!(r.due, Some(today));
+        assert_eq!(r.label, "毎週水曜 (11/18 から)");
+        let r = p("毎週金曜 10:00").unwrap();
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 11, 20));
+        assert_eq!(r.time, NaiveTime::from_hms_opt(10, 0, 0));
+        assert_eq!(r.label, "毎週金曜 10:00 (11/20 から)");
+        let r = p("毎月 1 日").unwrap();
+        assert_eq!(r.rrule.as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=1"));
+        assert_eq!(r.due, NaiveDate::from_ymd_opt(2026, 12, 1));
+        assert_eq!(p("毎月1日").unwrap().due, NaiveDate::from_ymd_opt(2026, 12, 1));
+        // A year other than this one is shown.
+        assert_eq!(p("2027/1/5").map(|r| r.label), Some("2027/1/5 (火)".to_string()));
+        // Mixed with other words, or nothing readable.
+        assert!(p("買い物 明日").is_none());
+        assert!(p("毎週水曜 買い物").is_none());
+        assert!(p("").is_none());
+        assert!(p("あああ").is_none());
     }
 
     #[test]

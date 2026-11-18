@@ -85,6 +85,8 @@ export interface SaveStatus { project: string; state: SaveState; message?: strin
 /** 起動時に開く画面 (この端末の設定)。 */
 export type StartView = "today" | "inbox";
 export interface AppStateDto { dataDir: string | null; projects: ProjectSummary[]; inbox: string; warning?: string; watchError?: string; trayError?: string; startView: StartView; }
+/** `parse_due_text`: 日付欄の文字の解釈。`due` は繰り返しのときその最初の日。 */
+export interface DueTextDto { due: string | null; time: string | null; rrule: string | null; label: string; }
 export interface SettingsDto {
   displayName: string;
   weekStart: "mon" | "sun";

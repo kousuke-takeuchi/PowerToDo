@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Comment,
   AutostartDto,
+  DueTextDto,
   StartView,
   AppError,
   AppErrorKind,
@@ -106,6 +107,7 @@ export const api = {
 
   quickAdd: (text: string, defaultProject: string) => invoke<QuickAddOutcome>("quick_add", { text, defaultProject }),
   parseQuickAdd: (text: string) => invoke<QuickAddResult>("parse_quick_add", { text }),
+  parseDueText: (text: string, today: string) => invoke<DueTextDto | null>("parse_due_text", { text, today }),
   parseRecurrence: (text: string) => invoke<RecurrenceDto>("parse_recurrence", { text }),
   summarizeRecurrence: (rrule: string) => invoke<RecurrenceLabelDto>("summarize_recurrence", { rrule }),
 

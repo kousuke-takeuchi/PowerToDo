@@ -134,8 +134,8 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
             today={today}
             recurrenceLabel={recurrenceLabel(v.rrule)}
             onOpenRecurrence={() => setPop("repeat")}
-            onChange={({ date, time }) => {
-              set({ due: date, dueTime: date ? time : undefined });
+            onChange={({ date, time, rrule }) => {
+              set({ due: date, dueTime: date ? time : undefined, ...(rrule ? { rrule } : {}) });
               setPop(null);
             }}
           />
