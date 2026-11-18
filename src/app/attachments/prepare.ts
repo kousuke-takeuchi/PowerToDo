@@ -19,28 +19,49 @@ export async function prepareFile(file: File): Promise<Prepared> {
   const asIs: Prepared = { blob: file, name: file.name, type };
   const kind = imageKind(file.type, file.name);
   if (kind === "other") return asIs;
-  let bmp: ImageBitmap;
+  const decoded = await decode(file);
+  if (!decoded) return asIs;
+  const { src, w: sw, h: sh, release } = decoded;
   try {
-    bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
-  } catch {
-    return asIs;
-  }
-  try {
-    const plan = planResize(kind, bmp.width, bmp.height);
-    if (plan.action === "keep") return { ...asIs, w: bmp.width, h: bmp.height };
+    const plan = planResize(kind, sw, sh);
+    if (plan.action === "keep") return { ...asIs, w: sw, h: sh };
     const canvas = document.createElement("canvas");
     canvas.width = plan.w;
     canvas.height = plan.h;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return { ...asIs, w: bmp.width, h: bmp.height };
+    if (!ctx) return { ...asIs, w: sw, h: sh };
     ctx.fillStyle = "#fff"; // transparency would turn black in a JPEG
     ctx.fillRect(0, 0, plan.w, plan.h);
-    ctx.drawImage(bmp, 0, 0, plan.w, plan.h);
+    ctx.drawImage(src, 0, 0, plan.w, plan.h);
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", JPEG_QUALITY));
-    if (!blob) return { ...asIs, w: bmp.width, h: bmp.height };
+    if (!blob) return { ...asIs, w: sw, h: sh };
     return { blob, name: jpegName(file.name), type: "image/jpeg", w: plan.w, h: plan.h };
   } finally {
-    bmp.close();
+    release();
+  }
+}
+
+/**
+ * Decodes with the EXIF orientation applied. `createImageBitmap` first; WKWebView (iPhone) may refuse a HEIC file
+ * there while an <img> opens it, so that is the second try. null when the webview cannot open it at all.
+ */
+async function decode(file: File): Promise<{ src: CanvasImageSource; w: number; h: number; release: () => void } | null> {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+    return { src: bmp, w: bmp.width, h: bmp.height, release: () => bmp.close() };
+  } catch {
+    // fall through to <img>
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    // <img> draws with its EXIF orientation (WebKit and Chromium), and naturalWidth is the displayed width.
+    return { src: img, w: img.naturalWidth, h: img.naturalHeight, release: () => URL.revokeObjectURL(url) };
+  } catch {
+    URL.revokeObjectURL(url);
+    return null;
   }
 }
 
