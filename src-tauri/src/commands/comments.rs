@@ -71,20 +71,33 @@ struct Body {
     files: Option<Vec<AttachmentInfo>>,
 }
 
-/// Every file named must be stored here already (`add_attachment` first): a record that points at
-/// nothing would show a frame that never fills.
+/// Every file newly named must be stored here already (`add_attachment` first): a record that points
+/// at nothing would show a frame that never fills. Files the comment has already (`known`) are not
+/// checked: an edit that keeps one whose blob has not arrived by sync yet must still go through.
 fn check_files(
     s: &crate::store::project_store::ProjectStore,
     files: &[AttachmentInfo],
+    known: &[AttachmentInfo],
 ) -> AppResult<()> {
-    for f in files {
-        if !attachments::exists(s.paths(), &f.hash, &f.ext) {
-            return Err(AppError::NotFound {
-                message: format!("添付「{}」のファイルが見つかりません", f.name),
-            });
-        }
+    match first_missing(files, known, |f| {
+        attachments::exists(s.paths(), &f.hash, &f.ext)
+    }) {
+        Some(f) => Err(AppError::NotFound {
+            message: format!("添付「{}」のファイルが見つかりません", f.name),
+        }),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+/// The first of `files` that is neither in `known` (same blob) nor `stored`.
+fn first_missing<'a>(
+    files: &'a [AttachmentInfo],
+    known: &[AttachmentInfo],
+    stored: impl Fn(&AttachmentInfo) -> bool,
+) -> Option<&'a AttachmentInfo> {
+    files
+        .iter()
+        .find(|f| !known.iter().any(|k| k.hash == f.hash && k.ext == f.ext) && !stored(f))
 }
 
 /// Appends one line by the current display name, then asks for a sync. `target`: the comment an edit
@@ -117,9 +130,7 @@ fn write_lines<T>(
     let Body { text, files } = body;
     let out = with_store(state, |s| {
         let author = s.settings().display_name;
-        if let Some(f) = &files {
-            check_files(s, f)?;
-        }
+        let mut known: Vec<AttachmentInfo> = Vec::new();
         if matches!(op, Op::Edit | Op::Delete) {
             let id = target.as_deref().unwrap_or_default();
             let existing = comments::lines(s.paths(), project, no)?;
@@ -127,6 +138,9 @@ fn write_lines<T>(
             if op == Op::Edit {
                 // Text and files may not both end up empty.
                 let c = comments::view(&existing).into_iter().find(|c| c.id == id);
+                if let Some(c) = &c {
+                    known = c.files.clone();
+                }
                 let has_text = text
                     .as_deref()
                     .or(c.as_ref().map(|c| c.text.as_str()))
@@ -139,6 +153,9 @@ fn write_lines<T>(
                     return Err(empty());
                 }
             }
+        }
+        if let Some(f) = &files {
+            check_files(s, f, &known)?;
         }
         let now = Local::now();
         let line = Line {
@@ -272,4 +289,34 @@ pub async fn detach_from_note(
         Body::default(),
         |s| comments::read_notes(s.paths(), &project, no),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(n: u8) -> AttachmentInfo {
+        AttachmentInfo {
+            hash: format!("{n:064x}"),
+            ext: "png".into(),
+            name: format!("{n}.png"),
+            mime: "image/png".into(),
+            size: 1,
+            w: None,
+            h: None,
+        }
+    }
+
+    #[test]
+    fn only_new_files_must_be_stored_here() {
+        let none = |_: &AttachmentInfo| false;
+        // An edit keeping a file whose blob has not arrived yet goes through.
+        assert!(first_missing(&[info(1)], &[info(1), info(2)], none).is_none());
+        // A file the comment did not have must be stored.
+        assert_eq!(
+            first_missing(&[info(1), info(3)], &[info(1)], none),
+            Some(&info(3))
+        );
+        assert!(first_missing(&[info(3)], &[], |_| true).is_none());
+    }
 }
