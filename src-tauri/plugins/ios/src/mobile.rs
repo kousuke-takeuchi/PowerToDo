@@ -54,7 +54,8 @@ impl<R: Runtime> PowerToDoIos<R> {
             .map_err(failed)
     }
 
-    /// Shows the file at `path` in the system preview (Quick Look). Returns once it is on screen.
+    /// Shows the file at `path` in the system preview (Quick Look). Returns once the preview is asked for
+    /// (a preview already up is left as it is). Blocks on the main thread's answer: call it off the main thread.
     pub fn preview_file(&self, path: &str) -> Result<()> {
         #[derive(Serialize)]
         struct Args<'a> {

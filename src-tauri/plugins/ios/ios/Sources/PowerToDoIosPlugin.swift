@@ -103,7 +103,8 @@ class PowerToDoIosPlugin: Plugin, ASWebAuthenticationPresentationContextProvidin
   }
 
   /// Shows the file at `path` in the system preview (Quick Look: pictures, PDF, Office files, text), whose share
-  /// button saves it to Files or hands it to another app. Resolves once the preview is on screen.
+  /// button saves it to Files or hands it to another app. Resolves as soon as the preview is asked for: the Rust side
+  /// waits for this call, and present() never calls back when it cannot present.
   @objc func previewFile(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(PreviewArgs.self)
     guard FileManager.default.fileExists(atPath: args.path) else {
@@ -117,11 +118,17 @@ class PowerToDoIosPlugin: Plugin, ASWebAuthenticationPresentationContextProvidin
         invoke.reject("no screen to show the preview on")
         return
       }
+      // A preview already up (a second tap on share) or a screen still sliding in or out: present() would refuse.
+      if host is QLPreviewController || host.isBeingPresented || host.isBeingDismissed {
+        invoke.resolve()
+        return
+      }
       let source = PreviewSource(url: URL(fileURLWithPath: args.path))
       let controller = QLPreviewController()
       controller.dataSource = source
       self.previewSource = source
-      host.present(controller, animated: true) { invoke.resolve() }
+      host.present(controller, animated: true)
+      invoke.resolve()
     }
   }
 
