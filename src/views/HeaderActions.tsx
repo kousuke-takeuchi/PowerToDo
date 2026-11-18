@@ -129,10 +129,13 @@ function EntryRow({ entry, run }: { entry: MenuEntry; run: (fn: () => void) => (
         <ChevronRight size={14} aria-hidden style={{ color: "var(--color-text-muted)" }} />
       </button>
       {sub && (
-        <div role="menu" aria-label={entry.label} style={{ ...popover, position: "absolute", top: -5, right: "100%", marginRight: 2 }}>
-          {entry.items.map((e, i) => (
-            <EntryRow key={e.kind === "separator" ? `sep${i}` : e.id} entry={e} run={run} />
-          ))}
+        // The padding bridges the gap to the row: crossing it keeps the pointer inside this row, so hover does not close it.
+        <div style={{ position: "absolute", top: -5, right: "100%", paddingRight: 2 }}>
+          <div role="menu" aria-label={entry.label} style={popover}>
+            {entry.items.map((e, i) => (
+              <EntryRow key={e.kind === "separator" ? `sep${i}` : e.id} entry={e} run={run} />
+            ))}
+          </div>
         </div>
       )}
     </div>
