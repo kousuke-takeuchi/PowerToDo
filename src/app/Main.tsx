@@ -895,7 +895,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   } else {
     body = (
       <ProjectView
-        key={current}
+        // Restoring from the archive remounts it, so it reports its rows again for the row keys.
+        key={archived ? `${current}\u0000archived` : current}
         project={current}
         tasks={view.tasks}
         sections={view.sections}
