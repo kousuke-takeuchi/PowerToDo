@@ -1491,8 +1491,13 @@ impl SyncEngine {
                 return Ok(());
             }
         };
-        let remotes: BTreeMap<&str, &RemoteFile> =
-            remote.iter().map(|f| (f.name.as_str(), f)).collect();
+        // Only blob names: the name becomes a local path below, so nothing a backend lists (a
+        // stray or hostile name on the target) may reach `dir.join` unchecked.
+        let remotes: BTreeMap<&str, &RemoteFile> = remote
+            .iter()
+            .filter(|f| crate::store::attachments::parse_file_name(&f.name).is_some())
+            .map(|f| (f.name.as_str(), f))
+            .collect();
         let mut received = Vec::new();
         let names: BTreeSet<&str> = local
             .iter()
@@ -3047,6 +3052,20 @@ mod tests {
             .map(|d| d.flatten().collect())
             .unwrap_or_default();
         assert!(left.is_empty(), "no temporary file either");
+    }
+
+    #[tokio::test]
+    async fn a_remote_name_that_is_not_a_blob_name_is_left_alone() {
+        let remote = backend();
+        let (_a, b) = two_pcs(&remote).await;
+        let content = b"evil";
+        let name = format!("{}.x/../../escape", sha256_hex(content));
+        remote.put_attachment(&name, content);
+        remote.put_attachment("notes.txt", b"n");
+        let r = b.sync().await;
+        assert!(r.attachments.is_empty() && r.failed.is_empty(), "{r:?}");
+        assert!(!b.data.join("escape").exists());
+        assert!(!b.data.join(crate::store::attachments::DIR).exists());
     }
 
     #[tokio::test]
