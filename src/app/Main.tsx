@@ -30,7 +30,7 @@ import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDialog } from "../views/TaskDialog";
-import { afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
+import { stillOpenAfterComplete, afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
 import { CommentCounts, useCommentCounts, useDialogComments } from "./useComments";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
@@ -725,14 +725,16 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           }
           onToggleDone={(done) => {
             const t = dlgTask;
-            // Spec ① §2.5: completing moves on to the next task (taken from the list as it was before).
+            // Spec ① §2.5: completing moves on to the next task (taken from the list as it was before), unless the
+            // task repeats and only moved its date on: that one stays open here. Decided by the result.
             const after = done ? afterRemoval(visibleKeys, dlgKey) : undefined;
-            void src.completeTask(t.no, done).then((ok) => {
+            let stays = false;
+            void src.completeTask(t.no, done, false, (v) => (stays = stillOpenAfterComplete(v, t.no))).then((ok) => {
               if (!ok) return;
               afterOther();
               if (done) {
                 completed(t);
-                goDialog(after);
+                if (!stays) goDialog(after);
               }
             });
           }}
