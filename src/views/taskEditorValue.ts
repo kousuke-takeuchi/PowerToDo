@@ -130,7 +130,9 @@ export function shouldParse(mode: "add" | "edit", title: string, initialTitle: s
  * text is the title; if nothing is left, the value is returned unchanged. `projects`: names the `#project` may match.
  */
 export function applyParsed(v: EditorValue, r: QuickAddResult, projects: string[] = []): EditorValue {
-  const title = r.title.trim();
+  const target = r.project === null ? undefined : (projects.find((n) => n === r.project) ?? projects.find((n) => n.toLowerCase() === r.project!.toLowerCase()));
+  // A `#project` the editor cannot move to (a subtask, or a name it does not offer) stays in the title instead of vanishing.
+  const title = (r.project !== null && target === undefined ? titleKeepingProject(v.title, r) : r.title).trim();
   if (title === "") return v;
   const out: EditorValue = { ...v, title };
   if (r.due) out.due = r.due;
@@ -138,12 +140,22 @@ export function applyParsed(v: EditorValue, r: QuickAddResult, projects: string[
   if (r.rrule) out.rrule = r.rrule;
   if (r.priority) out.priority = r.priority;
   for (const l of r.labels) if (!out.labels.includes(l)) out.labels = [...out.labels, l];
-  if (r.project) {
-    const name = projects.find((n) => n === r.project) ?? projects.find((n) => n.toLowerCase() === r.project!.toLowerCase());
-    if (name && name !== v.project) {
-      out.project = name;
-      out.section = null;
-    }
+  if (target !== undefined && target !== v.project) {
+    out.project = target;
+    out.section = null;
   }
   return out;
+}
+
+/** The text without the recognised words except `#project` (span offsets are code points), words joined by one space like quick add. */
+function titleKeepingProject(text: string, r: QuickAddResult): string {
+  const chars = Array.from(text);
+  const drop = new Set<number>();
+  for (const s of r.spans) if (s.kind !== "project") for (let i = s.start; i < s.end && i < chars.length; i++) drop.add(i);
+  const words = chars
+    .filter((_, i) => !drop.has(i))
+    .join("")
+    .split(/\s+/)
+    .filter((w) => w !== "");
+  return words.length > 0 ? words.join(" ") : r.title;
 }

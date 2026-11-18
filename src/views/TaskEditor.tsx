@@ -104,7 +104,11 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
       window.clearTimeout(id);
     };
   }, [parse, reads, composing, v.title]);
-  const tokens = reads && parsed && parsed.text === v.title ? spansToTokens(v.title, parsed.result.spans) : [];
+  // A subtask's editor has no project list: its `#project` is kept as text (applyParsed), so it is not shown as read.
+  const tokens =
+    reads && parsed && parsed.text === v.title
+      ? spansToTokens(v.title, projects ? parsed.result.spans : parsed.result.spans.filter((s) => s.kind !== "project"))
+      : [];
 
   const submit = async () => {
     if (!canSubmit || composing) return;

@@ -89,6 +89,18 @@ test("applyParsed_moves_to_a_known_project_and_ignores_unknown_ones", () => {
   assert.deepEqual(applyParsed(v, { ...none, title: "x", project: "ない" }, ["仕事"]).project, "受信トレイ");
 });
 
+test("applyParsed_keeps_a_project_word_it_cannot_move_to_in_the_title", () => {
+  // "買う #仕事 明日 p1": a subtask editor (no project list) strips the date and priority but keeps "#仕事".
+  const v = { ...blankValue("受信トレイ", null), title: "買う #仕事 明日 p1" };
+  const r: QuickAddResult = {
+    ...none, title: "買う", project: "仕事", due: "2026-10-27", priority: 1,
+    spans: [{ start: 3, end: 6, kind: "project" }, { start: 7, end: 9, kind: "date" }, { start: 10, end: 12, kind: "priority" }],
+  };
+  const o = applyParsed(v, r);
+  assert.deepEqual([o.title, o.project, o.due, o.priority], ["買う #仕事", "受信トレイ", "2026-10-27", 1]);
+  assert.equal(applyParsed(v, r, ["受信トレイ", "仕事"]).title, "買う");
+});
+
 test("applyParsed_keeps_the_text_when_nothing_would_be_left", () => {
   const v = { ...blankValue("受信トレイ", null), title: "明日" };
   assert.equal(applyParsed(v, { ...none, title: "", due: "2026-10-27" }), v);
