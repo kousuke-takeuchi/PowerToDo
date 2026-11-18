@@ -44,6 +44,8 @@ export type ShortcutHandlers = {
   goUpcoming: () => void;
   goInbox: () => void;
   goLabels: () => void;
+  /** S: 「セクションを追加」。プロジェクトの画面 (アーカイブ済みを除く) だけ渡す。 */
+  addSection?: () => void;
   /** null while no list is on screen. */
   row: RowHandlers | null;
   /** false while a dialog is open (its own keys win). */
@@ -103,6 +105,7 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
       const act: Record<string, (() => void) | undefined> = {
         q: h.quickAdd,
         "/": h.search,
+        s: h.addSection,
         g: () => {
           gAt.current = now;
         },

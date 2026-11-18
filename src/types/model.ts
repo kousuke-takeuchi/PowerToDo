@@ -4,7 +4,7 @@ export type { SyncState };
 
 export type Priority = 1 | 2 | 3 | 4;
 export interface Task { no: number; project: string; category: string | null; title: string; assignee: string; priority: Priority; progress: number; start?: string; due?: string; dueTime?: string; days?: number; note?: string; parentNo?: number; labels: string[]; rrule?: string; /** 表示用 (要約、読めなければ RRULE 文字列)。保存されない。 */ rruleLabel?: string; reminders: string[]; order: number; createdAt: string; completedAt?: string; }
-export interface Project { name: string; color: string; order: number; favorite: boolean; inbox: boolean; }
+export interface Project { name: string; color: string; order: number; favorite: boolean; inbox: boolean; archived?: boolean; }
 export interface Label { name: string; color: string; order: number; }
 export interface Section { project: string; name: string; order: number; collapsed?: boolean; }
 export interface SyncInfo { state: SyncState; lastSyncedAt?: string; target: "google" | "nas" | "none"; account?: string; }
@@ -13,7 +13,7 @@ export interface Comment { id: string; at: string; author: string; text: string;
 
 // ---- Rust command DTOs (src-tauri: commands/mod.rs, store/project_store.rs, domain/*) ----
 
-export interface ProjectSummary { name: string; color: string; order: number; favorite: boolean; inbox: boolean; taskCount: number; loadError?: string; }
+export interface ProjectSummary { name: string; color: string; order: number; favorite: boolean; inbox: boolean; /** アーカイブ済み: サイドバーの「アーカイブ済み」に入り、横断ビューには出ない。 */ archived?: boolean; taskCount: number; loadError?: string; }
 /** A row whose cell types are broken in the xlsx (reported, never rewritten). */
 export interface InvalidRow { row: number; no?: number; column: string; value: string; message: string; }
 export interface ProjectView { project: Project; sections: Section[]; tasks: Task[]; invalidRows: InvalidRow[]; /** 操作についての通知 (例: 繰り返しが読めず通常の完了になった)。 */ warnings?: string[]; }

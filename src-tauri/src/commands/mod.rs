@@ -1185,7 +1185,12 @@ fn start_watching(app: &AppHandle, state: &AppState) {
 // ---- quick add ----
 
 pub fn parse_quick_add_in(store: &ProjectStore, text: &str, today: NaiveDate) -> QuickAddResult {
-    let projects: Vec<String> = store.summaries().into_iter().map(|p| p.name).collect();
+    let projects: Vec<String> = store
+        .summaries()
+        .into_iter()
+        .filter(|p| !p.archived)
+        .map(|p| p.name)
+        .collect();
     let labels: Vec<String> = store.labels().into_iter().map(|l| l.name).collect();
     let mut parsed = parse(text, today, &projects, &labels);
     // A recurrence without a date starts on its first occurrence on or after today. An
@@ -1207,6 +1212,12 @@ pub fn quick_add_in(
     today: NaiveDate,
 ) -> AppResult<QuickAddOutcome> {
     let parsed = parse_quick_add_in(store, text, today);
+    // An archived project takes no new tasks: the inbox stands in for it.
+    let default_project = if store.is_archived(default_project) {
+        INBOX
+    } else {
+        default_project
+    };
     let project = parsed
         .project
         .clone()
@@ -1453,6 +1464,69 @@ pub async fn rename_project(
 }
 
 #[tauri::command]
+pub async fn update_project(
+    name: String,
+    new_name: String,
+    color: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectSummary> {
+    let summary = mutate_structure(&app, state.inner(), &[&new_name], |s| {
+        s.update_project(&name, &new_name, &color)
+    })?;
+    if new_name != name {
+        state.update_fired(|f| f.rename_project(&name, &new_name));
+    }
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn set_project_favorite(
+    name: String,
+    favorite: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectSummary> {
+    mutate_structure(&app, state.inner(), &[], |s| {
+        s.set_project_favorite(&name, favorite)
+    })
+}
+
+#[tauri::command]
+pub async fn set_project_archived(
+    name: String,
+    archived: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ProjectSummary> {
+    mutate_structure(&app, state.inner(), &[], |s| {
+        s.set_project_archived(&name, archived)
+    })
+}
+
+/// Opens `<name>.xlsx` in the OS's default app.
+#[tauri::command]
+pub async fn open_project_file(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let path = with_store(state.inner(), |s| s.project_file(&name))?;
+    platform::open_file(&app, &path)
+}
+
+/// Shows `<name>.xlsx` selected in Finder / Explorer.
+#[tauri::command]
+pub async fn reveal_project_file(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let path = with_store(state.inner(), |s| s.project_file(&name))?;
+    platform::reveal_file(&app, &path)
+}
+
+#[tauri::command]
 pub async fn delete_project(
     name: String,
     app: AppHandle,
@@ -1594,7 +1668,14 @@ pub async fn complete_task(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    complete_task_in(&app, state.inner(), &project, no, done, with_subtasks.unwrap_or(false))
+    complete_task_in(
+        &app,
+        state.inner(),
+        &project,
+        no,
+        done,
+        with_subtasks.unwrap_or(false),
+    )
 }
 
 #[tauri::command]
@@ -2338,6 +2419,19 @@ mod tests {
         // A finished rule (COUNT used up) is still well-formed.
         let s = summarize_recurrence_in("FREQ=DAILY;COUNT=1", d("2026-10-15"));
         assert!(s.valid);
+    }
+
+    #[test]
+    fn quick_add_skips_archived_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("古い", "c").unwrap();
+        store.set_project_archived("古い", true).unwrap();
+        // Not a candidate for "#古い", and the default falls back to the inbox.
+        let parsed = parse_quick_add_in(&store, "x #古い", d("2026-10-14"));
+        assert_eq!(parsed.project, None);
+        let out = quick_add_in(&mut store, "y", "古い", d("2026-10-14")).unwrap();
+        assert_eq!(out.view.project.name, INBOX);
     }
 
     #[test]

@@ -37,6 +37,7 @@ import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
 import { Banners } from "./Banners";
+import { usePlatform } from "./platform";
 import { setEscFallback, useEscLayer } from "./layers";
 import { useCrossViews } from "./useCrossViews";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
@@ -106,15 +107,19 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const focus = useRowFocus(visibleKeys);
   const clearFocus = focus.clear;
   const expandApi = useRef<ExpandApi | null>(null);
+  const addSectionApi = useRef<(() => void) | null>(null);
   const { searchOpen, setSearchOpen, search, searchSel, setSearchSel } = useSearchDialog();
 
   // プロジェクト一覧・「今日」の件数・表示名 (モバイルと共有: useSummaries)
-  const { summaries, displayName, setDisplayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
+  const { summaries, allSummaries, displayName, setDisplayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
   // 受信トレイ / プロジェクトの画面だけがタスク詳細・要修正の帯を持つ。今日 / 近日 / ラベル詳細 / フィルターとラベルは
   // 横断ビュー (useProject は受信トレイを読み続ける)。
   const projectScreen = nav.kind === "inbox" || nav.kind === "project";
   const current = nav.kind === "project" && nav.name ? nav.name : app.inbox;
+  const currentSummary = allSummaries.find((s) => s.name === current);
+  const archived = nav.kind === "project" && !!currentSummary?.archived;
+  const platform = usePlatform();
   // 操作の通知 (例: 読めない繰り返しがあったので通常の完了にした) は、エラーと同じフラッシュで出す。
   const showWarnings = useCallback((w: string[]) => setFlash({ text: w.join(" / "), tone: "error" }), []);
   const p = useProject(current, { onMutated: refreshSummaries, onWarnings: showWarnings });
@@ -181,7 +186,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     focus.set(`${project}/${no}`);
   };
   const openCross = (t: Task) => openTaskAt(t.project, t.no);
-  const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current, setFlash });
+  const { qa, openQuickAdd, closeQuickAdd, setText, submit: submitQuickAdd, tokens, qaProject } = useQuickAdd({ p, current: archived ? app.inbox : current, setFlash });
   // アプリの更新: 起動 5 秒後の確認、更新ダイアログ、設定の「アップデート」ペイン
   // クイック追加 / 検索が開いているあいだ、自動で見つかった更新は出さずに待つ (入力を奪わない)
   const updates = useUpdates({ hold: qa.open || searchOpen });
@@ -339,6 +344,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     navigate,
     openQuickAdd,
     openSearch: () => setSearchOpen(true),
+    addSection: projectScreen && !archived ? () => addSectionApi.current?.() : undefined,
     onCompleted: completed,
     requestDelete: (t) => requestDelete(t),
     edit: setEditing,
@@ -360,9 +366,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   }, [drawer, width]);
   useEscLayer(drawer && width === 960, () => setDrawer(false));
 
-  const { createProject, renameProject, deleteProject, deleteLabel, renameLabel } = useProjectActions({
+  const { createProject, saveProject, setFavorite, setArchived, openFile, revealFile, deleteProject, deleteLabel, renameLabel } = useProjectActions({
     current,
-    summaries,
+    summaries: allSummaries,
     refreshSummaries,
     navigate,
     showError,
@@ -425,7 +431,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       onClose={() => (width === 960 ? setDrawer(false) : setSidebarClosed(true))}
       active={nav}
       counts={counts}
-      projects={summaries}
+      projects={allSummaries}
       syncState={syncState}
       lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
       syncDetail={syncStatus?.message}
@@ -896,7 +902,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         invalidRows={view.invalidRows}
         focusedKey={focus.focusedKey ?? undefined}
         movingKey={movingKey ?? undefined}
-        onVisibleKeys={reportKeys}
+        onVisibleKeys={archived ? undefined : reportKeys}
         onExpandApi={(api) => (expandApi.current = api)}
         onOpenTask={(t) => openAny(t)}
         onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && completed(t))}
@@ -904,8 +910,23 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         onAddSubtask={(parent, title) => void p.addSubtask(parent.no, title)}
         onAddSection={(name) => void p.addSection(name)}
         onRenameSection={(from, to) => void p.renameSection(from, to)}
-        onRenameProject={current === app.inbox ? undefined : (name) => void renameProject(name)}
-        onDeleteProject={current === app.inbox ? undefined : () => void deleteProject()}
+        projectMenu={{
+          inbox: current === app.inbox,
+          archived,
+          favorite: currentSummary?.favorite ?? false,
+          color: currentSummary?.color ?? DEFAULT_LABEL_COLOR,
+          palette: LABEL_PALETTE,
+          os: platform.os,
+          onSave: (name, color) => void saveProject(name, color),
+          onToggleFavorite: () => void setFavorite(!currentSummary?.favorite),
+          onArchive: () => void setArchived(true),
+          onRestore: () => void setArchived(false),
+          onDelete: () => void deleteProject(),
+          onOpenFile: openFile,
+          onRevealFile: revealFile,
+        }}
+        readOnly={archived}
+        onAddSectionApi={(open) => (addSectionApi.current = open)}
         weekStart={settingsPanes.datetime.weekStart}
         labelOrder={allLabels}
         projectOrder={summaries.map((s) => s.name)}

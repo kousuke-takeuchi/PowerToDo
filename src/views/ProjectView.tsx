@@ -8,11 +8,13 @@ import { Button } from "../components/Button";
 import { Collapse, useMotionTiming } from "../motion";
 import { CommentCounts } from "../app/useComments";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
-import type { InvalidRow, Section, Task } from "../types/model";
+import type { InvalidRow, PlatformInfo, Section, Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { PageHeader, Subtitle, titleStyle } from "./HeaderActions";
+import { ProjectEditDialog } from "./ProjectEditDialog";
+import { projectMenuEntries } from "./projectMenu";
 import { useView } from "../app/view/ViewOptionsContext";
 import { arrange, firstOccurrences } from "../app/view/arrange";
 import type { ViewOptions } from "../app/view/viewOptions";
@@ -27,6 +29,24 @@ import { RowActions } from "../app/rowActions";
 import { DragCtx } from "../app/drag/DragContext";
 import { TaskMenu } from "./TaskMenu";
 import { blankValue, editorValueOf } from "./taskEditorValue";
+
+/** What the 「…」 menu of a project needs: its own state and what each line does (confirmations are the caller's). */
+export type ProjectMenuProps = {
+  inbox?: boolean;
+  archived?: boolean;
+  favorite: boolean;
+  color: string;
+  /** 「編集」で選べる色。 */
+  palette: string[];
+  os: PlatformInfo["os"];
+  onSave: (name: string, color: string) => void;
+  onToggleFavorite: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
+  onDelete: () => void;
+  onOpenFile: () => void;
+  onRevealFile: () => void;
+};
 
 export type ProjectViewProps = {
   project: string;
@@ -60,10 +80,16 @@ export type ProjectViewProps = {
   onAddSection?: (name: string) => void;
   /** 渡すとセクション名をダブルクリックでその場で編集でき、確定でこれ (旧名, 新名) を呼ぶ。 */
   onRenameSection?: (oldName: string, newName: string) => void;
-  /** 渡すとヘッダー右の「その他」にメニュー (名前を変更) が出る。確定でこれを呼ぶ。受信トレイには渡さない。 */
-  onRenameProject?: (newName: string) => void;
-  /** 渡すとヘッダー右の「その他」メニューに「削除」が出る (確認は呼び出し側)。受信トレイには渡さない。 */
-  onDeleteProject?: () => void;
+  /** 渡すとヘッダー右に「…」のメニューが出る (spec 2026-11-18 §4)。渡さなければボタンも出ない。 */
+  projectMenu?: ProjectMenuProps;
+  /** 「セクションを追加」を開く関数をマウント時に 1 度渡す (キー S 用。アンマウントで null)。 */
+  onAddSectionApi?: (open: (() => void) | null) => void;
+  /** アーカイブ済み: 一覧は触れない (追加・編集・完了・ドラッグなし)。ヘッダーに「アーカイブから戻す」を出す。 */
+  readOnly?: boolean;
+  /** Stories: the 「…」 menu starts open. */
+  initialMenuOpen?: boolean;
+  /** Stories: the 「編集」 dialog starts open. */
+  initialEditOpen?: boolean;
   /** 期限ラベルの基準日 YYYY-MM-DD。既定は Storybook の固定日 (TODAY)。 */
   today?: string;
   /** キーボードのフォーカス行 (`project/no`)。 */
@@ -216,8 +242,11 @@ export function ProjectView({
   errorDetail,
   onAddSection,
   onRenameSection,
-  onRenameProject,
-  onDeleteProject,
+  projectMenu,
+  onAddSectionApi,
+  readOnly,
+  initialMenuOpen,
+  initialEditOpen,
   today = TODAY,
   focusedKey,
   movingKey,
@@ -259,7 +288,7 @@ export function ProjectView({
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [addingSection, setAddingSection] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
-  const [renamingProject, setRenamingProject] = useState(false);
+  const [editingProject, setEditingProject] = useState(initialEditOpen ?? false);
   // 完了にした直後の行 (no)。完了タスクを隠している間は、LEAVE_DELAY_MS だけ未完了の一覧に残してから退場させる。
   const [leaving, setLeaving] = useState<Set<number>>(() => new Set());
   const leaveTimers = useRef(new Map<number, number>());
@@ -629,6 +658,10 @@ export function ProjectView({
     onExpandApi?.(expandApi.current);
     return () => onExpandApi?.(null);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onAddSectionApi?.(() => setAddingSection(true));
+    return () => onAddSectionApi?.(null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** セクション末尾 (未分類は section=null) の「タスクを追加」。onAddTask があればクリックでインライン入力に変わる。 */
   const addSlot = (section: string | null): React.ReactNode => {
@@ -876,36 +909,63 @@ export function ProjectView({
     );
   };
 
-  const menu = onRenameProject || onDeleteProject ? { rename: onRenameProject ? () => setRenamingProject(true) : undefined, delete: onDeleteProject } : undefined;
+  const menu = projectMenu
+    ? projectMenuEntries({
+        inbox: projectMenu.inbox ?? false,
+        archived: projectMenu.archived,
+        favorite: projectMenu.favorite,
+        os: projectMenu.os,
+        actions: {
+          edit: () => setEditingProject(true),
+          toggleFavorite: projectMenu.onToggleFavorite,
+          addSection: () => setAddingSection(true),
+          openFile: projectMenu.onOpenFile,
+          revealFile: projectMenu.onRevealFile,
+          archive: projectMenu.onArchive,
+          delete: projectMenu.onDelete,
+        },
+      })
+    : undefined;
   return (
     <>
-      <PageHeader viewLabel={board ? "ボード" : undefined} onMenu={menu} view={{ screen: "project", options: viewOptions, onChange: setViewOptions }} initialViewMenuOpen={initialViewMenuOpen}>
-        {renamingProject && onRenameProject ? (
-          <div style={{ flex: 1, minWidth: 0, maxWidth: 480, marginRight: "var(--space-4)" }}>
-            <InlineEdit
-              value={project}
-              ariaLabel="プロジェクト名"
-              style={{ fontSize: 26, lineHeight: "36px", fontWeight: 700, padding: "0 7px" }}
-              onCommit={(name) => {
-                setRenamingProject(false);
-                if (name !== project) onRenameProject(name);
-              }}
-              onCancel={() => setRenamingProject(false)}
-            />
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <h1 style={titleStyle}>{project}</h1>
-            <Subtitle text={`${openCount} 件のタスク`} />
-          </div>
-        )}
+      <PageHeader
+        viewLabel={board ? "ボード" : undefined}
+        onMenu={menu}
+        onRestore={readOnly ? projectMenu?.onRestore : undefined}
+        initialMenuOpen={initialMenuOpen}
+        view={{ screen: "project", options: viewOptions, onChange: setViewOptions }}
+        initialViewMenuOpen={initialViewMenuOpen}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <h1 style={titleStyle}>{project}</h1>
+          <Subtitle text={readOnly ? `アーカイブ済み · ${openCount} 件のタスク` : `${openCount} 件のタスク`} />
+        </div>
       </PageHeader>
       {state === "normal" && hiddenCount > 0 && (
         <div style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)", marginBottom: "var(--space-2)" }}>
           {hiddenCount} 件を隠しています (フィルター)
         </div>
       )}
-      {body()}
+      {/* アーカイブ済み: inert で一覧の操作 (クリック・キー・ドラッグ) を全部止める */}
+      {readOnly ? (
+        <div inert aria-readonly style={{ opacity: 0.75 }}>
+          {body()}
+        </div>
+      ) : (
+        body()
+      )}
+      {editingProject && projectMenu && (
+        <ProjectEditDialog
+          name={project}
+          color={projectMenu.color}
+          palette={projectMenu.palette}
+          onCancel={() => setEditingProject(false)}
+          onSave={(name, color) => {
+            setEditingProject(false);
+            projectMenu.onSave(name, color);
+          }}
+        />
+      )}
       {initialDeleteNo !== undefined &&
         (() => {
           const t = mine.find((x) => x.no === initialDeleteNo);

@@ -379,6 +379,7 @@ const SHORTCUTS: { keys: string[][]; action: string; note?: string }[] = [
   { keys: [["Delete"], ["Backspace"]], action: "フォーカス行を削除", note: "確認あり" },
   { keys: [["1 - 4"]], action: "優先度" },
   { keys: [["t"], ["m"]], action: "期限を今日 / 明日", note: "時刻は保つ" },
+  { keys: [["s"]], action: "セクションを追加", note: "プロジェクト画面" },
   { keys: [["→"], ["←"]], action: "サブタスクの展開 / 折りたたみ", note: "プロジェクト画面" },
   { keys: [["Esc"]], action: "最上位のレイヤーを閉じる", note: "レイヤーが無ければ行フォーカスを外す" },
 ];

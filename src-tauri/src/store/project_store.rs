@@ -54,6 +54,7 @@ pub struct ProjectSummary {
     pub order: u32,
     pub favorite: bool,
     pub inbox: bool,
+    pub archived: bool,
     /// Tasks that are not finished (progress < 100); 0 when the project failed to load.
     pub task_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -397,6 +398,7 @@ impl ProjectStore {
                     order: 0,
                     favorite: false,
                     inbox: true,
+                    archived: false,
                 },
             );
             store.common_dirty = true;
@@ -449,6 +451,7 @@ impl ProjectStore {
                 order,
                 favorite: false,
                 inbox: false,
+                archived: false,
             });
             self.common_dirty = true;
         }
@@ -565,6 +568,7 @@ impl ProjectStore {
             order: p.order,
             favorite: p.favorite,
             inbox: p.inbox,
+            archived: p.archived,
             task_count: task_count as u32,
             load_error,
         }
@@ -659,6 +663,7 @@ impl ProjectStore {
             order: self.next_project_order(),
             favorite: false,
             inbox: false,
+            archived: false,
         };
         self.common.projects.push(project.clone());
         self.books.insert(name.to_string(), LoadedProject::Ok(book));
@@ -730,6 +735,83 @@ impl ProjectStore {
         self.common_dirty = true;
         self.save_common_unless_held();
         Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    /// Renames (when `new_name` differs) and recolors a project. A blank color keeps the old one.
+    pub fn update_project(
+        &mut self,
+        name: &str,
+        new_name: &str,
+        color: &str,
+    ) -> AppResult<ProjectSummary> {
+        if new_name != name {
+            self.rename_project(name, new_name)?;
+        }
+        let idx = self.project_index(new_name)?;
+        if let Some(c) = non_empty(color) {
+            self.common.projects[idx].color = c;
+            self.common_dirty = true;
+            self.save_common_unless_held();
+        }
+        Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    pub fn set_project_favorite(
+        &mut self,
+        name: &str,
+        favorite: bool,
+    ) -> AppResult<ProjectSummary> {
+        let idx = self.project_index(name)?;
+        self.common.projects[idx].favorite = favorite;
+        self.common_dirty = true;
+        self.save_common_unless_held();
+        Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    /// Hides (or brings back) a project: only a mark in the common workbook, the file stays.
+    /// The inbox cannot be archived.
+    pub fn set_project_archived(
+        &mut self,
+        name: &str,
+        archived: bool,
+    ) -> AppResult<ProjectSummary> {
+        if name == INBOX && archived {
+            return Err(invalid("受信トレイはアーカイブできません"));
+        }
+        let idx = self.project_index(name)?;
+        self.common.projects[idx].archived = archived;
+        self.common_dirty = true;
+        self.save_common_unless_held();
+        Ok(self.summary(&self.common.projects[idx]))
+    }
+
+    /// The project's workbook path, for "open in Excel" / "show in Finder": only a listed
+    /// project whose file exists (the name goes through `Paths::project`'s safe-name check).
+    pub fn project_file(&self, name: &str) -> AppResult<PathBuf> {
+        self.project_index(name)?;
+        let path = self.paths.project(name)?;
+        if !path.is_file() {
+            return Err(not_found(format!(
+                "「{}」のファイルがありません",
+                path.display()
+            )));
+        }
+        Ok(path)
+    }
+
+    pub fn is_archived(&self, name: &str) -> bool {
+        self.common
+            .projects
+            .iter()
+            .any(|p| p.name == name && p.archived)
+    }
+
+    fn project_index(&self, name: &str) -> AppResult<usize> {
+        self.common
+            .projects
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| not_found(format!("プロジェクト「{name}」がありません")))
     }
 
     /// Moves `<name>.xlsx` to `archive/<name> (YYYYMMDD-HHMM).xlsx` (never deletes it) and
@@ -1679,10 +1761,12 @@ impl ProjectStore {
         labels
     }
 
-    /// Tasks of every project that loaded, in project order (仕様 §2). Failed projects are left out.
+    /// Tasks of every project that loaded, in project order (仕様 §2). Failed and archived
+    /// projects are left out: this feeds every cross view, search, counts and reminders.
     pub fn all_tasks(&self) -> Vec<Task> {
         self.summaries()
             .iter()
+            .filter(|p| !p.archived)
             .filter_map(|p| match self.books.get(&p.name) {
                 Some(LoadedProject::Ok(b)) => Some(b.tasks.iter().cloned()),
                 _ => None,
@@ -1971,6 +2055,7 @@ impl ProjectStore {
                 order,
                 favorite: false,
                 inbox: false,
+                archived: false,
             });
             self.common_dirty = true;
         }
@@ -2565,6 +2650,126 @@ mod tests {
         .unwrap();
         assert!(store.reload("壊れ").is_ok());
         assert!(store.summaries().iter().all(|s| s.load_error.is_none()));
+    }
+
+    #[test]
+    fn update_project_renames_and_recolors() {
+        let mut e = env();
+        e.store.create_project("旧", "red").unwrap();
+        let s = e.store.update_project("旧", "新", "blue").unwrap();
+        assert_eq!((s.name.as_str(), s.color.as_str()), ("新", "blue"));
+        // Same name, blank color: nothing changes.
+        let s = e.store.update_project("新", "新", " ").unwrap();
+        assert_eq!(s.color, "blue");
+        let again = e.reopen();
+        let p = again
+            .summaries()
+            .into_iter()
+            .find(|p| p.name == "新")
+            .unwrap();
+        assert_eq!(p.color, "blue");
+        // The inbox can be recolored, not renamed.
+        e.store.update_project(INBOX, INBOX, "green").unwrap();
+        assert!(e.store.update_project(INBOX, "x", "green").is_err());
+    }
+
+    #[test]
+    fn favorite_toggle_persists() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        assert!(e.store.set_project_favorite("仕事", true).unwrap().favorite);
+        let again = e.reopen();
+        assert!(
+            again
+                .summaries()
+                .iter()
+                .find(|p| p.name == "仕事")
+                .unwrap()
+                .favorite
+        );
+        assert!(
+            !e.store
+                .set_project_favorite("仕事", false)
+                .unwrap()
+                .favorite
+        );
+        assert!(matches!(
+            e.store.set_project_favorite("無い", true),
+            Err(AppError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn archived_projects_leave_every_cross_view() {
+        let mut e = env();
+        e.store.create_project("古い", "c").unwrap();
+        e.store.add_task("古い", input("old task")).unwrap();
+        e.store.add_task(INBOX, input("inbox task")).unwrap();
+        assert_eq!(e.store.all_tasks().len(), 2);
+
+        assert!(e.store.set_project_archived("古い", true).unwrap().archived);
+        let titles: Vec<String> = e.store.all_tasks().into_iter().map(|t| t.title).collect();
+        assert_eq!(titles, vec!["inbox task".to_string()]);
+        // Still listed (the sidebar shows it in its own group) and still readable.
+        assert!(
+            e.store
+                .summaries()
+                .iter()
+                .any(|p| p.name == "古い" && p.archived)
+        );
+        assert_eq!(e.store.view("古い").unwrap().tasks.len(), 1);
+        // The mark is in the common workbook; the project file is untouched.
+        assert!(e.data().join("古い.xlsx").exists());
+        assert!(
+            e.reopen()
+                .summaries()
+                .iter()
+                .any(|p| p.name == "古い" && p.archived)
+        );
+
+        assert!(matches!(
+            e.store.set_project_archived(INBOX, true),
+            Err(AppError::Invalid { .. })
+        ));
+        // Rescheduling overdue tasks leaves an archived project alone.
+        let mut overdue = input("late");
+        overdue.due = NaiveDate::from_ymd_opt(2026, 10, 1);
+        e.store.add_task("古い", overdue).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        assert!(e.store.reschedule_overdue(today, today).unwrap().is_empty());
+
+        assert!(
+            !e.store
+                .set_project_archived("古い", false)
+                .unwrap()
+                .archived
+        );
+        assert_eq!(e.store.all_tasks().len(), 3);
+    }
+
+    #[test]
+    fn project_file_is_a_listed_safe_path() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        assert_eq!(
+            e.store.project_file("仕事").unwrap(),
+            e.data().join("仕事.xlsx")
+        );
+        assert!(matches!(
+            e.store.project_file("無い"),
+            Err(AppError::NotFound { .. })
+        ));
+        assert!(e.store.project_file("../x").is_err());
+        assert!(
+            e.store
+                .project_file(COMMON_FILE.trim_end_matches(".xlsx"))
+                .is_err()
+        );
+        std::fs::remove_file(e.data().join("仕事.xlsx")).unwrap();
+        assert!(matches!(
+            e.store.project_file("仕事"),
+            Err(AppError::NotFound { .. })
+        ));
     }
 
     #[test]
@@ -3511,7 +3716,12 @@ mod tests {
         assert_eq!(v.tasks.iter().find(|t| t.no == 2).unwrap().progress, 100);
         e.store.complete_task(INBOX, 1, true).unwrap();
         let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
-        assert!(v.tasks.iter().filter(|t| t.no <= 3).all(|t| t.progress == 0));
+        assert!(
+            v.tasks
+                .iter()
+                .filter(|t| t.no <= 3)
+                .all(|t| t.progress == 0)
+        );
     }
 
     #[test]

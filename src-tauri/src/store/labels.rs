@@ -116,10 +116,23 @@ impl ProjectStore {
     /// Applies `f` to every loaded project's tasks; returns the names of the projects where
     /// `f` changed something (they are marked dirty and their working-day counts recomputed).
     /// Failed projects are skipped. Names come back in byte order.
-    fn edit_all_projects(&mut self, mut f: impl FnMut(&mut Task) -> bool) -> Vec<String> {
+    fn edit_all_projects(
+        &mut self,
+        include_archived: bool,
+        mut f: impl FnMut(&mut Task) -> bool,
+    ) -> Vec<String> {
         let holidays = self.common.holidays.clone();
         let mut changed = Vec::new();
+        let archived: Vec<String> = self
+            .summaries()
+            .into_iter()
+            .filter(|p| p.archived)
+            .map(|p| p.name)
+            .collect();
         for name in self.loaded_names() {
+            if !include_archived && archived.contains(&name) {
+                continue;
+            }
             let Some(LoadedProject::Ok(book)) = self.books.get_mut(&name) else {
                 continue;
             };
@@ -159,7 +172,7 @@ impl ProjectStore {
         }
         self.follow_view_option(super::view_options::LABEL, name, Some(&new_name));
         self.common_dirty = true;
-        let changed = self.edit_all_projects(|t| {
+        let changed = self.edit_all_projects(true, |t| {
             let mut hit = false;
             for l in &mut t.labels {
                 if l == name {
@@ -180,7 +193,7 @@ impl ProjectStore {
         if self.common.labels.len() != before {
             self.common_dirty = true;
         }
-        Ok(self.edit_all_projects(|t| {
+        Ok(self.edit_all_projects(true, |t| {
             let before = t.labels.len();
             t.labels.retain(|l| l != name);
             t.labels.len() != before
@@ -193,7 +206,7 @@ impl ProjectStore {
         today: NaiveDate,
         due: NaiveDate,
     ) -> AppResult<Vec<String>> {
-        Ok(self.edit_all_projects(|t| {
+        Ok(self.edit_all_projects(false, |t| {
             let overdue =
                 t.parent_no.is_none() && t.progress < 100 && t.due.is_some_and(|d| d < today);
             if overdue {

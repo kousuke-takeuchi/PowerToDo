@@ -74,6 +74,11 @@ export const api = {
   createProject: (name: string, color: string) => invoke<ProjectSummary>("create_project", { name, color }),
   renameProject: (name: string, newName: string) => invoke<ProjectSummary>("rename_project", { name, newName }),
   deleteProject: (name: string) => invoke<null>("delete_project", { name }),
+  updateProject: (name: string, newName: string, color: string) => invoke<ProjectSummary>("update_project", { name, newName, color }),
+  setProjectFavorite: (name: string, favorite: boolean) => invoke<ProjectSummary>("set_project_favorite", { name, favorite }),
+  setProjectArchived: (name: string, archived: boolean) => invoke<ProjectSummary>("set_project_archived", { name, archived }),
+  openProjectFile: (name: string) => invoke<null>("open_project_file", { name }),
+  revealProjectFile: (name: string) => invoke<null>("reveal_project_file", { name }),
 
   addSection: (project: string, name: string) => invoke<ProjectView>("add_section", { project, name }),
   renameSection: (project: string, name: string, newName: string) => invoke<ProjectView>("rename_section", { project, name, newName }),
