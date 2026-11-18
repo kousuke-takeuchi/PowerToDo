@@ -1550,9 +1550,10 @@ fn complete_task_in(
     project: &str,
     no: u32,
     done: bool,
+    with_subtasks: bool,
 ) -> AppResult<ProjectView> {
     let view = mutate(app, state, &[project], false, |s| {
-        s.complete_task(project, no, done)
+        s.complete_task_with(project, no, done, with_subtasks)
     })?;
     state.forget_fired(project, no);
     Ok(view)
@@ -1563,7 +1564,7 @@ fn complete_task_in(
 /// window back and tells the UI (`notification-error { message }`), which shows it.
 pub(crate) fn complete_from_notification(app: &AppHandle, project: &str, no: u32) {
     let state = app.state::<AppState>();
-    match complete_task_in(app, &state, project, no, true) {
+    match complete_task_in(app, &state, project, no, true, false) {
         Ok(_) => emit_changed(app, &[project.to_string()], ChangeReason::Bulk),
         Err(e) => {
             eprintln!("could not complete {project}#{no} from a notification: {e}");
@@ -1589,10 +1590,11 @@ pub async fn complete_task(
     project: String,
     no: u32,
     done: bool,
+    with_subtasks: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectView> {
-    complete_task_in(&app, state.inner(), &project, no, done)
+    complete_task_in(&app, state.inner(), &project, no, done, with_subtasks.unwrap_or(false))
 }
 
 #[tauri::command]

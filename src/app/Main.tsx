@@ -266,7 +266,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     for (const e of state.entries) {
       const u = undoOf(e);
       const onScreen = projectScreen && e.project === current;
-      await (onScreen ? p.completeTask(u.no, false) : cross.setDone(u.project, u.no, false));
+      await (onScreen ? p.completeTask(u.no, false, true) : cross.setDone(u.project, u.no, false, true));
       if (u.kind === "restore") {
         await (onScreen ? p.updateTask(u.no, u.patch) : api.updateTask(u.project, u.no, u.patch).catch(showError));
       }

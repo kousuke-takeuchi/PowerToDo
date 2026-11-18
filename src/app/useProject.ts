@@ -133,9 +133,9 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
   const addTask = useCallback((input: TaskInput) => mutate(() => api.addTask(name, input)), [mutate, name]);
   const updateTask = useCallback((no: number, patch: TaskPatch) => mutate(() => api.updateTask(name, no, patch)), [mutate, name]);
   const completeTask = useCallback(
-    (no: number, done: boolean): Promise<boolean> => {
+    (no: number, done: boolean, withSubtasks = false): Promise<boolean> => {
       // Only a repeated completion is dropped; an undo (done=false) goes through the queue as before.
-      if (!done) return mutate(() => api.completeTask(name, no, done));
+      if (!done) return mutate(() => api.completeTask(name, no, done, withSubtasks));
       const key = `${name}/${no}`;
       if (completing.current.has(key)) return Promise.resolve(false);
       completing.current.add(key);

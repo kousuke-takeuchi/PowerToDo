@@ -195,7 +195,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     setUndo(null);
     try {
       for (const s of undoSteps(u)) {
-        if (s.op === "complete") await (onScreen(s.project) ? p.completeTask(s.no, false) : cross.setDone(s.project, s.no, false));
+        if (s.op === "complete") await (onScreen(s.project) ? p.completeTask(s.no, false, true) : cross.setDone(s.project, s.no, false, true));
         else if (s.op === "update") await (onScreen(s.project) ? p.updateTask(s.no, s.patch) : api.updateTask(s.project, s.no, s.patch));
         else await api.moveTask(s.project, s.no, s.toProject, s.toSection);
       }

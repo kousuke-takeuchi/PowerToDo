@@ -8,6 +8,7 @@ import { useMotionTiming } from "../motion";
 import type { DayGroup, Task } from "../types/model";
 import { useView } from "../app/view/ViewOptionsContext";
 import { arrangeFlat } from "../app/view/arrange";
+import { visibleOpen } from "./visibleOpen";
 import { AddSlot, FilterNote, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
 import { PageHeader, titleStyle } from "./HeaderActions";
 import { WeekStrip } from "./WeekStrip";
@@ -73,7 +74,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
   useOutsideClose(monthRef, monthOpen, () => setMonthOpen(false));
 
   const [y, m] = (days?.[0]?.date ?? today).split("-");
-  const open = tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.due !== undefined);
+  const open = visibleOpen(tasks).filter((t) => t.due !== undefined);
   // 見出しは pen に合わせて「今日 + 3 日」(10月13日〜16日) の 4 グループ。days があれば Rust のグループをそのまま使う。
   const groups = days ? days.map((d) => d.date) : Array.from({ length: 4 }, (_, i) => addDays(today, i));
   const rowsOf = (ymd: string): Task[] =>

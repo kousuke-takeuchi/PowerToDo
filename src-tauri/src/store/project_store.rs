@@ -547,7 +547,14 @@ impl ProjectStore {
     fn summary(&self, p: &Project) -> ProjectSummary {
         let (task_count, load_error) = match self.books.get(&p.name) {
             Some(LoadedProject::Ok(b)) => {
-                (b.tasks.iter().filter(|t| t.progress < 100).count(), None)
+                // The rows the list shows: open, under open ancestors only.
+                (
+                    crate::domain::views::visible_open(&b.tasks)
+                        .into_iter()
+                        .filter(|v| *v)
+                        .count(),
+                    None,
+                )
             }
             Some(LoadedProject::Failed(m)) => (0, Some(m.clone())),
             None => (0, None),
@@ -1201,16 +1208,39 @@ impl ProjectStore {
     /// Completes (or reopens) a task. A repeating task is not finished: its due date moves to
     /// the next occurrence and it starts over. A recurrence that has run out is dropped and the
     /// task completes normally; one that cannot be read completes normally with a warning.
+    /// Finishing a task also finishes its open descendants at the same time. Reopening leaves
+    /// the subtasks alone, unless `with_subtasks` (the undo of a completion): then the
+    /// descendants completed at the parent's completion time are reopened too.
     pub fn complete_task(&mut self, project: &str, no: u32, done: bool) -> AppResult<ProjectView> {
+        self.complete_task_with(project, no, done, false)
+    }
+
+    pub fn complete_task_with(
+        &mut self,
+        project: &str,
+        no: u32,
+        done: bool,
+        with_subtasks: bool,
+    ) -> AppResult<ProjectView> {
         let mut warning: Option<String> = None;
         self.mutate(project, |book, ctx| {
             let idx = find_task(book, no)?;
-            let t = &mut book.tasks[idx];
             if !done {
-                t.progress = 0;
-                t.completed_at = None;
+                let stamp = book.tasks[idx].completed_at;
+                book.tasks[idx].progress = 0;
+                book.tasks[idx].completed_at = None;
+                if with_subtasks && stamp.is_some() {
+                    for i in subtree(book, no) {
+                        let s = &mut book.tasks[i];
+                        if s.progress == 100 && s.completed_at == stamp {
+                            s.progress = 0;
+                            s.completed_at = None;
+                        }
+                    }
+                }
                 return Ok(());
             }
+            let t = &mut book.tasks[idx];
             if let Some(rrule) = t.rrule.clone() {
                 let today = ctx.now.date();
                 let base = if recurrence::split(&rrule).from_completed {
@@ -1234,7 +1264,14 @@ impl ProjectStore {
                 t.completed_at = None;
             }
             t.progress = 100;
-            t.completed_at.get_or_insert(ctx.now);
+            let stamp = *t.completed_at.get_or_insert(ctx.now);
+            for i in subtree(book, no) {
+                let s = &mut book.tasks[i];
+                if s.progress < 100 {
+                    s.progress = 100;
+                    s.completed_at = Some(stamp);
+                }
+            }
             Ok(())
         })?;
         let mut view = self.view(project)?;
@@ -3422,6 +3459,84 @@ mod tests {
         assert_eq!(t.rrule_label.as_deref(), Some("毎週火曜"));
         assert!(v.warnings.is_empty());
         assert_eq!(e.store.dirty_projects(), vec![INBOX.to_string()]);
+    }
+
+    fn open_count(e: &Env) -> u32 {
+        e.store
+            .summaries()
+            .iter()
+            .find(|p| p.name == INBOX)
+            .unwrap()
+            .task_count
+    }
+
+    /// Parent 1 with child 2 and grandchild 3 (plus an unrelated top-level 4).
+    fn family(e: &mut Env) {
+        e.store.add_task(INBOX, input("p")).unwrap();
+        e.store.add_task(INBOX, child_of("c", 1)).unwrap();
+        e.store.add_task(INBOX, child_of("g", 2)).unwrap();
+        e.store.add_task(INBOX, input("other")).unwrap();
+    }
+
+    #[test]
+    fn completing_a_parent_completes_its_open_descendants() {
+        let mut e = env();
+        family(&mut e);
+        assert_eq!(open_count(&e), 4);
+        e.store.complete_task(INBOX, 2, true).unwrap(); // the child alone: grandchild follows
+        let v = e.store.complete_task(INBOX, 1, true).unwrap();
+        let by = |n: u32| v.tasks.iter().find(|t| t.no == n).unwrap().clone();
+        assert!(by(1).progress == 100 && by(2).progress == 100 && by(3).progress == 100);
+        assert_eq!(by(1).completed_at, by(3).completed_at);
+        assert_eq!(by(4).progress, 0);
+        assert_eq!(open_count(&e), 1);
+    }
+
+    #[test]
+    fn counts_skip_rows_under_a_completed_parent() {
+        let mut e = env();
+        family(&mut e);
+        // Finish the child (grandchild follows), reopen only the child: the grandchild stays done.
+        e.store.complete_task(INBOX, 2, true).unwrap();
+        e.store.complete_task(INBOX, 2, false).unwrap();
+        assert_eq!(open_count(&e), 3); // p, c, other (g stays done)
+    }
+
+    #[test]
+    fn reopening_a_parent_leaves_subtasks_and_undo_restores_them() {
+        let mut e = env();
+        family(&mut e);
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task(INBOX, 1, false).unwrap();
+        assert_eq!(v.tasks.iter().find(|t| t.no == 2).unwrap().progress, 100);
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        assert!(v.tasks.iter().filter(|t| t.no <= 3).all(|t| t.progress == 0));
+    }
+
+    #[test]
+    fn undo_keeps_subtasks_finished_earlier() {
+        let mut e = env();
+        family(&mut e);
+        e.store.complete_task(INBOX, 3, true).unwrap();
+        *e.clock.lock().unwrap() = dt("2026-10-14T10:30");
+        e.store.complete_task(INBOX, 1, true).unwrap();
+        let v = e.store.complete_task_with(INBOX, 1, false, true).unwrap();
+        let by = |n: u32| v.tasks.iter().find(|t| t.no == n).unwrap().progress;
+        assert_eq!((by(1), by(2), by(3)), (0, 0, 100));
+    }
+
+    #[test]
+    fn a_recurring_parent_moves_on_and_leaves_subtasks() {
+        let mut e = env();
+        let mut i = input("p");
+        i.due = Some(ymd(2026, 10, 13));
+        i.rrule = Some("FREQ=WEEKLY;BYDAY=TU".into());
+        e.store.add_task(INBOX, i).unwrap();
+        e.store.add_task(INBOX, child_of("c", 1)).unwrap();
+        let v = e.store.complete_task(INBOX, 1, true).unwrap();
+        assert_eq!(v.tasks.iter().find(|t| t.no == 1).unwrap().progress, 0);
+        assert_eq!(v.tasks.iter().find(|t| t.no == 2).unwrap().progress, 0);
     }
 
     #[test]

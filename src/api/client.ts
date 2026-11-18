@@ -81,7 +81,8 @@ export const api = {
 
   addTask: (project: string, input: TaskInput, position?: Position) => invoke<ProjectView>("add_task", { project, input, position: position ?? null }),
   updateTask: (project: string, no: number, patch: TaskPatch) => invoke<ProjectView>("update_task", { project, no, patch }),
-  completeTask: (project: string, no: number, done: boolean) => invoke<ProjectView>("complete_task", { project, no, done }),
+  /** `withSubtasks`: 完了の取り消しで、親と同時に完了になったサブタスクも未完了に戻す。 */
+  completeTask: (project: string, no: number, done: boolean, withSubtasks = false) => invoke<ProjectView>("complete_task", { project, no, done, withSubtasks }),
   // ---- comments (spec ① §3) ----
   listComments: (project: string, no: number) => invoke<Comment[]>("list_comments", { project, no }),
   commentCounts: (project: string) => invoke<Record<string, number>>("comment_counts", { project }),

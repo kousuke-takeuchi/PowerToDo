@@ -4,6 +4,7 @@ import type { Task } from "../types/model";
 import { useView } from "../app/view/ViewOptionsContext";
 import { arrangeFlat, firstOccurrences } from "../app/view/arrange";
 import { SectionHeader } from "../components/SectionHeader";
+import { visibleOpen } from "./visibleOpen";
 import { AddSlot, FilterNote, HiddenNote, dupKeysOf, useCrossRows } from "./crossList";
 import { PageHeader, TitleGroup } from "./HeaderActions";
 
@@ -34,7 +35,7 @@ export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask,
   const [view, setView] = useView("label", label);
   const list = onToggleDone
     ? tasks
-    : tasks.filter((t) => t.parentNo === undefined && t.progress !== 100 && t.labels.includes(label)).sort((a, b) => a.no - b.no);
+    : visibleOpen(tasks).filter((t) => t.labels.includes(label)).sort((a, b) => a.no - b.no);
   // 表示の設定 (spec ⑤)。label_view は未完了のタスクだけを返すので、完了の表示は無い (ALLOWED.label.done)。
   const arranged = arrangeFlat(list, view, { today: today ?? TODAY, weekStart, labelOrder, projectOrder });
   const grouped = view.group !== "none";
