@@ -1,14 +1,17 @@
 import type React from "react";
-import { useState } from "react";
-import { Bell, Calendar, ChevronRight, Flag, Repeat, Send, Tag } from "lucide-react";
+import { useRef, useState } from "react";
+import { Bell, Calendar, ChevronRight, Flag, MessageSquare, Paperclip, Repeat, Send, Tag } from "lucide-react";
 import { AddTaskRow } from "../../components/AddTaskRow";
+import { TextField } from "../../components/TextField";
 import { Button } from "../../components/Button";
 import { Checkbox } from "../../components/Checkbox";
 import { MobileHeader } from "../../components/MobileHeader";
 import { TaskRow } from "../../components/TaskRow";
-import { TextField } from "../../components/TextField";
 import { TODAY, dateLabel } from "../../mock/data";
-import type { Label, Project, Task, TaskPatch } from "../../types/model";
+import { noteInfos } from "../../app/attachments/list";
+import type { AttachmentInfo, Comment, Label, NoteFile, Project, Task, TaskPatch } from "../../types/model";
+import { AttachmentList } from "../Attachments";
+import { commentTime } from "../CommentsSection";
 import { RecurrencePicker, recurrenceLabel } from "../RecurrencePicker";
 import type { RecurrenceParse } from "../RecurrencePicker";
 import { reminderLabel } from "../ReminderPicker";
@@ -16,6 +19,7 @@ import { useDone } from "../useDone";
 import { BottomSheet, SheetCard } from "./BottomSheet";
 import { DateSheet } from "./DateSheet";
 import { LabelSheet } from "./LabelSheet";
+import { MobileComments, PICK_ACCEPT } from "./MobileComments";
 import { MobileShell } from "./MobileShell";
 import { mobileRowProps } from "./rowProps";
 import { PrioritySheet } from "./PrioritySheet";
@@ -54,10 +58,28 @@ export type MobileTaskDetailProps = {
   onParseRecurrence?: (text: string) => Promise<RecurrenceParse>;
   /** 最初から開いておくシート (Story 用)。 */
   initialSheet?: DetailSheet;
+  /** コメント (spec 添付 §6): 渡すと「コメント」の欄と、下端の入力欄から開くコメントのシートが出る。 */
+  comments?: Comment[];
+  commentsFailed?: boolean;
+  /** 今の表示名 (自分のコメントだけ編集・削除できる)。 */
+  me?: string;
+  onAddComment?: (text: string, files: AttachmentInfo[]) => Promise<boolean>;
+  onEditComment?: (id: string, text: string, files?: AttachmentInfo[]) => Promise<boolean>;
+  onDeleteComment?: (id: string) => void;
+  /** 選んだファイルを (縮小して) 保存し、保存したものを返す。渡すとクリップのボタンが出る。 */
+  onAttachComment?: (files: File[]) => Promise<AttachmentInfo[]>;
+  /** Story: 送る前の添付 / 編集中のコメント。 */
+  initialPending?: AttachmentInfo[];
+  initialCommentEdit?: string;
+  /** メモの添付 (spec 添付 §6)。onAttachNote を渡すと「添付」のボタンが出て、onDetachNote で × が効く。 */
+  noteFiles?: NoteFile[];
+  onAttachNote?: (files: File[]) => void | Promise<void>;
+  onDetachNote?: (id: string) => void;
 };
 
-type DetailSheet = "title" | "note" | "date" | "priority" | "label" | "reminder" | "recurrence" | "subtask" | "delete" | null;
+type DetailSheet = "comments" | "title" | "note" | "date" | "priority" | "label" | "reminder" | "recurrence" | "subtask" | "delete" | null;
 const sheetName: Record<NonNullable<DetailSheet>, string> = {
+  comments: "コメント",
   title: "名前",
   note: "メモ",
   date: "期限",
@@ -110,12 +132,14 @@ function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)
 }
 
 /** M-03: タスク詳細 (全画面、下部タブなし)。戻る + パンくず、プロパティ 5 行、サブタスク、下端のコメント欄。完了チェックとサブタスクのチェックは見た目だけトグルする。 */
-export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null }: MobileTaskDetailProps) {
+export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote }: MobileTaskDetailProps) {
   // 下部シートの状態。詳細は key (プロジェクト/番号) で作り直すだけで、一覧の再読み込みでは作り直さない。
   const [sheet, setSheet] = useState<DetailSheet>(initialSheet);
   const closeSheet = () => setSheet(null);
   const editable = onChange !== undefined;
   const open = (s: NonNullable<DetailSheet>) => (editable ? () => setSheet(s) : undefined);
+  const notePicker = useRef<HTMLInputElement>(null);
+  const note = noteInfos(noteFiles);
   const [localDone, setLocalDone] = useState(task.progress === 100);
   const done = live ? task.progress === 100 : localDone;
   const setDone = (v: boolean) => (live ? onToggleDone?.(v) : setLocalDone(v));
@@ -137,10 +161,26 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           {overlay}
           <BottomSheet
             fill={fill}
+            size={sheet === "comments" ? "large" : "auto"}
             confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : undefined}
             open={sheet !== null}
             title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}
           >
+            {sheet === "comments" && (
+              <MobileComments
+                comments={comments}
+                failed={commentsFailed}
+                me={me}
+                taskTitle={task.title}
+                onAdd={onAddComment}
+                onEdit={onEditComment}
+                onDelete={onDeleteComment}
+                onAttach={onAttachComment}
+                initialPending={initialPending}
+                initialEditId={initialCommentEdit}
+                autoFocus={comments.length === 0}
+              />
+            )}
             {sheet === "title" && (
               <TextSheet
                 label="名前"
@@ -259,6 +299,35 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             </div>
           </Tap>
         )}
+        {(note.files.length > 0 || onAttachNote) && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-2)" }}>
+            <AttachmentList touch files={note.files} ids={note.ids} alwaysRemove onRemove={onDetachNote ? (i) => onDetachNote(note.ids[i]) : undefined} />
+            {onAttachNote && (
+              <>
+                <input
+                  ref={notePicker}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={PICK_ACCEPT}
+                  aria-label="メモに添付するファイルを選ぶ"
+                  onChange={(e) => {
+                    void onAttachNote(Array.from(e.target.files ?? []));
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => notePicker.current?.click()}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, padding: "0 4px", border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 15, lineHeight: "20px", color: "var(--color-text-secondary)", cursor: "pointer" }}
+                >
+                  <Paperclip size={16} aria-hidden />
+                  添付
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", boxShadow: "inset 0 1px 0 var(--color-border)" }}>
           <Tap onClick={open("date")} label="期限を変更"><Prop icon={Calendar} name="期限" value={dueText} valueColor={dueColor} /></Tap>
           <Tap onClick={open("priority")} label="優先度を変更"><Prop icon={Flag} name="優先度" value={`P${task.priority}`} valueColor={`var(--color-priority-${task.priority})`} /></Tap>
@@ -275,6 +344,28 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           ))}
           <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => setSheet("subtask") : undefined} />
         </div>
+        {onAddComment && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+            <div style={{ fontSize: 15, lineHeight: "20px", fontWeight: 700, paddingTop: 8, color: "var(--color-text-primary)" }}>コメント {comments.length}</div>
+            {comments.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "12px 16px", borderRadius: 16, background: "var(--color-sheet-card)" }}>
+                <span style={{ fontSize: 13, lineHeight: "18px", color: "var(--color-text-secondary)" }}>
+                  <b style={{ fontWeight: 700, color: "var(--color-text-primary)" }}>{comments[comments.length - 1].author}</b>
+                  {`  ${commentTime(comments[comments.length - 1].at)}`}
+                </span>
+                {comments[comments.length - 1].text && (
+                  <div style={{ fontSize: 16, lineHeight: "22px", color: "var(--color-text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{comments[comments.length - 1].text}</div>
+                )}
+                <AttachmentList touch files={comments[comments.length - 1].files ?? []} />
+                {comments.length > 1 && (
+                  <button type="button" onClick={() => setSheet("comments")} style={{ alignSelf: "flex-start", minHeight: 44, padding: 0, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 15, fontWeight: 600, color: "var(--color-accent)", cursor: "pointer" }}>
+                    すべて表示
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {onDelete && (
           <button
             type="button"
@@ -286,20 +377,26 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           </button>
         )}
       </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--space-2)",
-          padding: "8px 15px",
-          boxShadow: "inset 0 1px 0 var(--color-border)",
-          flex: "0 0 auto",
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <TextField placeholder="コメント" />
-        </div>
-        <Button variant="icon" icon={Send} ariaLabel="送信" />
+      <div style={{ padding: "8px 15px", boxShadow: "inset 0 1px 0 var(--color-border)", flex: "0 0 auto" }}>
+        {onAddComment ? (
+          // The pill opens the comment sheet (an input card with the clip and send button), as Todoist's does.
+          <button
+            type="button"
+            aria-label="コメントを書く"
+            onClick={() => setSheet("comments")}
+            style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", width: "100%", minHeight: 44, padding: "0 16px", border: "1px solid var(--color-border)", borderRadius: 22, background: "var(--color-bg)", fontFamily: "var(--font-body)", fontSize: 16, color: "var(--color-text-muted)", textAlign: "left", cursor: "pointer" }}
+          >
+            <MessageSquare size={18} aria-hidden />
+            コメント
+          </button>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minHeight: 44 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TextField placeholder="コメント" />
+            </div>
+            <Button variant="icon" icon={Send} ariaLabel="送信" />
+          </div>
+        )}
       </div>
       <div aria-hidden style={{ height: fill ? "env(safe-area-inset-bottom)" : 34, flex: "0 0 auto" }} />
     </MobileShell>

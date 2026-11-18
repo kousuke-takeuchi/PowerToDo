@@ -5,11 +5,14 @@ export type DateEntry = { project: string; no: number; before: { due: string | n
 export type MobileUndo =
   | { kind: "complete"; entries: Completed[] }
   | { kind: "date"; entries: DateEntry[]; label: string | null }
-  | { kind: "move"; to: { project: string; no: number }; back: { project: string; section: string | null }; toName: string };
+  | { kind: "move"; to: { project: string; no: number }; back: { project: string; section: string | null }; toName: string }
+  /** Anything the screen undoes itself (a file taken off a description: `run` attaches it again). */
+  | { kind: "run"; text: string; run: () => void };
 export type UndoStep =
   | { op: "complete"; project: string; no: number; done: false }
   | { op: "update"; project: string; no: number; patch: { due: string | null; dueTime: string | null; reminders?: string[]; rrule?: string } }
-  | { op: "move"; project: string; no: number; toProject: string; toSection: string | null };
+  | { op: "move"; project: string; no: number; toProject: string; toSection: string | null }
+  | { op: "run"; run: () => void };
 
 /** Completions in a row share one toast (as desktop); anything else replaces it, and undo then covers only the newest. */
 export function pushUndo(cur: MobileUndo | null, next: MobileUndo): MobileUndo {
@@ -30,6 +33,8 @@ export function undoText(u: MobileUndo): string {
     }
     case "move":
       return `${u.toName} に移動しました`;
+    case "run":
+      return u.text;
   }
 }
 
@@ -46,5 +51,7 @@ export function undoSteps(u: MobileUndo): UndoStep[] {
     case "move":
       // move_task renumbers the task in the target: `to.no` is its number there (MobileMain reads it from the result).
       return [{ op: "move", project: u.to.project, no: u.to.no, toProject: u.back.project, toSection: u.back.section }];
+    case "run":
+      return [{ op: "run", run: u.run }];
   }
 }

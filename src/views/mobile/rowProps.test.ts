@@ -7,7 +7,7 @@ const t = (p: Partial<Task>): Task => ({
   no: 1, project: "仕事", category: null, title: "週報を書く", assignee: "たろう", priority: 2, progress: 0,
   labels: [], reminders: [], order: 0, createdAt: "2026-10-01T09:00", ...p,
 });
-const ctx = { today: "2026-10-13", inbox: "受信トレイ", colors: { 仕事: "var(--color-priority-3)" }, comments: { "仕事/1": 2 } };
+const ctx = { today: "2026-10-13", inbox: "受信トレイ", colors: { 仕事: "var(--color-priority-3)" }, comments: { "仕事/1": 2 }, attachments: { "仕事/1": 3 } };
 
 test("meta_line_parts", () => {
   const r = mobileRowProps(t({ due: "2026-10-12", rrule: "FREQ=DAILY", note: "一行目\n二行目" }), ctx, { project: true });
@@ -15,6 +15,8 @@ test("meta_line_parts", () => {
   assert.deepEqual(r.date, { label: "昨日", tone: "danger" });
   assert.equal(r.recurring, true);
   assert.equal(r.commentCount, 2);
+  assert.equal(r.attachmentCount, 3);
+  assert.equal(mobileRowProps(t({ no: 9 }), ctx).attachmentCount, undefined);
   assert.equal(r.project, "仕事");
   assert.equal(r.projectColor, "var(--color-priority-3)");
   assert.equal(r.projectIsInbox, undefined);
