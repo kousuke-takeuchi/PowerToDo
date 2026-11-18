@@ -548,6 +548,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     inbox: app.inbox,
     projects: pickerProjects,
     allLabels,
+    parse: api.parseQuickAdd,
     editing,
     setEditing,
     inserting,

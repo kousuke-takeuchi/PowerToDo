@@ -1,5 +1,5 @@
 import type React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bell, Calendar, Check, Flag, Folder, Inbox, Plus, Repeat, Tag, Text, X } from "lucide-react";
 import { useEscLayer } from "../app/layers";
 import { confirmDiscard } from "../api/dialogs";
@@ -11,7 +11,10 @@ import { useFitPopover } from "./useFitPopover";
 import { ProjectPicker, type PickerProject } from "./ProjectPicker";
 import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
-import { changed, submitKey, type EditorValue } from "./taskEditorValue";
+import { applyParsed, changed, shouldParse, submitKey, type EditorValue } from "./taskEditorValue";
+import { RecognizedTokens } from "./QuickAddDialog";
+import { spansToTokens } from "../app/quickAddTokens";
+import type { QuickAddResult } from "../types/model";
 
 export type TaskEditorProps = {
   mode: "add" | "edit";
@@ -25,6 +28,8 @@ export type TaskEditorProps = {
   /** Resolves true when saved. Add: the editor clears (keeping project and section) and stays open. */
   onSubmit: (v: EditorValue) => Promise<boolean>;
   onCancel: () => void;
+  /** Reads the title like quick add (spec §13): dates, recurrence, priority, labels, `#project`. Absent: the title is taken as typed. */
+  parse?: (text: string) => Promise<QuickAddResult>;
   /** Stories: open with this popover. */
   initialPopover?: "plus" | "date" | "priority" | "project";
 };
@@ -70,7 +75,7 @@ const field: React.CSSProperties = {
 };
 
 /** Spec ② §3: the inline editor of a row, and of every "add task" slot (Todoist's task editor). */
-export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, onSubmit, onCancel, initialPopover }: TaskEditorProps) {
+export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, onSubmit, onCancel, parse, initialPopover }: TaskEditorProps) {
   const [v, setV] = useState<EditorValue>(initial);
   const [showNote, setShowNote] = useState(initial.note !== "");
   const [pop, setPop] = useState<Pop | null>(initialPopover ?? null);
@@ -81,12 +86,40 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
   const set = (patch: Partial<EditorValue>) => setV((cur) => ({ ...cur, ...patch }));
   const canSubmit = v.title.trim() !== "" && !busy;
 
+  // Quick-add style highlight of the words the title contains. Not while an IME is composing; the result belongs to the text it read.
+  const [composing, setComposing] = useState(false);
+  const [parsed, setParsed] = useState<{ text: string; result: QuickAddResult } | null>(null);
+  const reads = !!parse && shouldParse(mode, v.title, initial.title);
+  useEffect(() => {
+    if (!parse || !reads || composing) return;
+    const text = v.title;
+    let cancelled = false;
+    const id = window.setTimeout(() => {
+      parse(text)
+        .then((result) => !cancelled && setParsed({ text, result }))
+        .catch(() => undefined);
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [parse, reads, composing, v.title]);
+  const tokens = reads && parsed && parsed.text === v.title ? spansToTokens(v.title, parsed.result.spans) : [];
+
   const submit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || composing) return;
     setBusy(true);
-    const ok = await onSubmit(v).finally(() => setBusy(false));
+    let value = v;
+    if (parse && shouldParse(mode, v.title, initial.title)) {
+      try {
+        value = applyParsed(v, await parse(v.title), projects?.map((p) => p.name));
+      } catch {
+        value = v; // unreadable: save the text as typed
+      }
+    }
+    const ok = await onSubmit(value).finally(() => setBusy(false));
     if (ok && mode === "add") {
-      setV({ ...initial, project: v.project, section: v.section });
+      setV({ ...initial, project: value.project, section: value.section });
       setShowNote(initial.note !== "");
       titleRef.current?.focus();
     }
@@ -222,6 +255,8 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
           e.currentTarget.setSelectionRange(n, n);
         }}
         onChange={(e) => set({ title: e.target.value })}
+        onCompositionStart={() => setComposing(true)}
+        onCompositionEnd={() => setComposing(false)}
         onKeyDown={(e) => {
           if (submitKey(e.nativeEvent, "title")) {
             e.preventDefault();
@@ -230,6 +265,7 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
         }}
         style={{ ...field, fontSize: 14, lineHeight: "20px", fontWeight: 500 }}
       />
+      <RecognizedTokens tokens={tokens} />
       {showNote && (
         <textarea
           aria-label="説明"

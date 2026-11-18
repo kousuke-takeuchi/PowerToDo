@@ -1,4 +1,4 @@
-import type { Task, TaskInput, TaskPatch } from "../types/model";
+import type { QuickAddResult, Task, TaskInput, TaskPatch } from "../types/model";
 
 /** What the inline editor edits (spec ② §3). `note` is "" when there is none. */
 export type EditorValue = {
@@ -114,4 +114,36 @@ export function insertTarget(
 export function editBase(cur: EditorValue | null, editing: boolean, task: Task): EditorValue | null {
   if (!editing) return null;
   return cur ?? editorValueOf(task);
+}
+
+/**
+ * Whether the title is read like quick add. Always when adding; when editing only if the title was changed, so saving
+ * another field never strips date words an existing title already contains.
+ */
+export function shouldParse(mode: "add" | "edit", title: string, initialTitle: string): boolean {
+  return title.trim() !== "" && (mode === "add" || title !== initialTitle);
+}
+
+/**
+ * Merges what quick add read from the title into the editor value (spec §13). A field is replaced only when the text had
+ * its token: date (and its time), time, recurrence, priority, `#project`. Labels are added to the chosen ones. The rest of the
+ * text is the title; if nothing is left, the value is returned unchanged. `projects`: names the `#project` may match.
+ */
+export function applyParsed(v: EditorValue, r: QuickAddResult, projects: string[] = []): EditorValue {
+  const title = r.title.trim();
+  if (title === "") return v;
+  const out: EditorValue = { ...v, title };
+  if (r.due) out.due = r.due;
+  if (r.dueTime) out.dueTime = r.dueTime;
+  if (r.rrule) out.rrule = r.rrule;
+  if (r.priority) out.priority = r.priority;
+  for (const l of r.labels) if (!out.labels.includes(l)) out.labels = [...out.labels, l];
+  if (r.project) {
+    const name = projects.find((n) => n === r.project) ?? projects.find((n) => n.toLowerCase() === r.project!.toLowerCase());
+    if (name && name !== v.project) {
+      out.project = name;
+      out.section = null;
+    }
+  }
+  return out;
 }

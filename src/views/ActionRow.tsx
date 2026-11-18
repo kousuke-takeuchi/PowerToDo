@@ -80,6 +80,7 @@ export function ActionRow({ task, rowProps, canInsert, dup = false }: { task: Ta
         mode="add"
         initial={blankValue(task.project, task.category)}
         allLabels={ctx.allLabels}
+        parse={ctx.parse}
         today={ctx.today}
         inbox={ctx.inbox}
         projects={task.parentNo === undefined ? ctx.projects : undefined}
@@ -101,6 +102,7 @@ export function ActionRow({ task, rowProps, canInsert, dup = false }: { task: Ta
         mode="edit"
         initial={base.current ?? editBase(null, true, task)!}
         allLabels={ctx.allLabels}
+        parse={ctx.parse}
         today={ctx.today}
         inbox={ctx.inbox}
         projects={task.parentNo === undefined ? ctx.projects : undefined}

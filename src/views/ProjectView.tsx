@@ -535,6 +535,7 @@ export function ProjectView({
                       mode="add"
                       initial={blankValue(project, t.category)}
                       allLabels={rowCtx.allLabels}
+                      parse={rowCtx.parse}
                       today={rowCtx.today}
                       onCancel={() => setFormParent(undefined)}
                       onSubmit={(v) => rowCtx.add(v, { parentNo: t.no }).then((no) => no !== null)}
@@ -683,6 +684,7 @@ export function ProjectView({
             projects={rowCtx.projects}
             inbox={rowCtx.inbox}
             allLabels={rowCtx.allLabels}
+            parse={rowCtx.parse}
             today={rowCtx.today}
             onCancel={() => setAddTo(null)}
             onSubmit={(v) => rowCtx.add(v).then((no) => no !== null)}

@@ -36,6 +36,22 @@ const tokenStyle = {
   label: { color: "var(--color-text-secondary)", background: "var(--color-bg-hover)" },
 } as const;
 
+/** The recognised words of the typed text, coloured by kind (shared with the row editor). */
+export function RecognizedTokens({ tokens }: { tokens: QuickAddToken[] }) {
+  if (!tokens.some((t) => t.kind)) return null;
+  return (
+    <div role="group" aria-label="認識した項目" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px" }}>
+      {tokens
+        .filter((t) => t.kind)
+        .map((t, i) => (
+          <span key={i} style={{ padding: "1px 4px", borderRadius: 4, whiteSpace: "pre", ...tokenStyle[t.kind!] }}>
+            {t.text}
+          </span>
+        ))}
+    </div>
+  );
+}
+
 type Icon = React.ComponentType<{ size?: number }>;
 
 function ToolbarChip({ icon: Icon, label, color = "var(--color-text-secondary)" }: { icon: Icon; label?: string; color?: string }) {
@@ -191,17 +207,7 @@ export function QuickAddDialog({
                     color: "var(--color-text-primary)",
                   }}
                 />
-                {tokens.some((t) => t.kind) && (
-                  <div role="group" aria-label="認識した項目" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)", fontSize: 13, lineHeight: "19px" }}>
-                    {tokens
-                      .filter((t) => t.kind)
-                      .map((t, i) => (
-                        <span key={i} style={{ padding: "1px 4px", borderRadius: 4, whiteSpace: "pre", ...tokenStyle[t.kind!] }}>
-                          {t.text}
-                        </span>
-                      ))}
-                  </div>
-                )}
+                <RecognizedTokens tokens={tokens} />
               </>
             ) : (
               <>

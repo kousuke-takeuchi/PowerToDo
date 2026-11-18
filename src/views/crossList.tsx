@@ -251,6 +251,7 @@ export function AddSlot({ label, defaults = {}, onAdd }: { label?: string; defau
         projects={ctx.projects}
         inbox={ctx.inbox}
         allLabels={ctx.allLabels}
+        parse={ctx.parse}
         today={ctx.today}
         onCancel={() => setAdding(false)}
         onSubmit={(v) => ctx.add(v).then((no) => no !== null)}
