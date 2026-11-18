@@ -34,6 +34,7 @@ import { stillOpenAfterComplete, afterRemoval, dialogTarget, neighbors, parseKey
 import { CommentCounts, useCommentCounts, useDialogComments } from "./useComments";
 import { AttachmentCounts, AttachmentEnvContext } from "./attachments/env";
 import { useAttachmentCounts, useAttachmentEnv, useNoteFiles } from "./useAttachments";
+import { useRefuseStrayFileDrops } from "./useFileDrop";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
@@ -361,6 +362,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     setEscFallback(clearFocus);
     return () => setEscFallback(null);
   }, [clearFocus]);
+  // A file dropped outside the attachment zones must not open in the webview (spec 添付 §5).
+  useRefuseStrayFileDrops();
 
   // 狭い幅のドロワー: Esc で閉じる (Esc レイヤー。上に開いたものがあればそちらが先に閉じる)。幅が戻ったら閉じる。
   useEffect(() => {

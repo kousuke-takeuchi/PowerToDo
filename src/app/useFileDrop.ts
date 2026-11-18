@@ -1,5 +1,5 @@
 import type React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dragHasFiles, filesOf, pastedName } from "./attachments/drop";
 
 /**
@@ -37,6 +37,30 @@ export function useFileDrop(onFiles: (files: File[]) => void) {
     },
   };
   return { over, props };
+}
+
+/**
+ * With Tauri's own drag-drop off (`dragDropEnabled: false`, so the page gets DOM drops), a file dropped where no
+ * zone takes it would make the webview navigate to the file. While mounted, such a drop is refused (no-drop cursor)
+ * and its navigation cancelled. Zones stop the event before it reaches the window.
+ */
+export function useRefuseStrayFileDrops(): void {
+  useEffect(() => {
+    const over = (e: DragEvent) => {
+      if (e.defaultPrevented || !dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    };
+    const drop = (e: DragEvent) => {
+      if (!e.defaultPrevented && dragHasFiles(e.dataTransfer)) e.preventDefault();
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
 }
 
 /** A paste that carries files (a screenshot, a copied file) goes to `onFiles`; a plain-text paste is left alone. */
