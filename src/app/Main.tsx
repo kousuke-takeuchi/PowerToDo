@@ -745,11 +745,15 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
             const leaves = toProject !== dialog.project;
             void api
               .moveTask(dialog.project, dialog.no, toProject, toSection)
-              .then((out) => {
+              .then(async (out) => {
                 refreshAll();
-                void p.refresh();
+                const onScreen = p.refresh();
                 if (target === "other") void other.refresh();
-                if (leaves) goDialog(`${toProject}/${out.no}`);
+                if (!leaves) return;
+                // Moved into the project on screen: wait for its new view, or the dialog would look for the new No.
+                // in the old one and close.
+                if (projectScreen && toProject === current) await onScreen;
+                goDialog(`${toProject}/${out.no}`);
               })
               .catch(showError);
           }}
