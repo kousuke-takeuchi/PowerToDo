@@ -64,11 +64,11 @@ export function MobileAttachmentViewer({ files, index, onIndex, onClose }: { fil
   const [chrome, setChrome] = useState(true);
   const file = files[index];
 
-  // A new picture starts unzoomed (the key on Picture makes a new img; the old one's size is stale until it loads).
+  // A new picture starts unzoomed (the key on Picture makes a new img). imgRef is not cleared here: a cached picture's
+  // load can come before this effect, and the old img, once gone, has offsetWidth 0, which `content()` reads as "not shown yet".
   useEffect(() => {
     setView(IDENTITY);
     setPull({ x: 0, y: 0 });
-    imgRef.current = null;
   }, [index]);
   useEffect(() => () => window.clearTimeout(tapTimer.current), []);
 
