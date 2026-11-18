@@ -27,7 +27,6 @@ import { Banners } from "./Banners";
 import { MobileToast } from "../components/MobileToast";
 import { pushUndo, undoSteps, undoText, type MobileUndo } from "./mobileUndo";
 import { completedOf } from "./completionToast";
-import { movedRootNo } from "./drag/movedRoot";
 import { dateLabel } from "../mock/data";
 import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
@@ -225,9 +224,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const moveTask = async (t: Task, toProject: string, toSection: string | null) => {
     try {
       const out = await api.moveTask(t.project, t.no, toProject, toSection);
-      // Same project: only the section changes. Another project renumbers the subtree; its root is the highest parentless No.
-      const no = toProject === t.project ? t.no : movedRootNo(out.to.tasks, 1);
-      if (no !== undefined) offer({ kind: "move", to: { project: toProject, no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
+      const no = out.no; // another project renumbers the subtree; the outcome carries the root's new No.
+      offer({ kind: "move", to: { project: toProject, no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
     } catch (e) {
       showError(e);
     }

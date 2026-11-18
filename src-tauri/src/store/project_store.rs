@@ -1432,14 +1432,14 @@ impl ProjectStore {
     /// Moves the task and its descendants. In another project they get new numbers (appended
     /// after the target's highest), the moved task is detached from its old parent, the rest
     /// keep their tree, and their assignees join the target's assignee list. Within the same
-    /// project only the section changes.
+    /// project only the section changes. Also returns the moved task's No. in the target.
     pub fn move_task(
         &mut self,
         project: &str,
         no: u32,
         to_project: &str,
         to_section: Option<&str>,
-    ) -> AppResult<(ProjectView, ProjectView)> {
+    ) -> AppResult<(ProjectView, ProjectView, u32)> {
         let to_section = to_section.and_then(non_empty);
         let source = self.ok_book(project)?;
         let target = self.ok_book(to_project)?;
@@ -1465,7 +1465,7 @@ impl ProjectStore {
                 Ok(())
             })?;
             let v = self.view(project)?;
-            return Ok((v.clone(), v));
+            return Ok((v.clone(), v, no));
         }
 
         let indices = subtree(source, no);
@@ -1525,7 +1525,7 @@ impl ProjectStore {
                 (to_project, *new),
             ));
         }
-        Ok((self.view(project)?, self.view(to_project)?))
+        Ok((self.view(project)?, self.view(to_project)?, renumber[&no]))
     }
 
     /// Spec ③ §8: moves the task and its subtree to `to` in the same project. The new siblings
@@ -2404,7 +2404,8 @@ mod tests {
         e.store.save("A").unwrap();
         e.store.save("B").unwrap();
 
-        let (from, to) = e.store.move_task("A", 2, "B", Some("来週")).unwrap();
+        let (from, to, new_no) = e.store.move_task("A", 2, "B", Some("来週")).unwrap();
+        assert_eq!(new_no, 3, "the moved root's No. in B");
         assert_eq!(nos(&from), vec![1]);
         assert_eq!(nos(&to), vec![1, 2, 3, 4, 5]);
         let root = task(&to, 3);
@@ -4207,7 +4208,7 @@ mod tests {
         e.store.add_task("A", child_of("a2", 1)).unwrap();
         comment(&e, "A", 1);
         comment(&e, "A", 2);
-        let (_, to) = e.store.move_task("A", 1, "B", None).unwrap();
+        let (_, to, _) = e.store.move_task("A", 1, "B", None).unwrap();
         assert_eq!(nos(&to), vec![1, 2, 3]);
         assert!(has_comments(&e, "B", 2) && has_comments(&e, "B", 3));
         assert!(!has_comments(&e, "A", 1) && !has_comments(&e, "A", 2));

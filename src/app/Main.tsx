@@ -7,7 +7,6 @@ import { completedOf, nextNotice, noticeText, undoOf } from "./completionToast";
 import type { Notice, ToastState } from "./completionToast";
 import { RowActions, type RowActionsApi } from "./rowActions";
 import { DragProvider, type DropResult } from "./drag/DragContext";
-import { movedRootNo } from "./drag/movedRoot";
 import { rowStateAfter } from "./rowState";
 import { DeleteTaskDialog } from "../views/DeleteTaskDialog";
 import { countDescendants } from "../views/deleteMessage";
@@ -637,9 +636,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
       case "project":
         return afterMove(
           api.moveTask(r.source.task.project, r.source.task.no, r.project, null).then((out) => {
-            // The subtree is numbered after the target's highest No. in file order: open its root, not its last subtask.
-            const no = movedRootNo(out.to.tasks, r.source.subtree.size);
-            note(`タスクを ${r.project} に移しました`, "開く", () => no !== undefined && openTaskAt(r.project, no));
+            note(`タスクを ${r.project} に移しました`, "開く", () => openTaskAt(r.project, out.no));
           }),
         );
       case "day":
@@ -743,16 +740,15 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           onToggleSubtask={(no, done) => void src.completeTask(no, done).then(afterOther)}
           projects={summaries.map((s) => ({ name: s.name, sections: s.name === dlgView.project.name ? dlgView.sections.map((x) => x.name) : [] }))}
           onMove={(toProject, toSection) => {
-            // Spec ① §2.5: moving to another project goes on to the next task; a new section keeps the task (same No).
+            // Spec ② §6: the task stays open after a move; another project gives it a new No., so follow it there.
             const leaves = toProject !== dialog.project;
-            const after = leaves ? afterRemoval(visibleKeys, dlgKey, leavingWith(dlgTask.no)) : null;
             void api
               .moveTask(dialog.project, dialog.no, toProject, toSection)
-              .then(() => {
+              .then((out) => {
                 refreshAll();
                 void p.refresh();
                 if (target === "other") void other.refresh();
-                if (leaves) goDialog(after);
+                if (leaves) goDialog(`${toProject}/${out.no}`);
               })
               .catch(showError);
           }}

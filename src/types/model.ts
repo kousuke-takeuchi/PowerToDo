@@ -49,7 +49,7 @@ export interface Span { start: number; end: number; kind: TokenKind; }
 export interface QuickAddResult { title: string; due: string | null; dueTime: string | null; rrule: string | null; priority: Priority | null; project: string | null; labels: string[]; spans: Span[]; }
 /** `no`: the number of the task just added (in `view.project`). */
 export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; no: number; }
-export interface MoveOutcome { from: ProjectView; to: ProjectView; }
+export interface MoveOutcome { from: ProjectView; to: ProjectView; /** 移した先でのタスクの No. */ no: number; }
 /** `parse_recurrence`: rrule and label are both null when the text is not a recurrence. */
 export interface RecurrenceDto { rrule: string | null; label: string | null; }
 /** `summarize_recurrence`: label is the RRULE itself when it has no short form; valid = the rule computes without error (a finished COUNT/UNTIL rule is valid; only an unreadable one is not). */

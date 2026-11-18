@@ -362,6 +362,8 @@ pub struct QuickAddOutcome {
 pub struct MoveOutcome {
     pub from: ProjectView,
     pub to: ProjectView,
+    /// The moved task's No. in `to` (another project renumbers it; the same project keeps it).
+    pub no: u32,
 }
 
 /// `settings` / `update_settings`: the common workbook's settings plus the local data folder.
@@ -1713,7 +1715,7 @@ pub async fn move_task(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<MoveOutcome> {
-    let (from, to) = mutate(&app, state.inner(), &[&project, &to_project], false, |s| {
+    let (from, to, new_no) = mutate(&app, state.inner(), &[&project, &to_project], false, |s| {
         s.move_task(&project, no, &to_project, to_section.as_deref())
     })?;
     if project != to_project {
@@ -1721,7 +1723,11 @@ pub async fn move_task(
         state.forget_fired(&project, no);
         emit_changed(&app, &[project, to_project], ChangeReason::Move);
     }
-    Ok(MoveOutcome { from, to })
+    Ok(MoveOutcome {
+        from,
+        to,
+        no: new_no,
+    })
 }
 
 #[tauri::command]
