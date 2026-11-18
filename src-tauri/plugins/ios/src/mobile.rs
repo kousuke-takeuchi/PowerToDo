@@ -54,6 +54,17 @@ impl<R: Runtime> PowerToDoIos<R> {
             .map_err(failed)
     }
 
+    /// Shows the file at `path` in the system preview (Quick Look). Returns once it is on screen.
+    pub fn preview_file(&self, path: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Args<'a> {
+            path: &'a str,
+        }
+        self.0
+            .run_mobile_plugin::<()>("previewFile", Args { path })
+            .map_err(|e| Error::Failed(e.to_string()))
+    }
+
     /// Opens `url` in the system login sheet and returns the URL it ended on (starting with
     /// `callback_scheme`). Blocks until the sheet closes: call it off the main thread. The user
     /// closing the sheet is `Err(Error::Cancelled)`.

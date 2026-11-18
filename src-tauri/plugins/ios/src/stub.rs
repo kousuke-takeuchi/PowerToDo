@@ -26,6 +26,11 @@ impl<R: Runtime> PowerToDoIos<R> {
     }
 
     /// Always `Err(Error::Unsupported)` off iOS.
+    pub fn preview_file(&self, _path: &str) -> Result<()> {
+        Err(Error::Unsupported)
+    }
+
+    /// Always `Err(Error::Unsupported)` off iOS.
     pub fn authenticate(&self, _url: &str, _callback_scheme: &str) -> Result<String> {
         Err(Error::Unsupported)
     }

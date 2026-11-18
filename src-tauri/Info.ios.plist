@@ -5,6 +5,9 @@
 	<!-- Tailscale talks to the NAS directly on the home network (TN3179). -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>家の NAS と直接つないで同期を速くするために使います。</string>
+	<!-- 「写真を撮る」 in the attach button's picker (file input with accept="image/*"). The photo library needs no string. -->
+	<key>NSCameraUsageDescription</key>
+	<string>タスクのコメントに添える写真を撮るために使います。</string>
 	<!-- The data folder is Documents: shown in the Files app and editable in place (spec 3.6). -->
 	<key>UIFileSharingEnabled</key>
 	<true/>

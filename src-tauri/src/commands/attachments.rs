@@ -86,8 +86,7 @@ fn existing_path(state: &AppState, hash: &str, ext: &str) -> AppResult<std::path
     Ok(p)
 }
 
-/// Opens the blob with the default app (iPhone: refused, the page previews it itself). On a desktop
-/// the blob is first copied to the temp folder under `name` (the name the user knows, made safe), so
+/// Opens the blob with the default app (iPhone: the system preview, Quick Look). The blob is first copied to the temp folder under `name` (the name the user knows, made safe), so
 /// the app's title bar and its "save" show that and not the hash; the copy also keeps an app that
 /// edits in place away from the blob, which must never change.
 #[tauri::command]
@@ -99,19 +98,15 @@ pub async fn open_attachment(
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     let blob = existing_path(state.inner(), &hash, &ext)?;
-    #[cfg(desktop)]
     let blob = match name.as_deref() {
         Some(n) => named_copy(&std::env::temp_dir(), &blob, n, &hash, &ext)?,
         None => blob,
     };
-    #[cfg(mobile)]
-    let _ = name;
     platform::open_file(&app, &blob)
 }
 
 /// `<base>/PowerToDo-attachments/<hash>/<display name>`, copied from `blob` unless it is there already
 /// with the same size. One folder per blob, so two files that share a name do not clash.
-#[cfg_attr(mobile, allow(dead_code))]
 fn named_copy(
     base: &std::path::Path,
     blob: &std::path::Path,

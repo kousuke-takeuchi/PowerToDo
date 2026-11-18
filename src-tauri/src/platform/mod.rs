@@ -68,9 +68,22 @@ pub fn reveal_path(app: &AppHandle, path: &Path) -> AppResult<()> {
     }
 }
 
-/// Opens a file with the OS's default app. On iPhone there is no such thing to open.
+/// Opens a file with the OS's default app. On iPhone: the system preview (Quick Look, with its share button that
+/// saves to Files), through the iOS plugin. Android has no such path yet.
 pub fn open_file(app: &AppHandle, path: &Path) -> AppResult<()> {
-    reveal_path(app, path)
+    #[cfg(target_os = "ios")]
+    {
+        use tauri_plugin_powertodo_ios::PowerToDoIosExt;
+        app.powertodo_ios()
+            .preview_file(&path.to_string_lossy())
+            .map_err(|e| AppError::Io {
+                message: e.to_string(),
+            })
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        reveal_path(app, path)
+    }
 }
 
 /// Shows a file selected in Finder / Explorer. On iPhone there is no such thing to open.
