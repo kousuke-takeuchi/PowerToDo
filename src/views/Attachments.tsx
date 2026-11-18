@@ -196,7 +196,7 @@ export function AttachmentList({
           ),
         )}
       </div>
-      {viewing !== null && <AttachmentViewer files={images} index={Math.min(viewing, images.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />}
+      {viewing !== null && images.length > 0 && <AttachmentViewer files={images} index={Math.min(viewing, images.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />}
     </>
   );
 }
@@ -209,15 +209,27 @@ export function AttachmentViewer({ files, index, onIndex, onClose }: { files: At
   const act = useEnvAction();
   const env = useContext(AttachmentEnvContext);
   useEscLayer(true, onClose);
+  // Modal: keys other than Esc (the Esc layers) stop here, before the dialog's j / k and the app's shortcuts see them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return;
+      e.stopPropagation();
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       e.preventDefault();
       onIndex(stepViewer(index, e.key === "ArrowLeft" ? -1 : 1, files.length));
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [index, files.length, onIndex]);
+  // Focus moves into the viewer (so typing does not reach a field behind it) and goes back where it was on close.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const before = document.activeElement;
+    rootRef.current?.focus();
+    return () => {
+      if (before instanceof HTMLElement && before.isConnected) before.focus();
+    };
+  }, []);
   const file = files[index];
   if (!file) return null;
   const iconButton = (label: string, node: React.ReactNode, onClick: () => void, disabled?: boolean) => (
@@ -237,12 +249,14 @@ export function AttachmentViewer({ files, index, onIndex, onClose }: { files: At
   );
   return createPortal(
     <div
+      ref={rootRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label={file.name}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", background: "rgba(0,0,0,0.85)", fontFamily: "var(--font-body)" }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, outline: "none", display: "grid", placeItems: "center", background: "rgba(0,0,0,0.85)", fontFamily: "var(--font-body)" }}
     >
       <div style={{ position: "absolute", top: 12, right: 12, display: "flex", gap: 8 }}>
         {iconButton("既定のアプリで開く", <ExternalLink size={18} />, () => act(() => env.open(file)))}
