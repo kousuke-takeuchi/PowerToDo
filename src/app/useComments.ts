@@ -1,7 +1,7 @@
 import { createContext, useCallback, useEffect, useReducer, useState } from "react";
 import { api } from "../api/client";
 import { onCommentsChanged } from "../api/events";
-import type { Comment } from "../types/model";
+import type { AttachmentInfo, Comment } from "../types/model";
 import { dialogCommentsReducer, initialDialogComments } from "./dialogComments";
 
 /** `${project}/${no}` -> number of comments, for the count on task rows (spec ① §3.3). Main provides it. */
@@ -61,9 +61,10 @@ export function useDialogComments(dialog: { project: string; no: number } | null
   return {
     comments: state.comments,
     failed: state.failed,
-    add: (text: string) => (project === undefined || no === undefined ? Promise.resolve(false) : run(() => api.addComment(project, no, text))),
-    edit: (id: string, text: string) =>
-      project === undefined || no === undefined ? Promise.resolve(false) : run(() => api.editComment(project, no, id, text)),
+    add: (text: string, files?: AttachmentInfo[]) =>
+      project === undefined || no === undefined ? Promise.resolve(false) : run(() => api.addComment(project, no, text, files && files.length > 0 ? files : undefined)),
+    edit: (id: string, text: string, files?: AttachmentInfo[]) =>
+      project === undefined || no === undefined ? Promise.resolve(false) : run(() => api.editComment(project, no, id, text, files)),
     remove: (id: string) => {
       if (project !== undefined && no !== undefined) void run(() => api.deleteComment(project, no, id));
     },
