@@ -4,24 +4,15 @@ import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, ExternalLink, Ellipsis, FolderOpen, Paperclip, X } from "lucide-react";
 import { useEscLayer } from "../app/layers";
 import { AttachmentEnvContext } from "../app/attachments/env";
-import { buildAttachmentList, formatBytes, missingLabel, stepViewer } from "../app/attachments/list";
-import { useAttachmentBlob } from "../app/attachments/useBlob";
+import { Picture } from "./AttachmentPicture";
+import { MobileAttachmentViewer } from "./mobile/MobileAttachmentViewer";
+import { buildAttachmentList, formatBytes, stepViewer } from "../app/attachments/list";
 import type { AttachmentInfo } from "../types/model";
 
 function useEnvAction() {
   const env = useContext(AttachmentEnvContext);
   return (run: () => Promise<void>) => void run().catch(env.onError);
 }
-
-const grey: React.CSSProperties = {
-  display: "grid",
-  placeItems: "center",
-  background: "var(--color-bg-hover)",
-  color: "var(--color-text-muted)",
-  fontFamily: "var(--font-body)",
-  fontSize: 12,
-  lineHeight: "17px",
-};
 
 const removeStyle: React.CSSProperties = {
   display: "inline-grid",
@@ -35,34 +26,6 @@ const removeStyle: React.CSSProperties = {
   color: "var(--color-bg)",
   cursor: "pointer",
 };
-
-/** The picture frame: the picture, or a grey frame (同期中 / 見つかりません), or null when the webview cannot decode it. */
-function Picture({ file, box, fit }: { file: AttachmentInfo; box?: { w: number; h: number }; fit: "thumb" | "full" }) {
-  const env = useContext(AttachmentEnvContext);
-  const blob = useAttachmentBlob(file);
-  const [broken, setBroken] = useState(false);
-  if (blob.status === "ready" && !broken) {
-    return (
-      <img
-        src={blob.url}
-        alt={file.name}
-        draggable={false}
-        onError={() => setBroken(true)}
-        style={
-          fit === "thumb"
-            ? { display: "block", width: box?.w, height: box?.h, objectFit: "cover", borderRadius: 6, border: "1px solid var(--color-border)" }
-            : { display: "block", maxWidth: "min(90vw, 1600px)", maxHeight: "82vh", objectFit: "contain", borderRadius: 4 }
-        }
-      />
-    );
-  }
-  const text = blob.status === "loading" ? "" : blob.status === "missing" ? missingLabel(env.syncing) : "表示できません";
-  return (
-    <div role="img" aria-label={`${file.name} ${text}`.trim()} style={{ ...grey, width: box?.w ?? 320, height: box?.h ?? 240, borderRadius: 6 }}>
-      {text}
-    </div>
-  );
-}
 
 /** 「Finder で表示」「別名で保存」 at the pointer (right-click, or the … button). Closes on a click outside, Esc and blur. */
 function FileMenu({ file, at, onClose }: { file: AttachmentInfo; at: { x: number; y: number }; onClose: () => void }) {
@@ -105,29 +68,34 @@ function FileMenu({ file, at, onClose }: { file: AttachmentInfo; at: { x: number
   );
 }
 
-function Chip({ file, sizeText, onRemove, alwaysRemove }: { file: AttachmentInfo; sizeText: string; onRemove?: () => void; alwaysRemove?: boolean }) {
+function Chip({ file, sizeText, onRemove, alwaysRemove, touch }: { file: AttachmentInfo; sizeText: string; onRemove?: () => void; alwaysRemove?: boolean; touch?: boolean }) {
   const env = useContext(AttachmentEnvContext);
   const act = useEnvAction();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   return (
     <span
       className="group"
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenu({ x: e.clientX, y: e.clientY });
-      }}
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", padding: "4px 6px 4px 8px", border: "1px solid var(--color-border)", borderRadius: 6, background: "var(--color-bg)", fontFamily: "var(--font-body)", fontSize: 12, lineHeight: "17px", color: "var(--color-text-primary)" }}
+      onContextMenu={
+        touch
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY });
+            }
+      }
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", padding: touch ? "0 8px 0 10px" : "4px 6px 4px 8px", minHeight: touch ? 44 : undefined, boxSizing: "border-box", border: "1px solid var(--color-border)", borderRadius: 6, background: "var(--color-bg)", fontFamily: "var(--font-body)", fontSize: 12, lineHeight: "17px", color: "var(--color-text-primary)" }}
     >
       <Paperclip size={12} aria-hidden color="var(--color-text-muted)" style={{ flex: "0 0 auto" }} />
       <button
         type="button"
         title={`${file.name} を開く`}
         onClick={() => act(() => env.open(file))}
-        style={{ minWidth: 0, display: "inline-flex", gap: 6, alignItems: "baseline", padding: 0, border: 0, background: "none", font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left" }}
+        style={{ minWidth: 0, display: "inline-flex", gap: 6, alignItems: touch ? "center" : "baseline", padding: 0, border: 0, background: "none", font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left", minHeight: touch ? 44 : undefined, alignSelf: touch ? "center" : undefined }}
       >
-        <span style={{ minWidth: 0, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
+        <span style={{ minWidth: 0, maxWidth: touch ? 220 : 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
         <span style={{ flex: "0 0 auto", color: "var(--color-text-muted)" }}>{sizeText}</span>
       </button>
+      {!touch && (
       <button
         type="button"
         aria-label={`${file.name} のその他の操作`}
@@ -140,9 +108,10 @@ function Chip({ file, sizeText, onRemove, alwaysRemove }: { file: AttachmentInfo
       >
         <Ellipsis size={14} />
       </button>
+      )}
       {onRemove && (
-        <button type="button" aria-label={`${file.name} を外す`} className={alwaysRemove ? undefined : "opacity-0 group-hover:opacity-100 focus:opacity-100"} onClick={onRemove} style={removeStyle}>
-          <X size={12} />
+        <button type="button" aria-label={`${file.name} を外す`} className={alwaysRemove || touch ? undefined : "opacity-0 group-hover:opacity-100 focus:opacity-100"} onClick={onRemove} style={touch ? { ...removeStyle, width: 28, height: 28, borderRadius: 14 } : removeStyle}>
+          <X size={touch ? 14 : 12} />
         </button>
       )}
       {menu && <FileMenu file={file} at={menu} onClose={() => setMenu(null)} />}
@@ -159,16 +128,20 @@ export function AttachmentList({
   ids,
   onRemove,
   alwaysRemove,
+  touch,
 }: {
   files: AttachmentInfo[];
   /** Keys for the files (the description's `note-attach` ids). */
   ids?: string[];
   onRemove?: (index: number) => void;
   alwaysRemove?: boolean;
+  /** iPhone (spec attachments §6): the touch viewer, 44 px chips, a × that is always there, no right-click menu. */
+  touch?: boolean;
 }) {
   const { items, images } = buildAttachmentList(files, ids);
   const [viewing, setViewing] = useState<number | null>(null);
   if (items.length === 0) return null;
+  const Viewer = touch ? MobileAttachmentViewer : AttachmentViewer;
   const indexOf = (f: AttachmentInfo) => files.indexOf(f);
   return (
     <>
@@ -176,27 +149,27 @@ export function AttachmentList({
         {items.map((it) =>
           it.kind === "image" ? (
             <span key={it.key} className="group" style={{ position: "relative", display: "inline-flex" }}>
-              <button type="button" aria-label={`${it.file.name} を大きく表示`} onClick={() => setViewing(it.viewIndex)} style={{ display: "block", padding: 0, border: 0, background: "none", cursor: "zoom-in" }}>
+              <button type="button" aria-label={`${it.file.name} を大きく表示`} onClick={() => setViewing(it.viewIndex)} style={{ display: "block", padding: 0, border: 0, background: "none", cursor: "zoom-in", touchAction: "manipulation" }}>
                 <Picture file={it.file} box={it.box} fit="thumb" />
               </button>
               {onRemove && (
                 <button
                   type="button"
                   aria-label={`${it.file.name} を外す`}
-                  className={alwaysRemove ? undefined : "opacity-0 group-hover:opacity-100 focus:opacity-100"}
+                  className={alwaysRemove || touch ? undefined : "opacity-0 group-hover:opacity-100 focus:opacity-100"}
                   onClick={() => onRemove(indexOf(it.file))}
-                  style={{ ...removeStyle, position: "absolute", top: 4, right: 4 }}
+                  style={touch ? { ...removeStyle, position: "absolute", top: 4, right: 4, width: 28, height: 28, borderRadius: 14 } : { ...removeStyle, position: "absolute", top: 4, right: 4 }}
                 >
-                  <X size={12} />
+                  <X size={touch ? 14 : 12} />
                 </button>
               )}
             </span>
           ) : (
-            <Chip key={it.key} file={it.file} sizeText={it.sizeText} alwaysRemove={alwaysRemove} onRemove={onRemove ? () => onRemove(indexOf(it.file)) : undefined} />
+            <Chip key={it.key} file={it.file} sizeText={it.sizeText} alwaysRemove={alwaysRemove} touch={touch} onRemove={onRemove ? () => onRemove(indexOf(it.file)) : undefined} />
           ),
         )}
       </div>
-      {viewing !== null && images.length > 0 && <AttachmentViewer files={images} index={Math.min(viewing, images.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />}
+      {viewing !== null && images.length > 0 && <Viewer files={images} index={Math.min(viewing, images.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />}
     </>
   );
 }
