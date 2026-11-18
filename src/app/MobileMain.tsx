@@ -66,7 +66,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const today = useToday();
   const { errors: saveErrors } = useSaveErrors();
 
-  // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は受信トレイ。
+  // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は設定の「起動時に開く画面」(既定は今日)。
   const [nav, dispatchNav] = useReducer(reduceNav, app.startView, initialMobileNav);
   const screen = screenOf(nav);
   const settingsOpen = screen.kind === "settings";

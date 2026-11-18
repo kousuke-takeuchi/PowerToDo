@@ -59,9 +59,9 @@ export type MobileSettingsProps = {
   onDisplayName?: AccountPaneProps["onSaveDisplayName"];
   displayNameBusy?: boolean;
   displayNameError?: string | null;
-  /** 「ファイル」アプリの案内。 */
   /** 「全般」(起動時に開く画面)。 */
   general?: GeneralPaneProps;
+  /** 「ファイル」アプリの案内。 */
   dataDirHint?: string;
   /** 実機: 戻る (ヘッダーの左を戻るにする)。省略すると M-07 の絵のままメニュー。 */
   onBack?: () => void;
