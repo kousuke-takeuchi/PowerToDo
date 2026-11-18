@@ -470,14 +470,18 @@ function DetailScreen({
   widthPx,
   layout,
   initialCommentEdit,
+  asSubtask,
 }: {
+  /** Shows the first subtask's dialog, with its parent in the header. */
+  asSubtask?: boolean;
   initialPopover?: TaskDialogProps["initialPopover"];
   widthPx?: number;
   layout?: "wide" | "narrow";
   initialCommentEdit?: string;
 }) {
   // 行をクリックするとその行のダイアログを開く (pen の詳細は 1 番の行のものだけなので、他の行は mock のまま)。
-  const [openNo, setOpenNo] = useState<number | null>(detailTask.no);
+  const firstSub = tasks.find((t) => t.parentNo !== undefined);
+  const [openNo, setOpenNo] = useState<number | null>(asSubtask && firstSub ? firstSub.no : detailTask.no);
   const shown = openNo === null ? undefined : openNo === detailTask.no ? detailTask : tasks.find((t) => t.no === openNo);
   const order = shopping.filter((t) => t.parentNo === undefined).map((t) => t.no);
   const i = shown ? order.indexOf(shown.no) : -1;
@@ -493,6 +497,12 @@ function DetailScreen({
             key={shown.no}
             task={shown}
             subtasks={tasks.filter((t) => t.parentNo === shown.no)}
+            parent={
+              shown.parentNo !== undefined
+                ? { title: (shown.parentNo === detailTask.no ? detailTask : tasks.find((t) => t.no === shown.parentNo))?.title ?? "", onOpen: () => setOpenNo(shown.parentNo!) }
+                : undefined
+            }
+            onOpenSubtask={setOpenNo}
             project={detailProject}
             section={shown.category ?? undefined}
             comments={shown.no === detailTask.no ? comments : []}
@@ -521,6 +531,11 @@ function DetailScreen({
 export const D03: Story = {
   name: "D-03 タスク詳細",
   render: () => <DetailScreen />,
+};
+
+export const D03Subtask: Story = {
+  name: "D-03 タスク詳細 (サブタスク)",
+  render: () => <DetailScreen asSubtask />,
 };
 
 export const D03Project: Story = {

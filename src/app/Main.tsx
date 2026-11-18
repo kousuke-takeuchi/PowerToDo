@@ -474,6 +474,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const src = target === "current" ? p : other;
   const dlgView = target === "none" ? null : src.view;
   const dlgTask = dialog && dlgView && dlgView.project.name === dialog.project ? dlgView.tasks.find((t) => t.no === dialog.no) : undefined;
+  const dlgParent = dlgTask?.parentNo !== undefined ? dlgView?.tasks.find((t) => t.no === dlgTask.parentNo) : undefined;
+  const dlgSubKeys = dlgTask && dlgView ? dlgView.tasks.filter((t) => t.parentNo === dlgTask.no).map((t) => `${t.project}/${t.no}`).join("\n") : "";
   const dlgKey = dialog ? `${dialog.project}/${dialog.no}` : null;
   const dlgComments = useDialogComments(dialog, showError);
   const { prev, next } = dlgKey ? neighbors(visibleKeys, dlgKey) : {};
@@ -657,11 +659,12 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // Rows that left the screen (another view, deleted, hidden, gone after a sync) let go of their editor and menu.
   // Only on a change of the rows: a just-added task's row arrives after the editor already moved under it.
   useEffect(() => {
-    const next = rowStateAfter(visibleKeys, { editing, inserting, overlay: rowOverlay });
+    // The dialog's subtask rows are on screen too (editor, menu) even when the list has them folded.
+    const next = rowStateAfter([...visibleKeys, ...dlgSubKeys.split("\n").filter(Boolean)], { editing, inserting, overlay: rowOverlay });
     if (next.editing !== editing) setEditing(next.editing);
     if (next.inserting !== inserting) setInserting(next.inserting);
     if (next.overlay !== rowOverlay) setRowOverlay(next.overlay);
-  }, [visibleKeys]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visibleKeys, dlgSubKeys]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * Spec ② §4.3: the confirmation names the subtasks that go too. Counted from the view that holds the task's
    * project (the open project, the dialog's), else read for it (Today and the other cross views list no subtasks).
@@ -681,7 +684,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const confirmDelete = (t: Task) => {
     setDeleting(null);
     const isDialogTask = dialog?.project === t.project && dialog.no === t.no && dlgKey !== null;
-    const after = isDialogTask ? afterRemoval(visibleKeys, dlgKey, leavingWith(t.no)) : null;
+    // A subtask opened from its parent's dialog goes back to the parent; otherwise the next task in the list.
+    const after = isDialogTask ? (dlgParent ? `${t.project}/${dlgParent.no}` : afterRemoval(visibleKeys, dlgKey, leavingWith(t.no))) : null;
     const done = onScreen(t.project) ? p.deleteTask(t.no) : cross.remove(t);
     void done.then((ok) => {
       if (!ok) return;
@@ -715,6 +719,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           layout={width === 960 ? "narrow" : "wide"}
           onClose={() => setDialog(null)}
           onOpenProject={() => navigate(dialog.project === app.inbox ? { kind: "inbox" } : { kind: "project", name: dialog.project })}
+          onOpenSubtask={(no) => goDialog(`${dialog.project}/${no}`)}
+          parent={dlgParent ? { title: dlgParent.title, onOpen: () => goDialog(`${dialog.project}/${dlgParent.no}`) } : undefined}
           onPrev={prev ? () => goDialog(prev) : undefined}
           onNext={next ? () => goDialog(next) : undefined}
           onChange={(patch) =>
@@ -727,7 +733,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
             const t = dlgTask;
             // Spec ① §2.5: completing moves on to the next task (taken from the list as it was before), unless the
             // task repeats and only moved its date on: that one stays open here. Decided by the result.
-            const after = done ? afterRemoval(visibleKeys, dlgKey) : undefined;
+            const after = done ? (dlgParent ? `${t.project}/${dlgParent.no}` : afterRemoval(visibleKeys, dlgKey)) : undefined;
             let stays = false;
             void src.completeTask(t.no, done, false, (v) => (stays = stillOpenAfterComplete(v, t.no))).then((ok) => {
               if (!ok) return;
