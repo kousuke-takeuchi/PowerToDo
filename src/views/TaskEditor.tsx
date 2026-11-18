@@ -7,6 +7,7 @@ import { dateLabel } from "../mock/data";
 import { DatePicker } from "./DatePicker";
 import { LabelPicker } from "./LabelPicker";
 import { PopRow, PopoverShell } from "./PopoverShell";
+import { useFitPopover } from "./useFitPopover";
 import { ProjectPicker, type PickerProject } from "./ProjectPicker";
 import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
@@ -75,6 +76,8 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
   const [pop, setPop] = useState<Pop | null>(initialPopover ?? null);
   const [busy, setBusy] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  useFitPopover(popRef, pop !== null); // 下からはみ出さない (spec ② §7)
   const set = (patch: Partial<EditorValue>) => setV((cur) => ({ ...cur, ...patch }));
   const canSubmit = v.title.trim() !== "" && !busy;
 
@@ -311,7 +314,7 @@ export function TaskEditor({ mode, initial, projects, inbox, allLabels, today, o
         </button>
       </div>
       {popover && (
-        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, marginTop: 4 }} onMouseDown={(e) => e.stopPropagation()}>
+        <div ref={popRef} style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, marginTop: 4, display: "flex", flexDirection: "column" }} onMouseDown={(e) => e.stopPropagation()}>
           {popover}
         </div>
       )}

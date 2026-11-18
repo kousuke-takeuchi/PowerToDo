@@ -17,6 +17,7 @@ import { DatePicker } from "./DatePicker";
 import { LabelPicker } from "./LabelPicker";
 import { ProjectPicker } from "./ProjectPicker";
 import { PopRow, PopoverShell } from "./PopoverShell";
+import { useFitPopover } from "./useFitPopover";
 import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
 import { SubtaskForm } from "./SubtaskForm";
@@ -242,6 +243,7 @@ export function TaskDialog({
     setPopover((cur) => (cur === p ? null : p));
   };
   const popoverRef = useRef<HTMLDivElement>(null);
+  useFitPopover(popoverRef, popover !== null); // 下からはみ出さない (spec ② §7)
   const { reduced, t } = useMotionTiming();
   // 閉じるアニメーション中 (AppShell の AnimatePresence で退場中) は Esc レイヤーから外す (下のレイヤーの Esc を奪わない)。
   const present = useIsPresent();
@@ -465,7 +467,7 @@ export function TaskDialog({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: reduced ? 0 : 8 }}
             transition={t(0.15)}
-            style={{ position: "absolute", right: 8, top: editable && anchorTop !== null ? anchorTop : POPOVER_TOP[popover], zIndex: 10 }}
+            style={{ position: "absolute", right: 8, top: editable && anchorTop !== null ? anchorTop : POPOVER_TOP[popover], zIndex: 10, display: "flex", flexDirection: "column" }}
           >
             {popover === "date" && (
               <DatePicker

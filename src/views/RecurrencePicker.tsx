@@ -87,7 +87,28 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse, fontSiz
     });
   };
   return (
-    <PopoverShell label="繰り返し" gap="var(--space-2)">
+    <PopoverShell
+      label="繰り返し"
+      gap="var(--space-2)"
+      footer={
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)", paddingTop: 8 }}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setRrule(undefined);
+              setRruleLabel(undefined);
+              setTyped(null);
+              onChange?.(undefined);
+            }}
+          >
+            解除
+          </Button>
+          <Button variant="primary" onClick={() => onChange?.(preview?.rrule ?? rrule)}>
+            適用
+          </Button>
+        </div>
+      }
+    >
       <TextField
         fontSize={fontSize}
         value={typed ?? current}
@@ -120,22 +141,6 @@ export function RecurrencePicker({ value, onChange, valueLabel, onParse, fontSiz
           </span>
         </PopRow>
       ))}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)", paddingTop: 8 }}>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setRrule(undefined);
-            setRruleLabel(undefined);
-            setTyped(null);
-            onChange?.(undefined);
-          }}
-        >
-          解除
-        </Button>
-        <Button variant="primary" onClick={() => onChange?.(preview?.rrule ?? rrule)}>
-          適用
-        </Button>
-      </div>
     </PopoverShell>
   );
 }

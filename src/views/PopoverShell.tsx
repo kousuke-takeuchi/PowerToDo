@@ -1,7 +1,22 @@
 import type React from "react";
 
-/** ポップオーバーの外枠 (pen の DatePopover など: 幅 320, padding 12, 角丸 12, 影)。位置決めは呼び出し側。 */
-export function PopoverShell({ children, gap = "var(--space-3)", label, width = 320 }: { children: React.ReactNode; gap?: string; label: string; width?: number }) {
+/**
+ * ポップオーバーの外枠 (pen の DatePopover など: 幅 320, padding 12, 角丸 12, 影)。位置決めは呼び出し側。
+ * 高さが足りないとき (useFitPopover が親の max-height を絞る) は、中 (children) だけがスクロールし、`footer` は常に見える。
+ */
+export function PopoverShell({
+  children,
+  footer,
+  gap = "var(--space-3)",
+  label,
+  width = 320,
+}: {
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  gap?: string;
+  label: string;
+  width?: number;
+}) {
   return (
     <div
       role="dialog"
@@ -9,6 +24,7 @@ export function PopoverShell({ children, gap = "var(--space-3)", label, width = 
       style={{
         width,
         boxSizing: "border-box",
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
         gap,
@@ -21,7 +37,8 @@ export function PopoverShell({ children, gap = "var(--space-3)", label, width = 
         color: "var(--color-text-primary)",
       }}
     >
-      {children}
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap }}>{children}</div>
+      {footer && <div style={{ flex: "none" }}>{footer}</div>}
     </div>
   );
 }
