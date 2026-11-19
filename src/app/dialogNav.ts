@@ -31,11 +31,3 @@ export function parseKey(key: string): { project: string; no: number } {
   return { project: key.slice(0, i), no: Number(key.slice(i + 1)) };
 }
 
-/**
- * Whether completing `no` left it open in the refreshed view: a repeating task only moves its due date on (spec ① §2.5),
- * so the dialog stays on it. A recurrence that has run out really completes, and so does a non-repeating task.
- */
-export function stillOpenAfterComplete(view: { tasks: { no: number; progress: number }[] }, no: number): boolean {
-  const t = view.tasks.find((x) => x.no === no);
-  return t !== undefined && t.progress < 100;
-}

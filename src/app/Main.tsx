@@ -30,7 +30,7 @@ import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDialog } from "../views/TaskDialog";
-import { stillOpenAfterComplete, afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
+import { afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
 import { CommentCounts, useCommentCounts, useDialogComments } from "./useComments";
 import { AttachmentCounts, AttachmentEnvContext } from "./attachments/env";
 import { useAttachmentCounts, useAttachmentEnv, useNoteFiles } from "./useAttachments";
@@ -753,16 +753,13 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           }
           onToggleDone={(done) => {
             const t = dlgTask;
-            // Spec ① §2.5: completing moves on to the next task (taken from the list as it was before), unless the
-            // task repeats and only moved its date on: that one stays open here. Decided by the result.
-            const after = done ? (dlgParent ? `${t.project}/${dlgParent.no}` : afterRemoval(visibleKeys, dlgKey)) : undefined;
-            let stays = false;
-            void src.completeTask(t.no, done, false, (v) => (stays = stillOpenAfterComplete(v, t.no))).then((ok) => {
+            // Spec ① §2.5: completing closes the dialog (an opened subtask goes back to its parent).
+            void src.completeTask(t.no, done).then((ok) => {
               if (!ok) return;
               afterOther();
               if (done) {
                 completed(t);
-                if (!stays) goDialog(after);
+                goDialog(dlgParent ? `${t.project}/${dlgParent.no}` : null);
               }
             });
           }}
