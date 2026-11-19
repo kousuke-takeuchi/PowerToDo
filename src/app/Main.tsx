@@ -30,8 +30,11 @@ import { LabelsView } from "../views/LabelsView";
 import { Sidebar } from "../views/Sidebar";
 import type { SidebarProps } from "../views/Sidebar";
 import { TaskDialog } from "../views/TaskDialog";
-import { stillOpenAfterComplete, afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
+import { afterRemoval, dialogTarget, neighbors, parseKey } from "./dialogNav";
 import { CommentCounts, useCommentCounts, useDialogComments } from "./useComments";
+import { AttachmentCounts, AttachmentEnvContext } from "./attachments/env";
+import { useAttachmentCounts, useAttachmentEnv, useNoteFiles } from "./useAttachments";
+import { useRefuseStrayFileDrops } from "./useFileDrop";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
 import { useShellWidth, useToday } from "./hooks";
@@ -359,6 +362,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     setEscFallback(clearFocus);
     return () => setEscFallback(null);
   }, [clearFocus]);
+  // A file dropped outside the attachment zones must not open in the webview (spec 添付 §5).
+  useRefuseStrayFileDrops();
 
   // 狭い幅のドロワー: Esc で閉じる (Esc レイヤー。上に開いたものがあればそちらが先に閉じる)。幅が戻ったら閉じる。
   useEffect(() => {
@@ -461,6 +466,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // Comment counts of the projects whose rows are on screen (spec ① §3.3).
   const shownProjects = useMemo(() => visibleKeys.map((k) => parseKey(k).project), [visibleKeys]);
   const commentCounts = useCommentCounts(shownProjects);
+  const attachmentCounts = useAttachmentCounts(shownProjects);
+  // A missing picture reads 同期中 while a sync runs or has not reported yet, 見つかりません once it is idle (spec 添付 §9).
+  const attachmentEnv = useAttachmentEnv(!sync.status || sync.status.state === "syncing", showError);
   const projectColors = useMemo(() => Object.fromEntries(summaries.map((s) => [s.name, s.color])), [summaries]);
 
   // ---- タスクの詳細ダイアログ (spec ① §2) ----
@@ -478,6 +486,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const dlgSubKeys = dlgTask && dlgView ? dlgView.tasks.filter((t) => t.parentNo === dlgTask.no).map((t) => `${t.project}/${t.no}`).join("\n") : "";
   const dlgKey = dialog ? `${dialog.project}/${dialog.no}` : null;
   const dlgComments = useDialogComments(dialog, showError);
+  const dlgNote = useNoteFiles(dialog, showError, note);
   const { prev, next } = dlgKey ? neighbors(visibleKeys, dlgKey) : {};
   /** Shows the task with row key `k` in the dialog (and focuses its row), or closes the dialog. */
   const goDialog = (k?: string | null) => {
@@ -744,16 +753,13 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           }
           onToggleDone={(done) => {
             const t = dlgTask;
-            // Spec ① §2.5: completing moves on to the next task (taken from the list as it was before), unless the
-            // task repeats and only moved its date on: that one stays open here. Decided by the result.
-            const after = done ? (dlgParent ? `${t.project}/${dlgParent.no}` : afterRemoval(visibleKeys, dlgKey)) : undefined;
-            let stays = false;
-            void src.completeTask(t.no, done, false, (v) => (stays = stillOpenAfterComplete(v, t.no))).then((ok) => {
+            // Spec ① §2.5: completing closes the dialog (an opened subtask goes back to its parent).
+            void src.completeTask(t.no, done).then((ok) => {
               if (!ok) return;
               afterOther();
               if (done) {
                 completed(t);
-                if (!stays) goDialog(after);
+                goDialog(dlgParent ? `${t.project}/${dlgParent.no}` : null);
               }
             });
           }}
@@ -787,6 +793,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           onAddComment={dlgComments.add}
           onEditComment={dlgComments.edit}
           onDeleteComment={dlgComments.remove}
+          onAttachComment={dlgNote.store}
+          noteFiles={dlgNote.files}
+          onAttachNote={dlgNote.attach}
+          onDetachNote={(id) => void dlgNote.detach(id)}
         />
       </motion.div>
     ) : null;
@@ -1143,6 +1153,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     <ViewOptionsCtx.Provider value={viewStore}>
     <ProjectColors.Provider value={projectColors}>
     <CommentCounts.Provider value={commentCounts}>
+    <AttachmentCounts.Provider value={attachmentCounts}>
+    <AttachmentEnvContext.Provider value={attachmentEnv}>
     <RowActions.Provider value={rowActions}>
     <DragProvider onDrop={onDrop}>
     <AppShell
@@ -1184,6 +1196,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     </AppShell>
     </DragProvider>
     </RowActions.Provider>
+    </AttachmentEnvContext.Provider>
+    </AttachmentCounts.Provider>
     </CommentCounts.Provider>
     </ProjectColors.Provider>
     </ViewOptionsCtx.Provider>

@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod cells;
 pub mod comments;
 pub mod common_book;

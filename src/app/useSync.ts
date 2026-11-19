@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorMessage } from "../api/client";
 import { confirmAction } from "../api/dialogs";
-import { onSyncStatus, onTailnetStatus } from "../api/events";
-import type { SyncBackend, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
+import { onAttachmentsChanged, onSyncStatus, onTailnetStatus } from "../api/events";
+import type { AttachmentUsage, SyncBackend, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
 import type { SyncBusy, SyncPaneProps } from "../views/SyncPane";
 import { googleLoginNote, googleLogoutNote, isNasConnected, recoverQuestion, recoverResult, targetName } from "./syncText";
 
@@ -66,6 +66,20 @@ export function useSync({ active, onNotice }: Options) {
     const off = onSyncStatus((s) => setStatus(s), read);
     return off;
   }, []);
+
+  // ---- 添付の使用量 (spec 添付 §8): 「同期」ペインを見せている間だけ。同期の終わりと届いた添付で読み直す ----
+  const [usage, setUsage] = useState<AttachmentUsage | null>(null);
+  const syncedAt = status?.lastSynced;
+  useEffect(() => {
+    if (!active) return;
+    const read = () =>
+      void api
+        .attachmentUsage()
+        .then((u) => alive.current && setUsage(u))
+        .catch(() => undefined);
+    read();
+    return onAttachmentsChanged(read);
+  }, [active, syncedAt]);
 
   // ---- 設定と Tailscale: 必要なときだけ ----
   const reloadSettings = useCallback(async () => {
@@ -409,6 +423,7 @@ export function useSync({ active, onNotice }: Options) {
     checkError,
     recoverError,
     googleNote,
+    attachmentUsage: usage,
     onChangeBackend: (b) => void setBackend(b),
     onLogin: () => void login(),
     onOpenLoginUrl: (url) => void openLoginUrl(url),

@@ -2,6 +2,7 @@
 //! changed for the debounced [`Saver`], and return the new view. The few non-trivial bits
 //! (start-up, quick add) live in plain functions so they can be tested without Tauri.
 
+pub mod attachments;
 pub mod autostart;
 pub mod comments;
 pub mod saver;
@@ -692,6 +693,10 @@ impl SyncHost for TauriSyncHost {
 
     fn comments_changed(&self, files: &[String]) {
         comments::emit_comments_changed(&self.app, files.to_vec());
+    }
+
+    fn attachments_changed(&self, files: &[String]) {
+        attachments::emit_attachments_changed(&self.app, files.to_vec());
     }
 
     fn projects_reloaded(&self, names: &[String]) {

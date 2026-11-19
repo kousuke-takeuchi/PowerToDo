@@ -1,8 +1,13 @@
 import type React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Paperclip } from "lucide-react";
 import { isImeKey } from "../app/keys";
+import { pasteFiles, useFileDrop } from "../app/useFileDrop";
+import { sameFiles } from "../app/attachments/list";
 import { confirmAction } from "../api/dialogs";
-import type { Comment } from "../types/model";
+import { Button } from "../components/Button";
+import type { AttachmentInfo, Comment } from "../types/model";
+import { AttachmentList } from "./Attachments";
 
 const heading: React.CSSProperties = { fontSize: 13, lineHeight: "19px", fontWeight: 700, color: "var(--color-text-primary)" };
 const field: React.CSSProperties = {
@@ -50,6 +55,8 @@ export function CommentsSection({
   onAdd,
   onEdit,
   onDelete,
+  onAttach,
+  initialPending,
   initialEditId,
 }: {
   comments: Comment[];
@@ -58,29 +65,80 @@ export function CommentsSection({
   /** Puts the cursor in the comment input on mount. */
   autoFocusInput?: boolean;
   me?: string;
-  /** Resolves true when saved (the input then clears). Without it there is no input (Storybook). */
-  onAdd?: (text: string) => Promise<boolean>;
-  onEdit?: (id: string, text: string) => Promise<boolean>;
+  /** Resolves true when saved (the input then clears). Without it there is no input (Storybook). The text may be empty when there are files. */
+  onAdd?: (text: string, files: AttachmentInfo[]) => Promise<boolean>;
+  /** `files` is given only when the attachments changed (it then replaces them). */
+  onEdit?: (id: string, text: string, files?: AttachmentInfo[]) => Promise<boolean>;
   onDelete?: (id: string) => void;
+  /** Stores picked, pasted or dropped files (shrunk first) and resolves the stored ones. Without it there is no clip button. */
+  onAttach?: (files: File[]) => Promise<AttachmentInfo[]>;
+  /** Stories: files waiting above the input. */
+  initialPending?: AttachmentInfo[];
   /** Stories: this comment starts in edit mode. */
   initialEditId?: string;
 }) {
   const [draft, setDraft] = useState("");
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(() => {
+  const [pending, setPending] = useState<AttachmentInfo[]>(initialPending ?? []);
+  const [uploading, setUploading] = useState(0);
+  const [editing, setEditing] = useState<{ id: string; text: string; files: AttachmentInfo[] } | null>(() => {
     const c = comments.find((x) => x.id === initialEditId);
-    return c ? { id: c.id, text: c.text } : null;
+    return c ? { id: c.id, text: c.text, files: c.files ?? [] } : null;
   });
+  // Files are stored as soon as they are picked; the comment only points at them.
+  // An edit's files go to the comment that was being edited when they were picked (not one opened since).
+  const attach = (files: File[], into: "pending" | "editing") => {
+    if (!onAttach || files.length === 0) return;
+    const editId = editing?.id;
+    setUploading((n) => n + 1);
+    void onAttach(files)
+      .then((stored) => {
+        if (into === "pending") setPending((cur) => [...cur, ...stored]);
+        else setEditing((cur) => (cur && cur.id === editId ? { ...cur, files: [...cur.files, ...stored] } : cur));
+      })
+      .finally(() => setUploading((n) => n - 1));
+  };
+  // One send at a time (a second Enter before the first is saved would post the comment twice). Files added while
+  // it is being saved stay for the next comment.
+  const sending = useRef(false);
   const send = () => {
     const text = draft.trim();
-    if (!text || !onAdd) return;
-    void onAdd(text).then((ok) => ok && setDraft(""));
+    if ((!text && pending.length === 0) || !onAdd || uploading > 0 || sending.current) return;
+    const sent = pending;
+    sending.current = true;
+    void onAdd(text, sent)
+      .then((ok) => {
+        if (!ok) return;
+        setDraft("");
+        setPending((cur) => cur.filter((f) => !sent.includes(f)));
+      })
+      .finally(() => {
+        sending.current = false;
+      });
   };
   const saveEdit = () => {
-    if (!editing || !onEdit) return;
+    if (!editing || !onEdit || uploading > 0) return;
     const text = editing.text.trim();
-    if (!text) return;
-    void onEdit(editing.id, text).then((ok) => ok && setEditing(null));
+    if (!text && editing.files.length === 0) return;
+    const before = comments.find((c) => c.id === editing.id)?.files ?? [];
+    void onEdit(editing.id, text, sameFiles(before, editing.files) ? undefined : editing.files).then((ok) => ok && setEditing(null));
   };
+  const composerDrop = useFileDrop((files) => attach(files, "pending"));
+  const editDrop = useFileDrop((files) => attach(files, "editing"));
+  const picker = useRef<HTMLInputElement>(null);
+  const editPicker = useRef<HTMLInputElement>(null);
+  const pickInput = (ref: React.RefObject<HTMLInputElement | null>, into: "pending" | "editing") => (
+    <input
+      ref={ref}
+      type="file"
+      multiple
+      hidden
+      aria-label="ファイルを選ぶ"
+      onChange={(e) => {
+        attach(Array.from(e.target.files ?? []), into);
+        e.target.value = "";
+      }}
+    />
+  );
   if (comments.length === 0 && !onAdd) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
@@ -98,7 +156,7 @@ export function CommentsSection({
                 </span>
                 {mine && onEdit && onDelete && editing?.id !== c.id && (
                   <span className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" style={{ display: "inline-flex", gap: "var(--space-2)" }}>
-                    <button type="button" style={linkButton} onClick={() => setEditing({ id: c.id, text: c.text })}>
+                    <button type="button" style={linkButton} onClick={() => setEditing({ id: c.id, text: c.text, files: c.files ?? [] })}>
                       編集
                     </button>
                     <button
@@ -116,13 +174,15 @@ export function CommentsSection({
                 )}
               </div>
               {editing?.id === c.id ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div {...editDrop.props} style={{ display: "flex", flexDirection: "column", gap: 4, outline: editDrop.over ? "2px dashed var(--color-accent)" : undefined, outlineOffset: 2, borderRadius: 8 }}>
+                  <AttachmentList files={editing.files} alwaysRemove onRemove={(i) => setEditing({ ...editing, files: editing.files.filter((_, j) => j !== i) })} />
                   <textarea
                     aria-label="コメントを編集"
                     autoFocus
                     rows={2}
                     value={editing.text}
-                    onChange={(e) => setEditing({ id: c.id, text: e.target.value })}
+                    onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                    onPaste={(e) => pasteFiles(e, (f) => attach(f, "editing"))}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
                         e.preventDefault();
@@ -135,6 +195,14 @@ export function CommentsSection({
                     style={field}
                   />
                   <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                    {onAttach && (
+                      <>
+                        {pickInput(editPicker, "editing")}
+                        <button type="button" style={linkButton} onClick={() => editPicker.current?.click()}>
+                          添付
+                        </button>
+                      </>
+                    )}
                     <button type="button" style={linkButton} onClick={() => setEditing(null)}>
                       キャンセル
                     </button>
@@ -144,28 +212,48 @@ export function CommentsSection({
                   </div>
                 </div>
               ) : (
-                <span style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{c.text}</span>
+                <>
+                  {c.text && <span style={{ fontSize: 13, lineHeight: "19px", color: "var(--color-text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{c.text}</span>}
+                  <AttachmentList files={c.files ?? []} />
+                </>
               )}
             </div>
           </div>
         );
       })}
       {onAdd && (
-        <textarea
-          aria-label="コメント"
-          autoFocus={autoFocusInput}
-          placeholder="コメント"
-          rows={2}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          style={field}
-        />
+        <div
+          {...composerDrop.props}
+          data-drop-zone="composer"
+          style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", outline: composerDrop.over ? "2px dashed var(--color-accent)" : undefined, outlineOffset: 2, borderRadius: 8 }}
+        >
+          <AttachmentList files={pending} alwaysRemove onRemove={(i) => setPending((cur) => cur.filter((_, j) => j !== i))} />
+          <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "flex-end" }}>
+            <textarea
+              aria-label="コメント"
+              autoFocus={autoFocusInput}
+              placeholder="コメント"
+              rows={2}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onPaste={(e) => pasteFiles(e, (f) => attach(f, "pending"))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              style={{ ...field, flex: 1, minWidth: 0 }}
+            />
+            {onAttach && (
+              <>
+                {pickInput(picker, "pending")}
+                <Button variant="icon" icon={Paperclip} ariaLabel="ファイルを添付" onClick={() => picker.current?.click()} />
+              </>
+            )}
+          </div>
+          {uploading > 0 && <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>添付を準備しています…</span>}
+        </div>
       )}
     </div>
   );

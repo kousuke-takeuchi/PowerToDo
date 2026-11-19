@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Network
+import QuickLook
 import SwiftRs
 import Tauri
 import UIKit
@@ -19,10 +20,25 @@ private struct AuthReply: Encodable {
   let url: String
 }
 
+private struct PreviewArgs: Decodable {
+  let path: String
+}
+
+/// QLPreviewController keeps its data source weakly: the plugin holds this one while the preview is up.
+private final class PreviewSource: NSObject, QLPreviewControllerDataSource {
+  let url: URL
+  init(url: URL) { self.url = url }
+  func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+  func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+    return url as NSURL
+  }
+}
+
 class PowerToDoIosPlugin: Plugin, ASWebAuthenticationPresentationContextProviding {
   private var monitor: NWPathMonitor?
   private let monitorQueue = DispatchQueue(label: "app.powertodo.path-monitor")
   private var session: ASWebAuthenticationSession?
+  private var previewSource: PreviewSource?
 
   /// Starts the path monitor (once). Called after the Rust side registered its `pathChanged`
   /// listener, so the first report (the current state) reaches it.
@@ -83,6 +99,36 @@ class PowerToDoIosPlugin: Plugin, ASWebAuthenticationPresentationContextProvidin
         self.session = nil
         invoke.reject("could not show the login sheet")
       }
+    }
+  }
+
+  /// Shows the file at `path` in the system preview (Quick Look: pictures, PDF, Office files, text), whose share
+  /// button saves it to Files or hands it to another app. Resolves as soon as the preview is asked for: the Rust side
+  /// waits for this call, and present() never calls back when it cannot present.
+  @objc func previewFile(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(PreviewArgs.self)
+    guard FileManager.default.fileExists(atPath: args.path) else {
+      invoke.reject("file not found")
+      return
+    }
+    DispatchQueue.main.async {
+      var top = self.manager.viewController
+      while let presented = top?.presentedViewController { top = presented }
+      guard let host = top else {
+        invoke.reject("no screen to show the preview on")
+        return
+      }
+      // A preview already up (a second tap on share) or a screen still sliding in or out: present() would refuse.
+      if host is QLPreviewController || host.isBeingPresented || host.isBeingDismissed {
+        invoke.resolve()
+        return
+      }
+      let source = PreviewSource(url: URL(fileURLWithPath: args.path))
+      let controller = QLPreviewController()
+      controller.dataSource = source
+      self.previewSource = source
+      host.present(controller, animated: true)
+      invoke.resolve()
     }
   }
 

@@ -1,11 +1,12 @@
 import type React from "react";
 import { useState } from "react";
 import { isImeKey } from "../app/keys";
+import { formatBytes } from "../app/attachments/list";
 import { formatSynced, isGoogleLoggedIn, isNasConnected, targetName } from "../app/syncText";
 import { Button } from "../components/Button";
 import { Segmented } from "../components/Segmented";
 import type { SyncState } from "../components/SyncStatus";
-import type { SyncBackend, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
+import type { AttachmentUsage, SyncBackend, SyncRecoverMode, SyncSettingsDto, SyncStatusDto, TailnetStatus } from "../types/model";
 import { Desc, Row, Section } from "./SettingsPanes";
 import { NarrowContext } from "../components/NarrowContext";
 import { NasFields, hintStyle } from "./SyncFields";
@@ -57,6 +58,8 @@ export type SyncPaneProps = TailnetActions & {
   checkError?: string | null;
   /** 「戻す」の失敗。 */
   recoverError?: string | null;
+  /** 添付の使用量 (spec 添付 §8)。null / 未指定なら出さない。 */
+  attachmentUsage?: AttachmentUsage | null;
   onChangeBackend?: (b: SyncBackend) => void;
   /** 成功したら true。パスワードは呼び出し側に残さず、成功したら入力欄も消す。 */
   onCheck?: (url: string, user: string, password: string) => Promise<boolean>;
@@ -542,6 +545,7 @@ export function SyncPane(props: SyncPaneProps) {
     checkError,
     recoverError,
     googleNote,
+    attachmentUsage,
     onChangeBackend,
     onCheck,
     onDisconnect,
@@ -654,6 +658,11 @@ export function SyncPane(props: SyncPaneProps) {
         <SuspectPanel side={status.suspect} target={targetName(settings.backend)} busy={!!busy} error={recoverError} onRecover={onRecover} />
       )}
       {body}
+      {attachmentUsage && (
+        <Section label="添付">
+          <Desc>{`添付: ${attachmentUsage.count} 件、合計 ${formatBytes(attachmentUsage.bytes)}`}</Desc>
+        </Section>
+      )}
       {error && settings?.backend !== "nas" && settings?.backend !== "gdrive" && (
         <div role="alert" style={dangerStyle}>
           {error}

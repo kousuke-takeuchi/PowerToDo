@@ -117,6 +117,16 @@ pub fn is_comment_key(name: &str) -> bool {
         .is_some_and(|leaf| crate::store::comments::parse_file_name(leaf).is_some())
 }
 
+/// The 30 s check lists the attachment blobs under this prefix plus the file name (spec attachments
+/// §7). They have no records: a name is its content, so one side having it is all there is to know.
+pub const ATTACHMENT_KEY_PREFIX: &str = "_attachments/";
+
+/// `true` for `_attachments/<sha256>[.<ext>]`.
+pub fn is_attachment_key(name: &str) -> bool {
+    name.strip_prefix(ATTACHMENT_KEY_PREFIX)
+        .is_some_and(|leaf| crate::store::attachments::parse_file_name(leaf).is_some())
+}
+
 /// The name of the conflict copy of `name`: `受信トレイ (競合 2026-10-16 0930).xlsx`.
 pub fn conflict_name(name: &str, at: NaiveDateTime) -> String {
     let stem = match name.len().checked_sub(5) {

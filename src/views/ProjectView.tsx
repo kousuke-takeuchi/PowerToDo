@@ -7,6 +7,7 @@ import { TaskRow, type TaskRowProps } from "../components/TaskRow";
 import { Button } from "../components/Button";
 import { Collapse, useMotionTiming } from "../motion";
 import { CommentCounts } from "../app/useComments";
+import { AttachmentCounts } from "../app/attachments/env";
 import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
 import type { InvalidRow, PlatformInfo, Section, Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
@@ -300,6 +301,7 @@ export function ProjectView({
   const { reduced } = useMotionTiming();
 
   const commentCounts = useContext(CommentCounts);
+  const attachmentCounts = useContext(AttachmentCounts);
   const rowCtx = useContext(RowActions);
   const drag = useContext(DragCtx);
   const mine = tasks.filter((t) => t.project === project);
@@ -388,6 +390,7 @@ export function ProjectView({
       recurring: onToggleDone && t.rrule ? true : undefined,
       labels: t.labels,
       commentCount: commentCounts[`${t.project}/${t.no}`],
+      attachmentCount: attachmentCounts[`${t.project}/${t.no}`],
       indent,
       showActions: showActions || hoverNo === t.no,
       showHandle: hoverNo === t.no,

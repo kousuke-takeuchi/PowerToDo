@@ -87,6 +87,18 @@ pub fn run() {
     // Start at login (resident sync spec 2): driven from `commands::autostart`.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
+    // The window opens at the size and place it had when the app last quit. Visibility is left out:
+    // the tray and autostart decide whether it shows.
+    #[cfg(desktop)]
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::new()
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::SIZE
+                    | tauri_plugin_window_state::StateFlags::POSITION
+                    | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+            )
+            .build(),
+    );
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {
@@ -150,6 +162,16 @@ pub fn run() {
             commands::comments::add_comment,
             commands::comments::edit_comment,
             commands::comments::delete_comment,
+            commands::comments::list_note_files,
+            commands::comments::attachment_counts,
+            commands::comments::attach_to_note,
+            commands::comments::detach_from_note,
+            commands::attachments::add_attachment,
+            commands::attachments::read_attachment,
+            commands::attachments::open_attachment,
+            commands::attachments::reveal_attachment,
+            commands::attachments::save_attachment_as,
+            commands::attachments::attachment_usage,
             commands::move_task,
             commands::reorder_tasks,
             commands::move_task_within,

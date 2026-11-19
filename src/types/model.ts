@@ -9,7 +9,13 @@ export interface Label { name: string; color: string; order: number; }
 export interface Section { project: string; name: string; order: number; collapsed?: boolean; }
 export interface SyncInfo { state: SyncState; lastSyncedAt?: string; target: "google" | "nas" | "none"; account?: string; }
 /** One comment of a task (spec ① §3). `at` is RFC 3339 with offset; `edited` after an edit. */
-export interface Comment { id: string; at: string; author: string; text: string; edited: boolean; }
+export interface Comment { id: string; at: string; author: string; text: string; edited: boolean; files: AttachmentInfo[]; }
+/** One attachment (spec attachments §3). `hash` + `ext` name the blob in `_attachments/`; `w`/`h` for images only. */
+export interface AttachmentInfo { hash: string; ext: string; name: string; type: string; size: number; w?: number; h?: number; }
+/** A file of the description; `id` is what `detachFromNote` takes. */
+export interface NoteFile { id: string; at: string; author: string; file: AttachmentInfo; }
+/** Settings, spec §8: blobs on this device. */
+export interface AttachmentUsage { count: number; bytes: number; }
 
 // ---- Rust command DTOs (src-tauri: commands/mod.rs, store/project_store.rs, domain/*) ----
 

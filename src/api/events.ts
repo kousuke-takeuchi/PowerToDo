@@ -124,3 +124,8 @@ export function onUpdateProgress(cb: (p: UpdateProgress) => void, onReady?: () =
 export function onCommentsChanged(cb: (files: string[]) => void): () => void {
   return subscribe<{ files: string[] }>("comments-changed", (p) => cb(p.files));
 }
+
+/** `attachments-changed`: blob file names (`<sha256>.<ext>`) a sync wrote here; frames waiting for them can read again. */
+export function onAttachmentsChanged(cb: (files: string[]) => void): () => void {
+  return subscribe<{ files: string[] }>("attachments-changed", (p) => cb(p.files));
+}

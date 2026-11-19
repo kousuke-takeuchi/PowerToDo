@@ -4276,6 +4276,7 @@ mod tests {
             at: "2026-10-25T21:00:00+09:00".into(),
             author: "たろう".into(),
             text: Some("メモ".into()),
+            files: None,
         };
         crate::store::comments::append(&Paths::new(e.data()), project, no, &line).unwrap();
     }

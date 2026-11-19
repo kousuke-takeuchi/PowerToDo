@@ -26,8 +26,8 @@ use super::base::BaseStore;
 use super::merge::{Merged, merge_files};
 use super::state::{BackendKind, FileRecord, SyncState};
 use super::{
-    Action, COMMENT_KEY_PREFIX, LocalFile, PlanMode, Side, conflict_name, decide, fold,
-    is_comment_key, is_sync_target, plan, sha256_hex,
+    ATTACHMENT_KEY_PREFIX, Action, COMMENT_KEY_PREFIX, LocalFile, PlanMode, Side, conflict_name,
+    decide, fold, is_attachment_key, is_comment_key, is_sync_target, plan, sha256_hex,
 };
 use crate::error::AppError;
 use crate::store::common_book::COMMON_FILE;
@@ -65,7 +65,9 @@ pub const REMOTE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
     files
         .iter()
-        .filter(|f| is_sync_target(&f.name) || is_comment_key(&f.name))
+        .filter(|f| {
+            is_sync_target(&f.name) || is_comment_key(&f.name) || is_attachment_key(&f.name)
+        })
         .map(|f| (f.name.clone(), f.version.clone()))
         .collect()
 }
@@ -79,13 +81,24 @@ fn with_comments(mut files: Vec<RemoteFile>, comments: &[RemoteFile]) -> Vec<Rem
     files
 }
 
+/// `files` plus the attachment blobs, named `_attachments/<leaf>` like the keys the check lists.
+fn with_attachments(mut files: Vec<RemoteFile>, blobs: &[RemoteFile]) -> Vec<RemoteFile> {
+    files.extend(blobs.iter().map(|f| RemoteFile {
+        name: format!("{ATTACHMENT_KEY_PREFIX}{}", f.name),
+        ..f.clone()
+    }));
+    files
+}
+
 /// The target's state as far as the sync cares: the sync targets' names and versions, in name
 /// order, hashed. Files that are not sync targets (conflict copies, temporaries) are left out,
 /// and so are the ids and times (a version changes whenever the content does).
 pub fn remote_fingerprint(files: &[RemoteFile]) -> String {
     let mut pairs: Vec<(&str, &str)> = files
         .iter()
-        .filter(|f| is_sync_target(&f.name) || is_comment_key(&f.name))
+        .filter(|f| {
+            is_sync_target(&f.name) || is_comment_key(&f.name) || is_attachment_key(&f.name)
+        })
         .map(|f| (f.name.as_str(), f.version.as_str()))
         .collect();
     pairs.sort_unstable();
@@ -219,6 +232,8 @@ pub trait SyncHost: Send + Sync {
 
     /// Comment files (leaf names) a run wrote here: the screens showing them read them again.
     fn comments_changed(&self, _files: &[String]) {}
+    /// Blobs (leaf names) a run wrote here: a record that waited for its file can show it now.
+    fn attachments_changed(&self, _files: &[String]) {}
     /// Right before a normal run: bring the app up to date with the disk and the network (iOS:
     /// external edits, the proxy). `false` skips the run; the request that made it due is spent
     /// (whatever changed asks again). Blocking; the loop calls it off the async threads.
@@ -263,6 +278,8 @@ pub struct SyncReport {
     pub merged: Vec<String>,
     /// Comment files (leaf names) this run uploaded, downloaded, merged or archived (spec ① §3.4).
     pub comments: Vec<String>,
+    /// Attachment blobs (leaf names) this run copied to the target or from it (spec attachments §7).
+    pub attachments: Vec<String>,
     /// Left alone from the start: unsaved, held, being saved or unreadable.
     pub skipped: Vec<String>,
     /// Changed (or got unsaved edits) while the run was going; tried again next time.
@@ -931,10 +948,16 @@ impl SyncEngine {
         // Comments that cannot be listed leave them out, as the run does (its fingerprint then
         // has the workbooks alone too).
         let listed = match backend.list().await {
-            Ok(files) => Ok(match backend.list_comments().await {
-                Ok(c) => with_comments(files, c.as_deref().unwrap_or_default()),
-                Err(_) => files,
-            }),
+            Ok(files) => {
+                let files = match backend.list_comments().await {
+                    Ok(c) => with_comments(files, c.as_deref().unwrap_or_default()),
+                    Err(_) => files,
+                };
+                Ok(match backend.list_attachments().await {
+                    Ok(a) => with_attachments(files, &a),
+                    Err(_) => files,
+                })
+            }
             Err(e) => Err(e),
         };
         let changed = {
@@ -1113,9 +1136,23 @@ impl SyncEngine {
                 None
             }
         };
+        let remote_attachments = match target.backend.list_attachments().await {
+            Ok(a) => Some(a),
+            Err(e) => {
+                report.failed.push((
+                    attachments_dir_label(),
+                    failure_text(&attachments_dir_label(), e),
+                ));
+                None
+            }
+        };
         let seen = match &remote_comments {
             Some(c) => with_comments(remote.clone(), c.as_deref().unwrap_or_default()),
             None => remote.clone(),
+        };
+        let seen = match &remote_attachments {
+            Some(a) => with_attachments(seen, a),
+            None => seen,
         };
         self.see_remote(generation, &seen);
         let listed = versions(&seen);
@@ -1156,6 +1193,7 @@ impl SyncEngine {
         report.skipped = skip.iter().filter(|n| is_sync_target(n)).cloned().collect();
         let records = state.files.clone();
         let comments_dir = data_dir.join(crate::store::comments::DIR);
+        let attachments_dir = data_dir.join(crate::store::attachments::DIR);
         let mut run = Run {
             engine: self,
             host,
@@ -1190,6 +1228,18 @@ impl SyncEngine {
             Err(Stop::Changed) => {
                 // The new target / folder publishes its own status.
                 report.outcome = RunOutcome::Interrupted;
+                return report;
+            }
+        }
+
+        // (6a) The attachment blobs (spec attachments §7): before the comment files, so a record
+        // that arrives finds its file already here.
+        if let Some(ra) = remote_attachments {
+            if let Err(e) = self
+                .sync_attachments(host, &target.backend, &attachments_dir, &mut report, ra)
+                .await
+            {
+                report.outcome = self.backend_failed(host, generation, target.kind, &e);
                 return report;
             }
         }
@@ -1245,11 +1295,19 @@ impl SyncEngine {
             || !report.merged.is_empty()
             || !report.archived_remote.is_empty()
             || !report.conflicts.is_empty()
-            || !report.comments.is_empty())
+            || !report.comments.is_empty()
+            || !report.attachments.is_empty())
             && let Ok(files) = target.backend.list().await
             && let Ok(comment_files) = target.backend.list_comments().await
+            && let Ok(blobs) = target.backend.list_attachments().await
         {
             let files = with_comments(files, comment_files.as_deref().unwrap_or_default());
+            let files = with_attachments(files, &blobs);
+            let blob_keys: Vec<String> = report
+                .attachments
+                .iter()
+                .map(|n| format!("{ATTACHMENT_KEY_PREFIX}{n}"))
+                .collect();
             let comment_keys: Vec<String> = report
                 .comments
                 .iter()
@@ -1261,6 +1319,7 @@ impl SyncEngine {
                 .chain(&report.merged)
                 .chain(&report.archived_remote)
                 .chain(&comment_keys)
+                .chain(&blob_keys)
                 .map(String::as_str)
                 .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
                 .collect();
@@ -1346,6 +1405,32 @@ fn comments_dir_label() -> String {
     format!("{}/", crate::store::comments::DIR)
 }
 
+/// How the attachments folder is named in messages.
+fn attachments_dir_label() -> String {
+    format!("{}/", crate::store::attachments::DIR)
+}
+
+/// The blob names in `dir` (`_attachments/`); a missing folder has none. Temporary files and anything
+/// else that is not a blob name are left out.
+fn list_attachment_names(dir: &Path) -> std::io::Result<BTreeSet<String>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(e) => return Err(e),
+    };
+    let mut names = BTreeSet::new();
+    for entry in entries {
+        let entry = entry?;
+        if let Ok(name) = entry.file_name().into_string()
+            && crate::store::attachments::parse_file_name(&name).is_some()
+            && entry.metadata().is_ok_and(|m| m.is_file())
+        {
+            names.insert(name);
+        }
+    }
+    Ok(names)
+}
+
 /// The comment files in `dir` (`_comments/`), leaf names; a missing folder has none. Unreadable
 /// files are left out (they come back next time).
 fn list_comment_files(dir: &Path) -> std::io::Result<Vec<LocalFile>> {
@@ -1382,6 +1467,98 @@ fn list_comment_files(dir: &Path) -> std::io::Result<Vec<LocalFile>> {
 }
 
 impl SyncEngine {
+    /// The attachments pass (spec attachments §7): what only one side has goes to the other, both ways.
+    /// Nothing is compared or merged (a name is its content) and a deletion is never passed on. A
+    /// download is checked against its name's SHA-256 before it is written, and a local file is
+    /// before it is sent; one that does not match is reported and left. Files are held in memory
+    /// whole (1 file is 50 MB at most). A file that fails is reported and tried again next run; refused
+    /// credentials or no network stop the run.
+    async fn sync_attachments(
+        &self,
+        host: &dyn SyncHost,
+        backend: &Arc<dyn StorageBackend>,
+        dir: &Path,
+        report: &mut SyncReport,
+        remote: Vec<RemoteFile>,
+    ) -> Result<(), BackendError> {
+        let local = match list_attachment_names(dir) {
+            Ok(l) => l,
+            Err(e) => {
+                report.failed.push((
+                    attachments_dir_label(),
+                    failure_text(&attachments_dir_label(), e),
+                ));
+                return Ok(());
+            }
+        };
+        // Only blob names: the name becomes a local path below, so nothing a backend lists (a
+        // stray or hostile name on the target) may reach `dir.join` unchecked.
+        let remotes: BTreeMap<&str, &RemoteFile> = remote
+            .iter()
+            .filter(|f| crate::store::attachments::parse_file_name(&f.name).is_some())
+            .map(|f| (f.name.as_str(), f))
+            .collect();
+        let mut received = Vec::new();
+        let names: BTreeSet<&str> = local
+            .iter()
+            .map(String::as_str)
+            .chain(remotes.keys().copied())
+            .collect();
+        for name in names {
+            let has_local = local.contains(name);
+            let r = remotes.get(name).copied();
+            let hash = name.split('.').next().unwrap_or_default();
+            let result: Result<bool, BackendError> = async {
+                match (has_local, r) {
+                    (true, Some(_)) | (false, None) => Ok(false),
+                    (true, None) => {
+                        let bytes = std::fs::read(dir.join(name))
+                            .map_err(|e| BackendError::Other(e.to_string()))?;
+                        if sha256_hex(&bytes) != hash {
+                            return Err(BackendError::Other(
+                                "この PC の添付が名前と合いません (壊れている可能性があります)"
+                                    .into(),
+                            ));
+                        }
+                        match backend.upload_attachment(name, bytes).await {
+                            // Another PC put it there meanwhile: the same content.
+                            Ok(_) | Err(BackendError::Precondition) => Ok(true),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    (false, Some(r)) => {
+                        let bytes = backend.download(r).await?;
+                        if sha256_hex(&bytes) != hash {
+                            return Err(BackendError::Other(
+                                "同期先の添付が名前と合いません (壊れている可能性があります)"
+                                    .into(),
+                            ));
+                        }
+                        std::fs::create_dir_all(dir)
+                            .map_err(|e| BackendError::Other(e.to_string()))?;
+                        crate::store::paths::write_atomic(&dir.join(name), &bytes)
+                            .map_err(|e| BackendError::Other(e.to_string()))?;
+                        received.push(name.to_string());
+                        Ok(true)
+                    }
+                }
+            }
+            .await;
+            match result {
+                Ok(false) => {}
+                Ok(true) => report.attachments.push(name.to_string()),
+                Err(e @ (BackendError::Auth | BackendError::Offline(_))) => return Err(e),
+                Err(e) => report
+                    .failed
+                    .push((name.to_string(), failure_text(name, e))),
+            }
+        }
+        if !received.is_empty() {
+            host.attachments_changed(&received);
+        }
+        Ok(())
+    }
+
     /// The comments pass (spec ① §3.4): each comment file is decided like a workbook (`decide`),
     /// but both sides' changes are merged by line id (no conflict copy, no base), and nothing goes
     /// through the store. Records live in `state` under `_comments/<leaf>`. A file that fails is
@@ -2505,6 +2682,7 @@ mod tests {
             && r.clashes.is_empty()
             && r.merged.is_empty()
             && r.comments.is_empty()
+            && r.attachments.is_empty()
     }
 
     /// A with a project 仕事, synced; B joined (its fresh inbox and common workbook became
@@ -2712,6 +2890,7 @@ mod tests {
             at: "2026-10-25T21:00:00+09:00".into(),
             author: "たろう".into(),
             text: Some(text.into()),
+            files: None,
         };
         append(&Paths::new(&pc.data), project, no, &line).unwrap();
     }
@@ -2812,6 +2991,221 @@ mod tests {
         assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
     }
 
+    // ---- attachments (spec attachments §7) ----
+
+    /// Stores `bytes` as a blob on `pc` and returns its file name.
+    fn attach(pc: &Pc, bytes: &[u8], name: &str) -> String {
+        let info =
+            crate::store::attachments::add(&Paths::new(&pc.data), bytes, name, "", None).unwrap();
+        crate::store::attachments::file_name(&info.hash, &info.ext)
+    }
+
+    fn blob(pc: &Pc, file: &str) -> Option<Vec<u8>> {
+        fs::read(pc.data.join(crate::store::attachments::DIR).join(file)).ok()
+    }
+
+    #[tokio::test]
+    async fn a_blob_is_copied_to_the_other_side_and_back() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let from_a = attach(&a, b"from a", "a.png");
+        let r = a.sync().await;
+        assert_eq!(r.attachments, [from_a.clone()], "{r:?}");
+        assert_eq!(remote.attachment(&from_a).unwrap(), b"from a");
+        let from_b = attach(&b, b"from b", "b.pdf");
+        let r = b.sync().await;
+        assert_eq!(
+            sorted(r.attachments.clone()),
+            sorted(vec![from_a.clone(), from_b.clone()])
+        );
+        assert_eq!(blob(&b, &from_a).unwrap(), b"from a");
+        a.sync().await;
+        assert_eq!(blob(&a, &from_b).unwrap(), b"from b");
+        assert!(idle(&a.sync().await) && idle(&b.sync().await));
+    }
+
+    #[tokio::test]
+    async fn a_deleted_blob_is_not_passed_on() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let f = attach(&a, b"x", "a.png");
+        a.sync().await;
+        b.sync().await;
+        fs::remove_file(a.data.join(crate::store::attachments::DIR).join(&f)).unwrap();
+        a.sync().await;
+        assert_eq!(blob(&b, &f).unwrap(), b"x");
+        assert_eq!(blob(&a, &f).unwrap(), b"x", "it comes back from the target");
+        assert!(remote.attachment(&f).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_blob_that_does_not_match_its_name_is_refused() {
+        let remote = backend();
+        let (_a, b) = two_pcs(&remote).await;
+        let name = format!("{}.png", sha256_hex(b"right"));
+        remote.put_attachment(&name, b"wrong");
+        let r = b.sync().await;
+        assert!(r.failed.iter().any(|(n, _)| *n == name), "{r:?}");
+        assert!(r.attachments.is_empty());
+        assert!(blob(&b, &name).is_none());
+        let left: Vec<_> = fs::read_dir(b.data.join(crate::store::attachments::DIR))
+            .map(|d| d.flatten().collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "no temporary file either");
+    }
+
+    #[tokio::test]
+    async fn a_remote_name_that_is_not_a_blob_name_is_left_alone() {
+        let remote = backend();
+        let (_a, b) = two_pcs(&remote).await;
+        let content = b"evil";
+        let name = format!("{}.x/../../escape", sha256_hex(content));
+        remote.put_attachment(&name, content);
+        remote.put_attachment("notes.txt", b"n");
+        let r = b.sync().await;
+        assert!(r.attachments.is_empty() && r.failed.is_empty(), "{r:?}");
+        assert!(!b.data.join("escape").exists());
+        assert!(!b.data.join(crate::store::attachments::DIR).exists());
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_local_blob_is_not_uploaded() {
+        let remote = backend();
+        let (a, _b) = two_pcs(&remote).await;
+        let dir = a.data.join(crate::store::attachments::DIR);
+        fs::create_dir_all(&dir).unwrap();
+        let name = format!("{}.png", sha256_hex(b"right"));
+        fs::write(dir.join(&name), b"wrong").unwrap();
+        let r = a.sync().await;
+        assert!(r.failed.iter().any(|(n, _)| *n == name), "{r:?}");
+        assert!(remote.attachment_names().is_empty());
+    }
+
+    /// Records what the run sends, in order.
+    struct Logged {
+        inner: Arc<MemoryBackend>,
+        log: std::sync::Mutex<Vec<&'static str>>,
+        fail_blobs: bool,
+    }
+
+    impl StorageBackend for Logged {
+        fn list(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.inner.list()
+        }
+        fn download<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, Vec<u8>> {
+            self.inner.download(file)
+        }
+        fn upload<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.inner.upload(name, existing, bytes)
+        }
+        fn move_to_archive<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+            self.inner.move_to_archive(file)
+        }
+        fn list_comments(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+            self.inner.list_comments()
+        }
+        fn upload_comment<'a>(
+            &'a self,
+            name: &'a str,
+            existing: Option<&'a RemoteFile>,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.log.lock().unwrap().push("comment");
+            self.inner.upload_comment(name, existing, bytes)
+        }
+        fn list_attachments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
+            self.inner.list_attachments()
+        }
+        fn upload_attachment<'a>(
+            &'a self,
+            name: &'a str,
+            bytes: Vec<u8>,
+        ) -> BoxFut<'a, RemoteFile> {
+            self.log.lock().unwrap().push("blob");
+            if self.fail_blobs {
+                // A write that broke half way: nothing is left on the target.
+                return Box::pin(async { Err(BackendError::Other("broken".into())) });
+            }
+            self.inner.upload_attachment(name, bytes)
+        }
+    }
+
+    fn logged(remote: &Arc<MemoryBackend>, fail_blobs: bool) -> Arc<Logged> {
+        Arc::new(Logged {
+            inner: remote.clone(),
+            log: Default::default(),
+            fail_blobs,
+        })
+    }
+
+    #[tokio::test]
+    async fn blobs_go_before_the_records_that_name_them() {
+        let remote = backend();
+        let l = logged(&remote, false);
+        let a = Pc::with_backend(l.clone(), None);
+        a.add(INBOX, "牛乳を買う");
+        say(&a, INBOX, 1, "x");
+        attach(&a, b"p", "a.png");
+        attach(&a, b"q", "b.png");
+        a.sync().await;
+        assert_eq!(*l.log.lock().unwrap(), ["blob", "blob", "comment"]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_blob_is_reported_leaves_nothing_and_is_tried_again() {
+        let remote = backend();
+        let a = Pc::with_backend(logged(&remote, true), None);
+        a.add(INBOX, "牛乳を買う");
+        let f = attach(&a, b"p", "a.png");
+        let r = a.sync().await;
+        assert!(r.failed.iter().any(|(n, _)| *n == f), "{r:?}");
+        assert!(remote.attachment_names().is_empty());
+        // Next run, the target working again: it goes.
+        a.engine
+            .set_backend(Some(remote.clone()), BackendKind::Nas, ROOT);
+        let r = a.sync().await;
+        assert!(r.failed.is_empty(), "{r:?}");
+        assert_eq!(remote.attachment_names(), [f]);
+    }
+
+    #[tokio::test]
+    async fn remote_check_sees_a_new_blob() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        settled(&a).await;
+        a.engine.check_remote().await;
+        settled(&a).await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+        attach(&b, b"x", "a.png");
+        b.sync().await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    #[test]
+    fn the_fingerprint_covers_blobs_and_not_strangers() {
+        let f = |name: &str, v: &str| RemoteFile {
+            id: name.into(),
+            name: name.into(),
+            version: v.into(),
+            modified: dt(NOW),
+            size: 1,
+        };
+        let blob = format!("{ATTACHMENT_KEY_PREFIX}{}.png", "a".repeat(64));
+        let base = remote_fingerprint(&[]);
+        let with = remote_fingerprint(&[f(&blob, "v1")]);
+        assert_ne!(base, with);
+        assert_ne!(with, remote_fingerprint(&[f(&blob, "v2")]));
+        assert_eq!(
+            base,
+            remote_fingerprint(&[f("_attachments/x.png.part-1", "v")])
+        );
+    }
+
     /// A backend whose next comment download (or upload) first appends a comment on this PC: the
     /// app writing one while the run is between reading the file and writing the new copy.
     struct AppendDuringDownload {
@@ -2830,6 +3224,7 @@ mod tests {
                 at: "2026-10-25T21:00:00+09:00".into(),
                 author: "たろう".into(),
                 text: Some(text.into()),
+                files: None,
             };
             crate::store::comments::append(&Paths::new(&data), "仕事", 1, &line).unwrap();
         }

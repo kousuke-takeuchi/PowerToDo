@@ -1,5 +1,5 @@
 import type React from "react";
-import { ChevronDown, ChevronRight, Hash, Inbox, ListTree, MessageSquare, Repeat } from "lucide-react";
+import { ChevronDown, ChevronRight, Hash, Inbox, ListTree, MessageSquare, Paperclip, Repeat } from "lucide-react";
 import { Checkbox } from "./Checkbox";
 import { DateChip } from "./DateChip";
 import type { TaskRowProps } from "./TaskRow";
@@ -20,7 +20,7 @@ const meta: React.CSSProperties = {
 
 export function MobileTaskRow(p: TaskRowProps) {
   const sub = p.subtasks;
-  const hasMeta = !!(p.date || p.recurring || sub || p.commentCount || p.project);
+  const hasMeta = !!(p.date || p.recurring || sub || p.commentCount || p.attachmentCount || p.project);
   const twoOrMore = hasMeta || !!p.description;
   return (
     <div
@@ -81,6 +81,12 @@ export function MobileTaskRow(p: TaskRowProps) {
               <span style={meta} aria-label={`コメント ${p.commentCount} 件`}>
                 <MessageSquare size={12} aria-hidden />
                 {p.commentCount}
+              </span>
+            ) : null}
+            {p.attachmentCount ? (
+              <span style={meta} aria-label={`添付 ${p.attachmentCount} 件`}>
+                <Paperclip size={12} aria-hidden />
+                {p.attachmentCount}
               </span>
             ) : null}
             {p.project && (

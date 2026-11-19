@@ -42,3 +42,15 @@ test("complete_undo_of_a_recurring_task_reopens_then_restores", () => {
     { op: "update", project: "仕事", no: 3, patch: { due: "2026-10-13", dueTime: "09:00", reminders: ["-30m"], rrule: "FREQ=WEEKLY" } },
   ]);
 });
+
+test("run_undo_shows_its_text_and_runs_its_own_step", () => {
+  let ran = 0;
+  const u: MobileUndo = { kind: "run", text: "「見積.pdf」を外しました", run: () => void ran++ };
+  assert.equal(undoText(u), "「見積.pdf」を外しました");
+  const steps = undoSteps(u);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].op, "run");
+  if (steps[0].op === "run") steps[0].run();
+  assert.equal(ran, 1);
+  assert.equal(pushUndo(done("仕事", 1), u), u);
+});

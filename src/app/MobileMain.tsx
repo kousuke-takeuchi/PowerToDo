@@ -39,10 +39,12 @@ import { useSaveErrors } from "./useSaveStatus";
 import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { useSearch } from "./useSearch";
-import { useCommentCounts } from "./useComments";
+import { useCommentCounts, useDialogComments } from "./useComments";
 import { useSummaries } from "./useSummaries";
 import type { RowContext } from "../views/mobile/rowProps";
 import { useSync } from "./useSync";
+import { AttachmentEnvContext } from "./attachments/env";
+import { useAttachmentCounts, useAttachmentEnv, useNoteFiles } from "./useAttachments";
 import type { SyncConflicts } from "./useSyncConflicts";
 import { formatSynced, syncErrorText, targetName } from "./syncText";
 
@@ -83,12 +85,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const [qaReminderSheet, setQaReminderSheet] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>("granted");
 
-  const { summaries, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
+  const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
 
   const commentCounts = useCommentCounts(summaries.map((s) => s.name));
+  const attachmentCounts = useAttachmentCounts(summaries.map((s) => s.name));
   const rowContext = useMemo<Omit<RowContext, "today">>(
-    () => ({ inbox: app.inbox, colors: Object.fromEntries(summaries.map((s) => [s.name, s.color])), comments: commentCounts }),
-    [app.inbox, summaries, commentCounts],
+    () => ({ inbox: app.inbox, colors: Object.fromEntries(summaries.map((s) => [s.name, s.color])), comments: commentCounts, attachments: attachmentCounts }),
+    [app.inbox, summaries, commentCounts, attachmentCounts],
   );
 
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
@@ -197,6 +200,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       for (const s of undoSteps(u)) {
         if (s.op === "complete") await (onScreen(s.project) ? p.completeTask(s.no, false, true) : cross.setDone(s.project, s.no, false, true));
         else if (s.op === "update") await (onScreen(s.project) ? p.updateTask(s.no, s.patch) : api.updateTask(s.project, s.no, s.patch));
+        else if (s.op === "run") s.run();
         else await api.moveTask(s.project, s.no, s.toProject, s.toSection);
       }
     } catch (e) {
@@ -206,6 +210,10 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     refreshAll();
     void refreshSummaries();
   };
+  // The open task's comments and description files (spec 添付 §6). A file taken off a description can be put back from the toast.
+  const taskComments = useDialogComments(detail, showError);
+  const taskNote = useNoteFiles(detail, showError, (text, _action, run) => offer({ kind: "run", text, run }));
+  const attachmentEnv = useAttachmentEnv(!sync.status || sync.status.state === "syncing", showError);
   const offerDate = (entries: { project: string; no: number; due?: string; dueTime?: string }[], date: string | null) =>
     offer({ kind: "date", entries: entries.map((t) => ({ project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null } })), label: date ? (dateLabel(date, today)?.label ?? date) : null });
   const offerDone = (t: Task) => offer({ kind: "complete", entries: [completedOf(t)] });
@@ -536,6 +544,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       );
     }
     return (
+      <AttachmentEnvContext.Provider value={attachmentEnv}>
       <MobileTaskDetail
         key={`${detail.project}/${openTask.no}`}
         live
@@ -571,9 +580,20 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         }}
         labels={allLabels}
         onParseRecurrence={api.parseRecurrence}
+        comments={taskComments.comments}
+        commentsFailed={taskComments.failed}
+        me={displayName}
+        onAddComment={taskComments.add}
+        onEditComment={taskComments.edit}
+        onDeleteComment={taskComments.remove}
+        onAttachComment={taskNote.store}
+        noteFiles={taskNote.files}
+        onAttachNote={taskNote.attach}
+        onDetachNote={(id) => void taskNote.detach(id)}
         banner={banner}
         overlay={layers}
       />
+      </AttachmentEnvContext.Provider>
     );
   }
 
