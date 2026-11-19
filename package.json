@@ -12,7 +12,9 @@
     "build-storybook": "storybook build",
     "check:stories": "node scripts/check-stories.mjs",
     "test:web": "node --test 'src/**/*.test.ts'",
-    "build:tailnet": "node scripts/build-tailnet.mjs"
+    "build:tailnet": "node scripts/build-tailnet.mjs",
+    "test:docs": "node --test scripts/check-docs.test.mjs",
+    "capture:docs": "node scripts/capture-docs-screens.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
