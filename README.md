@@ -1,358 +1,68 @@
+<div align="center">
+
 # PowerToDo
 
-Excel (xlsx) をデータベースにした Todoist 風の ToDo アプリ。
-Windows / macOS / Ubuntu のデスクトップと、iOS / Android のモバイルで同じデータを扱う。
-データは Synology NAS (Tailscale 経由) か Google Drive で同期する。
+**Excel のファイルで動く、Todoist 風の ToDo アプリ。**
 
-- 1 プロジェクト = 1 xlsx ファイル (形式は [Qiita: エクセル七つ道具ではじめるシンプルなタスク管理](https://qiita.com/y-tetsu/items/c028737330fc47106fe8) 準拠 + 拡張列)
-- 技術: Tauri 2 (Rust コア) + React / TypeScript / Tailwind
-- 設計書: `docs/superpowers/specs/`
-- 調査メモ: `docs/research/`
-- デザイン: `design/opendesign/` (OpenDesign)
+[概要](docs/01-overview.md) | [クイックスタート](docs/02-quick-start.md) | [デスクトップ](docs/03-desktop.md) | [iPhone](docs/04-iphone.md) | [同期](docs/05-sync.md) | [内部資料](docs/internal/README.md)
 
-## アプリの起動 (Phase 1)
+<img src="docs/images/screen-today.png" alt="今日の画面" width="720">
 
-前提: Node.js、Rust (stable)、Go (版は `tailnet/go.mod` の `go` 行、同期用サイドカーのビルドに使う)、各 OS の Tauri 2 の前提ツール。
+</div>
 
-1. `npm install`
-2. `npm run tauri dev`
-3. 初回起動でデータフォルダを選ぶ (既定は app data dir の `data/`。「選択」でフォルダ選択ダイアログ)。「次へ」で共通ファイルと受信トレイが作られる
+## なぜ作るか
 
-データの場所 (どちらも選んだフォルダの直下)
-- `<選んだフォルダ>/_PowerToDo.xlsx`: 共通ファイル (プロジェクト一覧、ラベル、祝日、設定)
-- `<選んだフォルダ>/<プロジェクト名>.xlsx`: 1 プロジェクト 1 ファイル (受信トレイは `受信トレイ.xlsx`)
-- `<選んだフォルダ>/archive/`: 削除したプロジェクトの xlsx の移動先 (物理削除はしない)
+- **データは Excel のファイルである。** 1 つのプロジェクトが 1 つの xlsx になる。アプリが無くても Excel で開いて直せる。
+- **Todoist と同じ操作で使う。** クイック追加、繰り返し、リマインダー、キーボードの操作、iPhone のスワイプを Todoist に合わせる。
+- **自分の NAS で同期する。** Synology NAS (アプリの中の Tailscale 経由) か Google Drive に同期する。2 台で直しても、タスクごとに合わせる。
 
-設定ダイアログの「データ」ペインで、現在のフォルダの確認・ファイラで開く・変更ができる。変更しても既存のファイルは移動しない。
+## できること
 
-Phase 1 でできること
-- プロジェクトの追加・改名・削除、セクションの追加・改名・並び替え
-- タスクの追加・編集・完了 / 取り消し・削除・並び替え・プロジェクト間の移動、サブタスク (多段)
-- クイック追加 (例: `牛乳 明日 p1 @食品`、`#プロジェクト`、時刻付き)
-- 変更は 1 秒後に xlsx へ保存される。Excel / LibreOffice で開ける。Excel 側で壊れた行は「要修正」として表示され、直したあとに再読み込みできる
+| | |
+|---|---|
+| 端末 | macOS、Windows、Linux のデスクトップと iPhone |
+| タスク | プロジェクト、セクション、サブタスク、ラベル、優先度、期限と時刻、ボード表示 |
+| 画面 | 受信トレイ、今日、近日、フィルターとラベル、検索 |
+| クイック追加 | `牛乳 明日 p1 @食品` のように書くと、日付や優先度を読み取る |
+| 繰り返しと通知 | `毎週水曜 10:00` のような言葉で繰り返す。OS の通知で知らせる |
+| コメントと添付 | コメントを書き、画像やファイルを付ける |
+| 同期 | Synology NAS か Google Drive |
+| 更新 | 新しい版が出ると、アプリが入れ替える |
 
-Phase 2 でできること
-- 今日 (期限切れの一括再スケジュール付き) / 近日 (週ストリップ、月ジャンプ) / ラベル (一覧、色、改名、削除、ラベル詳細) のビュー
-- 検索 (`Cmd/Ctrl+K` か `/`)。ひらがな・カタカナ・全角半角・大文字小文字の違いを区別せず、複数の語は AND
-- キーボード操作 (下の「操作」)
-- Excel 側の変更の自動検知と取り込み (下の「Excel で直したとき」)
-- CI (GitHub Actions: Web のチェック、Go のテストとサイドカーのビルド、Rust のテストとビルドを Ubuntu / Windows / macOS で実行)
+## 入れる
 
-Phase 3 でできること
-- 繰り返し (下の「繰り返し」)。完了すると同じ行の期限が次回に進む
-- リマインダーと OS 通知 (下の「リマインダーと通知」)
-- ウィンドウを閉じても通知が届くトレイ常駐 (下の「トレイ」)
+[Releases ページ](https://github.com/kousuke-takeuchi/PowerToDo/releases/latest) から、OS のファイルを取る。最初の起動の警告の越え方は [クイックスタート](docs/02-quick-start.md) にある。
 
-Phase 4 でできること
-- Synology NAS (Tailscale 経由の WebDAV) か Google Drive へ、データフォルダを鏡として同期 (下の「同期」)
+開発するときは次のとおりである。Node.js、Rust、Go (版は `tailnet/go.mod`)、各 OS の Tauri 2 の前提ツールが要る。
 
-Phase 5 以降 (アプリでは「Phase N で実装予定」と出るもの)
-- フィルター / ボードのビュー
-- モバイルビルド
-
-アプリ本体 (`npm run tauri dev` / `tauri build`) の動作確認は macOS のみ。Windows / Ubuntu は CI で `cargo test` と `cargo build` が通ることだけを確認する。
-
-## インストール
-
-[GitHub の Releases ページ](https://github.com/kousuke-takeuchi/PowerToDo/releases/latest) から、使っている OS のファイルを取る。このアプリはコード署名と公証をしていないため、OS の警告が出る。下の手順で越える。
-
-| OS | ファイル | 入れ方 |
-| --- | --- | --- |
-| macOS (Apple シリコン) | `.dmg` (`aarch64`) | 開いて `PowerToDo` を `Applications` へドラッグ |
-| macOS (Intel) | `.dmg` (`x64`) | 同上 |
-| Windows | `-setup.exe` (または `.msi`) | 実行する。exe を勧める (ユーザー単位で入り、管理者権限が要らない)。msi は管理者向け |
-| Linux | `.AppImage` | `chmod +x PowerToDo_*.AppImage` してから実行 |
-| Linux (Debian / Ubuntu) | `.deb` | `sudo dpkg -i PowerToDo_*.deb` |
-| Linux (Fedora など) | `.rpm` | `sudo rpm -i PowerToDo-*.rpm` |
-
-初回起動の警告
-- macOS: 「開発元を検証できないため開けません」と出る。`Applications` の `PowerToDo` を右クリック →「開く」→ もう一度「開く」。それでも開けないときは、ターミナルで `xattr -d com.apple.quarantine /Applications/PowerToDo.app` を実行してから開く。更新のあとに警告がもう一度出たら、同じ手順で開く
-- Windows: SmartScreen の「Windows によって PC が保護されました」が出る。「詳細情報」→「実行」
-- Linux: 警告は出ない。AppImage は実行権限 (`chmod +x`) が要る
-
-リリース版には Google Drive 用の OAuth クライアントが組み込まれている。自分でビルドしたときは、「同期」の Google Drive の準備が要る。
-
-## 自動更新
-
-- 起動の 5 秒後に、新しい版があるか一度だけ確認する。見つかると「新しいバージョンがあります」のダイアログが出る。「今すぐ更新」で、ダウンロード → 入れ替え → 再起動まで進む。「あとで」にした版は、そのまま起動しているあいだは出ない (次の起動でまた確認する)
-- クイック追加や検索を開いているあいだ、文字を打っているあいだは、自動で見つけた更新のダイアログを出さずに待つ。設定の「更新を確認」で調べたときはすぐ出る
-- 同期の途中で「今すぐ更新」を押すと、同期が終わるのを待ってから入れ替える (「同期の完了を待っています…」)。最大 60 秒待っても終わらないときは更新を中止する。データは何も変わらない
-- 設定の「アップデート」ペインに、いまの版、「起動時に更新を確認する」(既定はオン)、「更新を確認」ボタンがある。起動時の確認を切っても、ボタンでいつでも確認できる
-- 更新の確認は GitHub の最新の release を見る。pre-release (テスト用) は更新として届かない
-- 更新ファイルは署名つきで、アプリに入っている公開鍵で確かめてから入れる。確かめられなければ入れずに、理由を出す
-- 自動更新できない入れ方
-  - Linux で AppImage から動かしていないとき (deb / rpm): 設定に「この入れ方では自動更新できません」と release ページへのリンクが出る。新しい版を手で入れ直す
-  - 開発版 (`npm run tauri dev` や debug ビルド): 「開発版のため更新を確認しません」と出る
-
-## リリースの手順
-
-GitHub で release を公開すると、Actions の Release が macOS (Apple シリコン / Intel)、Windows、Linux の 4 つの「Installers」ジョブで、インストーラー 7 種 (dmg ×2、exe、msi、AppImage、deb、rpm)、更新ファイルとその署名、更新の案内 `latest.json` を作り、その release に付ける。
-
-事前準備 (所有者が 1 回だけ)
-1. 署名鍵を作る: `npx tauri signer generate -w ~/.tauri/powertodo.key` (パスワードを付ける)
-2. GitHub の Settings → Secrets and variables → Actions に登録する
-   - `TAURI_SIGNING_PRIVATE_KEY`: 鍵ファイルの中身
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: 1 のパスワード
-   - `POWERTODO_GOOGLE_OAUTH_JSON_CONTENT`: `src-tauri/google-oauth.json` の中身 (「同期」の Google Drive の準備を参照)
-3. 公開鍵 (`~/.tauri/powertodo.key.pub` の中身) を `src-tauri/tauri.conf.json` の `plugins.updater.pubkey` に入れる。公開してよい値
-4. 秘密鍵とパスワードは、パスワード管理ツールなどに控える。**秘密鍵をなくすと、すでに入っているアプリに更新を届けられなくなる** (別の鍵で署名した版は、アプリの検証に通らない)。そのときは、新しい鍵で作った版を手で入れ直してもらうしかない
-
-リリースする
-1. main が CI 緑であることを確かめる
-2. GitHub → Releases → Draft a new release → タグ `vX.Y.Z` (新規、main から。数字だけの `X.Y.Z`。`v1.2.3-rc1` のような版は CI が断る) → タイトルと更新内容を書く → Publish release。更新内容はアプリの更新ダイアログにそのまま出る。テスト用は「Set as a pre-release」にする
-3. Actions の Release が全ジョブ (準備、4 つの「Installers」、「Check latest.json」の 6 つ) 緑になるのを待つ (20〜30 分)。release に 7 種 + 更新ファイル + `latest.json` が付いたことを確かめる
-   - 最後の「Check latest.json」ジョブが、`latest.json` に 4 つのプラットフォームすべて (macOS の Apple シリコン / Intel、Linux、Windows の exe と msi) の更新ファイルと署名が入っているかを確かめる。tauri-action は `latest.json` を排他なしで読んで書き直すので、2 つのジョブが同時に書くと片方のプラットフォームが消えることがあり、そのとき赤になる
-   - 赤になったら: Actions → その実行 → 足りないプラットフォームの「Installers」ジョブを選んで「Re-run jobs」。ジョブの再実行で `latest.json` に足され、確認も自動でやり直される。それでも直らなければ、4 の作り直しをする
-4. 作り直し: Actions → Release → Run workflow → 既存のタグを入れる (公開済みの release が対象)
-
-メモ
-- リポジトリの `tauri.conf.json` の `version` は開発用の値 (`0.1.0`) のまま。配布版の版は CI がタグの数字で書き換える。アプリが表示する版も、配布版ではタグの値になる
-- secret が無いときは CI は止まらず、警告を出して作る: `TAURI_SIGNING_PRIVATE_KEY` が無ければ更新ファイルなし、`POWERTODO_GOOGLE_OAUTH_JSON_CONTENT` が無ければ Drive なしのビルドになる。公開前に Actions のログで警告が出ていないことを見る
-- ビルドのログとキャッシュ: release のワークフローは `-v` / `-vv` を付けず、`target/` をキャッシュにもアーティファクトにも上げない (OAuth のクライアントの値が残るため)。この決まりを変えない
-
-## 操作
-
-キーボードで操作できる。入力欄にカーソルがあるとき、日本語入力の変換中は効かない。Shift を押しながらのキーは何もしない (`↑` `↓` `←` `→` を除く)。`g` のあとの 1 秒は Shift 抜きで押す。ダイアログが開いているあいだは、ダイアログ自身のキーが優先される。
-
-| キー | 動作 |
-| --- | --- |
-| `q` | クイック追加 |
-| `Cmd/Ctrl+K`、`/` | 検索を開く (`/` は入力中以外) |
-| `g` のあと 1 秒以内に `t` / `u` / `i` / `l` | 今日 / 近日 / 受信トレイ / フィルターとラベルへ移動 |
-| `↑` / `↓` | フォーカス行を上下 (折りたたまれた行は飛ばす) |
-| `Enter` | フォーカス行の詳細を開く (検索では移動して開く) |
-| `e` | フォーカス行を完了 / 取り消し |
-| `Delete` / `Backspace` | フォーカス行を削除 (確認あり) |
-| `1` 〜 `4` | 優先度を p1 〜 p4 に |
-| `t` / `m` | 期限を今日 / 明日に (時刻は保つ) |
-| `→` / `←` | サブタスクの展開 / 折りたたみ (プロジェクト画面) |
-| `Esc` | 最上位のダイアログ・パネルを閉じる。何も開いていなければ行のフォーカスを外す |
-
-- 行のキー (`Enter` `e` `Delete` `Backspace` `1`〜`4` `t` `m` `→` `←`) は、行にフォーカスがあるときだけ効く。マウスのホバーではフォーカスは動かない
-- Tab でボタンやリンクにフォーカスしているあいだは、そのボタンが `Enter` `Space` `Delete` `Backspace` を使う
-- 一覧は設定ダイアログの「キーボード」ペインでも見られる
-
-## 繰り返し
-
-タスク詳細の「繰り返し」(日付ピッカーの繰り返し設定) の入力欄か、クイック追加に、次のように書ける (日本語 / 英語、全角半角どちらも、英語は大文字小文字を区別しない)。
-
-| 入力 | 意味 |
-| --- | --- |
-| 毎日 / every day / daily | 毎日 |
-| 平日 / every weekday / weekdays | 月曜から金曜 |
-| 毎週 / every week / weekly | 毎週 (曜日は期限の曜日) |
-| 毎週月曜 / 毎週月 / every monday / every mon | 毎週月曜 |
-| 毎週月水金 / every mon,wed,fri | 毎週月・水・金 |
-| 隔週 / every 2 weeks / every other week | 2 週間ごと |
-| 毎月 / every month / monthly | 毎月 (日は期限の日) |
-| 毎月1日 / 毎月 15 日 / every month on the 1st / monthly on 15 | 毎月その日 |
-| 毎月末 / 月末 / every month end / last day of month | 毎月末 |
-| 毎年 / every year / yearly | 毎年 (月日は期限) |
-| 毎年10月18日 / every oct 18 | 毎年その月日 |
-| 3日ごと / every 3 days | 3 日ごと |
-| 毎3日! / 3日ごと! / every 3 days! | 3 日ごと。末尾の `!` で「完了した日から」数える (Todoist と同じ) |
-
-- 曜日は 月 火 水 木 金 土 日 / 月曜 / 月曜日 / mon / monday。複数書いたら後ろが勝つ
-- クイック追加の例: `ゴミ出し 毎週火曜 8:00` は、期限が次の火曜 8:00、繰り返しが毎週火曜になる。期限の語を書かないときは最初の発生 (今日が該当日なら今日) が期限になる。変換できない語はタスク名に残る
-- 完了すると進捗は 0 のまま、期限だけが次回に進む (完了履歴は残さない。サブタスクは触らない)。完了の取り消しでは期限を戻さない
-- xlsx の「繰り返し」列には RRULE の本体だけが入る。例: `FREQ=WEEKLY;BYDAY=MO`、`FREQ=MONTHLY;BYMONTHDAY=-1`。`DTSTART` は書かず、計算のたびに現在の期限から組む
-- 「完了した日から」は末尾の `;X-FROM=COMPLETED` で表す (例: `FREQ=DAILY;INTERVAL=3;X-FROM=COMPLETED`)。付いていなければ期限から数える
-- Excel でこの列に RRULE を直接書いてもよい。読めない規則のタスクは通常どおり完了になり、「繰り返しの指定が読めません」と知らせる
-
-## リマインダーと通知
-
-「リマインダー」列はカンマ区切りで、次のコードを書く。
-
-| コード | 意味 |
-| --- | --- |
-| `-0m` | 期限と同時刻 |
-| `-10m` `-30m` `-60m` | 10 分 / 30 分 / 1 時間前 |
-| `-1d` | 前日の 9:00 |
-| `-1w` | 1 週間前の 9:00 |
-| `2026-10-20T09:00` | 日時の指定 (ローカル、分まで) |
-
-- 期限に時刻が無いタスクで有効なのは `-1d` と `-1w` だけ。この「9:00」は設定の「日付と時刻」の「時刻なしの通知時刻」で変えられる。Excel でこの設定の時刻を時刻のセルで入れても読める
-- 既定リマインダー: アプリで時刻付きの期限を付けたとき、リマインダーが空なら設定の「日付と時刻」の「既定リマインダー」(初期値は同時刻。なし / 10 分前 / 30 分前 / 1 時間前 / 前日にも変えられる) を 1 つ付ける。Excel で作った行には付かない
-- 繰り返しで期限が進んでも、相対のリマインダーはそのまま次回に効く。日時の指定は過去になるので外れる
-- 時刻になると OS 通知が出る (30 秒ごとに判定)。通知のボタンは「後で (10 分)」と「完了」。クリックするとウィンドウが出て、そのタスクの詳細が開く
-  - macOS は、2 つのボタンが通知の「オプション」メニューに畳まれる。「オプション」自体を押すと「後で (10 分)」になる
-  - Windows は、通知が画面に出ている間だけボタンが効く
-  - 古い通知のボタンはタスクを変えず、ウィンドウを出すだけ
-  - 「完了」が失敗したとき (未保存の帯があるプロジェクトなど) は、ウィンドウを出して理由を表示する
-- 通知が画面に出るかどうかは OS の通知設定で決まる (macOS: システム設定 > 通知 > PowerToDo)。アプリから権限を求めることはない。設定の「通知」ペインで通知を切っても、画面上部の「リマインダー」の帯は出る
-- 「後で」は、そのときの期限に対するもの。後でにしたあと期限が変わると (「期限切れを今日に」や Excel での編集)、後での時刻ではなく新しい期限のリマインダーが出る
-- アプリ内の帯: 発火したリマインダーが画面上部に出る。「完了」(繰り返しなら次回へ)、「後で」(10 分 / 1 時間 / 明日の通知時刻)、「開く」、「閉じる」。通知を逃しても帯に残る。2 件以上は「N 件のリマインダー」にまとまり、展開して一覧できる
-- アプリを止めている間に過ぎたリマインダーは、次の起動で 1 通の通知「N 件のリマインダーがありました」と帯にまとまる (1 件だけなら通常の通知)。前回の判定より後、起動より前の分が対象で、初回は 24 時間前から
-- 発火済みの記録は `fired.json` に残る。共通ファイルや xlsx ではなく、端末ごとのアプリのデータフォルダ (設定の `settings.json` の隣。macOS では `~/Library/Application Support/app.powertodo/`) にある。同期されないので、端末ごとに 1 回ずつ通知が出る。消すと、直近 24 時間の分がもう一度出ることがある
-
-## トレイ
-
-- macOS / Windows: ウィンドウを閉じてもアプリは終了せず、メニューバー / タスクバーのトレイに残って通知を出し続ける。設定の「通知」ペインの「閉じたときトレイに残す」を「いいえ」にすると、閉じたときに終了する
-- トレイのアイコンは、macOS では単色 (メニューバーの明暗に合わせて色が変わる)、Windows / Linux ではアプリのアイコン
-- トレイのメニュー: 「PowerToDo を開く」、「タスクを追加…」(ウィンドウを出してクイック追加を開く)、「今すぐ同期」(同期先につながっているときだけ押せる)、「終了」。「終了」は未保存の帯があるとウィンドウを出して確認する (「Excel で直したとき」と同じ)
-- macOS は、Dock のアイコンをクリックしてもウィンドウが戻る
-- Linux (Ubuntu): 今のところウィンドウを閉じるとアプリが終了する (トレイに残らない)。Linux はデスクトップによってトレイが無く、隠すとウィンドウに戻れなくなるため。バックグラウンドの通知は Phase 5 で再検討する
-- アプリは 1 つだけ動く。動いている (トレイに隠れている) ときにもう一度起動すると、2 つ目は起動せず、動いている方のウィンドウが出る
-- ログイン時に起動: PC にログインすると PowerToDo が起動する (ウィンドウも開く)。最初からオンで、設定の「通知」ペインの「ログイン時に起動」で切れる。macOS はログイン項目 (LaunchAgent)、Windows はスタートアップ、Linux は `~/.config/autostart` に登録される。OS の設定で外したときは、アプリはそれに従う (登録し直さない)。ただし macOS の「システム設定 > 一般 > ログイン項目」で「バックグラウンドでの実行を許可」を切った場合と、Linux のデスクトップが項目を消さずに無効にした場合は、アプリからはそれが見えず、スイッチはオンのまま表示される (起動はしない)。macOS ではアプリのスイッチで切り替えても戻らないので、システム設定の側で入れ直す。開発中のビルド (`tauri dev`) は登録しない
-
-## Excel で直したとき
-
-アプリを開いたまま、Excel や LibreOffice で xlsx を直して保存してよい。データフォルダを監視していて、変更を見つけると次のように扱う。
-
-- このアプリに未保存の変更が無いとき: 自動で取り込む。画面が更新され、「「<プロジェクト名>」の Excel での変更を取り込みました」と出る
-- このアプリに未保存の変更があるとき: 自動保存を止めて、画面の上に帯を出す。どちらかを選ぶまでそのプロジェクトは保存されない
-  - 「ファイルを読み込む」: Excel 側の内容を読み込む。このアプリでの未保存の変更は失われる (確認あり)
-  - 「このアプリの内容で上書き」: このアプリの内容をファイルに書く。Excel 側の変更は失われる (確認あり)
-- 共通ファイル (`_PowerToDo.xlsx`) も同じ。帯には「共通設定」と出る
-- ファイルが消えた / 移動した: そのプロジェクトは「ファイルが見つかりません」の表示になる。新しい xlsx を置くと、プロジェクトとして一覧に加わる
-- Excel の読み込みに失敗した (保存の途中、ロック中など): 画面の内容は変えず、「「<プロジェクト名>」の Excel の変更を読み込めません」の帯を出す (閉じるボタンのみ)。次に保存されたときにもう一度読み、読めたら帯は消える
-- Excel / LibreOffice が編集中に作るロックファイル (`~$` で始まるもの、`.~lock.` で始まるもの) は無視する
-- 帯が出たままアプリを終了しようとすると (ウィンドウを閉じる、macOS のメニューの「PowerToDo を終了」や `Cmd+Q`)、確認が出る。「上書きして終了」はアプリの内容で上書きして終了、「終了しない」は戻って帯で選び直す。Excel 側の内容を採りたいときは、先に帯の「ファイルを読み込む」を押す
-- 確認を出せない終わり方 (macOS の Dock の「終了」、ログアウトやシステムの終了) では、帯が出ているファイルと、終了の直前に Excel 側で変わっていたファイルには書かない。代わりにアプリの内容を `<選んだフォルダ>/archive/<プロジェクト名> (未保存 YYYYMMDD-HHMM).xlsx` (共通ファイルは `archive/_PowerToDo (未保存 YYYYMMDD-HHMM).xlsx`) に書き出す。必要な行はそこから写す
-- 帯が出ているあいだは、データフォルダの変更もできない
-
-## 同期 (Phase 4)
-
-データフォルダ (正本) の `*.xlsx` を、Synology NAS か Google Drive のどちらか 1 つに鏡として同期する。設定の「同期」ペインで同期先を選ぶ (Google Drive | Synology NAS | 同期しない)。初回起動のステップ 2 でも選べる。同期先を切り替えると、次の同期で全ファイルを送り直す。
-
-- 起動時、保存の 5 秒後、5 分ごと、「今すぐ同期」で同期する。さらに 30 秒ごとに同期先のファイルの一覧だけを見て、変わっていれば同期する (手元のファイルは読まない)。iPhone や別の PC で変えた内容は、アプリが動いていればトレイに隠れていても 1 分以内に届く。サイドバー最下部に状態 (同期済み / 同期中 / オフライン / エラー) が出る。オフラインのときもデータは失われず、つながったら次の同期で追いつく
-- 対象はデータフォルダ直下の `*.xlsx` (プロジェクトと `_PowerToDo.xlsx`)。`archive/`、ロックファイル、競合コピーは対象外
-- 同期の端末ごとの記録は、データフォルダではなく app data dir の `sync.json` に置く
-
-### Synology NAS (Tailscale 経由)
-
-アプリに同梱した Tailscale (サイドカー `powertodo-tailnet`) で NAS につなぐ。各 PC に Tailscale アプリは要らず、ルーターのポートも開けない。設定画面の「NAS の準備手順」にも同じ 5 ステップが出る。
-
-1. DSM のパッケージセンターで「WebDAV Server」を入れ、HTTP (ポート 5005) を有効にする
-2. 共有フォルダ `powertodo` を作る
-3. PowerToDo 専用のユーザーを作り、`powertodo` だけ読み書き可、ほかのフォルダは「アクセスなし」にする
-4. パッケージセンターで「Tailscale」を入れてログインし、NAS の名前を控える
-5. アプリで同期先に「Synology NAS (WebDAV)」を選び、NAS と同じアカウントで Tailscale にログインしてから、サーバー URL・ユーザー・パスワードを入れて「確かめる」を押す。例: `http://nas:5005/powertodo/`、ユーザー `たろう`
-
-Tailscale のログインと承認
-- 「Tailscale にログイン」を押すとブラウザでログインページが開く (開かないときは「ブラウザで開く」)。ログインするまで、アプリが勝手にブラウザを開くことはない
-- この PC は `powertodo-mac` / `powertodo-win` / `powertodo-linux` という名前の端末として tailnet に加わる。Tailscale の管理画面で端末の承認が有効なときは、これを承認する (承認するまで「承認待ち」と出る)
-- Tailscale のキーの有効期限が切れたら、同期ペインでもう一度ログインする
-- 起動中のまま 30 秒たっても「接続済み」にならないときは、「再試行」と「状態を消してログインし直す」が出る。後者は `<app data>/tailscale/` の状態を消して、最初からログインし直す
-- サイドカーが異常終了したときは、5 秒あけて 3 回まで自動で再起動する。それでも駄目なら「失敗」と理由が出る
-
-NAS の URL は `http://` で書く (`https` は使えない)。NAS の名前は tailnet の端末として確かめられ、tailnet にない名前は拒否される。ユーザー名は `settings.json`、パスワードは OS のキーチェーンに保存される。キーチェーンが使えない環境では、パスワードはそのセッションの間だけメモリに持つ (再起動でもう一度入力する)。
-
-### Google Drive
-
-Google Drive の `PowerToDo` フォルダに同期する。「Google でログイン」を押すとブラウザが開くので許可する。ログアウトでリフレッシュトークンがキーチェーンから消え、Google 側にも取り消しを送る (オフラインで送れなかったときはそう表示される)。ログインの同意画面で Drive へのアクセスのチェックを外すと、同期できないのでログインは受け付けられない。もう一度ログインして、チェックを入れる。
-
-アプリを作る人の準備 (Google Cloud)
-1. Google Cloud でプロジェクトを作り、Google Auth Platform で OAuth クライアントを作る。種類は「デスクトップ アプリ」
-2. 「データアクセス」で次のスコープを追加する: `https://www.googleapis.com/auth/drive.file`、`openid`、`email`
-3. 「対象」で公開ステータスを「本番環境」にする。「テスト」のままだと、リフレッシュトークンが 7 日で切れる。`drive.file` は機密でないスコープなので、審査 (verification) は要らない。未確認アプリの警告が出たら、ここに追記する
-4. クライアントの JSON (`{"installed": {...}}` 形式) をダウンロードし、`src-tauri/google-oauth.json` として置く。このファイルは git 管理外 (`.gitignore` 済み)。雛形は `src-tauri/google-oauth.example.json`。別の場所に置くときは、環境変数 `POWERTODO_GOOGLE_OAUTH_JSON` にパスを入れる (worktree や CI 用)
-
-`build.rs` がこの JSON を読み、クライアント ID とシークレットをビルドに埋め込む。JSON が無いビルドでも動くが、Drive は「このビルドでは使えません」と出る (NAS は影響を受けない)。注意
-- JSON を置いたビルドでは、`-v` / `-vv` を付けない (`cargo build -v` など)。ビルドスクリプトの出力に ID とシークレットが出る
-- JSON を置いたビルドの `target/` を、キャッシュにもアーティファクトにも上げない。値は `target/*/build/powertodo-*/output` と生成されたバイナリに残る
-- JSON をコミットしない、ログや Issue に貼らない
-
-Drive の挙動
-- `drive.file` は、このアプリが作ったファイルだけを見せるスコープ。ブラウザで Drive の `PowerToDo` フォルダに手で置いた xlsx は、アプリから見えない (同期されない)。ほかの PC に渡したいファイルは、データフォルダに置いて同期させる。NAS は WebDAV で直接見えるので、`powertodo` フォルダ直下に置いた `*.xlsx` は同期される
-- 既存の Drive のフォルダを選ぶ UI はない。アプリが `PowerToDo` フォルダを自分で作る (同じアカウントの別の PC は同じフォルダを使う)
-
-### 競合と archive
-
-- 2 台の PC (や iPhone) で同じプロジェクトを編集してから同期すると、前回の同期のときの中身と比べて、タスクごとに合わせる。別々のタスクの追加や編集は両方とも残り、競合コピーはできない。同じタスクの同じ項目を両方で変えたときは、ファイルが新しい方の値になる。消したタスクをもう一方で編集していたら、編集した方が残る。両方で同じ番号のタスクを足したときは、この端末で足した方に新しい番号を振る。前回の同期のときの中身は、端末ごとにアプリのデータの場所 (`sync-base/`) に置く
-- 合わせられないとき (アプリを更新して最初の同期、ファイルが読めない、「要修正」の行がある) は、新しい方が残り、負けた方の内容が `<名前> (競合 yyyy-mm-dd hhmm).xlsx` (例: `仕事 (競合 2026-10-16 0930).xlsx`) としてデータフォルダと同期先の両方に残り、アプリに帯が出る (「競合ファイルを開く」でデータフォルダを開く)
-- 競合コピーは同期の対象外。必要な行を元のファイルへ写したら、不要になったコピーは各側 (この PC と NAS / Drive) で消す
-- 新しい PC を初めてつなぐときは、同期先に既にあるファイルを採用し、この PC の同名ファイルと中身が違えば競合コピーを残す。初期状態の `受信トレイ.xlsx` / `_PowerToDo.xlsx` は、競合コピーを作らずに同期先の内容へ置き換える
-- 削除は同期される: 片方でプロジェクトを消すと、もう片方のファイルは `archive/` に移る。`受信トレイ.xlsx` と `_PowerToDo.xlsx` は消しても戻る。archive は `<名前> (<更新日時>).xlsx` の名前で、同名があれば `-2`、`-3` … を付ける。物理削除はしない
-  - この PC: `<データフォルダ>/archive/`
-  - NAS: 共有フォルダ `powertodo` の `archive/`
-  - Google Drive: `PowerToDo` フォルダの `archive` フォルダ
-
-片方が空に見えるとき
-- データフォルダ、または同期先が空に見える (記録があるのにファイルが 1 つもない) と、誤って全部を消さないよう同期を止め、「同期が止まっています」と出る。次のどちらかを選ぶ (確認あり)
-  - 「<同期先> の内容でこの PC を戻す」: この PC に同期先の内容を写す
-  - 「この PC の内容で <同期先> を戻す」: 同期先にこの PC の内容を写す
-- 戻す前のファイルは、それぞれの `archive/` に残る。選ぶまで同期は動かない
-
-### ビルドの前提 (サイドカー)
-
-`tauri dev` / `tauri build` は、`beforeDevCommand` / `beforeBuildCommand` で `npm run build:tailnet` を自動で実行し、Go のサイドカーを `src-tauri/binaries/powertodo-tailnet-<ターゲット>` (Windows は `.exe`、git 管理外) にビルドする。Tauri はこれを `bundle.externalBin` として同梱する。
-- Go は `tailnet/go.mod` の `go` 行の版以上。見つける順は、環境変数 `GO`、`/opt/homebrew/bin/go`、`PATH` の `go`
-- 単体でビルドするときは `npm run build:tailnet` (`--target <triple>` で別のターゲット。`universal-apple-darwin` は非対応で、`aarch64-apple-darwin` と `x86_64-apple-darwin` を別々に作る)
-- Go 側のテストは `cd tailnet && go test ./...`
-- `cargo build` の前にサイドカーが要る (`tauri-build` が存在を確かめる)。CI も同じ順に実行する
-
-## iPhone 版 (Phase 6)
-
-デスクトップと同じ Rust の中身と React の画面を Tauri の iOS ターゲットでビルドする。所有者の iPhone に TestFlight (内部テスト) で入れる。iPad は iPhone の画面がそのまま拡大されて動く。
-
-### 前提 (この Mac)
-
-- Xcode (27 で確認)。シミュレーターのランタイム (iOS 26.5 で確認)
-- arm64 の `cargo tauri` (tauri-cli 2.12.2): `cargo install tauri-cli --version 2.12.2 --locked`。この Mac の Node は Rosetta (x86_64) で動くので、`npm run tauri ios ...` は使わない (x86_64 のシミュレーター向けを作ってしまう)。別の場所に入れたときは環境変数 `CARGO_TAURI` にパスを入れる
-- Rust の iOS ターゲット: `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
-- Go (`/opt/homebrew/bin/go`)。Tailscale を iOS 用ライブラリ (`libtailnet.a`) にビルドする (`scripts/build-tailnet-ios.sh`、ビルドのスクリプトが自動で呼ぶ)
-- Xcode のプロジェクトは `src-tauri/gen/apple/project.yml` から作る。作り直すときは `cd src-tauri/gen/apple && xcodegen generate` (`brew install xcodegen`)
-
-### 署名 (Team ID)
-
-```sh
-cp src-tauri/gen/apple/Signing.example.xcconfig src-tauri/gen/apple/Signing.xcconfig
-# Signing.xcconfig の DEVELOPMENT_TEAM に Team ID を書く (このファイルは git 管理外)
+```bash
+npm install
+npm run tauri dev
 ```
 
-Team ID は `Signing.xcconfig` にだけ書く。`APPLE_DEVELOPMENT_TEAM` や `tauri.conf.json` の `bundle.iOS.developmentTeam` は使わない (Tauri CLI が `project.pbxproj` に書き込み、コミットされてしまう)。Xcode に Apple ID でサインインしておく (自動署名)。
+## ドキュメント
 
-### ビルドと起動
+| # | 文書 | 内容 |
+|---|---|---|
+| 1 | [概要](docs/01-overview.md) | どんなアプリか。データの形と同期の全体像 |
+| 2 | [クイックスタート](docs/02-quick-start.md) | 入れて、データフォルダを選び、最初のタスクを足すまで |
+| 3 | [デスクトップ](docs/03-desktop.md) | 画面、クイック追加、繰り返し、リマインダー、添付、キー、Excel で直したとき |
+| 4 | [iPhone](docs/04-iphone.md) | iPhone の画面と操作、データの場所 |
+| 5 | [同期](docs/05-sync.md) | NAS と Google Drive の準備、2 台で直したとき、削除と archive |
+| | [内部資料](docs/internal/README.md) | 開発する人のための資料 (構成、データ、リリース、iOS のビルド) |
 
-- シミュレーター: `scripts/ios-build.sh sim <シミュレーターの UDID>` (`xcrun simctl list devices available` で UDID を調べる)。ビルドして入れて起動する
-- 実機: `scripts/ios-build.sh device` → `xcrun devicectl list devices` で UDID を調べ、`xcrun devicectl device install app --device <UDID> "$TMPDIR/powertodo-ios/dd-device/Build/Products/release-iphoneos/PowerToDo.app"`。iPhone で「デベロッパモード」を有効にしておく
-- TestFlight: 下記
+## 仕組み
 
-### TestFlight
+<img src="docs/images/architecture.svg" alt="構成" width="640">
 
-1. `src-tauri/gen/apple/project.yml` の `CFBundleVersion` を上げる (アップロードのたびに増やす。同じ番号は受け付けられない)。`CFBundleShortVersionString` は見える版
-2. `scripts/ios-build.sh archive`。`$TMPDIR/powertodo-ios/PowerToDo.xcarchive` と、App Store Connect 用の `.ipa` (`$TMPDIR/powertodo-ios/export/`) ができる
-3. アップロード: Xcode の Organizer (Window → Organizer) で archive を選んで「Distribute App」→「App Store Connect」、または `xcrun altool --upload-app -f <ipa> -t ios --apiKey <キー ID> --apiIssuer <Issuer ID>` (API キーは App Store Connect の「ユーザとアクセス」→「キー」で作る。キーをリポジトリに置かない)
-4. App Store Connect の TestFlight で、ビルドの処理が終わったら内部テスターに配る (外部テスターは審査が要るので使わない)
-5. 最初のアップロードで、暗号の輸出規制の質問に答える (WireGuard と TLS を使う)
+画面は React、中身は Rust で、Tauri 2 でアプリにする。くわしくは [docs/internal/architecture.md](docs/internal/architecture.md) にある。
 
-プライバシーマニフェスト (`src-tauri/gen/apple/powertodo_iOS/PrivacyInfo.xcprivacy`) を同梱している。申告の中身と理由は仕様 §9。
+## 開発に参加する
 
-### Google ログイン (iPhone)
+[CONTRIBUTING.md](CONTRIBUTING.md) を読む。設計仕様は `docs/superpowers/specs/`、実装計画は `docs/superpowers/plans/` にある。
 
-デスクトップとは別に、iOS 用の OAuth クライアントが要る。
-1. Google Cloud の同じプロジェクトで OAuth クライアントを作る。種類は「iOS」、Bundle ID は `app.powertodo`
-2. ダウンロードした plist を `src-tauri/google-oauth-ios.plist` として置く (git 管理外。雛形は `src-tauri/google-oauth-ios.example.plist`)。別の場所に置くときは環境変数 `POWERTODO_GOOGLE_IOS_OAUTH_PLIST` にパスを入れる
-3. iOS のビルドはこの plist のクライアント ID だけを埋め込む (シークレットは無い)。デスクトップ用の `google-oauth.json` は iOS のビルドでは読まない。plist が無いビルドでは「このビルドでは Google Drive を使えません」と出る
+## ライセンス
 
-ログイン画面はアプリの中のシート (`ASWebAuthenticationSession`) で開く。Info.plist に URL スキームの登録は要らない。
+このリポジトリは非公開である。PowerToDo 自体のライセンスは決めていない。依存するものの一覧は [docs/internal/third-party-licenses.md](docs/internal/third-party-licenses.md) にある。
 
-### 所有者の作業
-
-1. App Store Connect に PowerToDo を登録する (Bundle ID `app.powertodo`)。TestFlight の内部テスターに自分を入れる
-2. Google Cloud に iOS 用の OAuth クライアントを作り、plist を上の場所に置く
-3. 最初のアップロードで、暗号の輸出規制の質問に答える
-
-### iPhone での動き
-
-- データは「ファイル」アプリの「このiPhone内 → PowerToDo」にある (保存先を選ぶ画面は無い)。iPhone の Excel で直した内容は、アプリに戻ったときと同期の前に取り込む (未保存の編集があるプロジェクトはデスクトップと同じく保留して選ばせる)
-- 同期は起動時、前面に戻ったとき、保存の 5 秒後、前面にいる間の 5 分ごと、一覧を引っ張ったとき、ヘッダーの同期アイコンを押したとき。背面では同期しない
-- NAS へは、アプリの中の Tailscale (ホスト名 `powertodo-ios`) でつなぐ。Tailscale のアプリは要らない。Wi-Fi とモバイル回線が切り替わった直後に失敗した同期は、5 秒後と 15 秒後にもう一度試す
-- パスワードと Google のトークンは、この端末のキーチェーンにだけ置く (iCloud に同期しない)
-- リマインダーは、近い順に 64 件を iOS の予約通知に登録する。アプリを閉じていても時刻に届く。通知の許可は、初めてリマインダーを登録するとき (または設定で通知をオンにしたとき) に聞く
-
-## UI の確認 (Storybook)
-
-pen の画面を React コンポーネントで再現し、Storybook で実際に触って操作性を確認する。
-
-1. `npm install`
-2. `npm run storybook` を起動し、ブラウザで http://localhost:6006 を開く
-3. 左のツリーの `Screens/` (Desktop / Dark / Mobile) を上から順に開く。Story 名は pen の画面名と同じ (例 `D-01 プロジェクト`、`M-01b サブタスク展開`)。`Components/` には部品ごとの状態一覧がある
-4. 各画面で何を触り、何を見るか (操作項目と確認観点) は [`design/storyboard.md`](design/storyboard.md) の「画面ごとの操作項目と確認観点」に書いてある。画面間の遷移は同ファイルの遷移表を見て、Story を切り替えて確かめる
-5. 指摘は「Story 名 + 内容」で返す (例: `D-03 タスク詳細: 優先度の行が目立ちすぎる`)。まとめて 1 PR で直し、pen にも同じ内容を反映する
-
-動くのは開閉・選択・切替 (折りたたみ、サブタスク展開、ダイアログ / パネル / ポップオーバー、設定の同期先切替、タブバーなど) だけで、タスクの追加・保存・同期はしない。ツールバーでテーマ (ライト / ダーク) と幅 (1440 / 960 / 390) を切り替えられる。
-幅のツールバーはフレームのサイズを変えるだけで画面は再配置されない。960 幅の見た目は D-13、モバイルは M-* の Story で確認する。
-
-`npm run check:stories` は、`design/storyboard.md` の画面一覧がすべて Story になっているかを確認する (先に `npm run build-storybook`)。
+Todoist は Doist の製品である。PowerToDo は Todoist と関係が無い。
