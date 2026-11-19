@@ -87,6 +87,18 @@ pub fn run() {
     // Start at login (resident sync spec 2): driven from `commands::autostart`.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
+    // The window opens at the size and place it had when the app last quit. Visibility is left out:
+    // the tray and autostart decide whether it shows.
+    #[cfg(desktop)]
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::new()
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::SIZE
+                    | tauri_plugin_window_state::StateFlags::POSITION
+                    | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+            )
+            .build(),
+    );
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {
