@@ -32,7 +32,7 @@ GitHub で release を公開すると、Actions の Release (`.github/workflows/
 
 ## 決まりごと
 
-- `tauri.conf.json` の `version` は開発用の値 (`0.1.0`) のままにする。配布版の版は、CI がタグの数字で書き換える。
+- `tauri.conf.json` の `version` は開発用の値 (`0.1.0`) のままにする。配布版の版は、CI がタグの数字で書き換える。アプリが表示する版も、配布版ではタグの値になる。
 - secret が無くても CI は止まらず、警告を出して作る。`TAURI_SIGNING_PRIVATE_KEY` が無ければ更新ファイル無し、`POWERTODO_GOOGLE_OAUTH_JSON_CONTENT` が無ければ Drive 無しのビルドになる。公開の前に、Actions のログに警告が無いことを見る。
 - release のワークフローは `-v` / `-vv` を付けず、`target/` をキャッシュにもアーティファクトにも上げない。OAuth のクライアントの値が残るためである。この決まりを変えない。
 
@@ -57,7 +57,7 @@ iOS の OAuth クライアントは [iOS のビルド](ios-build.md#google-ロ�
 
 `tauri dev` と `tauri build` は、`beforeDevCommand` と `beforeBuildCommand` で `npm run build:tailnet` を実行する。Go のサイドカーを `src-tauri/binaries/powertodo-tailnet-<ターゲット>` (Windows は `.exe`、git 管理外) にビルドし、Tauri が `bundle.externalBin` として同梱する。
 
-- Go は `tailnet/go.mod` の `go` 行の版以上が要る。探す順は、環境変数 `GO`、`/opt/homebrew/bin/go`、`PATH` の `go` である。
+- Go は `tailnet/go.mod` の `go` 行の版以上が要る。探す順は、環境変数 `GO`、`PATH` の `go`、`/opt/homebrew/bin/go` である (iOS 用の `scripts/build-tailnet-ios.sh` は、`GO`、`/opt/homebrew/bin/go`、`PATH` の `go` の順)。
 - 単体でビルドするときは `npm run build:tailnet`。`--target <triple>` で別のターゲットになる。`universal-apple-darwin` は扱わない。`aarch64-apple-darwin` と `x86_64-apple-darwin` を別々に作る。
 - Go のテストは `cd tailnet && go test ./...`。
 - `cargo build` の前にサイドカーが要る (`tauri-build` が有ることを確かめる)。CI も同じ順に実行する。

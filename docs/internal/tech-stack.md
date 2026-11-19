@@ -14,6 +14,6 @@
 | Tailscale | tailscale.com (Go) | NAS へつなぐ。デスクトップはサイドカー、iOS はライブラリ |
 | iOS の追加 | Swift のプラグイン (`src-tauri/plugins/ios`) | Google ログイン (`ASWebAuthenticationSession`)、Quick Look、回線の切り替えの検知 |
 | テスト | `cargo test`、`node --test` | Rust と、画面の純粋な処理 |
-| CI | GitHub Actions | `ci.yml` (テストとビルド)、`release.yml` (配布物) |
+| CI | GitHub Actions | `ci.yml` (web: 型、ビルド、Storybook の確かめ、`test:web`、`test:docs`。Ubuntu、Windows、macOS: Go のテスト、サイドカーのビルド、`cargo test` と `cargo build`。macOS では iOS ターゲットの `cargo check` も)、`release.yml` (配布物) |
 
 ライセンスは [ライセンス](third-party-licenses.md) にある。

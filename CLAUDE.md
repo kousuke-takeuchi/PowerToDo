@@ -12,7 +12,7 @@ Excel (xlsx) のファイルをデータにした、Todoist 風の ToDo アプ�
 
 ## 絶対原則
 
-- **xlsx が正本である**: データはデータフォルダの xlsx にある。アプリのほかにデータベースを持たない。Excel や LibreOffice で開いて直せる形を保つ。知らない列、シート、設定の行は書き戻しで残す (`store/project_book.rs`、`store/common_book.rs`)。
+- **xlsx が正本である**: データはデータフォルダの xlsx にある。アプリのほかにデータベースを持たない。Excel や LibreOffice で開いて直せる形を保つ。知らない列と設定の行は書き戻しで残す (`store/project_book.rs`、`store/common_book.rs`)。知らないシートと書式は残らない。
 - **消さずに移す**: 削除したプロジェクト、競合で負けた側、終了時に退避した内容は `archive/` へ移す。ファイルを物理的に消さない。
 - **共有するものと端末ごとのものを分ける**: ほかの端末と共有するものはデータフォルダ (xlsx、`_comments/`、`_attachments/`) に置く。端末ごとのもの (データフォルダの場所、同期先、起動時の画面、同期の記録、届けた通知) はアプリのデータの場所 (`settings.json` など) に置く。
 - **秘密をリポジトリに入れない**: `src-tauri/google-oauth.json`、`src-tauri/google-oauth-ios.plist`、`src-tauri/gen/apple/Signing.xcconfig`、署名鍵、App Store Connect の API キー。NAS のパスワードと Google のトークンは OS のキーチェーンに置く。OAuth の JSON を置いたビルドで `-v` を付けず、`target/` を外に上げない。
