@@ -6,7 +6,7 @@
 - `2026-10-25-desktop-look-design.md` (④ 見た目)
 - `2026-10-25-task-dialog-and-comments-design.md` (① タスクの詳細ダイアログとコメント)
 - `2026-10-25-task-level-merge-design.md` (タスク単位で合わせる同期。並び順だけの変更の扱い)
-- `docs/research/2026-10-25-todoist-row-actions.md` (Todoist の実物の測定)
+- `docs/internal/research/2026-10-25-todoist-row-actions.md` (Todoist の実物の測定)
 - main のコード (PR #51 まで)
 
 状態: 会話で設計合意済み (2026-10-25)。本ファイルのレビュー待ち。

@@ -12,7 +12,7 @@ A new `TopBar` and `Toast` component are wired in `Main`. `design.pen` is edited
 
 **Tech Stack:** React 19, TypeScript, motion 14, Tailwind 4 (a few classes), lucide-react, Storybook 10, Tauri 2.12.3 (`tauri.conf.json`), Pencil MCP (`mcp__pencil__*`).
 
-**Spec:** `docs/superpowers/specs/2026-10-25-desktop-look-design.md` (PR #44). Research: `docs/research/2026-10-25-todoist-desktop-look-and-motion.md`.
+**Spec:** `docs/superpowers/specs/2026-10-25-desktop-look-design.md` (PR #44). Research: `docs/internal/research/2026-10-25-todoist-desktop-look-and-motion.md`.
 
 **Prerequisite:** Merge #44 first. Start the implementation branch from origin/main after that.
 
@@ -660,7 +660,7 @@ PowerToDo:
 ```
 
 Todoist:
-- Use the numbers in `docs/research/2026-10-25-todoist-desktop-look-and-motion.md`.
+- Use the numbers in `docs/internal/research/2026-10-25-todoist-desktop-look-and-motion.md`.
 - If the owner's Todoist is open, take new screenshots of the Today view at window width 1512 with `screencapture`. Keep them in the scratchpad only.
 
 - [ ] **Step 2: Compare**

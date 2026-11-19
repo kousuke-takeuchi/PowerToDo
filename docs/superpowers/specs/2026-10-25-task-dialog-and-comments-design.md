@@ -4,7 +4,7 @@
 
 前提:
 - `2026-10-25-desktop-look-design.md` (④ 見た目)
-- `docs/research/2026-10-25-todoist-desktop-look-and-motion.md` §3 (Todoist のタスクの詳細)
+- `docs/internal/research/2026-10-25-todoist-desktop-look-and-motion.md` §3 (Todoist のタスクの詳細)
 - `2026-10-25-task-level-merge-design.md` (タスク単位で合わせる同期)
 - `2026-10-25-desktop-resident-sync-design.md` (30 秒ごとの相手側の確認)
 - main のコード (PR #45 まで。#46 の ④ 見た目の上に作る)

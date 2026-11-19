@@ -33,7 +33,7 @@ The desktop does not change.
 
 **Tech Stack:** React 19, TypeScript 6, `motion` 14.2.0 (`motion/react`: `useMotionValue`, `useTransform`, `useDragControls`, spring transitions), lucide-react 1.56.0, Tailwind 4 (a few classes), Storybook 10, Tauri 2 (iOS build through TestFlight), Pencil MCP (`mcp__pencil__*`).
 
-**Spec:** `docs/superpowers/specs/2026-10-26-mobile-look-design.md`. Research (measured sizes and motion, §9 and "Motion"): `docs/research/2026-10-26-todoist-iphone.md`.
+**Spec:** `docs/superpowers/specs/2026-10-26-mobile-look-design.md`. Research (measured sizes and motion, §9 and "Motion"): `docs/internal/research/2026-10-26-todoist-iphone.md`.
 
 **Prerequisite:**
 - Merge the spec PR (`feature/spec-mobile-look`) and this plan's PR first.

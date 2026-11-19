@@ -21,7 +21,7 @@ It applies on the project, Today, Upcoming and label screens. The settings sync 
 
 **Tech Stack:** Rust (store, Tauri commands), React 19, TypeScript, Storybook 10, Pencil MCP for `design.pen`.
 
-**Spec:** `docs/superpowers/specs/2026-10-25-view-options-design.md` (PR #58). Research: `docs/research/2026-10-25-todoist-view-options.md`.
+**Spec:** `docs/superpowers/specs/2026-10-25-view-options-design.md` (PR #58). Research: `docs/internal/research/2026-10-25-todoist-view-options.md`.
 
 **Prerequisite:**
 - Merge #58 (spec) and this plan's PR first.

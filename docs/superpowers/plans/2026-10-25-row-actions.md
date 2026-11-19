@@ -21,7 +21,7 @@
 
 **Tech Stack:** Rust (store, Tauri commands), React 19, TypeScript, motion, lucide-react, Storybook 10, Pencil MCP for `design.pen`.
 
-**Spec:** `docs/superpowers/specs/2026-10-25-row-actions-design.md` (PR #52). Research: `docs/research/2026-10-25-todoist-row-actions.md`.
+**Spec:** `docs/superpowers/specs/2026-10-25-row-actions-design.md` (PR #52). Research: `docs/internal/research/2026-10-25-todoist-row-actions.md`.
 
 **Prerequisite:** Merge #52 (spec) and this plan's PR first. Start the implementation branch `feature/row-actions` from origin/main after that. Line numbers below refer to origin/main at 77f5409; anchor on the quoted code.
 
@@ -1006,7 +1006,7 @@ Start Storybook (`npm run storybook -- --ci -p 6108` in the background) and take
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --hide-scrollbars --window-size=1512,940 --virtual-time-budget=6000 --screenshot=<out.png> "http://localhost:6108/iframe.html?id=screens-desktop--d-01-i&viewMode=story"
 ```
 
-Find the story id in Storybook's `index.json` if the guess is wrong. Compare the screenshots with `docs/research/2026-10-25-todoist-row-actions.md` §1 and §3: one bordered box, the name line, the chips row, and × with the red button on the right.
+Find the story id in Storybook's `index.json` if the guess is wrong. Compare the screenshots with `docs/internal/research/2026-10-25-todoist-row-actions.md` §1 and §3: one bordered box, the name line, the chips row, and × with the red button on the right.
 
 - [ ] **Step 5: Commit**
 

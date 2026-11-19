@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26
 前提:
-- `docs/research/2026-10-26-todoist-iphone.md` (Todoist iPhone 版の調査。所有者の iPhone の写真と動画から測った寸法と動き)
+- `docs/internal/research/2026-10-26-todoist-iphone.md` (Todoist iPhone 版の調査。所有者の iPhone の写真と動画から測った寸法と動き)
 - `2026-10-25-desktop-look-design.md` (デスクトップの ④。部品の `mobile` の分岐はこのとき残した)
 - `2026-10-20-phase6-ios-design.md` (iPhone の画面の元の設計)
 - main のコード (PR #60 まで)

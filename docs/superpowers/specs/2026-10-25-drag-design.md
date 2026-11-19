@@ -6,8 +6,8 @@
 - `2026-10-25-desktop-look-design.md` (④ 見た目)
 - `2026-10-25-row-actions-design.md` (② 行の操作)
 - `2026-10-25-task-level-merge-design.md` (タスク単位で合わせる同期)
-- `docs/research/2026-10-25-todoist-desktop-look-and-motion.md` §5 (ドラッグの動き)
-- `docs/research/2026-10-25-todoist-drag.md` (ドラッグとキーの測定)
+- `docs/internal/research/2026-10-25-todoist-desktop-look-and-motion.md` §5 (ドラッグの動き)
+- `docs/internal/research/2026-10-25-todoist-drag.md` (ドラッグとキーの測定)
 - main のコード (PR #54 まで)
 
 状態: 会話で設計合意済み (2026-10-25)。本ファイルのレビュー待ち。

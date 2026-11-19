@@ -2,7 +2,7 @@
 
 作成日: 2026-10-20
 前提: `2026-10-13-powertodo-overall-design.md` (§9 Phase 6)、`2026-10-13-phase0-pen-design.md` (モバイル M-01〜M-07)、`2026-10-13-phase0.5-storybook-design.md` (モバイル部品)、`2026-10-15-phase3-time-design.md` (リマインダー)、`2026-10-16-phase4-sync-design.md` (同期、Tailscale、OAuth)、`2026-10-19-release-updater-design.md` (デスクトップ専用の updater)、main のコード (PR #31 まで)
-調査: `docs/research/2026-10-19-ios-tailscale-research.md`、`docs/research/2026-10-19-ios-tailnet-spike.md` (試作。ブランチ `spike/ios-tailnet` は手元だけに残す)
+調査: `docs/internal/research/2026-10-19-ios-tailscale-research.md`、`docs/internal/research/2026-10-19-ios-tailnet-spike.md` (試作。ブランチ `spike/ios-tailnet` は手元だけに残す)
 参考: InfoDesk の iOS 版 (`~/Documents/InfoDesk/mobile`、Flutter) の運用の決まり (状態フォルダの扱い、ログインの開き方、同期のタイミング)
 状態: 会話で設計合意済み。本ファイルのレビュー待ち。
 
@@ -188,7 +188,7 @@
 | 2026-10-19 | NAS へは、アプリの中に Tailscale を組み込む (公式アプリや Network Extension は使わない) | 所有者の選択。公式の Tailscale アプリを併用する案は退けられた |
 | 2026-10-19 | Tauri の iOS ビルドに InfoDesk のやり方を取り入れる (Flutter の別アプリにはしない) | Rust の中身と React の部品をそのまま使える。InfoDesk の iOS 版は Flutter で、Tailscale は Dart パッケージ (fd を使う HTTP クライアント) |
 | 2026-10-19 | Tailscale は自前の `tailnet/` Go を iOS 用 c-archive にする (libtailscale は使わない) | 受け口を自分で開閉でき、iOS が受け口を取り上げる問題 (tailscale/tailscale#20060) を避けられる。Go の c-archive は 1 つのアプリに 2 つ入れられない (重複シンボル) ので、どちらか一方 |
-| 2026-10-19 | 試作で確認: シミュレーターと実機で、ログイン、起動し直しでのログイン維持、WebDAV の読み書き (約 0.4 秒)、背面 1 分・10 分からの復帰は成功。Wi-Fi → モバイル回線は失敗、コントロールセンターの開閉で受け口が閉じたまま | `docs/research/2026-10-19-ios-tailnet-spike.md` |
+| 2026-10-19 | 試作で確認: シミュレーターと実機で、ログイン、起動し直しでのログイン維持、WebDAV の読み書き (約 0.4 秒)、背面 1 分・10 分からの復帰は成功。Wi-Fi → モバイル回線は失敗、コントロールセンターの開閉で受け口が閉じたまま | `docs/internal/research/2026-10-19-ios-tailnet-spike.md` |
 | 2026-10-19 | Google Drive も Phase 6 に入れる | 所有者の選択 |
 | 2026-10-20 | 画面は Phase 0 のモバイル設計に合わせて組み直す (M-01〜M-07、スワイプ、長押し) | 所有者の選択。デスクトップの画面を縮めたものはスマホで使いにくい |
 | 2026-10-20 | リマインダーはローカル通知で近い順に 64 件を予約 | 所有者の選択。iOS の予約通知の上限は 64 |

@@ -2,7 +2,7 @@
 
 作成日: 2026-10-25
 前提:
-- `docs/research/2026-10-25-todoist-desktop-look-and-motion.md` (Todoist デスクトップ版の測定)
+- `docs/internal/research/2026-10-25-todoist-desktop-look-and-motion.md` (Todoist デスクトップ版の測定)
 - `2026-10-13-powertodo-overall-design.md` (Todoist 風の操作)
 - main のコード (PR #42 まで)
 

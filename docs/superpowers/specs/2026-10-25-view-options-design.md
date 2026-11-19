@@ -6,7 +6,7 @@
 - `2026-10-25-desktop-look-design.md` (④ 見た目)
 - `2026-10-25-drag-design.md` (③ ドラッグ。PR #57)
 - `2026-10-25-task-level-merge-design.md` (タスク単位で合わせる同期)
-- `docs/research/2026-10-25-todoist-view-options.md` (Todoist の「表示」メニューの測定)
+- `docs/internal/research/2026-10-25-todoist-view-options.md` (Todoist の「表示」メニューの測定)
 - main のコード (PR #57 のマージ後に実装する)
 
 状態: 会話で設計合意済み (2026-10-25)。本ファイルのレビュー待ち。
