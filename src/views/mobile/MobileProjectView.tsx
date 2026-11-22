@@ -8,7 +8,7 @@ import { TaskRow } from "../../components/TaskRow";
 import { MOBILE_ROW } from "../../components/MobileTaskRow";
 import { Collapse } from "../../motion";
 import { TODAY } from "../../mock/data";
-import type { Section, Task } from "../../types/model";
+import type { Placement, Section, Task } from "../../types/model";
 import { useLeaving } from "../crossList";
 import { useDone } from "../useDone";
 import { visibleOpen } from "../visibleOpen";
@@ -16,6 +16,7 @@ import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
+import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 import type { MobileTab } from "../../app/mobileNav";
 import type { QuickAddToken } from "../QuickAddDialog";
 
@@ -70,6 +71,8 @@ export type MobileProjectViewProps = {
   onAddTask?: (section: string | null) => void;
   /** 「サブタスクを追加」 under an expanded parent. Omitted: it opens the plain quick add (onFab). */
   onAddSubtask?: (parent: Task) => void;
+  /** live のみ (spec 2026-11-22): 長押しで行を持ち上げて並び替える。動かさずに離すと onTaskMenu。省略すると長押しはメニューだけ。 */
+  onReorder?: (no: number, to: Placement) => void;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -137,6 +140,7 @@ export function MobileProjectView({
   onTaskMenu,
   onAddTask,
   onAddSubtask,
+  onReorder,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
@@ -161,15 +165,40 @@ export function MobileProjectView({
       return next;
     });
 
+  const reorder = useMobileReorder({
+    project,
+    onMove: (no, to) => onReorder?.(no, to),
+    onMenu: (no) => {
+      const t = mine.find((x) => x.no === no);
+      if (t) onTaskMenu?.(t);
+    },
+  });
+  const reordering = live && onReorder !== undefined;
+  const heightOf = (no: number): number => Math.max(0, ...childrenOf(no).map((c) => 1 + heightOf(c.no)));
+  const subtreeOf = (no: number): number[] => [no, ...childrenOf(no).flatMap((c) => subtreeOf(c.no))];
+  /** The lifted row follows the finger (its subtree inside it goes along). */
+  const liftStyle = (t: Task): React.CSSProperties | undefined =>
+    reorder.state?.no === t.no
+      ? { position: "relative", zIndex: 3, transform: `translateY(${reorder.state.dy}px)`, background: "var(--color-bg)", boxShadow: "var(--shadow-popover)", borderRadius: 8 }
+      : undefined;
+
   /** live のとき、行をスワイプ / 長押しのラッパーで包む。 */
-  const swipeable = (t: Task, row: React.ReactNode, onComplete: () => void): React.ReactNode =>
+  const swipeable = (t: Task, row: React.ReactNode, onComplete: () => void, depth = 0): React.ReactNode =>
     live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={t.no} onComplete={onComplete} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
+      <SwipeRow
+        key={t.no}
+        onComplete={onComplete}
+        done={isDone(t)}
+        onDate={onSwipeDate && (() => onSwipeDate(t))}
+        onLongPress={onTaskMenu && (() => onTaskMenu(t))}
+        onLift={reordering ? (at) => reorder.lift(t.no, at, subtreeOf(t.no), heightOf(t.no), depth) : undefined}
+      >
         {row}
       </SwipeRow>
     ) : (
       row
     );
+  const taskAttrs = (t: Task, depth: number) => (reordering ? reorderAttrs({ kind: "task", no: t.no, depth, parent: t.parentNo ?? null, section: t.category }) : {});
 
   const renderRow = (t: Task, group = "", index = 0): React.ReactNode => {
     const kids = childrenOf(t.no);
@@ -177,7 +206,8 @@ export function MobileProjectView({
     const ctx: RowContext = { today, ...rowContext };
     const done = () => toggle(t, group, index);
     return (
-      <div key={t.no}>
+      <div key={t.no} style={liftStyle(t)}>
+        <div {...taskAttrs(t, 0)}>
         {swipeable(
           t,
           <TaskRow
@@ -191,15 +221,19 @@ export function MobileProjectView({
           />,
           done,
         )}
+        </div>
         {open && (
           <>
-            {kids.map((k) =>
-              swipeable(
-                k,
-                <TaskRow key={k.no} variant="mobile" indent={1} {...mobileRowProps(k, ctx)} done={isDone(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />,
-                () => toggle(k),
-              ),
-            )}
+            {kids.map((k) => (
+              <div key={k.no} {...taskAttrs(k, 1)} style={liftStyle(k)}>
+                {swipeable(
+                  k,
+                  <TaskRow variant="mobile" indent={1} {...mobileRowProps(k, ctx)} done={isDone(k)} onToggleDone={() => toggle(k)} onClick={onOpenTask ? () => onOpenTask(k) : undefined} />,
+                  () => toggle(k),
+                  1,
+                )}
+              </div>
+            ))}
             <div style={{ marginLeft: MOBILE_ROW.indent }}>
               <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => onAddSubtask(t) : (onFab ?? (() => setOverlay("quickAdd")))} />
             </div>
@@ -255,20 +289,34 @@ export function MobileProjectView({
         )
       }
     >
-      <div style={{ padding: "0 15px" }}>
+      <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
+        {reorder.state?.line && (
+          // Where the lifted row will land (the desktop's drop line, spec ③ §3.4)
+          <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15 + reorder.state.line.x, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />
+        )}
         {live && open.length === 0 && projectSections.length === 0 && (
           <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>{emptyText}</div>
         )}
         {list("s:", unsectioned)}
         {/* With sections and no loose tasks, the FAB covers 「no section」 (no lone add row above the first section). */}
-        {onAddTask && (unsectioned.length > 0 || projectSections.length === 0) && <AddTaskRow onClick={() => onAddTask(null)} />}
+        {onAddTask && (unsectioned.length > 0 || projectSections.length === 0) && (
+          <div {...(reordering ? reorderAttrs({ kind: "slot", section: null }) : {})}>
+            <AddTaskRow onClick={() => onAddTask(null)} />
+          </div>
+        )}
         {projectSections.map((s, i) => {
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
-              <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
+              <div {...(reordering ? reorderAttrs({ kind: "header", section: s.name }) : {})}>
+                <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
+              </div>
               {list(`s:${s.name}`, rows)}
-              {onAddTask && <AddTaskRow onClick={() => onAddTask(s.name)} />}
+              {onAddTask && (
+                <div {...(reordering ? reorderAttrs({ kind: "slot", section: s.name }) : {})}>
+                  <AddTaskRow onClick={() => onAddTask(s.name)} />
+                </div>
+              )}
             </section>
           );
         })}

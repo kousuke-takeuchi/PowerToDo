@@ -132,6 +132,33 @@ function LiveTodayNoOverdue() {
   return <MobileToday live fill overdue={[]} todays={list} today={TODAY} onToggleDone={toggle} />;
 }
 
+// Spec 2026-11-22: long press lifts a row; moving it shows the drop line, releasing moves it (here: logged only).
+export const M01Reorder: Story = {
+  name: "M-01 長押しで並び替え (fill)",
+  render: () => {
+    const Live = () => {
+      const { list, toggle } = useTasks(shopping);
+      return (
+        <MobileProjectView
+          live
+          fill
+          tab="browse"
+          project="買い物"
+          tasks={list}
+          sections={sections}
+          today={TODAY}
+          onToggleDone={toggle}
+          onSwipeDate={() => undefined}
+          onTaskMenu={() => console.log("menu")}
+          onReorder={(no, to) => console.log("reorder", no, JSON.stringify(to))}
+          onAddTask={() => undefined}
+        />
+      );
+    };
+    return <Live />;
+  },
+};
+
 export const M04NoOverdue: Story = {
   name: "M-04 期限切れなし",
   render: () => <LiveTodayNoOverdue />,

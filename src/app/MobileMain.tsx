@@ -851,6 +851,15 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
       onAddTask={(section) => openQuickAddAt({ section })}
       onAddSubtask={(t) => openQuickAddAt({ parentNo: t.no })}
+      onReorder={(no, to) =>
+        void p
+          .moveWithin(no, to)
+          .then(refreshAll)
+          .catch((e) => {
+            showError(e);
+            void p.reload().catch(() => undefined);
+          })
+      }
       {...rowOps}
       overlay={layers}
     />
