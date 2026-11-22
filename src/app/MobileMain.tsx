@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
-import type { AppStateDto, Label, NotificationPermission, SearchHit, Task } from "../types/model";
+import type { AppStateDto, Label, NotificationPermission, SearchHit, Task, TokenKind } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
 import { DateSheet } from "../views/mobile/DateSheet";
 import { MobileBrowse } from "../views/mobile/MobileBrowse";
@@ -22,6 +22,7 @@ import { crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type Mob
 import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
+import { LabelSheet } from "../views/mobile/LabelSheet";
 import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
 import { Banners } from "./Banners";
 import { MobileToast } from "../components/MobileToast";
@@ -32,7 +33,7 @@ import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
-import { insertToken } from "./quickAddInsert";
+import { dateWords, projectWord, replaceWords, type InsertKind } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
@@ -56,6 +57,7 @@ const sheetTitle: Record<NonNullable<SheetState>["kind"], (s: NonNullable<SheetS
   move: () => "移動",
   reschedule: () => "期限切れの日付",
 };
+const QA_PICKER_TITLE: Record<"reminder" | InsertKind, string> = { reminder: "リマインダー", date: "日付", priority: "優先度", project: "プロジェクト", label: "ラベル" };
 /** 開いている下部シート。状態はここ (画面の子ではなく MobileMain) に持つ: 一覧の再読み込みや画面の差し替えで失わない。 */
 type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | { kind: "reschedule" } | null;
 
@@ -81,8 +83,8 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
-  // クイック追加の上に重ねるリマインダーのシート
-  const [qaReminderSheet, setQaReminderSheet] = useState(false);
+  // クイック追加の上に重ねるシート (リマインダー、チップの一覧: spec 2026-11-22 §1)
+  const [qaPicker, setQaPicker] = useState<"reminder" | InsertKind | null>(null);
   const [permission, setPermission] = useState<NotificationPermission>("granted");
 
   const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
@@ -160,17 +162,21 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
 
   useEffect(() => {
-    if (!qa.open) setQaReminderSheet(false);
+    if (!qa.open) setQaPicker(null);
   }, [qa.open]);
+  // A picked value rewrites the words of its kind in the field (the field stays the source, as typed words).
+  const rewrite = (kinds: TokenKind[], words: string[]) => setText(replaceWords(qa.text, parsed?.spans ?? [], kinds, words));
 
   // ラベルのシートに並べる、ストアにあるラベル (詳細を開いたとき読む)
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const detailOpen = detail !== null;
+  // The task detail's label sheet and the quick add's label picker list them.
+  const labelsWanted = detailOpen || qa.open;
   useEffect(() => {
-    if (!detailOpen) return;
+    if (!labelsWanted) return;
     let cancelled = false;
     api
       .labels()
@@ -184,7 +190,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, showError]);
+  }, [labelsWanted, showError]);
 
   // ---- 行の操作 (スワイプ / 長押しのシート)。開いているプロジェクトの行は useProject、横断ビューの行は cross (操作のあと refreshAll) ----
   const closeSheet = () => setSheet(null);
@@ -395,18 +401,47 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onSubmit={(t) => void submit(t).then(refreshAll)}
             busy={qa.busy}
             error={qa.error}
-            onInsert={(kind) => setText(insertToken(qa.text, kind))}
+            onPick={setQaPicker}
             reminders={qa.reminders}
-            onPickReminder={() => setQaReminderSheet(true)}
+            onPickReminder={() => setQaPicker("reminder")}
             projectName={qaProject === app.inbox ? "受信トレイ" : qaProject}
-            covered={qaReminderSheet}
+            covered={qaPicker !== null}
             onClose={closeQuickAdd}
           />
         )}
         {undo && <MobileToast key="undo" id={undo.id} text={undoText(undo.u)} onAction={() => void runUndo(undo.u)} onClose={() => setUndo(null)} />}
       </AnimatePresence>
-      <BottomSheet fill open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
-        <ReminderSheet value={qa.reminders} onChange={setReminders} />
+      <BottomSheet
+        fill
+        size={qaPicker === "project" ? "large" : "auto"}
+        open={qa.open && qaPicker !== null}
+        title={qaPicker === null ? undefined : QA_PICKER_TITLE[qaPicker]}
+        onClose={() => setQaPicker(null)}
+      >
+        {qaPicker === "reminder" && <ReminderSheet value={qa.reminders} onChange={setReminders} />}
+        {qaPicker === "date" && (
+          <DateSheet
+            value={parsed?.due ?? undefined}
+            time={parsed?.dueTime ?? undefined}
+            today={today}
+            // 日付なし clears the recurrence too: a recurrence alone would set the date again.
+            onChange={(v) => rewrite(v.date ? ["date", "time"] : ["date", "time", "recurrence"], dateWords(v.date, v.time, today))}
+            onClose={() => setQaPicker(null)}
+          />
+        )}
+        {qaPicker === "priority" && (
+          <PrioritySheet value={parsed?.priority ?? 4} onChange={(v) => rewrite(["priority"], v === 4 ? [] : [`p${v}`])} onClose={() => setQaPicker(null)} />
+        )}
+        {qaPicker === "project" && (
+          <MoveSheet
+            projects={summaries}
+            sections={[]}
+            current={{ project: qaProject, section: null }}
+            onMove={(project) => rewrite(["project"], project === navCurrent ? [] : [projectWord(project)])}
+            onClose={() => setQaPicker(null)}
+          />
+        )}
+        {qaPicker === "label" && <LabelSheet labels={allLabels} value={parsed?.labels ?? []} onChange={(names) => rewrite(["label"], names.map((n) => `@${n}`))} />}
       </BottomSheet>
       <BottomSheet fill confirmForm={projectSheet === "rename" ? TEXT_SHEET_FORM : undefined} open={projectSheet !== null} title={projectSheet === "rename" ? "名前を変更" : navCurrent} onClose={() => setProjectSheet(null)}>
         {projectSheet === "menu" && (

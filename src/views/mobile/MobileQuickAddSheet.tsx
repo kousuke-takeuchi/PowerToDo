@@ -24,6 +24,8 @@ export type MobileQuickAddSheetProps = {
   error?: string;
   /** ツールバー (日付 / 優先度 / ラベル / リマインダー) が押されたとき。入力欄の末尾に語を足すのは呼び出し側。 */
   onInsert?: (kind: InsertKind) => void;
+  /** Device: the chip opens a picker sheet over the card instead (spec 2026-11-22 §1). Wins over onInsert. */
+  onPick?: (kind: InsertKind) => void;
   /** リマインダー (クイック追加の構文に無い): 選んだコード。ボタンは onPickReminder で別のシートを開く。 */
   reminders?: string[];
   onPickReminder?: () => void;
@@ -90,7 +92,7 @@ function ToolbarIcon({
  * シートの下端 = キーボードの上端なので、シートは常に全体が見える。保存はしない。
  * scrim は pointerEvents: "auto" (MobileShell の overlay ラッパーは "none")。
  */
-export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange, onSubmit, busy, error, onInsert, reminders = [], onPickReminder, projectName, covered }: MobileQuickAddSheetProps) {
+export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange, onSubmit, busy, error, onInsert, onPick, reminders = [], onPickReminder, projectName, covered }: MobileQuickAddSheetProps) {
   const live = onTextChange !== undefined;
   const ts = live ? 44 : 32;
   const inset = useKeyboardInset(!!fill);
@@ -99,6 +101,10 @@ export function MobileQuickAddSheet({ tokens, onClose, fill, text, onTextChange,
     if (live && onSubmit && !busy && (text ?? "").trim()) onSubmit(text ?? "");
   };
   const insert = (kind: InsertKind) => {
+    if (onPick) {
+      onPick(kind);
+      return;
+    }
     onInsert?.(kind);
     input.current?.focus();
   };

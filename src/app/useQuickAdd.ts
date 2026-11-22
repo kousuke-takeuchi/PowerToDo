@@ -69,5 +69,5 @@ export function useQuickAdd({
   const tokens = parsed ? spansToTokens(qa.text, parsed.spans) : qa.text ? [{ text: qa.text }] : [];
   const qaProject = parsed?.project ?? current;
 
-  return { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject };
+  return { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed };
 }

@@ -245,6 +245,19 @@ export const M02LongChips: Story = {
   ),
 };
 
+// The date chip opens the date list over the card (spec 2026-11-22 §1). Picking rewrites the date word in the field.
+export const M02DatePicker: Story = {
+  name: "M-02 日付のチップで一覧を開いた",
+  render: () => (
+    <SheetFrame>
+      <MobileQuickAddSheet tokens={[{ text: "牛乳 " }, { text: "明日", kind: "date" }]} text="牛乳 明日" onTextChange={() => undefined} onSubmit={() => undefined} covered />
+      <BottomSheet open title="日付" onClose={() => undefined}>
+        <DateSheet value="2026-10-15" today={TODAY} onChange={() => undefined} onClose={() => undefined} />
+      </BottomSheet>
+    </SheetFrame>
+  ),
+};
+
 export const M03DateSheet: Story = {
   name: "M-03 日付のシートを開いた",
   render: () => (
