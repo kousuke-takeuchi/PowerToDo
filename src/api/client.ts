@@ -25,6 +25,7 @@ import type {
   ProjectSummary,
   ProjectView,
   QuickAddOutcome,
+  QuickAddPlace,
   QuickAddResult,
   RecurrenceDto,
   RecurrenceLabelDto,
@@ -132,7 +133,8 @@ export const api = {
   reorderProjects: (names: string[]) => invoke<ProjectSummary[]>("reorder_projects", { names }),
   setTodayOrder: (today: string, keys: [string, number][]) => invoke<void>("set_today_order", { today, keys }),
 
-  quickAdd: (text: string, defaultProject: string) => invoke<QuickAddOutcome>("quick_add", { text, defaultProject }),
+  /** `place`: a section of / a parent in `defaultProject` (dropped when a `#project` sends the task elsewhere). */
+  quickAdd: (text: string, defaultProject: string, place?: QuickAddPlace) => invoke<QuickAddOutcome>("quick_add", { text, defaultProject, place: place ?? null }),
   parseQuickAdd: (text: string) => invoke<QuickAddResult>("parse_quick_add", { text }),
   parseDueText: (text: string, today: string) => invoke<DueTextDto | null>("parse_due_text", { text, today }),
   parseRecurrence: (text: string) => invoke<RecurrenceDto>("parse_recurrence", { text }),

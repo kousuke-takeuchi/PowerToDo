@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage, isAppError } from "../api/client";
 import { onProjectChanged, onProjectsChanged, onSaveStatus } from "../api/events";
-import type { Placement, ProjectView, QuickAddOutcome, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
+import type { Placement, ProjectView, QuickAddOutcome, QuickAddPlace, QuickAddResult, TaskInput, TaskPatch } from "../types/model";
 
 export type UseProjectOptions = {
   /** Called after every successful command (the sidebar refreshes its counts here). */
@@ -154,10 +154,10 @@ export function useProject(name: string, opts: UseProjectOptions = {}) {
    * dialog can show it; `view` is replaced only when the task landed in this project.
    */
   const quickAdd = useCallback(
-    (text: string): Promise<QuickAddOutcome> => {
+    (text: string, place?: QuickAddPlace): Promise<QuickAddOutcome> => {
       const g = gen.current;
       return enqueue(async () => {
-        const out = await api.quickAdd(text, name);
+        const out = await api.quickAdd(text, name, place);
         if (g === gen.current && out.view.project.name === name) {
           setView(out.view);
           setError(null);

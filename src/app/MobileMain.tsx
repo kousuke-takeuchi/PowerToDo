@@ -78,7 +78,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const push = (s: BrowseScreen) => dispatchNav({ type: "push", screen: s });
   const back = () => dispatchNav({ type: "back" });
   // プロジェクトの「…」(名前を変更 / 削除)
-  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | null>(null);
+  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -162,7 +162,11 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, openQuickAddAt, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
+  // The section / parent shows on the project chip while the task still goes to this project.
+  const qaPlaced = qaProject === navCurrent ? qa.place : undefined;
+  const qaParent = qaPlaced?.parentNo !== undefined ? view?.tasks.find((t) => t.no === qaPlaced.parentNo) : undefined;
+  const qaProjectName = (qaProject === app.inbox ? "受信トレイ" : qaProject) + (qaParent ? ` / ${qaParent.title}` : qaPlaced?.section ? ` / ${qaPlaced.section}` : "");
 
   useEffect(() => {
     if (!qa.open) setQaPicker(null);
@@ -404,7 +408,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onPick={setQaPicker}
             reminders={qa.reminders}
             onPickReminder={() => setQaPicker("reminder")}
-            projectName={qaProject === app.inbox ? "受信トレイ" : qaProject}
+            projectName={qaProjectName}
             covered={qaPicker !== null}
             onClose={closeQuickAdd}
           />
@@ -435,17 +439,45 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         {qaPicker === "project" && (
           <MoveSheet
             projects={summaries}
-            sections={[]}
-            current={{ project: qaProject, section: null }}
-            onMove={(project) => rewrite(["project"], project === navCurrent ? [] : [projectWord(project)])}
+            sections={qaProject === navCurrent && view ? view.sections : []}
+            current={{ project: qaProject, section: qaPlaced?.section ?? null }}
+            onMove={(project, section) => {
+              rewrite(["project"], project === navCurrent ? [] : [projectWord(project)]);
+              // A section only exists in this project; picking anything clears the parent.
+              setPlace(project === navCurrent && section ? { section } : undefined);
+            }}
             onClose={() => setQaPicker(null)}
           />
         )}
         {qaPicker === "label" && <LabelSheet labels={allLabels} value={parsed?.labels ?? []} onChange={(names) => rewrite(["label"], names.map((n) => `@${n}`))} />}
       </BottomSheet>
-      <BottomSheet fill confirmForm={projectSheet === "rename" ? TEXT_SHEET_FORM : undefined} open={projectSheet !== null} title={projectSheet === "rename" ? "名前を変更" : navCurrent} onClose={() => setProjectSheet(null)}>
+      <BottomSheet
+        fill
+        confirmForm={projectSheet === "rename" || projectSheet === "section" ? TEXT_SHEET_FORM : undefined}
+        open={projectSheet !== null}
+        title={projectSheet === "rename" ? "名前を変更" : projectSheet === "section" ? "セクションを追加" : navCurrent === app.inbox ? "受信トレイ" : navCurrent}
+        onClose={() => setProjectSheet(null)}
+      >
         {projectSheet === "menu" && (
-          <ProjectMenuSheet project={navCurrent} onRename={() => setProjectSheet("rename")} onDelete={() => void deleteProject()} onClose={() => setProjectSheet(null)} />
+          <ProjectMenuSheet
+            project={navCurrent}
+            onAddSection={() => setProjectSheet("section")}
+            onRename={navCurrent === app.inbox ? undefined : () => setProjectSheet("rename")}
+            onDelete={navCurrent === app.inbox ? undefined : () => void deleteProject()}
+            onClose={() => setProjectSheet(null)}
+          />
+        )}
+        {projectSheet === "section" && (
+          <TextSheet
+            label="セクション名"
+            value=""
+            placeholder="セクション名"
+            onSave={(v) => {
+              const t = v.trim();
+              if (t) void p.addSection(t);
+            }}
+            onClose={() => setProjectSheet(null)}
+          />
         )}
         {projectSheet === "rename" && (
           <TextSheet
@@ -756,13 +788,15 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       onRefresh={pullRefresh}
       tab={nav.tab}
       onBack={screen.kind === "project" ? back : undefined}
-      onProjectMenu={screen.kind === "project" ? () => setProjectSheet("menu") : undefined}
+      onProjectMenu={() => setProjectSheet("menu")}
       title={title}
       project={current}
       tasks={view.tasks}
       sections={view.sections}
       onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && offerDone(t))}
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
+      onAddTask={(section) => openQuickAddAt({ section })}
+      onAddSubtask={(t) => openQuickAddAt({ parentNo: t.no })}
       {...rowOps}
       overlay={layers}
     />

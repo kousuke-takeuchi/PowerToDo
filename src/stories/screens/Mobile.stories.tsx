@@ -118,7 +118,7 @@ function useTasks(initial: Task[]) {
 
 function LiveProject() {
   const { list, toggle } = useTasks(shopping);
-  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} onProjectMenu={() => undefined} onAddTask={() => undefined} />;
 }
 
 export const M01Live: Story = {

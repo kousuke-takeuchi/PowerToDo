@@ -66,6 +66,10 @@ export type MobileProjectViewProps = {
   /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。どちらも省略すると行はスワイプしない。 */
   onSwipeDate?: (t: Task) => void;
   onTaskMenu?: (t: Task) => void;
+  /** 「タスクを追加」 at the end of each section (null: the tasks without a section). Omitted: no such rows. */
+  onAddTask?: (section: string | null) => void;
+  /** 「サブタスクを追加」 under an expanded parent. Omitted: it opens the plain quick add (onFab). */
+  onAddSubtask?: (parent: Task) => void;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -131,6 +135,8 @@ export function MobileProjectView({
   emptyText = "タスクはありません",
   onSwipeDate,
   onTaskMenu,
+  onAddTask,
+  onAddSubtask,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
@@ -195,7 +201,7 @@ export function MobileProjectView({
               ),
             )}
             <div style={{ marginLeft: MOBILE_ROW.indent }}>
-              <AddTaskRow label="サブタスクを追加" onClick={onFab ?? (() => setOverlay("quickAdd"))} />
+              <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => onAddSubtask(t) : (onFab ?? (() => setOverlay("quickAdd")))} />
             </div>
           </>
         )}
@@ -250,19 +256,22 @@ export function MobileProjectView({
       }
     >
       <div style={{ padding: "0 15px" }}>
+        {live && open.length === 0 && projectSections.length === 0 && (
+          <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>{emptyText}</div>
+        )}
         {list("s:", unsectioned)}
+        {/* With sections and no loose tasks, the FAB covers 「no section」 (no lone add row above the first section). */}
+        {onAddTask && (unsectioned.length > 0 || projectSections.length === 0) && <AddTaskRow onClick={() => onAddTask(null)} />}
         {projectSections.map((s, i) => {
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
               <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
               {list(`s:${s.name}`, rows)}
+              {onAddTask && <AddTaskRow onClick={() => onAddTask(s.name)} />}
             </section>
           );
         })}
-        {live && open.length === 0 && (
-          <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>{emptyText}</div>
-        )}
         {!live && <SwipeDemo title={swipeTitle} />}
       </div>
     </MobileShell>
