@@ -288,6 +288,9 @@ export const M03ManySubtasks: Story = {
       onChange={() => undefined}
       onAddSubtask={() => undefined}
       onAddComment={async () => true}
+      onMove={() => undefined}
+      projects={projects.map((p) => ({ ...p, taskCount: 0 }))}
+      sections={sections}
     />
   ),
 };

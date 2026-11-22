@@ -263,6 +263,20 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
     if (listProject || detail) void p.reload().catch(() => undefined);
     refreshAll();
   };
+  /** The task detail's 「プロジェクト」 (2026-11-22): the detail follows the task to its new place (another project renumbers it). */
+  const moveOpenTask = async (t: Task, toProject: string, toSection: string | null) => {
+    try {
+      const out = await api.moveTask(t.project, t.no, toProject, toSection);
+      setDetail({ project: toProject, no: out.no });
+      offer({ kind: "move", to: { project: toProject, no: out.no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
+      // Same project: re-read it here (another project is read when the detail switches to it).
+      if (toProject === t.project) void p.reload().catch(() => undefined);
+    } catch (e) {
+      showError(e);
+    }
+    refreshAll();
+    void refreshSummaries();
+  };
   const renameProject = async (name: string) => {
     const from = navCurrent;
     try {
@@ -694,6 +708,9 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         noteFiles={taskNote.files}
         onAttachNote={taskNote.attach}
         onDetachNote={(id) => void taskNote.detach(id)}
+        onMove={openTask.parentNo === undefined ? (project, section) => void moveOpenTask(openTask, project, section) : undefined}
+        projects={summaries}
+        sections={view.sections}
         banner={banner}
         overlay={layers}
       />
