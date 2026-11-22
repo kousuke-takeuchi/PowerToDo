@@ -5,6 +5,12 @@ import { LONG_PRESS_MS, PULL_TRIGGER, axisLock, decidePull, decideSwipe, longPre
 import type { Axis } from "./gestures";
 
 /** 行に付けるポインターのハンドラー (React の onPointer*)。 */
+/** A row is being dragged (iPhone reorder): pull-to-refresh ignores the touch. */
+let reorderLock = false;
+export function setReorderLock(on: boolean) {
+  reorderLock = on;
+}
+
 export type PointerHandlers = {
   onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
   onPointerMove: (e: React.PointerEvent<HTMLElement>) => void;
@@ -156,6 +162,11 @@ export function usePullToRefresh(onRefresh: (() => Promise<void>) | undefined): 
     };
     const onMove = (e: TouchEvent) => {
       if (!start || e.touches.length !== 1) return;
+      if (reorderLock) {
+        start.atTop = false;
+        setPull(0);
+        return;
+      }
       const t = e.touches[0];
       const dx = t.clientX - start.x;
       dy = t.clientY - start.y;

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Calendar, Check, RotateCcw } from "lucide-react";
 import { useLongPress, useSwipe } from "../../app/useGestures";
 import { EASE_CSS, useMotionTiming } from "../../motion";
@@ -14,6 +14,11 @@ export type SwipeRowProps = {
   onDate?: () => void;
   /** 500 ms の長押し (メニューを開く)。 */
   onLongPress?: () => void;
+  /**
+   * Reorder (spec 2026-11-22): the long press lifts the row instead, at the finger's place. The caller follows the finger
+   * and opens the menu itself when it is released without moving. While lifted, the list does not scroll under the finger.
+   */
+  onLift?: (at: { x: number; y: number }) => void;
   /** ジェスチャーを受けない (中のクリックはそのまま通る)。 */
   disabled?: boolean;
   /** Story 用: 指を動かしている途中の静止状態 (px。正は右)。 */
@@ -39,7 +44,7 @@ const panel: React.CSSProperties = {
  * 行は user-select: none / -webkit-touch-callout: none (文字選択のメニューを出さない)、touch-action: pan-y (縦はスクロールに任せる)。
  * 長押しの後と横に動かした後に来る click は捨てる (行を開かない)。
  */
-export function SwipeRow({ children, onComplete, done, onDate, onLongPress, disabled, initialOffset }: SwipeRowProps) {
+export function SwipeRow({ children, onComplete, done, onDate, onLongPress, onLift, disabled, initialOffset }: SwipeRowProps) {
   const { reduced } = useMotionTiming();
   const swallow = useRef(false);
   // 長押しが発火したあとのスワイプは捨てる (メニューが開いているのに完了 / 日付が動かない)
@@ -48,11 +53,28 @@ export function SwipeRow({ children, onComplete, done, onDate, onLongPress, disa
     onComplete: disabled ? undefined : onComplete,
     onDate: disabled ? undefined : onDate,
   });
+  // The finger's last place (where a lift starts) and whether the row is lifted (touchmove must not scroll then).
+  const at = useRef({ x: 0, y: 0 });
+  const lifted = useRef(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    if (!el || !onLift) return;
+    // Not passive: once lifted, the drag owns the finger (WebKit decides scrolling on touchmove, not on touch-action alone).
+    const stop = (e: TouchEvent) => {
+      if (lifted.current) e.preventDefault();
+    };
+    el.addEventListener("touchmove", stop, { passive: false });
+    return () => el.removeEventListener("touchmove", stop);
+  }, [onLift]);
   const press = useLongPress(() => {
-    if (disabled || !onLongPress) return;
+    if (disabled || (!onLongPress && !onLift)) return;
     swallow.current = true;
     pressed.current = true;
-    onLongPress();
+    if (onLift) {
+      lifted.current = true;
+      onLift(at.current);
+    } else onLongPress?.();
   });
   const offset = initialOffset !== undefined && !swipe.active && swipe.offset === 0 ? initialOffset : swipe.offset;
   const lastSide = useRef<"right" | "left" | null>(null);
@@ -66,10 +88,13 @@ export function SwipeRow({ children, onComplete, done, onDate, onLongPress, disa
         onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
           swallow.current = false;
           pressed.current = false;
+          lifted.current = false;
+          at.current = { x: e.clientX, y: e.clientY };
           swipe.bind.onPointerDown(e);
           press.onPointerDown(e);
         },
         onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+          at.current = { x: e.clientX, y: e.clientY };
           if (!pressed.current) swipe.bind.onPointerMove(e);
           press.onPointerMove(e);
         },
@@ -78,15 +103,18 @@ export function SwipeRow({ children, onComplete, done, onDate, onLongPress, disa
           if (pressed.current) swipe.bind.onPointerCancel(e);
           else swipe.bind.onPointerUp(e);
           press.onPointerUp(e);
+          lifted.current = false;
         },
         onPointerCancel: (e: React.PointerEvent<HTMLElement>) => {
           swipe.bind.onPointerCancel(e);
           press.onPointerCancel(e);
+          lifted.current = false;
         },
       };
 
   return (
     <div
+      ref={root}
       {...handlers}
       onClickCapture={(e) => {
         if (swallow.current) {
