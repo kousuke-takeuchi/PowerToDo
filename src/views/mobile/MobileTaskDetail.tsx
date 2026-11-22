@@ -283,7 +283,8 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
         />
       }
     >
-      <div style={{ flex: 1, minHeight: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "8px 15px" }}>
+      {/* Grows to push the comment bar down, but never shrinks: a long body scrolls instead of running under the bar. */}
+      <div style={{ flex: "1 0 auto", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "8px 15px" }}>
         <div style={{ display: "flex", gap: "var(--space-3)" }}>
           <Checkbox checked={done} onChange={setDone} ariaLabel="完了" size={22} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -377,7 +378,9 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           </button>
         )}
       </div>
-      <div style={{ padding: "8px 15px", boxShadow: "inset 0 1px 0 var(--color-border)", flex: "0 0 auto" }}>
+      {/* The comment bar stays at the bottom of the screen while the body scrolls above it (as Todoist's). */}
+      <div style={{ position: "sticky", bottom: 0, zIndex: 1, flex: "0 0 auto", background: "var(--color-bg)", boxShadow: "inset 0 1px 0 var(--color-border)" }}>
+      <div style={{ padding: "8px 15px" }}>
         {onAddComment ? (
           // The pill opens the comment sheet (an input card with the clip and send button), as Todoist's does.
           <button
@@ -398,7 +401,8 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           </div>
         )}
       </div>
-      <div aria-hidden style={{ height: fill ? "env(safe-area-inset-bottom)" : 34, flex: "0 0 auto" }} />
+      <div aria-hidden style={{ height: fill ? "env(safe-area-inset-bottom)" : 34 }} />
+      </div>
     </MobileShell>
   );
 }

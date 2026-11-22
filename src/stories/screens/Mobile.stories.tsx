@@ -259,6 +259,25 @@ export const M03DateSheet: Story = {
   ),
 };
 
+// Not on the storyboard: many subtasks scroll above the comment bar, so 「サブタスクを追加」 can be scrolled into view and pressed.
+export const M03ManySubtasks: Story = {
+  name: "M-03 サブタスクが多い (fill)",
+  render: () => (
+    <MobileTaskDetail
+      live
+      fill
+      task={{ ...tasks[0], labels: ["食品", "急ぎ"], reminders: ["-30m"], note: "近所のスーパーで。卵は 10 個入り。" }}
+      subtasks={[...byNo(4, 5, 7), ...byNo(4, 5, 7, 4, 5).map((t, i) => ({ ...t, no: 950 + i, order: 10 + i }))]}
+      project={projects.find((p) => p.name === "買い物")!}
+      section="今週"
+      today={TODAY}
+      onChange={() => undefined}
+      onAddSubtask={() => undefined}
+      onAddComment={async () => true}
+    />
+  ),
+};
+
 // ---- Phase 6 Task 12: 設定 (同期 / 通知 / 表示名 / ファイル)、同期の帯、引っ張って更新 ----
 const noop = () => undefined;
 const syncPane = {
