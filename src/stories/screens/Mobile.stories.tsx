@@ -19,6 +19,7 @@ import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
 import { insertToken } from "../../app/quickAddInsert";
 import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
+import { MobileDrawer, MobileMenuContext } from "../../views/mobile/MobileDrawer";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -118,7 +119,7 @@ function useTasks(initial: Task[]) {
 
 function LiveProject() {
   const { list, toggle } = useTasks(shopping);
-  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} />;
+  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} onProjectMenu={() => undefined} onAddTask={() => undefined} />;
 }
 
 export const M01Live: Story = {
@@ -245,6 +246,19 @@ export const M02LongChips: Story = {
   ),
 };
 
+// The date chip opens the date list over the card (spec 2026-11-22 §1). Picking rewrites the date word in the field.
+export const M02DatePicker: Story = {
+  name: "M-02 日付のチップで一覧を開いた",
+  render: () => (
+    <SheetFrame>
+      <MobileQuickAddSheet tokens={[{ text: "牛乳 " }, { text: "明日", kind: "date" }]} text="牛乳 明日" onTextChange={() => undefined} onSubmit={() => undefined} covered />
+      <BottomSheet open title="日付" onClose={() => undefined}>
+        <DateSheet value="2026-10-15" today={TODAY} onChange={() => undefined} onClose={() => undefined} />
+      </BottomSheet>
+    </SheetFrame>
+  ),
+};
+
 export const M03DateSheet: Story = {
   name: "M-03 日付のシートを開いた",
   render: () => (
@@ -255,6 +269,28 @@ export const M03DateSheet: Story = {
       section="今週"
       onChange={() => undefined}
       initialSheet="date"
+    />
+  ),
+};
+
+// Not on the storyboard: many subtasks scroll above the comment bar, so 「サブタスクを追加」 can be scrolled into view and pressed.
+export const M03ManySubtasks: Story = {
+  name: "M-03 サブタスクが多い (fill)",
+  render: () => (
+    <MobileTaskDetail
+      live
+      fill
+      task={{ ...tasks[0], labels: ["食品", "急ぎ"], reminders: ["-30m"], note: "近所のスーパーで。卵は 10 個入り。" }}
+      subtasks={[...byNo(4, 5, 7), ...byNo(4, 5, 7, 4, 5).map((t, i) => ({ ...t, no: 950 + i, order: 10 + i }))]}
+      project={projects.find((p) => p.name === "買い物")!}
+      section="今週"
+      today={TODAY}
+      onChange={() => undefined}
+      onAddSubtask={() => undefined}
+      onAddComment={async () => true}
+      onMove={() => undefined}
+      projects={projects.map((p) => ({ ...p, taskCount: 0 }))}
+      sections={sections}
     />
   ),
 };
@@ -371,6 +407,38 @@ export const M01Refreshing: Story = {
     };
     return <Live />;
   },
+};
+
+// M-11 (spec 2026-11-22 §4): the menu button at the top left of a tab screen opens the drawer. An item closes it.
+function DrawerOpen() {
+  const [open, setOpen] = useState(true);
+  return (
+    <MobileMenuContext.Provider value={() => setOpen(true)}>
+      <MobileToday
+        overdue={byNo(9, 10)}
+        todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+        today={TODAY}
+        overlay={
+          <MobileDrawer
+            open={open}
+            onClose={() => setOpen(false)}
+            displayName="たろう"
+            projects={projects}
+            counts={counts}
+            active={{ kind: "today" }}
+            syncState="synced"
+            lastSyncedAt="2 分前"
+            onGo={() => setOpen(false)}
+          />
+        }
+      />
+    </MobileMenuContext.Provider>
+  );
+}
+
+export const M11: Story = {
+  name: "M-11 メニュー (ドロワー)",
+  render: () => <DrawerOpen />,
 };
 
 export const M08: Story = {

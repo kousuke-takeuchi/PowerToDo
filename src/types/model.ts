@@ -54,6 +54,8 @@ export interface Span { start: number; end: number; kind: TokenKind; }
 /** Rust serializes the absent Options as null (no skip_serializing_if); dueTime is "HH:MM". */
 export interface QuickAddResult { title: string; due: string | null; dueTime: string | null; rrule: string | null; priority: Priority | null; project: string | null; labels: string[]; spans: Span[]; }
 /** `no`: the number of the task just added (in `view.project`). */
+/** Where in the default project a quick add lands (the syntax has no section). */
+export interface QuickAddPlace { section?: string | null; parentNo?: number; }
 export interface QuickAddOutcome { parsed: QuickAddResult; view: ProjectView; no: number; }
 export interface MoveOutcome { from: ProjectView; to: ProjectView; /** 移した先でのタスクの No. */ no: number; }
 /** `parse_recurrence`: rrule and label are both null when the text is not a recurrence. */

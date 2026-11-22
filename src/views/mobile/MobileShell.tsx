@@ -1,5 +1,5 @@
 import type React from "react";
-import { useLayoutEffect, useRef } from "react";
+import { useContext, useLayoutEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { usePullToRefresh } from "../../app/useGestures";
@@ -9,6 +9,7 @@ import type { MobileTab } from "../../app/mobileNav";
 import { TAB_BAR, TabBar } from "../../components/TabBar";
 import type { TabBarProps } from "../../components/TabBar";
 import { LARGE_TITLE_HEIGHT, titleLook, titleProgress } from "../../components/largeTitle";
+import { MobileMenuContext } from "./MobileDrawer";
 
 export type MobileShellProps = {
   /** A custom top bar (M-03's breadcrumb). Without it the shell draws MobileHeader from title / subtitle / actions / onBack. */
@@ -61,6 +62,9 @@ function LargeTitle({ title, subtitle, progress }: { title: string; subtitle?: s
  */
 export function MobileShell({ header, title, subtitle, largeTitle, actions, onBack, initialScrollTop, children, tab, today, onTabChange, fab, onFab, overlay, fill, banner, onRefresh, refreshing: forceRefreshing }: MobileShellProps) {
   const pulling = usePullToRefresh(onRefresh);
+  // The tab screens' top bar has the menu button (the drawer); pushed screens have back instead.
+  const openMenu = useContext(MobileMenuContext);
+  const onMenu = tab !== undefined && !onBack ? (openMenu ?? undefined) : undefined;
   const withPull = onRefresh !== undefined || forceRefreshing !== undefined;
   const progress = useMotionValue(titleProgress(initialScrollTop ?? 0));
   const scrollEl = useRef<HTMLDivElement | null>(null);
@@ -91,7 +95,7 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
     >
       {header ??
         (title !== undefined && (
-          <MobileHeader title={title} subtitle={subtitle} progress={largeTitle ? progress : undefined} actions={actions} onBack={onBack} safeArea={fill} />
+          <MobileHeader title={title} subtitle={subtitle} progress={largeTitle ? progress : undefined} actions={actions} onBack={onBack} onMenu={onMenu} safeArea={fill} />
         ))}
       {banner && <div style={{ flex: "0 0 auto", maxHeight: "40%", overflowY: "auto" }}>{banner}</div>}
       <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>

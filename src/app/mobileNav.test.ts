@@ -44,3 +44,10 @@ test("cross_nav_of_each_tab", () => {
   assert.deepEqual(crossNavOf(go({ type: "push", screen: { kind: "search" } })), { kind: "inbox" });
   assert.deepEqual(crossNavOf(go({ type: "push", screen: { kind: "labels" } })), { kind: "labels" });
 });
+
+test("drawer_open_replaces_the_browse_stack", () => {
+  // The drawer (spec 2026-11-22 §4) opens a screen fresh: back goes to 閲覧, not to what was open before.
+  const s = go({ type: "push", screen: { kind: "labels" } }, { type: "tab", tab: "today" }, { type: "open", screen: { kind: "project", name: "仕事" } });
+  assert.deepEqual(screenOf(s), { kind: "project", name: "仕事" });
+  assert.deepEqual(screenOf(reduceNav(s, { type: "back" })), { kind: "browse" });
+});

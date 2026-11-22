@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>M-11 メニュー (ドロワー)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP%3Awght%40100..900&display=swap" rel="stylesheet" />
+    <style>
+      *, ::before, ::after { box-sizing: border-box; }
+      body { margin: 0; background: #FFFFFF; font-family: "Noto Sans JP", system-ui, sans-serif; color: #202020; }
+      .frame { position: relative; width: 390px; height: 844px; overflow: hidden; background: #FFFFFF; }
+      /* The screen behind: M-04 今日, with the menu button at the left of the top bar */
+      .behind .time { position: absolute; left: 30px; top: 16px; font-size: 15px; font-weight: 600; }
+      .behind .menu { position: absolute; left: 15px; top: 51px; width: 44px; height: 44px; display: grid; place-items: center; }
+      .behind .title { position: absolute; left: 15px; top: 96px; font-size: 34px; font-weight: 700; }
+      .behind .row { position: absolute; left: 50px; font-size: 16px; }
+      .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); }
+      .drawer { position: absolute; top: 0; bottom: 0; left: 0; width: 320px; background: #FFFFFF; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); display: flex; flex-direction: column; }
+      .body { flex: 1; padding: 59px 15px 16px; }
+      .account { display: flex; align-items: center; gap: 8px; height: 44px; font-size: 16px; font-weight: 600; }
+      .avatar { width: 28px; height: 28px; border-radius: 14px; background: #DC4C3E; }
+      .sync { display: flex; align-items: center; gap: 8px; padding: 4px 10px 8px; font-size: 12px; color: #666666; }
+      .item { display: flex; align-items: center; gap: 8px; height: 44px; font-size: 16px; }
+      .item.active { background: #F5F3F0; margin: 0 -15px; padding: 0 15px; }
+      .item .label { flex: 1; }
+      .item .count { font-size: 12px; color: #666666; }
+      .head { margin: 16px 0 4px; font-size: 15px; font-weight: 700; }
+      .foot { padding: 0 15px 34px; box-shadow: inset 0 1px 0 #EEEEEE; }
+      svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+      .hash { font-weight: 400; width: 18px; text-align: center; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <div data-pencil-name="M-11 メニュー (ドロワー)" class="frame">
+      <div class="behind" aria-hidden="true">
+        <div class="time">9:41</div>
+        <div class="menu"><svg viewBox="0 0 24 24" style="width: 22px; height: 22px"><path d="M4 6h16M4 12h16M4 18h16" /></svg></div>
+        <div class="title">今日</div>
+        <div class="row" style="top: 240px">請求書を送る</div>
+        <div class="row" style="top: 303px">歯医者の予約</div>
+        <div class="row" style="top: 428px">食パンを買う</div>
+      </div>
+      <div class="scrim"></div>
+      <nav class="drawer" aria-label="メニュー">
+        <div class="body">
+          <div class="account"><span class="avatar"></span>たろう</div>
+          <div class="sync">
+            <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; color: #058527"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+            同期済み 2 分前
+          </div>
+          <div class="item"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg><span class="label">検索</span></div>
+          <div class="item"><svg viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg><span class="label">受信トレイ</span><span class="count">12</span></div>
+          <div class="item active"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /><path d="m9 16 2 2 4-4" /></svg><span class="label">今日</span><span class="count">5</span></div>
+          <div class="item"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg><span class="label">近日</span></div>
+          <div class="item"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg><span class="label">フィルターとラベル</span></div>
+          <div class="head">お気に入り</div>
+          <div class="item"><span class="hash" style="color: #EB8909">#</span><span class="label">買い物</span><span class="count">4</span></div>
+          <div class="head">マイプロジェクト</div>
+          <div class="item"><span class="hash" style="color: #246FE0">#</span><span class="label">仕事</span><span class="count">8</span></div>
+          <div class="item"><span class="hash" style="color: #EB8909">#</span><span class="label">買い物</span><span class="count">4</span></div>
+          <div class="item"><span class="hash" style="color: #058527">#</span><span class="label">家のこと</span><span class="count">3</span></div>
+          <div class="item"><span class="hash" style="color: #808080">#</span><span class="label">読書</span><span class="count">2</span></div>
+        </div>
+        <div class="foot">
+          <div class="item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg><span class="label">設定</span></div>
+        </div>
+      </nav>
+    </div>
+  </body>
+</html>

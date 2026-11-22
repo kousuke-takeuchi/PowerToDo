@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
-import type { AppStateDto, Label, NotificationPermission, SearchHit, Task } from "../types/model";
+import type { AppStateDto, Label, NotificationPermission, SearchHit, Task, TokenKind } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
 import { DateSheet } from "../views/mobile/DateSheet";
 import { MobileBrowse } from "../views/mobile/MobileBrowse";
@@ -16,12 +16,14 @@ import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
+import { MobileDrawer, MobileMenuContext, type DrawerTarget } from "../views/mobile/MobileDrawer";
 import { ProjectMenuSheet } from "../views/mobile/ProjectMenuSheet";
 import { TEXT_SHEET_FORM, TextSheet } from "../views/mobile/TextSheet";
 import { crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
 import { useSystemTheme } from "./useSystemTheme";
 import { ReminderSheet } from "../views/mobile/ReminderSheet";
 import { PrioritySheet } from "../views/mobile/PrioritySheet";
+import { LabelSheet } from "../views/mobile/LabelSheet";
 import { TaskMenuSheet } from "../views/mobile/TaskMenuSheet";
 import { Banners } from "./Banners";
 import { MobileToast } from "../components/MobileToast";
@@ -32,7 +34,7 @@ import { useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
-import { insertToken } from "./quickAddInsert";
+import { dateWords, projectWord, replaceWords, type InsertKind } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
@@ -56,6 +58,7 @@ const sheetTitle: Record<NonNullable<SheetState>["kind"], (s: NonNullable<SheetS
   move: () => "移動",
   reschedule: () => "期限切れの日付",
 };
+const QA_PICKER_TITLE: Record<"reminder" | InsertKind, string> = { reminder: "リマインダー", date: "日付", priority: "優先度", project: "プロジェクト", label: "ラベル" };
 /** 開いている下部シート。状態はここ (画面の子ではなく MobileMain) に持つ: 一覧の再読み込みや画面の差し替えで失わない。 */
 type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | { kind: "reschedule" } | null;
 
@@ -63,7 +66,18 @@ type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | 
  * iPhone の通常画面 (仕様 §4): 下部タブ (今日 / 近日 / 検索 / 一覧) + ドロワー + プロジェクト / ラベルの画面 + タスク詳細。
  * デスクトップの Main と同じフックにつなぐ。「一覧」のタブはドロワーを開き、選んだ受信トレイ / プロジェクト / ラベルを本文に出す。
  */
-export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
+export function MobileMain(props: { app: AppStateDto; syncConflicts: SyncConflicts }) {
+  // The drawer (spec 2026-11-22 §4): the tab screens' top bars read the opener from context.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  return (
+    <MobileMenuContext.Provider value={openDrawer}>
+      <MobileScreens {...props} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} />
+    </MobileMenuContext.Provider>
+  );
+}
+
+function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app: AppStateDto; syncConflicts: SyncConflicts; drawerOpen: boolean; setDrawerOpen: (open: boolean) => void }) {
   useSystemTheme();
   const today = useToday();
   const { errors: saveErrors } = useSaveErrors();
@@ -76,13 +90,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   const push = (s: BrowseScreen) => dispatchNav({ type: "push", screen: s });
   const back = () => dispatchNav({ type: "back" });
   // プロジェクトの「…」(名前を変更 / 削除)
-  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | null>(null);
+  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
-  // クイック追加の上に重ねるリマインダーのシート
-  const [qaReminderSheet, setQaReminderSheet] = useState(false);
+  // クイック追加の上に重ねるシート (リマインダー、チップの一覧: spec 2026-11-22 §1)
+  const [qaPicker, setQaPicker] = useState<"reminder" | InsertKind | null>(null);
   const [permission, setPermission] = useState<NotificationPermission>("granted");
 
   const { summaries, displayName, refreshSummaries, loadDisplayName, counts } = useSummaries(app, today);
@@ -160,17 +174,25 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, closeQuickAdd, setText, setReminders, submit, tokens, qaProject } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, openQuickAddAt, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
+  // The section / parent shows on the project chip while the task still goes to this project.
+  const qaPlaced = qaProject === navCurrent ? qa.place : undefined;
+  const qaParent = qaPlaced?.parentNo !== undefined ? view?.tasks.find((t) => t.no === qaPlaced.parentNo) : undefined;
+  const qaProjectName = (qaProject === app.inbox ? "受信トレイ" : qaProject) + (qaParent ? ` / ${qaParent.title}` : qaPlaced?.section ? ` / ${qaPlaced.section}` : "");
 
   useEffect(() => {
-    if (!qa.open) setQaReminderSheet(false);
+    if (!qa.open) setQaPicker(null);
   }, [qa.open]);
+  // A picked value rewrites the words of its kind in the field (the field stays the source, as typed words).
+  const rewrite = (kinds: TokenKind[], words: string[]) => setText(replaceWords(qa.text, parsed?.spans ?? [], kinds, words));
 
   // ラベルのシートに並べる、ストアにあるラベル (詳細を開いたとき読む)
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const detailOpen = detail !== null;
+  // The task detail's label sheet and the quick add's label picker list them.
+  const labelsWanted = detailOpen || qa.open;
   useEffect(() => {
-    if (!detailOpen) return;
+    if (!labelsWanted) return;
     let cancelled = false;
     api
       .labels()
@@ -184,7 +206,7 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, showError]);
+  }, [labelsWanted, showError]);
 
   // ---- 行の操作 (スワイプ / 長押しのシート)。開いているプロジェクトの行は useProject、横断ビューの行は cross (操作のあと refreshAll) ----
   const closeSheet = () => setSheet(null);
@@ -240,6 +262,20 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     }
     if (listProject || detail) void p.reload().catch(() => undefined);
     refreshAll();
+  };
+  /** The task detail's 「プロジェクト」 (2026-11-22): the detail follows the task to its new place (another project renumbers it). */
+  const moveOpenTask = async (t: Task, toProject: string, toSection: string | null) => {
+    try {
+      const out = await api.moveTask(t.project, t.no, toProject, toSection);
+      setDetail({ project: toProject, no: out.no });
+      offer({ kind: "move", to: { project: toProject, no: out.no }, back: { project: t.project, section: t.category }, toName: toProject === app.inbox ? "受信トレイ" : toProject });
+      // Same project: re-read it here (another project is read when the detail switches to it).
+      if (toProject === t.project) void p.reload().catch(() => undefined);
+    } catch (e) {
+      showError(e);
+    }
+    refreshAll();
+    void refreshSummaries();
   };
   const renameProject = async (name: string) => {
     const from = navCurrent;
@@ -333,6 +369,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     return () => window.clearTimeout(id);
   }, [flash]);
 
+  const drawerGo = (to: DrawerTarget) => {
+    setDrawerOpen(false);
+    if (to.kind === "inbox" || to.kind === "today" || to.kind === "upcoming") goTab(to.kind);
+    else dispatchNav({ type: "open", screen: to.kind === "project" ? { kind: "project", name: to.name } : { kind: to.kind } });
+  };
+  const drawerActive: DrawerTarget | undefined =
+    screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
   const header = { fill: true as const, onFab: openQuickAdd, onTabChange: goTab, today };
 
@@ -384,6 +427,24 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   );
   const layers = (
     <>
+      <MobileDrawer
+        open={drawerOpen && !detail}
+        onClose={() => setDrawerOpen(false)}
+        displayName={displayName}
+        projects={summaries}
+        counts={counts}
+        active={drawerActive}
+        syncState={syncState}
+        lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
+        syncOffText="同期オフ"
+        syncErrorText={syncErrorText(syncStatus, syncClickable)}
+        onSync={() => {
+          setDrawerOpen(false);
+          if (syncState === "off") dispatchNav({ type: "open", screen: { kind: "settings" } });
+          else headerSync();
+        }}
+        onGo={drawerGo}
+      />
       <AnimatePresence initial={false}>
         {qa.open && (
           <MobileQuickAddSheet
@@ -395,22 +456,79 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
             onSubmit={(t) => void submit(t).then(refreshAll)}
             busy={qa.busy}
             error={qa.error}
-            onInsert={(kind) => setText(insertToken(qa.text, kind))}
+            onPick={setQaPicker}
             reminders={qa.reminders}
-            onPickReminder={() => setQaReminderSheet(true)}
-            projectName={qaProject === app.inbox ? "受信トレイ" : qaProject}
-            covered={qaReminderSheet}
+            onPickReminder={() => setQaPicker("reminder")}
+            projectName={qaProjectName}
+            covered={qaPicker !== null}
             onClose={closeQuickAdd}
           />
         )}
         {undo && <MobileToast key="undo" id={undo.id} text={undoText(undo.u)} onAction={() => void runUndo(undo.u)} onClose={() => setUndo(null)} />}
       </AnimatePresence>
-      <BottomSheet fill open={qa.open && qaReminderSheet} title="リマインダー" onClose={() => setQaReminderSheet(false)}>
-        <ReminderSheet value={qa.reminders} onChange={setReminders} />
+      <BottomSheet
+        fill
+        size={qaPicker === "project" ? "large" : "auto"}
+        open={qa.open && qaPicker !== null}
+        title={qaPicker === null ? undefined : QA_PICKER_TITLE[qaPicker]}
+        onClose={() => setQaPicker(null)}
+      >
+        {qaPicker === "reminder" && <ReminderSheet value={qa.reminders} onChange={setReminders} />}
+        {qaPicker === "date" && (
+          <DateSheet
+            value={parsed?.due ?? undefined}
+            time={parsed?.dueTime ?? undefined}
+            today={today}
+            // 日付なし clears the recurrence too: a recurrence alone would set the date again.
+            onChange={(v) => rewrite(v.date ? ["date", "time"] : ["date", "time", "recurrence"], dateWords(v.date, v.time, today))}
+            onClose={() => setQaPicker(null)}
+          />
+        )}
+        {qaPicker === "priority" && (
+          <PrioritySheet value={parsed?.priority ?? 4} onChange={(v) => rewrite(["priority"], v === 4 ? [] : [`p${v}`])} onClose={() => setQaPicker(null)} />
+        )}
+        {qaPicker === "project" && (
+          <MoveSheet
+            projects={summaries}
+            sections={qaProject === navCurrent && view ? view.sections : []}
+            current={{ project: qaProject, section: qaPlaced?.section ?? null }}
+            onMove={(project, section) => {
+              rewrite(["project"], project === navCurrent ? [] : [projectWord(project)]);
+              // A section only exists in this project; picking anything clears the parent.
+              setPlace(project === navCurrent && section ? { section } : undefined);
+            }}
+            onClose={() => setQaPicker(null)}
+          />
+        )}
+        {qaPicker === "label" && <LabelSheet labels={allLabels} value={parsed?.labels ?? []} onChange={(names) => rewrite(["label"], names.map((n) => `@${n}`))} />}
       </BottomSheet>
-      <BottomSheet fill confirmForm={projectSheet === "rename" ? TEXT_SHEET_FORM : undefined} open={projectSheet !== null} title={projectSheet === "rename" ? "名前を変更" : navCurrent} onClose={() => setProjectSheet(null)}>
+      <BottomSheet
+        fill
+        confirmForm={projectSheet === "rename" || projectSheet === "section" ? TEXT_SHEET_FORM : undefined}
+        open={projectSheet !== null}
+        title={projectSheet === "rename" ? "名前を変更" : projectSheet === "section" ? "セクションを追加" : navCurrent === app.inbox ? "受信トレイ" : navCurrent}
+        onClose={() => setProjectSheet(null)}
+      >
         {projectSheet === "menu" && (
-          <ProjectMenuSheet project={navCurrent} onRename={() => setProjectSheet("rename")} onDelete={() => void deleteProject()} onClose={() => setProjectSheet(null)} />
+          <ProjectMenuSheet
+            project={navCurrent}
+            onAddSection={() => setProjectSheet("section")}
+            onRename={navCurrent === app.inbox ? undefined : () => setProjectSheet("rename")}
+            onDelete={navCurrent === app.inbox ? undefined : () => void deleteProject()}
+            onClose={() => setProjectSheet(null)}
+          />
+        )}
+        {projectSheet === "section" && (
+          <TextSheet
+            label="セクション名"
+            value=""
+            placeholder="セクション名"
+            onSave={(v) => {
+              const t = v.trim();
+              if (t) void p.addSection(t);
+            }}
+            onClose={() => setProjectSheet(null)}
+          />
         )}
         {projectSheet === "rename" && (
           <TextSheet
@@ -590,6 +708,9 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
         noteFiles={taskNote.files}
         onAttachNote={taskNote.attach}
         onDetachNote={(id) => void taskNote.detach(id)}
+        onMove={openTask.parentNo === undefined ? (project, section) => void moveOpenTask(openTask, project, section) : undefined}
+        projects={summaries}
+        sections={view.sections}
         banner={banner}
         overlay={layers}
       />
@@ -721,13 +842,15 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
       onRefresh={pullRefresh}
       tab={nav.tab}
       onBack={screen.kind === "project" ? back : undefined}
-      onProjectMenu={screen.kind === "project" ? () => setProjectSheet("menu") : undefined}
+      onProjectMenu={() => setProjectSheet("menu")}
       title={title}
       project={current}
       tasks={view.tasks}
       sections={view.sections}
       onToggleDone={(t, done) => void p.completeTask(t.no, done).then((ok) => ok && done && offerDone(t))}
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
+      onAddTask={(section) => openQuickAddAt({ section })}
+      onAddSubtask={(t) => openQuickAddAt({ parentNo: t.no })}
       {...rowOps}
       overlay={layers}
     />

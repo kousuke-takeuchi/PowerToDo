@@ -1235,6 +1235,34 @@ pub fn quick_add_in(
     default_project: &str,
     today: NaiveDate,
 ) -> AppResult<QuickAddOutcome> {
+    quick_add_into(
+        store,
+        text,
+        default_project,
+        QuickAddPlace::default(),
+        today,
+    )
+}
+
+/// Where in the default project a quick add lands (the iPhone's 「タスクを追加」 under a section,
+/// 「サブタスクを追加」 under a parent). The syntax has no section, so it comes from the screen.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickAddPlace {
+    #[serde(default)]
+    pub section: Option<String>,
+    #[serde(default)]
+    pub parent_no: Option<u32>,
+}
+
+/// `place` applies only when the task lands in `default_project` (a `#project` elsewhere drops it).
+pub fn quick_add_into(
+    store: &mut ProjectStore,
+    text: &str,
+    default_project: &str,
+    place: QuickAddPlace,
+    today: NaiveDate,
+) -> AppResult<QuickAddOutcome> {
     let parsed = parse_quick_add_in(store, text, today);
     // An archived project takes no new tasks: the inbox stands in for it.
     let default_project = if store.is_archived(default_project) {
@@ -1246,15 +1274,20 @@ pub fn quick_add_in(
         .project
         .clone()
         .unwrap_or_else(|| default_project.to_string());
+    let place = if project == default_project {
+        place
+    } else {
+        QuickAddPlace::default()
+    };
     let input = TaskInput {
         title: parsed.title.clone(),
-        section: None,
+        section: place.section,
         priority: parsed.priority,
         due: parsed.due,
         due_time: parsed.due_time,
         note: None,
         labels: parsed.labels.clone(),
-        parent_no: None,
+        parent_no: place.parent_no,
         rrule: parsed.rrule.clone(),
         reminders: Vec::new(),
     };
@@ -2019,12 +2052,14 @@ pub async fn counts(today: String, state: State<'_, AppState>) -> AppResult<Coun
 pub async fn quick_add(
     text: String,
     default_project: String,
+    place: Option<QuickAddPlace>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<QuickAddOutcome> {
     let today = Local::now().date_naive();
     let (outcome, common_dirty) = with_store(state.inner(), |s| {
-        let outcome = quick_add_in(s, &text, &default_project, today)?;
+        let place = place.unwrap_or_default();
+        let outcome = quick_add_into(s, &text, &default_project, place, today)?;
         Ok((outcome, s.common_dirty()))
     })?;
     state
@@ -2578,6 +2613,56 @@ mod tests {
         assert_eq!(parsed.project, None);
         let out = quick_add_in(&mut store, "y", "古い", d("2026-10-14")).unwrap();
         assert_eq!(out.view.project.name, INBOX);
+    }
+
+    #[test]
+    fn quick_add_into_a_section_or_under_a_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = open_store(tmp.path());
+        store.create_project("買い物", "c").unwrap();
+        store.add_section("買い物", "今週").unwrap();
+        let place = |section: Option<&str>, parent_no| QuickAddPlace {
+            section: section.map(str::to_string),
+            parent_no,
+        };
+        let out = quick_add_into(
+            &mut store,
+            "牛乳 p2",
+            "買い物",
+            place(Some("今週"), None),
+            d("2026-10-14"),
+        )
+        .unwrap();
+        let milk = out.view.tasks.iter().find(|t| t.no == out.no).unwrap();
+        assert_eq!(milk.category.as_deref(), Some("今週"));
+        assert_eq!(
+            milk.priority,
+            crate::domain::model::Priority::try_from(2).unwrap()
+        );
+        // Under a parent: a subtask in the parent's section.
+        let out = quick_add_into(
+            &mut store,
+            "低脂肪",
+            "買い物",
+            place(None, Some(milk.no)),
+            d("2026-10-14"),
+        )
+        .unwrap();
+        let sub = out.view.tasks.iter().find(|t| t.no == out.no).unwrap();
+        assert_eq!(sub.parent_no, Some(milk.no));
+        assert_eq!(sub.category.as_deref(), Some("今週"));
+        // A #project elsewhere ignores the place.
+        let out = quick_add_into(
+            &mut store,
+            "封筒 #受信トレイ",
+            "買い物",
+            place(Some("今週"), Some(milk.no)),
+            d("2026-10-14"),
+        )
+        .unwrap();
+        assert_eq!(out.view.project.name, INBOX);
+        let t = out.view.tasks.iter().find(|t| t.no == out.no).unwrap();
+        assert_eq!((t.category.as_deref(), t.parent_no), (None, None));
     }
 
     #[test]
