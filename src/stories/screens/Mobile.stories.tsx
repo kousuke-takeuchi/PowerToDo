@@ -19,6 +19,7 @@ import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
 import { insertToken } from "../../app/quickAddInsert";
 import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
+import { MobileDrawer, MobileMenuContext } from "../../views/mobile/MobileDrawer";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -403,6 +404,38 @@ export const M01Refreshing: Story = {
     };
     return <Live />;
   },
+};
+
+// M-11 (spec 2026-11-22 §4): the menu button at the top left of a tab screen opens the drawer. An item closes it.
+function DrawerOpen() {
+  const [open, setOpen] = useState(true);
+  return (
+    <MobileMenuContext.Provider value={() => setOpen(true)}>
+      <MobileToday
+        overdue={byNo(9, 10)}
+        todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+        today={TODAY}
+        overlay={
+          <MobileDrawer
+            open={open}
+            onClose={() => setOpen(false)}
+            displayName="たろう"
+            projects={projects}
+            counts={counts}
+            active={{ kind: "today" }}
+            syncState="synced"
+            lastSyncedAt="2 分前"
+            onGo={() => setOpen(false)}
+          />
+        }
+      />
+    </MobileMenuContext.Provider>
+  );
+}
+
+export const M11: Story = {
+  name: "M-11 メニュー (ドロワー)",
+  render: () => <DrawerOpen />,
 };
 
 export const M08: Story = {

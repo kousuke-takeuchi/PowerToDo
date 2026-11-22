@@ -16,6 +16,7 @@ import { MobileTaskDetail } from "../views/mobile/MobileTaskDetail";
 import { MobileToday } from "../views/mobile/MobileToday";
 import { MobileUpcoming } from "../views/mobile/MobileUpcoming";
 import { MoveSheet } from "../views/mobile/MoveSheet";
+import { MobileDrawer, MobileMenuContext, type DrawerTarget } from "../views/mobile/MobileDrawer";
 import { ProjectMenuSheet } from "../views/mobile/ProjectMenuSheet";
 import { TEXT_SHEET_FORM, TextSheet } from "../views/mobile/TextSheet";
 import { crossNavOf, projectOf, reduceNav, screenOf, type BrowseScreen, type MobileTab } from "./mobileNav";
@@ -65,7 +66,18 @@ type SheetState = { kind: "menu" | "date" | "priority" | "move"; task: Task } | 
  * iPhone の通常画面 (仕様 §4): 下部タブ (今日 / 近日 / 検索 / 一覧) + ドロワー + プロジェクト / ラベルの画面 + タスク詳細。
  * デスクトップの Main と同じフックにつなぐ。「一覧」のタブはドロワーを開き、選んだ受信トレイ / プロジェクト / ラベルを本文に出す。
  */
-export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
+export function MobileMain(props: { app: AppStateDto; syncConflicts: SyncConflicts }) {
+  // The drawer (spec 2026-11-22 §4): the tab screens' top bars read the opener from context.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  return (
+    <MobileMenuContext.Provider value={openDrawer}>
+      <MobileScreens {...props} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} />
+    </MobileMenuContext.Provider>
+  );
+}
+
+function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app: AppStateDto; syncConflicts: SyncConflicts; drawerOpen: boolean; setDrawerOpen: (open: boolean) => void }) {
   useSystemTheme();
   const today = useToday();
   const { errors: saveErrors } = useSaveErrors();
@@ -343,6 +355,13 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
     return () => window.clearTimeout(id);
   }, [flash]);
 
+  const drawerGo = (to: DrawerTarget) => {
+    setDrawerOpen(false);
+    if (to.kind === "inbox" || to.kind === "today" || to.kind === "upcoming") goTab(to.kind);
+    else dispatchNav({ type: "open", screen: to.kind === "project" ? { kind: "project", name: to.name } : { kind: to.kind } });
+  };
+  const drawerActive: DrawerTarget | undefined =
+    screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
   const header = { fill: true as const, onFab: openQuickAdd, onTabChange: goTab, today };
 
@@ -394,6 +413,24 @@ export function MobileMain({ app, syncConflicts }: { app: AppStateDto; syncConfl
   );
   const layers = (
     <>
+      <MobileDrawer
+        open={drawerOpen && !detail}
+        onClose={() => setDrawerOpen(false)}
+        displayName={displayName}
+        projects={summaries}
+        counts={counts}
+        active={drawerActive}
+        syncState={syncState}
+        lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
+        syncOffText="同期オフ"
+        syncErrorText={syncErrorText(syncStatus, syncClickable)}
+        onSync={() => {
+          setDrawerOpen(false);
+          if (syncState === "off") dispatchNav({ type: "open", screen: { kind: "settings" } });
+          else headerSync();
+        }}
+        onGo={drawerGo}
+      />
       <AnimatePresence initial={false}>
         {qa.open && (
           <MobileQuickAddSheet

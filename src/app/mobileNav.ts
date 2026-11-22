@@ -10,6 +10,8 @@ export type MobileNav = { tab: MobileTab; browse: BrowseScreen[] };
 export type NavAction =
   | { type: "tab"; tab: MobileTab }
   | { type: "push"; screen: BrowseScreen }
+  /** The drawer: that screen on its own in 閲覧 (back goes to 閲覧's root). */
+  | { type: "open"; screen: BrowseScreen }
   | { type: "back" }
   | { type: "renamed"; from: string; to: string }
   | { type: "removed"; project: string };
@@ -25,6 +27,8 @@ export function reduceNav(s: MobileNav, a: NavAction): MobileNav {
       return { ...s, tab: a.tab };
     case "push":
       return { tab: "browse", browse: [...(s.tab === "browse" ? s.browse : []), a.screen] };
+    case "open":
+      return { tab: "browse", browse: [a.screen] };
     case "back":
       return { ...s, browse: s.browse.slice(0, -1) };
     case "renamed":

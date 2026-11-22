@@ -1,5 +1,5 @@
 import type React from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Menu } from "lucide-react";
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { Button } from "./Button";
 import { Glass } from "./Glass";
@@ -14,6 +14,8 @@ export type MobileHeaderProps = {
   /** 0..1 from the list's scroll (screens with a large title). Omitted: the small title shows at once. */
   progress?: MotionValue<number>;
   onBack?: () => void;
+  /** The menu button at the left (opens the drawer, spec 2026-11-22 §4). Not shown with onBack. */
+  onMenu?: () => void;
   /** Buttons in the glass pill at the right (spec ④ iPhone §3.4). */
   actions?: HeaderAction[];
   /** Replaces the small title, left-aligned (M-03's breadcrumb). `title` becomes its aria-label. */
@@ -35,7 +37,7 @@ const actionButton: React.CSSProperties = {
 };
 
 /** iPhone top bar (spec ④ iPhone §3.3-3.4): back, the small centered title, the glass pill of actions. */
-export function MobileHeader({ title, subtitle, progress, onBack, actions, breadcrumb, safeArea }: MobileHeaderProps) {
+export function MobileHeader({ title, subtitle, progress, onBack, onMenu, actions, breadcrumb, safeArea }: MobileHeaderProps) {
   const one = useMotionValue(1);
   const smallOpacity = useTransform(progress ?? one, (p) => titleLook(p).smallOpacity);
   return (
@@ -44,6 +46,8 @@ export function MobileHeader({ title, subtitle, progress, onBack, actions, bread
       <div style={{ position: "relative", height: 52, display: "flex", alignItems: "center", gap: 8, padding: "0 15px" }}>
         {onBack ? (
           <Button variant="icon" icon={ChevronLeft} ariaLabel="戻る" onClick={onBack} />
+        ) : onMenu ? (
+          <Button variant="icon" icon={Menu} ariaLabel="メニュー" onClick={onMenu} />
         ) : null}
         {breadcrumb ? (
           <div aria-label={title} style={{ flex: 1, minWidth: 0 }}>
