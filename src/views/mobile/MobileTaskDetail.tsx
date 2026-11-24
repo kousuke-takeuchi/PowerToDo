@@ -51,6 +51,8 @@ export type MobileTaskDetailProps = {
   onChange?: (patch: TaskPatch) => void;
   /** サブタスクを追加する (「サブタスクを追加」の行)。 */
   onAddSubtask?: (title: string) => void;
+  /** サブタスクの行を押した (そのサブタスクの詳細を開く)。省略すると行は押せない。 */
+  onOpenSubtask?: (t: Task) => void;
   /** 削除 (確認のシートのあと)。デスクトップと同じく、呼び出し側が詳細を閉じる。 */
   onDelete?: () => void;
   /** ラベルのシートに並べる、ストアにあるラベル。 */
@@ -139,7 +141,7 @@ function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)
 }
 
 /** M-03: タスク詳細 (全画面、下部タブなし)。戻る + パンくず、プロパティ 5 行、サブタスク、下端のコメント欄。完了チェックとサブタスクのチェックは見た目だけトグルする。 */
-export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote, onMove, projects = [], sections = [] }: MobileTaskDetailProps) {
+export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote, onOpenSubtask, onMove, projects = [], sections = [] }: MobileTaskDetailProps) {
   // 下部シートの状態。詳細は key (プロジェクト/番号) で作り直すだけで、一覧の再読み込みでは作り直さない。
   const [sheet, setSheet] = useState<DetailSheet>(initialSheet);
   const closeSheet = () => setSheet(null);
@@ -356,7 +358,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             サブタスク {subtasks.filter(sub.isDone).length}/{subtasks.length}
           </div>
           {subtasks.map((t) => (
-            <TaskRow key={t.no} variant="mobile" {...mobileRowProps(t, { today })} done={sub.isDone(t)} onToggleDone={() => sub.toggle(t)} />
+            <TaskRow key={t.no} variant="mobile" {...mobileRowProps(t, { today })} done={sub.isDone(t)} onToggleDone={() => sub.toggle(t)} onClick={onOpenSubtask ? () => onOpenSubtask(t) : undefined} />
           ))}
           <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => setSheet("subtask") : undefined} />
         </div>

@@ -92,7 +92,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   // プロジェクトの「…」(名前を変更 / 削除)
   const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
-  const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
+  // `parent`: opened from that task's detail (a subtask row); back goes there instead of the list.
+  const [detail, setDetail] = useState<{ project: string; no: number; parent?: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   // クイック追加の上に重ねるシート (リマインダー、チップの一覧: spec 2026-11-22 §1)
@@ -672,7 +673,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
         project={view.project}
         section={openTask.category ?? undefined}
-        onBack={() => setDetail(null)}
+        onBack={() => setDetail(detail.parent !== undefined ? { project: detail.project, no: detail.parent } : null)}
+        onOpenSubtask={(t) => setDetail({ project: detail.project, no: t.no, parent: openTask.no })}
         onToggleDone={(done) =>
           void p.completeTask(openTask.no, done).then((ok) => {
             if (ok && done) offerDone(openTask);
