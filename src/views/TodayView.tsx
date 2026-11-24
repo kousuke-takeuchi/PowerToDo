@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEscLayer } from "../app/layers";
 import { SectionHeader } from "../components/SectionHeader";
-import { dateLabel, monthDay, weekdayLong } from "../mock/data";
+import { monthDay, weekdayLong } from "../mock/data";
 import { useMotionTiming } from "../motion";
 import type { Task } from "../types/model";
 import { useView } from "../app/view/ViewOptionsContext";
@@ -11,6 +11,7 @@ import { visibleOpen } from "./visibleOpen";
 import { AddSlot, FilterNote, HiddenNote, dupKeysOf, useCrossRows, useOutsideClose } from "./crossList";
 import { DatePicker } from "./DatePicker";
 import { PageHeader, TitleGroup } from "./HeaderActions";
+import { dueWithTime } from "./dueLabel";
 
 export type TodayViewProps = {
   tasks: Task[];
@@ -127,7 +128,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
     tasks,
     onToggleDone,
     onOpenTask,
-    date: (t) => dateLabel(t.due, today),
+    date: (t) => dueWithTime(t, today),
     focusedKey,
     onVisibleKeys,
     dragView: "today",

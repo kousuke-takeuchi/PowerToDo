@@ -6,8 +6,8 @@ import { isImeKey } from "../app/keys";
 import { useEscLayer } from "../app/layers";
 import { Segmented } from "../components/Segmented";
 import { TaskRow } from "../components/TaskRow";
-import { dateLabel } from "../mock/data";
 import type { SearchHit } from "../types/model";
+import { dueWithTime } from "./dueLabel";
 
 export type SearchDialogProps = {
   open: boolean;
@@ -202,7 +202,7 @@ export function SearchDialog({
                       done={h.task.progress === 100}
                       priority={h.task.priority}
                       project={h.task.project}
-                      date={dateLabel(h.task.due, today)}
+                      date={dueWithTime(h.task, today)}
                       labels={h.task.labels}
                       onClick={() => onOpen(h)}
                       onToggleDone={() => onToggleDone(h, h.task.progress !== 100)}

@@ -25,6 +25,7 @@ import { RecurrencePicker, recurrenceLabel } from "./RecurrencePicker";
 import { ReminderPicker, reminderSummary } from "./ReminderPicker";
 import { SubtaskForm } from "./SubtaskForm";
 import { useDone } from "./useDone";
+import { dueWithTime } from "./dueLabel";
 
 export type TaskDialogProps = {
   task: Task;
@@ -515,7 +516,7 @@ export function TaskDialog({
               title: t.title,
               done: subDone(t),
               priority: t.priority,
-              date: onOpenSubtask ? dateLabel(t.due, today) : undefined,
+              date: onOpenSubtask ? dueWithTime(t, today) : undefined,
               hideActions: !onOpenSubtask,
               onClick: onOpenSubtask ? () => onOpenSubtask(t.no) : undefined,
               onToggleDone: () => (onToggleSubtask ? onToggleSubtask(t.no, !subDone(t)) : sub.toggle(t)),
