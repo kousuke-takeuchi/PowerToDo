@@ -378,8 +378,15 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   const drawerActive: DrawerTarget | undefined =
     screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
-  // On 今日 a new task starts dated today (as Todoist): the field opens with the date word.
-  const header = { fill: true as const, onFab: screen.kind === "today" ? () => openQuickAddWith("今日 ") : openQuickAdd, onTabChange: goTab, today };
+  // On 今日 a new task starts dated today, on 近日 on the day at the top of the list (as Todoist): the field opens with the date word.
+  const [upcomingDay, setUpcomingDay] = useState<string | null>(null);
+  const fab =
+    screen.kind === "today"
+      ? () => openQuickAddWith("今日 ")
+      : screen.kind === "upcoming"
+        ? () => openQuickAddWith(`${dateWords(upcomingDay && upcomingDay >= today ? upcomingDay : today, undefined, today).join(" ")} `)
+        : openQuickAdd;
+  const header = { fill: true as const, onFab: fab, onTabChange: goTab, today };
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
@@ -776,6 +783,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onOpenTask={openCross}
         onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
         onMoveToDay={(t, date) => setDue(t, date, t.dueTime ?? null)}
+        onVisibleDay={setUpcomingDay}
         {...rowOps}
         overlay={layers}
       />

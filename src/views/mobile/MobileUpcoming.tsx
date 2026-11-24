@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence } from "motion/react";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
@@ -42,10 +43,12 @@ export type MobileUpcomingProps = {
   onTaskMenu?: (t: Task) => void;
   /** live のみ (spec 2026-11-24): 長押しで別の日のグループへ動かした (その日に変える)。同じ日の中の順は保存しない。 */
   onMoveToDay?: (t: Task, date: string) => void;
+  /** live のみ (spec 2026-11-24): 一覧の上に見えている日 (スクロールで変わる。週の帯で選んだ日も)。追加ボタンはこの日で開く。 */
+  onVisibleDay?: (date: string) => void;
 };
 
 /** M-05: 近日。WeekStrip (今日から 7 日、タップで選択) + タスクのある日だけの日付グループ。行は日付チップなし (見出しが日付)。 */
-export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay }: MobileUpcomingProps) {
+export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay, onVisibleDay }: MobileUpcomingProps) {
   const local = useDone();
   const leave = useLeaving(tasks);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -115,6 +118,25 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
     });
     return live ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
   };
+  // The day at the top of the list: the last day group whose top has scrolled up to the top bar.
+  const visibleCb = useRef(onVisibleDay);
+  visibleCb.current = onVisibleDay;
+  useEffect(() => {
+    const body = reorder.list.current?.closest<HTMLElement>("[data-scroll-body]");
+    if (!body || !live) return;
+    const pick = () => {
+      const top = body.getBoundingClientRect().top + 8;
+      let day: string | undefined;
+      for (const el of body.querySelectorAll<HTMLElement>("[data-day]")) {
+        if (el.getBoundingClientRect().top <= top || day === undefined) day = el.dataset.day;
+        else break;
+      }
+      if (day) visibleCb.current?.(day);
+    };
+    pick();
+    body.addEventListener("scroll", pick, { passive: true });
+    return () => body.removeEventListener("scroll", pick);
+  }, [live, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
   const days = [...new Set(tasks.map((t) => t.due).filter((d): d is string => d !== undefined && d >= today))].sort();
   return (
     <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
@@ -126,6 +148,7 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
           today={today}
           onSelect={(ymd) => {
             onSelectDay?.(ymd);
+            onVisibleDay?.(ymd);
             // 実画面では、その日のグループまでスクロールする (タスクが無い日は動かない)
             if (live) document.querySelector(`[data-day="${ymd}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
           }}
