@@ -175,7 +175,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, openQuickAddAt, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, openQuickAddAt, openQuickAddWith, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
   // The section / parent shows on the project chip while the task still goes to this project.
   const qaPlaced = qaProject === navCurrent ? qa.place : undefined;
   const qaParent = qaPlaced?.parentNo !== undefined ? view?.tasks.find((t) => t.no === qaPlaced.parentNo) : undefined;
@@ -378,7 +378,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   const drawerActive: DrawerTarget | undefined =
     screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
-  const header = { fill: true as const, onFab: openQuickAdd, onTabChange: goTab, today };
+  // On 今日 a new task starts dated today (as Todoist): the field opens with the date word.
+  const header = { fill: true as const, onFab: screen.kind === "today" ? () => openQuickAddWith("今日 ") : openQuickAdd, onTabChange: goTab, today };
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;

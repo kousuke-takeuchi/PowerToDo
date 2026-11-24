@@ -23,6 +23,8 @@ export function useQuickAdd({
   // No argument: it is passed straight as a click handler.
   const openQuickAdd = useCallback(() => setQa((s) => (s.open ? s : { ...QA_CLOSED, open: true })), []);
   const openQuickAddAt = useCallback((place: QuickAddPlace) => setQa((s) => (s.open ? s : { ...QA_CLOSED, open: true, place })), []);
+  /** Opens with words already in the field (the iPhone's 今日: 「今日 」, so what is typed next is the title). */
+  const openQuickAddWith = useCallback((text: string) => setQa((s) => (s.open ? s : { ...QA_CLOSED, open: true, text })), []);
   const setPlace = (place: QuickAddPlace | undefined) => setQa((s) => ({ ...s, place }));
   const closeQuickAdd = useCallback(() => setQa(QA_CLOSED), []);
   const setText = (text: string) => setQa((s) => ({ ...s, text, error: undefined }));
@@ -72,5 +74,5 @@ export function useQuickAdd({
   const tokens = parsed ? spansToTokens(qa.text, parsed.spans) : qa.text ? [{ text: qa.text }] : [];
   const qaProject = parsed?.project ?? current;
 
-  return { qa, openQuickAdd, openQuickAddAt, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed };
+  return { qa, openQuickAdd, openQuickAddAt, openQuickAddWith, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed };
 }
