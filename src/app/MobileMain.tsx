@@ -742,13 +742,18 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onReschedule={() => setSheet({ kind: "reschedule" })}
-        onReorderToday={(keys) =>
-          void api
-            .setTodayOrder(
-              today,
-              keys.map((k): [string, number] => [k.slice(0, k.lastIndexOf("/")), Number(k.slice(k.lastIndexOf("/") + 1))]),
+        onReorderToday={(keys, rescheduled) =>
+          void (rescheduled ? api.updateTask(rescheduled.project, rescheduled.no, { due: today }) : Promise.resolve())
+            .then(() =>
+              api.setTodayOrder(
+                today,
+                keys.map((k): [string, number] => [k.slice(0, k.lastIndexOf("/")), Number(k.slice(k.lastIndexOf("/") + 1))]),
+              ),
             )
-            .then(refreshAll, showError)
+            .then(() => {
+              if (rescheduled) offerDate([rescheduled], today);
+              refreshAll();
+            }, showError)
         }
         {...rowOps}
         overlay={layers}

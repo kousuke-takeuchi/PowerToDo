@@ -12,7 +12,7 @@ import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { dayHeading } from "./mobileDates";
-import { beforeKeyOf, reordered } from "./mobileReorder";
+import { beforeKeyOf, reordered, sectionAt } from "./mobileReorder";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 
 export type MobileTodayProps = {
@@ -41,8 +41,11 @@ export type MobileTodayProps = {
   /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。 */
   onSwipeDate?: (t: Task) => void;
   onTaskMenu?: (t: Task) => void;
-  /** live のみ (spec 2026-11-24): 「今日」のグループを長押しで並び替えた新しい順 (project/no)。期限切れの行は並び替えない。 */
-  onReorderToday?: (keys: string[]) => void;
+  /**
+   * live のみ (spec 2026-11-24): 「今日」のグループを長押しで並び替えた新しい順 (project/no)。期限切れの行を「今日」へ
+   * 落とすと `rescheduled` にそのタスク (呼び出し側が今日に変えてから順を保存する)。期限切れの中では並び替えない。
+   */
+  onReorderToday?: (keys: string[], rescheduled?: Task) => void;
 };
 
 /** M-04: 今日 (ヘッダーに同期アイコンなし)。期限切れ (再スケジュール付き) + 今日。pen のとおりチェックの色は全行 priority-4。 */
@@ -60,12 +63,14 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
   const reordering = live && onReorderToday !== undefined;
   const reorder = useMobileReorder({
     onDrop: (key, drop, rows) => {
+      if (sectionAt(rows, drop) !== "today") return;
+      const late = overdue.find((x) => taskKey(x) === key);
       const keys = todays.map(taskKey);
       const next = reordered(keys, key, beforeKeyOf(rows, drop, key));
-      if (next.join("\n") !== keys.join("\n")) onReorderToday?.(next);
+      if (late || next.join("\n") !== keys.join("\n")) onReorderToday?.(next, late);
     },
     onMenu: (key) => {
-      const t = todays.find((x) => taskKey(x) === key);
+      const t = [...overdue, ...todays].find((x) => taskKey(x) === key);
       if (t) onTaskMenu?.(t);
     },
   });
@@ -81,12 +86,13 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
       />
     );
-    const liftable = reordering && group === "today";
+    // Overdue rows lift too: dropped into 今日 they move to today (Todoist).
+    const liftable = reordering && (group === "today" || group === "overdue");
     const lifted = reorder.state?.key === taskKey(t);
     return live && (onSwipeDate || onTaskMenu) ? (
       <div
         key={taskKey(t)}
-        {...(liftable ? reorderAttrs({ kind: "task", key: taskKey(t), no: t.no, depth: 0, parent: null, section: "today" }) : {})}
+        {...(liftable ? reorderAttrs({ kind: "task", key: taskKey(t), no: t.no, depth: 0, parent: null, section: group }) : {})}
         style={lifted ? { position: "relative", zIndex: 3, transform: `translateY(${reorder.state!.dy}px)`, background: "var(--color-bg)", boxShadow: "var(--shadow-popover)", borderRadius: 8 } : undefined}
       >
         <SwipeRow
@@ -125,6 +131,7 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
         )}
         {(!live || overdue.length > 0) && (
           <section>
+            <div {...(reordering ? reorderAttrs({ kind: "header", section: "overdue" }) : {})}>
             <SectionHeader
               mobile
               tight
@@ -140,6 +147,7 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
                 </button>
               }
             />
+            </div>
             {list("overdue", overdue, { project: true, date: true })}
           </section>
         )}
