@@ -76,7 +76,7 @@
 | 隔週 / every 2 weeks / every other week | 2 週間ごと |
 | 毎月 / every month / monthly | 毎月 (日は期限の日) |
 | 毎月1日 / 毎月 15 日 / every month on the 1st / monthly on 15 | 毎月その日 |
-| 毎月末 / 月末 / every month end / last day of month | 毎月末 |
+| 毎月末 / 月末 / 毎月月末 / 毎月 月末 / 毎月最終日 / 月末日 / every month end / last day of month | 毎月末 |
 | 毎年 / every year / yearly | 毎年 (月日は期限) |
 | 毎年10月18日 / every oct 18 | 毎年その月日 |
 | 3日ごと / every 3 days | 3 日ごと |
