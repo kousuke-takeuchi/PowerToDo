@@ -14,6 +14,9 @@ import { dayHeading } from "./mobileDates";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { sectionAt } from "./mobileReorder";
+import { Ellipsis } from "lucide-react";
+import { arrangeFlat, type ArrangeCtx } from "../../app/view/arrange";
+import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 
 export type MobileUpcomingProps = {
@@ -45,10 +48,15 @@ export type MobileUpcomingProps = {
   onMoveToDay?: (t: Task, date: string) => void;
   /** live のみ (spec 2026-11-24): 一覧の上に見えている日 (スクロールで変わる。週の帯で選んだ日も)。追加ボタンはこの日で開く。 */
   onVisibleDay?: (date: string) => void;
+  /** 表示の設定 (spec 2026-11-24): 各日の中の並び替えと優先度の絞り込み (デスクトップと同じ)。日ごとのまとまりはそのまま。 */
+  view?: ViewOptions;
+  arrangeCtx?: ArrangeCtx;
+  /** 右上の「…」: 表示のシートを開く。省略すると「…」は出ない。 */
+  onViewMenu?: () => void;
 };
 
 /** M-05: 近日。WeekStrip (今日から 7 日、タップで選択) + タスクのある日だけの日付グループ。行は日付チップなし (見出しが日付)。 */
-export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay, onVisibleDay }: MobileUpcomingProps) {
+export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay, onVisibleDay, view, arrangeCtx, onViewMenu }: MobileUpcomingProps) {
   const local = useDone();
   const leave = useLeaving(tasks);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -137,9 +145,17 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
     body.addEventListener("scroll", pick, { passive: true });
     return () => body.removeEventListener("scroll", pick);
   }, [live, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
-  const days = [...new Set(tasks.map((t) => t.due).filter((d): d is string => d !== undefined && d >= today))].sort();
+  const options = view ?? DEFAULTS;
+  const ctx = arrangeCtx ?? { today, weekStart: "mon" as const, labelOrder: [], projectOrder: [] };
+  const dayTasks = (ymd: string) => tasks.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no);
+  const arranged = new Map(
+    [...new Set(tasks.map((t) => t.due).filter((d): d is string => d !== undefined && d >= today))].map((ymd) => [ymd, arrangeFlat(dayTasks(ymd), { ...options, group: "none" }, ctx)]),
+  );
+  const hidden = [...arranged.values()].reduce((n, a) => n + a.hidden, 0);
+  // A day whose tasks the filter hides is not shown (it has no rows).
+  const days = [...arranged.keys()].filter((d) => (arranged.get(d)?.groups[0]?.rows.length ?? 0) > 0).sort();
   return (
-    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
+    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" actions={onViewMenu ? [{ icon: Ellipsis, label: "表示", onClick: onViewMenu }] : undefined} tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
         {reorder.state?.line && (
           <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />
@@ -160,12 +176,21 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
             </div>
             {list(
               ymd,
-              tasks.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no),
+              (arranged.get(ymd)?.groups[0]?.rows ?? []).map((r) => r.task),
             )}
           </section>
         ))}
-        {live && days.length === 0 && (
+        {live && days.length === 0 && hidden === 0 && (
           <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>この先のタスクはありません</div>
+        )}
+        {live && hidden > 0 && (
+          <button
+            type="button"
+            onClick={onViewMenu}
+            style={{ display: "block", width: "100%", minHeight: 44, padding: "8px 0", border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", color: "var(--color-text-secondary)", textAlign: "center", cursor: onViewMenu ? "pointer" : "default" }}
+          >
+            {`優先度の絞り込みで ${hidden} 件を隠しています`}
+          </button>
         )}
         {live && onExtend && (
           <div style={{ display: "flex", justifyContent: "center", padding: "var(--space-4) 0" }}>
