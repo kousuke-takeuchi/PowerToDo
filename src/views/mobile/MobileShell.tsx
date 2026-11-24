@@ -175,7 +175,8 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
           <Plus size={26} />
         </button>
       )}
-      {onMenu && <EdgeSwipe onOpen={onMenu} />}
+      {/* The edge swipe works on every screen with the tab bar, a pushed project too (its top bar has back instead of the button). */}
+      {openMenu && tab !== undefined && <EdgeSwipe onOpen={openMenu} />}
       {overlay && <div style={{ position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>{overlay}</div>}
     </div>
   );
