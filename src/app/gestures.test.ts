@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { axisLock, decidePull, decideSwipe, longPressCancelled, AXIS_SLOP, SWIPE_TRIGGER, PULL_TRIGGER } from "./gestures.ts";
+import { axisLock, decideEdgeOpen, decidePull, decideSwipe, longPressCancelled, AXIS_SLOP, EDGE_OPEN_TRIGGER, SWIPE_TRIGGER, PULL_TRIGGER } from "./gestures.ts";
 
 test("axis is undecided inside the slop", () => {
   assert.equal(axisLock(AXIS_SLOP - 1, 0), null);
@@ -29,4 +29,13 @@ test("pull to refresh only at the top, vertical, past the trigger", () => {
 test("long press is cancelled by movement", () => {
   assert.equal(longPressCancelled(3, 4), false);
   assert.equal(longPressCancelled(0, 9), true);
+});
+
+test("an edge swipe to the right opens the menu once it passes the trigger", () => {
+  assert.equal(decideEdgeOpen(EDGE_OPEN_TRIGGER, 4), true);
+  assert.equal(decideEdgeOpen(EDGE_OPEN_TRIGGER - 1, 0), false);
+});
+test("a mostly vertical or leftward edge movement does not open the menu", () => {
+  assert.equal(decideEdgeOpen(EDGE_OPEN_TRIGGER + 10, EDGE_OPEN_TRIGGER + 20), false);
+  assert.equal(decideEdgeOpen(-EDGE_OPEN_TRIGGER, 0), false);
 });

@@ -39,3 +39,13 @@ export function decidePull(atTop: boolean, axis: Axis | null, dy: number): boole
 export function longPressCancelled(dx: number, dy: number): boolean {
   return Math.hypot(dx, dy) >= LONG_PRESS_SLOP;
 }
+
+/** The menu's edge swipe (spec 2026-11-24): how far right a swipe from the screen's left edge must go to open the drawer. */
+export const EDGE_OPEN_TRIGGER = 40;
+/** The strip at the left edge that takes the swipe (narrow enough to leave the row's checkbox at 15 px free). */
+export const EDGE_STRIP = 14;
+
+/** Whether a swipe from the left edge opens the menu: to the right past the trigger, more across than down. */
+export function decideEdgeOpen(dx: number, dy: number): boolean {
+  return dx >= EDGE_OPEN_TRIGGER && dx > Math.abs(dy);
+}
