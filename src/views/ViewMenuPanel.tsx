@@ -5,7 +5,7 @@ import { ALLOWED, DEFAULTS, isDefault, withSort, type CreatedFilter, type DateFi
 import { PopRow, PopoverShell } from "./PopoverShell";
 
 const GROUP_LABEL: Record<GroupKey, string> = { none: "なし", date: "日付", added: "追加日", priority: "優先度", label: "ラベル", project: "プロジェクト" };
-const SORT_LABEL: Record<SortKey, string> = { manual: "手動", name: "名前", date: "日付", added: "追加日", priority: "優先度" };
+const SORT_LABEL: Record<SortKey, string> = { manual: "手動", name: "名前", date: "日付", time: "時刻", added: "追加日", priority: "優先度" };
 const DATE_LABEL: Record<DateFilter, string> = { all: "すべて", today: "今日", week: "今週", "7d": "次の 7 日間", month: "今月", "30d": "次の 30 日間", none: "日付なし" };
 const CREATED_LABEL: Record<CreatedFilter, string> = { all: "すべて", today: "今日", "7d": "過去 7 日間", "30d": "過去 30 日間" };
 const PRIO_LABEL: Record<string, string> = { all: "すべて", "1": "P1", "2": "P2", "3": "P3", "4": "P4" };

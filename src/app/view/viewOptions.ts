@@ -1,5 +1,5 @@
 export type Screen = "project" | "today" | "upcoming" | "label";
-export type SortKey = "manual" | "name" | "date" | "added" | "priority";
+export type SortKey = "manual" | "name" | "date" | "time" | "added" | "priority";
 export type GroupKey = "none" | "date" | "added" | "priority" | "label" | "project";
 export type DateFilter = "all" | "today" | "week" | "7d" | "month" | "30d" | "none";
 export type CreatedFilter = "all" | "today" | "7d" | "30d";
@@ -23,7 +23,7 @@ const pick = <T extends string>(v: string | undefined, allowed: readonly T[]): T
 
 export function parseView(text: string | undefined): ViewOptions {
   const m = new Map((text ?? "").split(";").map((p) => p.split("=") as [string, string]).filter((p) => p.length === 2));
-  const sort = pick(m.get("sort"), ["manual", "name", "date", "added", "priority"] as const) ?? "manual";
+  const sort = pick(m.get("sort"), ["manual", "name", "date", "time", "added", "priority"] as const) ?? "manual";
   const prio = m.get("prio");
   return {
     layout: pick(m.get("layout"), ["list", "board"] as const) ?? "list",

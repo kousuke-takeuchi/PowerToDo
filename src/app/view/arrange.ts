@@ -40,6 +40,9 @@ function compare(a: Task, b: Task, o: ViewOptions): number {
     case "date":
       if (!a.due || !b.due) return a.due ? -1 : b.due ? 1 : 0; // no date last either way
       return sign * (num(a.due) - num(b.due));
+    case "time":
+      if (!a.dueTime || !b.dueTime) return a.dueTime ? -1 : b.dueTime ? 1 : 0; // no time last either way
+      return sign * a.dueTime.localeCompare(b.dueTime);
     case "added": return sign * a.createdAt.localeCompare(b.createdAt);
     case "priority": return sign * (a.priority - b.priority);
     default: return 0;

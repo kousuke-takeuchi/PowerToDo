@@ -50,3 +50,9 @@ test("pending_writes_win_over_a_fresh_load_until_they_settle", () => {
 test("label screens have no 完了 option (the label view holds open tasks only)", () => {
   assert.equal(sanitize("label", { ...DEFAULTS, done: true }).done, false);
 });
+
+test("the time sort round-trips and an old build's unknown value falls back to manual", () => {
+  assert.equal(parseView("sort=time").sort, "time");
+  assert.equal(formatView({ ...DEFAULTS, sort: "time" }), "sort=time");
+  assert.equal(parseView("sort=somethingnew").sort, "manual");
+});
