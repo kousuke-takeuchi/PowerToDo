@@ -240,9 +240,9 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   const offerDate = (entries: { project: string; no: number; due?: string; dueTime?: string }[], date: string | null) =>
     offer({ kind: "date", entries: entries.map((t) => ({ project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null } })), label: date ? (dateLabel(date, today)?.label ?? date) : null });
   const offerDone = (t: Task) => offer({ kind: "complete", entries: [completedOf(t)] });
-  const setDue = (t: Task, date?: string) => {
-    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? undefined : null }).then((ok) => ok && offerDate([t], date ?? null));
-    else void cross.setDue(t, date ?? null).then((ok) => ok && offerDate([t], date ?? null));
+  const setDue = (t: Task, date?: string, time?: string | null) => {
+    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? time : null }).then((ok) => ok && offerDate([t], date ?? null));
+    else void cross.setDue(t, date ?? null, time).then((ok) => ok && offerDate([t], date ?? null));
   };
   const setPriority = (t: Task, priority: 1 | 2 | 3 | 4) => {
     if (inCurrent(t)) void p.updateTask(t.no, { priority });
@@ -562,7 +562,11 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
           />
         )}
         {sheet?.kind === "date" && (
-          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => setDue(sheet.task, v.date)} onClose={closeSheet} />
+          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => {
+              setDue(sheet.task, v.date, v.time ?? null);
+              // The sheet stays open after a time change: show the new value.
+              setSheet({ kind: "date", task: { ...sheet.task, due: v.date, dueTime: v.date ? v.time : undefined } });
+            }} onClose={closeSheet} />
         )}
         {sheet?.kind === "priority" && <PrioritySheet value={sheet.task.priority} onChange={(v) => setPriority(sheet.task, v)} onClose={closeSheet} />}
         {sheet?.kind === "move" && (

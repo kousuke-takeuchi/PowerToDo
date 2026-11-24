@@ -1,6 +1,6 @@
 import type React from "react";
 import { useState } from "react";
-import { Ban, Calendar, CalendarPlus, CalendarSearch, Sofa, Sun } from "lucide-react";
+import { Ban, Calendar, CalendarPlus, CalendarSearch, Clock3, Sofa, Sun } from "lucide-react";
 import { TODAY, weekdayShort } from "../../mock/data";
 import { DatePicker } from "../DatePicker";
 import { quickDates } from "../quickDates";
@@ -50,6 +50,25 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
       ))}
       {!calendar && <SheetRow icon={<CalendarSearch size={18} />} label="カレンダーから選ぶ" onClick={() => setCalendar(true)} />}
       </SheetCard>
+      {!dateOnly && (
+        // Spec 2026-11-24: the time, with the iPhone's own wheel (input type=time). A time without a date is for today.
+        <SheetCard label="時刻">
+          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", minHeight: 48, padding: "0 16px", fontSize: 16, lineHeight: "22px", color: "var(--color-text-primary)" }}>
+            <span style={{ display: "inline-flex", color: "var(--color-text-secondary)" }}>
+              <Clock3 size={18} />
+            </span>
+            <span style={{ flex: 1 }}>時刻</span>
+            <input
+              type="time"
+              aria-label="時刻"
+              value={time ?? ""}
+              onChange={(e) => onChange(e.target.value ? { date: value ?? today, time: e.target.value } : { date: value })}
+              style={{ minWidth: 96, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 16, color: time ? "var(--color-text-primary)" : "var(--color-text-muted)", textAlign: "right" }}
+            />
+          </label>
+          {time && <SheetRow label="時刻なし" onClick={() => onChange({ date: value })} />}
+        </SheetCard>
+      )}
       {calendar && (
         <SheetCard>
         <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
