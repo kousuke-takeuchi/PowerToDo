@@ -159,6 +159,23 @@ export const M01Reorder: Story = {
   },
 };
 
+// Spec 2026-11-24: Today's group reorders by long press (logged only); overdue rows keep the menu.
+export const M04Reorder: Story = {
+  name: "M-04 長押しで並び替え (fill)",
+  render: () => (
+    <MobileToday
+      live
+      fill
+      overdue={byNo(9, 10)}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      onSwipeDate={() => undefined}
+      onTaskMenu={() => console.log("menu")}
+      onReorderToday={(keys) => console.log("today", keys.join(","))}
+    />
+  ),
+};
+
 export const M04NoOverdue: Story = {
   name: "M-04 期限切れなし",
   render: () => <LiveTodayNoOverdue />,

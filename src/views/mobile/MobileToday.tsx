@@ -12,6 +12,8 @@ import { mobileRowProps, type RowContext } from "./rowProps";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { dayHeading } from "./mobileDates";
+import { beforeKeyOf, reordered } from "./mobileReorder";
+import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 
 export type MobileTodayProps = {
   overdue: Task[];
@@ -39,10 +41,12 @@ export type MobileTodayProps = {
   /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。 */
   onSwipeDate?: (t: Task) => void;
   onTaskMenu?: (t: Task) => void;
+  /** live のみ (spec 2026-11-24): 「今日」のグループを長押しで並び替えた新しい順 (project/no)。期限切れの行は並び替えない。 */
+  onReorderToday?: (keys: string[]) => void;
 };
 
 /** M-04: 今日 (ヘッダーに同期アイコンなし)。期限切れ (再スケジュール付き) + 今日。pen のとおりチェックの色は全行 priority-4。 */
-export function MobileToday({ overdue, todays, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, initialScrollTop, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu }: MobileTodayProps) {
+export function MobileToday({ overdue, todays, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, initialScrollTop, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onReorderToday }: MobileTodayProps) {
   const local = useDone();
   const leave = useLeaving([...overdue, ...todays]);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -53,6 +57,18 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
     else leave.cancel(t);
     onToggleDone?.(t, next);
   };
+  const reordering = live && onReorderToday !== undefined;
+  const reorder = useMobileReorder({
+    onDrop: (key, drop, rows) => {
+      const keys = todays.map(taskKey);
+      const next = reordered(keys, key, beforeKeyOf(rows, drop, key));
+      if (next.join("\n") !== keys.join("\n")) onReorderToday?.(next);
+    },
+    onMenu: (key) => {
+      const t = todays.find((x) => taskKey(x) === key);
+      if (t) onTaskMenu?.(t);
+    },
+  });
   const row = (t: Task, group: string, index: number, show: { date?: boolean; project?: boolean }) => {
     const done = () => toggle(t, group, index);
     const r = (
@@ -65,10 +81,24 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
       />
     );
+    const liftable = reordering && group === "today";
+    const lifted = reorder.state?.key === taskKey(t);
     return live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={taskKey(t)} onComplete={done} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
-        {r}
-      </SwipeRow>
+      <div
+        key={taskKey(t)}
+        {...(liftable ? reorderAttrs({ kind: "task", key: taskKey(t), no: t.no, depth: 0, parent: null, section: "today" }) : {})}
+        style={lifted ? { position: "relative", zIndex: 3, transform: `translateY(${reorder.state!.dy}px)`, background: "var(--color-bg)", boxShadow: "var(--shadow-popover)", borderRadius: 8 } : undefined}
+      >
+        <SwipeRow
+          onComplete={done}
+          done={isDone(t)}
+          onDate={onSwipeDate && (() => onSwipeDate(t))}
+          onLongPress={onTaskMenu && (() => onTaskMenu(t))}
+          onLift={liftable ? (at) => reorder.lift({ key: taskKey(t), at, depth: 0, height: 2, subtree: [taskKey(t)] }) : undefined}
+        >
+          {r}
+        </SwipeRow>
+      </div>
     ) : (
       r
     );
@@ -89,7 +119,10 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
   };
   return (
     <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="今日" subtitle={`${overdue.length + todays.length} 件のタスク`} largeTitle initialScrollTop={initialScrollTop} tab="today" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
-      <div style={{ padding: "0 15px" }}>
+      <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
+        {reorder.state?.line && (
+          <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />
+        )}
         {(!live || overdue.length > 0) && (
           <section>
             <SectionHeader
@@ -111,7 +144,9 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
           </section>
         )}
         <section>
-          <SectionHeader mobile tight={live && overdue.length === 0} title={dayHeading(today, today)} />
+          <div {...(reordering ? reorderAttrs({ kind: "header", section: "today" }) : {})}>
+            <SectionHeader mobile tight={live && overdue.length === 0} title={dayHeading(today, today)} />
+          </div>
           {list("today", todays, { project: true, date: false })}
         </section>
         {live && overdue.length + todays.length === 0 && (

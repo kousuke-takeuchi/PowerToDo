@@ -12,6 +12,8 @@ import { MobileWeekNav } from "./MobileWeekNav";
 import { dayHeading } from "./mobileDates";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
+import { sectionAt } from "./mobileReorder";
+import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 
 export type MobileUpcomingProps = {
   tasks: Task[];
@@ -38,10 +40,12 @@ export type MobileUpcomingProps = {
   /** live のみ: 左スワイプ (日付のシート) / 長押し (メニュー)。右スワイプは onToggleDone。 */
   onSwipeDate?: (t: Task) => void;
   onTaskMenu?: (t: Task) => void;
+  /** live のみ (spec 2026-11-24): 長押しで別の日のグループへ動かした (その日に変える)。同じ日の中の順は保存しない。 */
+  onMoveToDay?: (t: Task, date: string) => void;
 };
 
 /** M-05: 近日。WeekStrip (今日から 7 日、タップで選択) + タスクのある日だけの日付グループ。行は日付チップなし (見出しが日付)。 */
-export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu }: MobileUpcomingProps) {
+export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay }: MobileUpcomingProps) {
   const local = useDone();
   const leave = useLeaving(tasks);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -52,6 +56,18 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
     else leave.cancel(t);
     onToggleDone?.(t, next);
   };
+  const reordering = live && onMoveToDay !== undefined;
+  const reorder = useMobileReorder({
+    onDrop: (key, drop, rows) => {
+      const t = tasks.find((x) => taskKey(x) === key);
+      const day = sectionAt(rows, drop);
+      if (t && day && day !== t.due) onMoveToDay?.(t, day);
+    },
+    onMenu: (key) => {
+      const t = tasks.find((x) => taskKey(x) === key);
+      if (t) onTaskMenu?.(t);
+    },
+  });
   const row = (t: Task, group: string, index: number) => {
     const done = () => toggle(t, group, index);
     const r = (
@@ -64,10 +80,23 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
         onClick={onOpenTask ? () => onOpenTask(t) : undefined}
       />
     );
+    const lifted = reorder.state?.key === taskKey(t);
     return live && (onSwipeDate || onTaskMenu) ? (
-      <SwipeRow key={taskKey(t)} onComplete={done} done={isDone(t)} onDate={onSwipeDate && (() => onSwipeDate(t))} onLongPress={onTaskMenu && (() => onTaskMenu(t))}>
-        {r}
-      </SwipeRow>
+      <div
+        key={taskKey(t)}
+        {...(reordering ? reorderAttrs({ kind: "task", key: taskKey(t), no: t.no, depth: 0, parent: null, section: group }) : {})}
+        style={lifted ? { position: "relative", zIndex: 3, transform: `translateY(${reorder.state!.dy}px)`, background: "var(--color-bg)", boxShadow: "var(--shadow-popover)", borderRadius: 8 } : undefined}
+      >
+        <SwipeRow
+          onComplete={done}
+          done={isDone(t)}
+          onDate={onSwipeDate && (() => onSwipeDate(t))}
+          onLongPress={onTaskMenu && (() => onTaskMenu(t))}
+          onLift={reordering ? (at) => reorder.lift({ key: taskKey(t), at, depth: 0, height: 2, subtree: [taskKey(t)] }) : undefined}
+        >
+          {r}
+        </SwipeRow>
+      </div>
     ) : (
       r
     );
@@ -89,7 +118,10 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
   const days = [...new Set(tasks.map((t) => t.due).filter((d): d is string => d !== undefined && d >= today))].sort();
   return (
     <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
-      <div style={{ padding: "0 15px" }}>
+      <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
+        {reorder.state?.line && (
+          <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />
+        )}
         <MobileWeekNav
           today={today}
           onSelect={(ymd) => {
@@ -100,7 +132,9 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
         />
         {days.map((ymd) => (
           <section key={ymd} data-day={ymd}>
-            <SectionHeader mobile title={dayHeading(ymd, today)} showChevron={false} />
+            <div {...(reordering ? reorderAttrs({ kind: "header", section: ymd }) : {})}>
+              <SectionHeader mobile title={dayHeading(ymd, today)} showChevron={false} />
+            </div>
             {list(
               ymd,
               tasks.filter((t) => t.due === ymd).sort((a, b) => a.no - b.no),

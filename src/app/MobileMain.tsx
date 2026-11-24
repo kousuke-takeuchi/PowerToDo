@@ -742,6 +742,14 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onReschedule={() => setSheet({ kind: "reschedule" })}
+        onReorderToday={(keys) =>
+          void api
+            .setTodayOrder(
+              today,
+              keys.map((k): [string, number] => [k.slice(0, k.lastIndexOf("/")), Number(k.slice(k.lastIndexOf("/") + 1))]),
+            )
+            .then(refreshAll, showError)
+        }
         {...rowOps}
         overlay={layers}
       />
@@ -762,6 +770,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
+        onMoveToDay={(t, date) => setDue(t, date, t.dueTime ?? null)}
         {...rowOps}
         overlay={layers}
       />

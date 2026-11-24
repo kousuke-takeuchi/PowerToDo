@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { autoScrollSpeed, placementOf, type RowBox } from "../../app/drag/dropTarget";
+import { autoScrollSpeed, type Drop, type RowBox } from "../../app/drag/dropTarget";
 import { setReorderLock } from "../../app/useGestures";
 import { MOBILE_ROW } from "../../components/MobileTaskRow";
-import type { Placement } from "../../types/model";
 import { liftMoved, mobileDrop } from "./mobileReorder";
 
 /** What a reorder row says about itself (data-* on its wrapper; MobileProjectView sets them). */
 export type ReorderRowData =
-  | { kind: "task"; no: number; depth: number; parent: number | null; section: string | null }
+  | { kind: "task"; key: string; no: number; depth: number; parent: number | null; section: string | null }
   | { kind: "header"; section: string }
   | { kind: "slot"; section: string | null };
 
@@ -16,21 +15,25 @@ export function reorderAttrs(r: ReorderRowData): Record<string, string> {
   return { "data-reorder-row": JSON.stringify(r) };
 }
 
-type Lifted = { no: number; key: string; startX: number; startY: number; dragged: Parameters<typeof mobileDrop>[3]; rows: RowBox[] };
-export type ReorderState = { no: number; dy: number; line: { y: number; x: number } | null } | null;
+type Lifted = { key: string; startX: number; startY: number; dragged: Parameters<typeof mobileDrop>[3]; rows: RowBox[] };
+export type ReorderState = { key: string; dy: number; line: { y: number; x: number } | null } | null;
+
+/** What to lift: the row's key (project/no), where the finger is, and the subtree that goes with it. */
+export type LiftArgs = { key: string; at: { x: number; y: number }; depth: number; height: number; subtree: string[] };
 
 /**
  * Spec 2026-11-22 reorder: long press lifts a row (the caller calls `lift` from SwipeRow's onLift). Moving it drags
  * (the drop is the desktop's, without "onto"); releasing without moving opens the menu instead. The list's scroll body
  * scrolls near its edges. `list` is the element that holds the rows; positions are measured relative to it.
+ * `onDrop` gets the drop and the rows as measured at the lift (the caller turns them into a placement, an order, a date).
  */
-export function useMobileReorder({ project, onMove, onMenu }: { project: string; onMove: (no: number, to: Placement) => void; onMenu: (no: number) => void }) {
+export function useMobileReorder({ onDrop, onMenu }: { onDrop: (key: string, drop: Drop, rows: RowBox[]) => void; onMenu: (key: string) => void }) {
   const list = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<ReorderState>(null);
   const lifted = useRef<Lifted | null>(null);
   const pointer = useRef({ x: 0, y: 0, moved: false });
-  const cb = useRef({ onMove, onMenu });
-  cb.current = { onMove, onMenu };
+  const cb = useRef({ onDrop, onMenu });
+  cb.current = { onDrop, onMenu };
 
   const measure = (): RowBox[] => {
     const el = list.current;
@@ -40,7 +43,7 @@ export function useMobileReorder({ project, onMove, onMenu }: { project: string;
       const r = node.getBoundingClientRect();
       const d = JSON.parse(node.dataset.reorderRow!) as ReorderRowData;
       const box = { top: r.top - base, bottom: r.bottom - base };
-      return d.kind === "task" ? { ...d, key: `${project}/${d.no}`, ...box } : { ...d, ...box };
+      return { ...d, ...box };
     });
   };
 
@@ -54,7 +57,7 @@ export function useMobileReorder({ project, onMove, onMenu }: { project: string;
     const y = pointer.current.y - rect.top;
     const drop = mobileDrop(l.rows, { x, y }, l.startX, l.dragged, 0);
     const line = drop?.kind === "between" ? { y: drop.y, x: drop.depth * MOBILE_ROW.indent } : null;
-    setState({ no: l.no, dy: y - l.startY, line });
+    setState({ key: l.key, dy: y - l.startY, line });
   };
 
   const finish = (commit: boolean) => {
@@ -64,15 +67,14 @@ export function useMobileReorder({ project, onMove, onMenu }: { project: string;
     setState(null);
     if (!l || !commit) return;
     if (!pointer.current.moved) {
-      cb.current.onMenu(l.no);
+      cb.current.onMenu(l.key);
       return;
     }
     const el = list.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const drop = mobileDrop(l.rows, { x: pointer.current.x - rect.left, y: pointer.current.y - rect.top }, l.startX, l.dragged, 0);
-    const to = drop ? placementOf(l.rows, drop, l.key) : null;
-    if (to) cb.current.onMove(l.no, to);
+    if (drop) cb.current.onDrop(l.key, drop, l.rows);
   };
 
   // While lifted: follow the finger on the window, scroll the body near its edges.
@@ -117,22 +119,20 @@ export function useMobileReorder({ project, onMove, onMenu }: { project: string;
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** SwipeRow's long press: lift the row with this task (its subtree goes with it). */
-  const lift = (no: number, at: { x: number; y: number }, subtree: number[], height: number, depth: number) => {
+  const lift = ({ key, at, depth, height, subtree }: LiftArgs) => {
     const el = list.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const key = `${project}/${no}`;
     lifted.current = {
-      no,
       key,
       startX: at.x - rect.left,
       startY: at.y - rect.top,
-      dragged: { key, depth, height, subtree: new Set(subtree.map((n) => `${project}/${n}`)) },
+      dragged: { key, depth, height, subtree: new Set(subtree) },
       rows: measure(),
     };
     pointer.current = { x: at.x, y: at.y, moved: false };
     setReorderLock(true);
-    setState({ no, dy: 0, line: null });
+    setState({ key, dy: 0, line: null });
   };
 
   return { list, state, lift };
