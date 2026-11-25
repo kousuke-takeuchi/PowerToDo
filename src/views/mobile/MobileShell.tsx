@@ -3,6 +3,7 @@ import { useContext, useLayoutEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { usePullToRefresh } from "../../app/useGestures";
+import { EDGE_STRIP, decideEdgeOpen } from "../../app/gestures";
 import { MobileHeader, type HeaderAction } from "../../components/MobileHeader";
 import { PullIndicator } from "../../components/PullIndicator";
 import type { MobileTab } from "../../app/mobileNav";
@@ -53,6 +54,31 @@ function LargeTitle({ title, subtitle, progress }: { title: string; subtitle?: s
       </h1>
       {subtitle && <div style={{ fontSize: 12, lineHeight: "16px", color: "var(--color-text-secondary)" }}>{subtitle}</div>}
     </motion.div>
+  );
+}
+
+/** A narrow strip at the screen's left edge: swiping right from it opens the menu (spec 2026-11-24), as iOS edge swipes do. */
+function EdgeSwipe({ onOpen }: { onOpen: () => void }) {
+  const start = useRef<{ id: number; x: number; y: number } | null>(null);
+  return (
+    <div
+      aria-hidden
+      onPointerDown={(e) => {
+        start.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        const s = start.current;
+        if (!s || s.id !== e.pointerId) return;
+        if (decideEdgeOpen(e.clientX - s.x, e.clientY - s.y)) {
+          start.current = null;
+          onOpen();
+        }
+      }}
+      onPointerUp={() => (start.current = null)}
+      onPointerCancel={() => (start.current = null)}
+      style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: EDGE_STRIP, zIndex: 3, touchAction: "none" }}
+    />
   );
 }
 
@@ -149,6 +175,8 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
           <Plus size={26} />
         </button>
       )}
+      {/* The edge swipe works on every screen with the tab bar, a pushed project too (its top bar has back instead of the button). */}
+      {openMenu && tab !== undefined && <EdgeSwipe onOpen={openMenu} />}
       {overlay && <div style={{ position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>{overlay}</div>}
     </div>
   );

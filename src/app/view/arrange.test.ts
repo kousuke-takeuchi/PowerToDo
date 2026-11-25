@@ -98,3 +98,10 @@ test("arrangeFlat_treats_subtasks_as_rows_and_returns_the_original_tasks", () =>
   assert.equal(r.groups[0].rows[0].task.parentNo, parent.no);
   assert.equal(arrangeFlat([parent, sub], { ...DEFAULTS, prio: 1 }, ctx).hidden, 1);
 });
+
+test("sorts_by_time_of_day_with_no_time_last_either_way", () => {
+  const x = [t({ title: "午後", dueTime: "15:00" }), t({ title: "なし" }), t({ title: "朝", dueTime: "07:30" }), t({ title: "同じ", dueTime: "15:00" })];
+  const order = (dir: "asc" | "desc") => arrange(x, { ...DEFAULTS, sort: "time", dir }, ctx).groups[0].rows.map((r) => r.task.title);
+  assert.deepEqual(order("asc"), ["朝", "午後", "同じ", "なし"]); // the tie keeps the manual order
+  assert.deepEqual(order("desc"), ["午後", "同じ", "朝", "なし"]);
+});

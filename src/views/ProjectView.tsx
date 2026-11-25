@@ -8,7 +8,7 @@ import { Button } from "../components/Button";
 import { Collapse, useMotionTiming } from "../motion";
 import { CommentCounts } from "../app/useComments";
 import { AttachmentCounts } from "../app/attachments/env";
-import { LONG_TITLE, TODAY, dateLabel } from "../mock/data";
+import { LONG_TITLE, TODAY } from "../mock/data";
 import type { InvalidRow, PlatformInfo, Section, Task } from "../types/model";
 import { useReportKeys } from "../app/useRowFocus";
 import { EmptyState } from "./EmptyState";
@@ -31,6 +31,7 @@ import { RowActions } from "../app/rowActions";
 import { DragCtx } from "../app/drag/DragContext";
 import { TaskMenu } from "./TaskMenu";
 import { blankValue, editorValueOf } from "./taskEditorValue";
+import { dueWithTime } from "./dueLabel";
 
 /** What the 「…」 menu of a project needs: its own state and what each line does (confirmations are the caller's). */
 export type ProjectMenuProps = {
@@ -386,7 +387,7 @@ export function ProjectView({
       focused: !dup && focusedKey === `${t.project}/${t.no}`,
       done: isDone(t),
       priority: t.priority,
-      date: dateLabel(t.due, today),
+      date: dueWithTime(t, today),
       recurring: onToggleDone && t.rrule ? true : undefined,
       labels: t.labels,
       commentCount: commentCounts[`${t.project}/${t.no}`],

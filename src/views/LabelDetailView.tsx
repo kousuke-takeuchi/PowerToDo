@@ -1,4 +1,4 @@
-import { TODAY, dateLabel } from "../mock/data";
+import { TODAY } from "../mock/data";
 import { useState } from "react";
 import type { Task } from "../types/model";
 import { useView } from "../app/view/ViewOptionsContext";
@@ -7,6 +7,7 @@ import { SectionHeader } from "../components/SectionHeader";
 import { visibleOpen } from "./visibleOpen";
 import { AddSlot, FilterNote, HiddenNote, dupKeysOf, useCrossRows } from "./crossList";
 import { PageHeader, TitleGroup } from "./HeaderActions";
+import { dueWithTime } from "./dueLabel";
 
 export type LabelDetailViewProps = {
   label: string;
@@ -41,7 +42,7 @@ export function LabelDetailView({ label, tasks, today, onToggleDone, onOpenTask,
   const grouped = view.group !== "none";
   const firstKeys = firstOccurrences(arranged.groups);
   const [groupCollapsed, setGroupCollapsed] = useState<Set<string>>(() => new Set());
-  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dateLabel(t.due, today ?? TODAY), focusedKey, onVisibleKeys, dragView: "label" });
+  const rows = useCrossRows({ tasks, onToggleDone, onOpenTask, date: (t) => dueWithTime(t, today ?? TODAY), focusedKey, onVisibleKeys, dragView: "label" });
 
   return (
     <>

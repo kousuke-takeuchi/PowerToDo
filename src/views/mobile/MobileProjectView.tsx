@@ -17,6 +17,7 @@ import { MobileQuickAddSheet } from "./MobileQuickAddSheet";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
+import { placementOf } from "../../app/drag/dropTarget";
 import type { MobileTab } from "../../app/mobileNav";
 import type { QuickAddToken } from "../QuickAddDialog";
 
@@ -165,20 +166,23 @@ export function MobileProjectView({
       return next;
     });
 
+  const keyOf = (no: number) => `${project}/${no}`;
   const reorder = useMobileReorder({
-    project,
-    onMove: (no, to) => onReorder?.(no, to),
-    onMenu: (no) => {
-      const t = mine.find((x) => x.no === no);
+    onDrop: (key, drop, rows) => {
+      const to = placementOf(rows, drop, key);
+      if (to) onReorder?.(Number(key.slice(project.length + 1)), to);
+    },
+    onMenu: (key) => {
+      const t = mine.find((x) => keyOf(x.no) === key);
       if (t) onTaskMenu?.(t);
     },
   });
   const reordering = live && onReorder !== undefined;
   const heightOf = (no: number): number => Math.max(0, ...childrenOf(no).map((c) => 1 + heightOf(c.no)));
-  const subtreeOf = (no: number): number[] => [no, ...childrenOf(no).flatMap((c) => subtreeOf(c.no))];
+  const subtreeOf = (no: number): string[] => [keyOf(no), ...childrenOf(no).flatMap((c) => subtreeOf(c.no))];
   /** The lifted row follows the finger (its subtree inside it goes along). */
   const liftStyle = (t: Task): React.CSSProperties | undefined =>
-    reorder.state?.no === t.no
+    reorder.state?.key === keyOf(t.no)
       ? { position: "relative", zIndex: 3, transform: `translateY(${reorder.state.dy}px)`, background: "var(--color-bg)", boxShadow: "var(--shadow-popover)", borderRadius: 8 }
       : undefined;
 
@@ -191,14 +195,14 @@ export function MobileProjectView({
         done={isDone(t)}
         onDate={onSwipeDate && (() => onSwipeDate(t))}
         onLongPress={onTaskMenu && (() => onTaskMenu(t))}
-        onLift={reordering ? (at) => reorder.lift(t.no, at, subtreeOf(t.no), heightOf(t.no), depth) : undefined}
+        onLift={reordering ? (at) => reorder.lift({ key: keyOf(t.no), at, depth, height: heightOf(t.no), subtree: subtreeOf(t.no) }) : undefined}
       >
         {row}
       </SwipeRow>
     ) : (
       row
     );
-  const taskAttrs = (t: Task, depth: number) => (reordering ? reorderAttrs({ kind: "task", no: t.no, depth, parent: t.parentNo ?? null, section: t.category }) : {});
+  const taskAttrs = (t: Task, depth: number) => (reordering ? reorderAttrs({ kind: "task", key: keyOf(t.no), no: t.no, depth, parent: t.parentNo ?? null, section: t.category }) : {});
 
   const renderRow = (t: Task, group = "", index = 0): React.ReactNode => {
     const kids = childrenOf(t.no);

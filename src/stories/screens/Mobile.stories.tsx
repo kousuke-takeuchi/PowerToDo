@@ -20,6 +20,8 @@ import { insertToken } from "../../app/quickAddInsert";
 import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 import { MobileDrawer, MobileMenuContext } from "../../views/mobile/MobileDrawer";
+import { ViewSheet } from "../../views/mobile/ViewSheet";
+import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -157,6 +159,23 @@ export const M01Reorder: Story = {
     };
     return <Live />;
   },
+};
+
+// Spec 2026-11-24: Today's group reorders by long press (logged only); overdue rows keep the menu.
+export const M04Reorder: Story = {
+  name: "M-04 長押しで並び替え (fill)",
+  render: () => (
+    <MobileToday
+      live
+      fill
+      overdue={byNo(9, 10)}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      onSwipeDate={() => undefined}
+      onTaskMenu={() => console.log("menu")}
+      onReorderToday={(keys) => console.log("today", keys.join(","))}
+    />
+  ),
 };
 
 export const M04NoOverdue: Story = {
@@ -466,6 +485,39 @@ function DrawerOpen() {
 export const M11: Story = {
   name: "M-11 メニュー (ドロワー)",
   render: () => <DrawerOpen />,
+};
+
+// Spec 2026-11-24: the 「…」 at the top right of Today opens the 表示 sheet (sort / direction / group / priority filter).
+function TodayWithViewSheet({ initial, open = true }: { initial: ViewOptions; open?: boolean }) {
+  const [view, setView] = useState(initial);
+  const [shown, setShown] = useState(open);
+  return (
+    <MobileToday
+      live
+      fill
+      overdue={byNo(9, 10)}
+      todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]}
+      today={TODAY}
+      view={view}
+      arrangeCtx={{ today: TODAY, weekStart: "mon", labelOrder: [], projectOrder: projects.map((p) => p.name) }}
+      onViewMenu={() => setShown(true)}
+      overlay={
+        <BottomSheet open={shown} size="large" title="表示" onClose={() => setShown(false)}>
+          <ViewSheet screen="today" options={view} onChange={setView} />
+        </BottomSheet>
+      }
+    />
+  );
+}
+
+export const M12: Story = {
+  name: "M-12 今日の表示のシート",
+  render: () => <TodayWithViewSheet initial={{ ...DEFAULTS, sort: "time" }} />,
+};
+
+export const M12Grouped: Story = {
+  name: "M-12 今日をプロジェクトでグループ",
+  render: () => <TodayWithViewSheet initial={{ ...DEFAULTS, group: "project", sort: "priority" }} open={false} />,
 };
 
 export const M08: Story = {

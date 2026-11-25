@@ -40,6 +40,8 @@ import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
 import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
+import { ViewOptionsCtx, useView, useViewOptionsStore } from "./view/ViewOptionsContext";
+import { ViewSheet } from "../views/mobile/ViewSheet";
 import { useSearch } from "./useSearch";
 import { useCommentCounts, useDialogComments } from "./useComments";
 import { useSummaries } from "./useSummaries";
@@ -70,10 +72,14 @@ export function MobileMain(props: { app: AppStateDto; syncConflicts: SyncConflic
   // The drawer (spec 2026-11-22 §4): the tab screens' top bars read the opener from context.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  // 表示の設定 (sort / group / filter of Today and Upcoming): the same rows of the common book as the desktop.
+  const viewStore = useViewOptionsStore();
   return (
-    <MobileMenuContext.Provider value={openDrawer}>
-      <MobileScreens {...props} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} />
-    </MobileMenuContext.Provider>
+    <ViewOptionsCtx.Provider value={viewStore}>
+      <MobileMenuContext.Provider value={openDrawer}>
+        <MobileScreens {...props} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} />
+      </MobileMenuContext.Provider>
+    </ViewOptionsCtx.Provider>
   );
 }
 
@@ -92,7 +98,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   // プロジェクトの「…」(名前を変更 / 削除)
   const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
-  const [detail, setDetail] = useState<{ project: string; no: number } | null>(null);
+  // `parent`: opened from that task's detail (a subtask row); back goes there instead of the list.
+  const [detail, setDetail] = useState<{ project: string; no: number; parent?: number } | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   // クイック追加の上に重ねるシート (リマインダー、チップの一覧: spec 2026-11-22 §1)
@@ -174,7 +181,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, openQuickAddAt, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, openQuickAddAt, openQuickAddWith, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
   // The section / parent shows on the project chip while the task still goes to this project.
   const qaPlaced = qaProject === navCurrent ? qa.place : undefined;
   const qaParent = qaPlaced?.parentNo !== undefined ? view?.tasks.find((t) => t.no === qaPlaced.parentNo) : undefined;
@@ -190,7 +197,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const detailOpen = detail !== null;
   // The task detail's label sheet and the quick add's label picker list them.
-  const labelsWanted = detailOpen || qa.open;
+  const labelsWanted = detailOpen || qa.open || screen.kind === "today";
   useEffect(() => {
     if (!labelsWanted) return;
     let cancelled = false;
@@ -239,9 +246,9 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   const offerDate = (entries: { project: string; no: number; due?: string; dueTime?: string }[], date: string | null) =>
     offer({ kind: "date", entries: entries.map((t) => ({ project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null } })), label: date ? (dateLabel(date, today)?.label ?? date) : null });
   const offerDone = (t: Task) => offer({ kind: "complete", entries: [completedOf(t)] });
-  const setDue = (t: Task, date?: string) => {
-    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? undefined : null }).then((ok) => ok && offerDate([t], date ?? null));
-    else void cross.setDue(t, date ?? null).then((ok) => ok && offerDate([t], date ?? null));
+  const setDue = (t: Task, date?: string, time?: string | null) => {
+    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? time : null }).then((ok) => ok && offerDate([t], date ?? null));
+    else void cross.setDue(t, date ?? null, time).then((ok) => ok && offerDate([t], date ?? null));
   };
   const setPriority = (t: Task, priority: 1 | 2 | 3 | 4) => {
     if (inCurrent(t)) void p.updateTask(t.no, { priority });
@@ -376,8 +383,21 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   };
   const drawerActive: DrawerTarget | undefined =
     screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
+  // 表示のシート (右上の「…」): Today / Upcoming.
+  const [viewSheet, setViewSheet] = useState<"today" | "upcoming" | null>(null);
+  const [todayView, setTodayView] = useView("today");
+  const [upcomingView, setUpcomingView] = useView("upcoming");
+  const arrangeCtx = { today, weekStart: settingsPanes.datetime.weekStart, labelOrder: allLabels.map((l) => l.name), projectOrder: summaries.map((s) => s.name) };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
-  const header = { fill: true as const, onFab: openQuickAdd, onTabChange: goTab, today };
+  // On 今日 a new task starts dated today, on 近日 on the day at the top of the list (as Todoist): the field opens with the date word.
+  const [upcomingDay, setUpcomingDay] = useState<string | null>(null);
+  const fab =
+    screen.kind === "today"
+      ? () => openQuickAddWith("今日 ")
+      : screen.kind === "upcoming"
+        ? () => openQuickAddWith(`${dateWords(upcomingDay && upcomingDay >= today ? upcomingDay : today, undefined, today).join(" ")} `)
+        : openQuickAdd;
+  const header = { fill: true as const, onFab: fab, onTabChange: goTab, today };
 
   // ---- 層: 帯 + クイック追加 + ドロワー ----
   const invalidCount = listProject && !p.error && view ? view.invalidRows.length : 0;
@@ -502,6 +522,15 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         )}
         {qaPicker === "label" && <LabelSheet labels={allLabels} value={parsed?.labels ?? []} onChange={(names) => rewrite(["label"], names.map((n) => `@${n}`))} />}
       </BottomSheet>
+      <BottomSheet fill size="large" open={viewSheet !== null} title="表示" onClose={() => setViewSheet(null)}>
+        {viewSheet !== null && (
+          <ViewSheet
+            screen={viewSheet}
+            options={viewSheet === "today" ? todayView : upcomingView}
+            onChange={viewSheet === "today" ? setTodayView : setUpcomingView}
+          />
+        )}
+      </BottomSheet>
       <BottomSheet
         fill
         confirmForm={projectSheet === "rename" || projectSheet === "section" ? TEXT_SHEET_FORM : undefined}
@@ -560,7 +589,11 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
           />
         )}
         {sheet?.kind === "date" && (
-          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => setDue(sheet.task, v.date)} onClose={closeSheet} />
+          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => {
+              setDue(sheet.task, v.date, v.time ?? null);
+              // The sheet stays open after a time change: show the new value.
+              setSheet({ kind: "date", task: { ...sheet.task, due: v.date, dueTime: v.date ? v.time : undefined } });
+            }} onClose={closeSheet} />
         )}
         {sheet?.kind === "priority" && <PrioritySheet value={sheet.task.priority} onChange={(v) => setPriority(sheet.task, v)} onClose={closeSheet} />}
         {sheet?.kind === "move" && (
@@ -672,7 +705,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
         project={view.project}
         section={openTask.category ?? undefined}
-        onBack={() => setDetail(null)}
+        onBack={() => setDetail(detail.parent !== undefined ? { project: detail.project, no: detail.parent } : null)}
+        onOpenSubtask={(t) => setDetail({ project: detail.project, no: t.no, parent: openTask.no })}
         onToggleDone={(done) =>
           void p.completeTask(openTask.no, done).then((ok) => {
             if (ok && done) offerDone(openTask);
@@ -735,6 +769,22 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onReschedule={() => setSheet({ kind: "reschedule" })}
+        view={todayView}
+        arrangeCtx={arrangeCtx}
+        onViewMenu={() => setViewSheet("today")}
+        onReorderToday={(keys, rescheduled) =>
+          void (rescheduled ? api.updateTask(rescheduled.project, rescheduled.no, { due: today }) : Promise.resolve())
+            .then(() =>
+              api.setTodayOrder(
+                today,
+                keys.map((k): [string, number] => [k.slice(0, k.lastIndexOf("/")), Number(k.slice(k.lastIndexOf("/") + 1))]),
+              ),
+            )
+            .then(() => {
+              if (rescheduled) offerDate([rescheduled], today);
+              refreshAll();
+            }, showError)
+        }
         {...rowOps}
         overlay={layers}
       />
@@ -755,6 +805,11 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
         onExtend={() => setUpDays((n) => Math.min(91, n + 7))}
+        onMoveToDay={(t, date) => setDue(t, date, t.dueTime ?? null)}
+        onVisibleDay={setUpcomingDay}
+        view={upcomingView}
+        arrangeCtx={arrangeCtx}
+        onViewMenu={() => setViewSheet("upcoming")}
         {...rowOps}
         overlay={layers}
       />

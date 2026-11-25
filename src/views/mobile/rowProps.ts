@@ -1,6 +1,6 @@
 import type { TaskRowProps } from "../../components/TaskRow";
 import type { Task } from "../../types/model";
-import { dateLabel } from "../../mock/data.ts";
+import { dueWithTime } from "../dueLabel.ts";
 
 export type RowContext = { today: string; inbox?: string; colors?: Record<string, string>; comments?: Record<string, number>; attachments?: Record<string, number> };
 
@@ -15,7 +15,7 @@ export function mobileRowProps(
     title: t.title,
     description: t.note?.split("\n")[0] || undefined,
     priority: t.priority,
-    date: show.date === false ? undefined : dateLabel(t.due, c.today),
+    date: dueWithTime(t, c.today, show.date !== false),
     recurring: t.rrule ? true : undefined,
     commentCount: c.comments?.[`${t.project}/${t.no}`] || undefined,
     attachmentCount: c.attachments?.[`${t.project}/${t.no}`] || undefined,

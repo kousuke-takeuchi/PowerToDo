@@ -132,7 +132,9 @@ fn ja_single(word: &str) -> Option<String> {
         "毎週" => return Some("FREQ=WEEKLY".into()),
         "隔週" => return Some("FREQ=WEEKLY;INTERVAL=2".into()),
         "毎月" => return Some("FREQ=MONTHLY".into()),
-        "毎月末" | "月末" => return Some("FREQ=MONTHLY;BYMONTHDAY=-1".into()),
+        "毎月末" | "月末" | "月末日" | "毎月月末" | "毎月最終日" => {
+            return Some("FREQ=MONTHLY;BYMONTHDAY=-1".into());
+        }
         "毎年" => return Some("FREQ=YEARLY".into()),
         _ => {}
     }
@@ -181,6 +183,10 @@ pub fn parse_recurrence(words: &[&str]) -> Option<(String, usize)> {
         if w == "毎月"
             && let Some(next) = words.get(1)
         {
+            // 毎月 月末  /  毎月 最終日
+            if *next == "月末" || *next == "最終日" {
+                return Some((join("FREQ=MONTHLY;BYMONTHDAY=-1", from_completed), 2));
+            }
             // 毎月 15日  /  毎月 15 日
             let n = ascii_digits(next);
             if let Some(d) = n.strip_suffix('日').and_then(day_of_month) {
@@ -354,6 +360,10 @@ mod tests {
             Some("FREQ=MONTHLY;BYMONTHDAY=15")
         );
         assert_eq!(one("毎月末").as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=-1"));
+        // 毎月月末 / 毎月 月末 / 毎月最終日 (the last day of each month)
+        for w in ["毎月月末", "毎月 月末", "毎月最終日", "毎月 最終日", "月末日"] {
+            assert_eq!(one(w).as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=-1"), "{w}");
+        }
         assert_eq!(one("月末").as_deref(), Some("FREQ=MONTHLY;BYMONTHDAY=-1"));
         assert_eq!(one("毎年").as_deref(), Some("FREQ=YEARLY"));
         assert_eq!(

@@ -95,7 +95,8 @@ export function useCrossActions(refresh: () => void, onError: (e: unknown) => vo
     setDone,
     toggleDone: (t: Task, done: boolean) => setDone(t.project, t.no, done),
     setPriority: (t: Task, priority: 1 | 2 | 3 | 4) => wrap(() => api.updateTask(t.project, t.no, { priority })),
-    setDue: (t: Task, due: string | null) => wrap(() => api.updateTask(t.project, t.no, { due, dueTime: due ? undefined : null })),
+    /** `time`: set it too (the iPhone's date sheet); omitted, a date keeps the task's time. */
+    setDue: (t: Task, due: string | null, time?: string | null) => wrap(() => api.updateTask(t.project, t.no, { due, dueTime: due ? time : null })),
     remove: (t: Task) => wrap(() => api.deleteTask(t.project, t.no)),
     addToInbox: (input: TaskInput) => wrap(() => api.addTask(inbox, input)),
   };

@@ -37,3 +37,12 @@ test("hidden_parts_stay_off", () => {
   assert.equal(mobileRowProps(t({ no: 9 }), ctx).commentCount, undefined);
   assert.equal(mobileRowProps(t({ note: "" }), ctx).description, undefined);
 });
+
+test("the time follows the date like Todoist (7:30, no leading zero)", () => {
+  assert.deepEqual(mobileRowProps(t({ due: "2026-10-14", dueTime: "07:30" }), ctx).date, { label: "明日 7:30", tone: "success" });
+  assert.deepEqual(mobileRowProps(t({ due: "2026-10-20", dueTime: "15:00" }), ctx).date, { label: "10月20日 15:00", tone: "muted" });
+});
+test("where the date is not shown (Today's group), a time still shows alone", () => {
+  assert.deepEqual(mobileRowProps(t({ due: "2026-10-13", dueTime: "10:00" }), ctx, { date: false }).date, { label: "10:00", tone: "success" });
+  assert.equal(mobileRowProps(t({ due: "2026-10-13" }), ctx, { date: false }).date, undefined);
+});
