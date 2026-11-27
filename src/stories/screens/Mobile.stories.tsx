@@ -20,7 +20,7 @@ import { insertToken } from "../../app/quickAddInsert";
 import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 import { MobileDrawer, MobileMenuContext } from "../../views/mobile/MobileDrawer";
-import { ViewSheet } from "../../views/mobile/ViewSheet";
+import { VIEW_SHEET_FORM, ViewSheet } from "../../views/mobile/ViewSheet";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { CalendarSheet } from "../../views/mobile/CalendarSheet";
 import { calendarEvents, chooserStub } from "../../mock/calendar";
@@ -553,8 +553,8 @@ function TodayWithViewSheet({ initial, open = true }: { initial: ViewOptions; op
       arrangeCtx={{ today: TODAY, weekStart: "mon", labelOrder: [], projectOrder: projects.map((p) => p.name) }}
       onViewMenu={() => setShown(true)}
       overlay={
-        <BottomSheet open={shown} size="large" title="表示" onClose={() => setShown(false)}>
-          <ViewSheet screen="today" options={view} onChange={setView} />
+        <BottomSheet open={shown} size="large" confirmForm={VIEW_SHEET_FORM} title="表示" onClose={() => setShown(false)}>
+          <ViewSheet screen="today" options={view} onApply={setView} onClose={() => setShown(false)} />
         </BottomSheet>
       }
     />
@@ -564,6 +564,30 @@ function TodayWithViewSheet({ initial, open = true }: { initial: ViewOptions; op
 export const M12: Story = {
   name: "M-12 今日の表示のシート",
   render: () => <TodayWithViewSheet initial={{ ...DEFAULTS, sort: "time" }} />,
+};
+
+// Spec 2026-11-28: the project's own 表示 (Todoist's form: rows with their value, a red check). Sorted by priority here.
+export const M12Project: Story = {
+  name: "M-12 プロジェクトの表示のシート",
+  render: () => (
+    <MobileProjectView
+      live
+      fill
+      tab="browse"
+      project="買い物"
+      tasks={shopping}
+      sections={sections}
+      today={TODAY}
+      view={{ ...DEFAULTS, sort: "priority" }}
+      onViewMenu={() => undefined}
+      onProjectMenu={() => undefined}
+      overlay={
+        <BottomSheet open size="large" confirmForm={VIEW_SHEET_FORM} title="表示" onClose={() => undefined}>
+          <ViewSheet screen="project" options={{ ...DEFAULTS, sort: "priority" }} onApply={() => undefined} onClose={() => undefined} />
+        </BottomSheet>
+      }
+    />
+  ),
 };
 
 export const M12Grouped: Story = {

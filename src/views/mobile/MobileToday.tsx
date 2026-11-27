@@ -1,5 +1,5 @@
 import type React from "react";
-import { ChevronRight, Ellipsis } from "lucide-react";
+import { ChevronRight, LayoutList } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { SectionHeader } from "../../components/SectionHeader";
 import { TaskRow } from "../../components/TaskRow";
@@ -146,7 +146,7 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
     return live ? <AnimatePresence initial={false}>{items}</AnimatePresence> : items;
   };
   return (
-    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="今日" subtitle={`${shownCount} 件のタスク`} actions={onViewMenu ? [{ icon: Ellipsis, label: "表示", onClick: onViewMenu }] : undefined} largeTitle initialScrollTop={initialScrollTop} tab="today" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
+    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="今日" subtitle={`${shownCount} 件のタスク`} actions={onViewMenu ? [{ icon: LayoutList, label: "表示", onClick: onViewMenu }] : undefined} largeTitle initialScrollTop={initialScrollTop} tab="today" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
         {reorder.state?.line && (
           <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />

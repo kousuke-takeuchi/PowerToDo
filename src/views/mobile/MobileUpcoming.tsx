@@ -14,7 +14,7 @@ import { dayHeading } from "./mobileDates";
 import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { sectionAt } from "./mobileReorder";
-import { Ellipsis } from "lucide-react";
+import { LayoutList } from "lucide-react";
 import { arrangeFlat, type ArrangeCtx } from "../../app/view/arrange";
 import { CalendarEventsBlock } from "../../components/CalendarEventsBlock";
 import type { ShownEvent } from "../../app/calendarEvents";
@@ -160,7 +160,7 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
   // A day whose tasks the filter hides is not shown (it has no rows).
   const days = [...new Set([...[...arranged.keys()].filter((d) => (arranged.get(d)?.groups[0]?.rows.length ?? 0) > 0), ...eventDays.filter((d) => d >= today)])].sort();
   return (
-    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" actions={onViewMenu ? [{ icon: Ellipsis, label: "表示", onClick: onViewMenu }] : undefined} tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
+    <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" actions={onViewMenu ? [{ icon: LayoutList, label: "表示", onClick: onViewMenu }] : undefined} tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
         {reorder.state?.line && (
           <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />

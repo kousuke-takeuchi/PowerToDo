@@ -47,7 +47,7 @@ import { useSaveErrors } from "./useSaveStatus";
 import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { ViewOptionsCtx, useView, useViewOptionsStore } from "./view/ViewOptionsContext";
-import { ViewSheet } from "../views/mobile/ViewSheet";
+import { VIEW_SHEET_FORM, ViewSheet } from "../views/mobile/ViewSheet";
 import { CalendarSheetHost } from "../views/mobile/CalendarSheetHost";
 import { DetailSheet } from "../views/mobile/DetailSheet";
 import { useSearch } from "./useSearch";
@@ -403,9 +403,11 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
   const drawerActive: DrawerTarget | undefined =
     screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
   // 表示のシート (右上の「…」): Today / Upcoming.
-  const [viewSheet, setViewSheet] = useState<"today" | "upcoming" | null>(null);
+  const [viewSheet, setViewSheet] = useState<"today" | "upcoming" | "project" | null>(null);
   const [todayView, setTodayView] = useView("today");
   const [upcomingView, setUpcomingView] = useView("upcoming");
+  // The open project's (or the inbox's) own 表示, keyed by its name like the desktop's.
+  const [projectView, setProjectView] = useView("project", navCurrent);
   const arrangeCtx = { today, weekStart: settingsPanes.datetime.weekStart, labelOrder: allLabels.map((l) => l.name), projectOrder: summaries.map((s) => s.name) };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
   // On 今日 a new task starts dated today, on 近日 on the day at the top of the list (as Todoist): the field opens with the date word.
@@ -615,12 +617,15 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       <BottomSheet fill size="large" open={calendarEvent !== null} title="予定" onClose={closeCalendarEvent}>
         {calendarEvent && <CalendarEventDetail event={calendarEvent} today={today} />}
       </BottomSheet>
-      <BottomSheet fill size="large" open={viewSheet !== null} title="表示" onClose={() => setViewSheet(null)}>
+      <BottomSheet fill size="large" confirmForm={VIEW_SHEET_FORM} open={viewSheet !== null} title="表示" onClose={() => setViewSheet(null)}>
         {viewSheet !== null && (
           <ViewSheet
+            // Each opening starts from the saved options (the sheet keeps a draft until the red check).
+            key={`${viewSheet}:${navCurrent}`}
             screen={viewSheet}
-            options={viewSheet === "today" ? todayView : upcomingView}
-            onChange={viewSheet === "today" ? setTodayView : setUpcomingView}
+            options={viewSheet === "today" ? todayView : viewSheet === "upcoming" ? upcomingView : projectView}
+            onApply={viewSheet === "today" ? setTodayView : viewSheet === "upcoming" ? setUpcomingView : setProjectView}
+            onClose={() => setViewSheet(null)}
           />
         )}
       </BottomSheet>
@@ -926,6 +931,9 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       tab={nav.tab}
       onBack={screen.kind === "project" ? back : undefined}
       onProjectMenu={() => setProjectSheet("menu")}
+      view={projectView}
+      arrangeCtx={arrangeCtx}
+      onViewMenu={() => setViewSheet("project")}
       title={title}
       project={current}
       tasks={view.tasks}
