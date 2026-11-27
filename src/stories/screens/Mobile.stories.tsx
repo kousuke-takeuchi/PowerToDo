@@ -356,6 +356,42 @@ export const M03Popup: Story = {
   ),
 };
 
+// A task with no extra fields: they are the chips under the card (説明, 優先度, リマインダー, ラベル), as Todoist's.
+export const M03PopupChips: Story = {
+  name: "M-03 タスク詳細 (空の項目はチップ)",
+  render: () => (
+    <MobileProjectView
+      live
+      fill
+      tab="browse"
+      project="買い物"
+      tasks={shopping}
+      sections={sections}
+      today={TODAY}
+      overlay={
+        <DetailSheet open onClose={() => undefined}>
+          <MobileTaskDetail
+            popup
+            live
+            fill
+            today={TODAY}
+            task={{ ...tasks[0], title: "洗濯物を取り込む", due: TODAY, dueTime: undefined, priority: 4, labels: [], reminders: [], note: undefined, rrule: undefined }}
+            subtasks={[]}
+            project={projects.find((p) => p.name === "買い物")!}
+            onBack={() => undefined}
+            onChange={() => undefined}
+            onAddSubtask={() => undefined}
+            onAddComment={async () => true}
+            onDelete={() => undefined}
+            onDuplicate={() => undefined}
+            onMove={() => undefined}
+          />
+        </DetailSheet>
+      }
+    />
+  ),
+};
+
 export const M03DateSheet: Story = {
   name: "M-03 日付のシートを開いた",
   render: () => (

@@ -56,7 +56,9 @@ function Card({ onClose, children }: { onClose: () => void; children: React.Reac
           top: "calc(env(safe-area-inset-top) + 10px)",
           overflow: "hidden",
           borderRadius: "16px 16px 0 0",
-          background: "var(--color-bg)",
+          // The card is the sheet's grey (Todoist's beige) so the white field cards inside show; everything in it reads --color-bg from here.
+          ["--color-bg" as string]: "var(--color-sheet-bg)",
+          background: "var(--color-sheet-bg)",
           boxShadow: "var(--shadow-popover)",
         }}
       >

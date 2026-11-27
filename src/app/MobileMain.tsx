@@ -512,6 +512,17 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
                   setDetail(null);
                   void p.deleteTask(openTask.no).then(refreshAll);
                 }}
+                onDuplicate={() =>
+                  void api.duplicateTask(openTask.project, openTask.no).then(
+                    () => {
+                      void p.reload().catch(() => undefined);
+                      refreshAll();
+                      void refreshSummaries();
+                      setFlash({ text: "タスクを複製しました", tone: "info" });
+                    },
+                    showError,
+                  )
+                }
                 labels={allLabels}
                 onParseRecurrence={api.parseRecurrence}
                 comments={taskComments.comments}
