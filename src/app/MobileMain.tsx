@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import type { AppStateDto, Label, NotificationPermission, SearchHit, Task, TokenKind } from "../types/model";
 import { BottomSheet } from "../views/mobile/BottomSheet";
-import { DateSheet } from "../views/mobile/DateSheet";
+import { DATE_SHEET_FORM, DateSheet } from "../views/mobile/DateSheet";
 import { MobileBrowse } from "../views/mobile/MobileBrowse";
 import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
 import { MobileProjectView } from "../views/mobile/MobileProjectView";
@@ -580,7 +580,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       </AnimatePresence>
       <BottomSheet
         fill
-        size={qaPicker === "project" ? "large" : "auto"}
+        size={qaPicker === "project" || qaPicker === "date" ? "large" : "auto"}
+        confirmForm={qaPicker === "date" ? DATE_SHEET_FORM : undefined}
         open={qa.open && qaPicker !== null}
         title={qaPicker === null ? undefined : QA_PICKER_TITLE[qaPicker]}
         onClose={() => setQaPicker(null)}
@@ -592,7 +593,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             time={parsed?.dueTime ?? undefined}
             today={today}
             // 日付なし clears the recurrence too: a recurrence alone would set the date again.
-            onChange={(v) => rewrite(v.date ? ["date", "time"] : ["date", "time", "recurrence"], dateWords(v.date, v.time, today))}
+            onApply={(v) => rewrite(v.date ? ["date", "time"] : ["date", "time", "recurrence"], dateWords(v.date, v.time, today))}
+            noRepeat
             onClose={() => setQaPicker(null)}
           />
         )}
@@ -676,7 +678,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       </BottomSheet>
       <BottomSheet
         fill
-        size={sheet?.kind === "move" ? "large" : "auto"}
+        size={sheet?.kind === "move" || sheet?.kind === "date" || sheet?.kind === "reschedule" ? "large" : "auto"}
+        confirmForm={sheet?.kind === "date" || sheet?.kind === "reschedule" ? DATE_SHEET_FORM : undefined}
         open={sheet !== null}
         title={sheet === null ? undefined : sheetTitle[sheet.kind](sheet)}
         onClose={closeSheet}
@@ -692,11 +695,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           />
         )}
         {sheet?.kind === "date" && (
-          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => {
-              setDue(sheet.task, v.date, v.time ?? null);
-              // The sheet stays open after a time change: show the new value.
-              setSheet({ kind: "date", task: { ...sheet.task, due: v.date, dueTime: v.date ? v.time : undefined } });
-            }} onClose={closeSheet} />
+          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} noRepeat onApply={(v) => setDue(sheet.task, v.date, v.time ?? null)} onClose={closeSheet} />
         )}
         {sheet?.kind === "priority" && <PrioritySheet value={sheet.task.priority} onChange={(v) => setPriority(sheet.task, v)} onClose={closeSheet} />}
         {sheet?.kind === "move" && (
@@ -712,7 +711,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           <DateSheet
             dateOnly
             today={today}
-            onChange={(v) => {
+            onApply={(v) => {
               if (v.date) {
                 const before = todayData.data?.overdue ?? [];
                 void api.rescheduleOverdue(today, v.date).then(() => offerDate(before, v.date!), showError).finally(refreshAll);

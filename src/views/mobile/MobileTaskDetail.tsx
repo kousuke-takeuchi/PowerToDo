@@ -17,7 +17,7 @@ import type { RecurrenceParse } from "../RecurrencePicker";
 import { reminderLabel } from "../ReminderPicker";
 import { useDone } from "../useDone";
 import { BottomSheet, SheetCard } from "./BottomSheet";
-import { DateSheet } from "./DateSheet";
+import { DATE_SHEET_FORM, DateSheet } from "./DateSheet";
 import { LabelSheet } from "./LabelSheet";
 import { MobileComments, PICK_ACCEPT } from "./MobileComments";
 import { MobileShell } from "./MobileShell";
@@ -173,8 +173,8 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           {overlay}
           <BottomSheet
             fill={fill}
-            size={sheet === "comments" || sheet === "move" ? "large" : "auto"}
-            confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : undefined}
+            size={sheet === "comments" || sheet === "move" || sheet === "date" ? "large" : "auto"}
+            confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : sheet === "date" ? DATE_SHEET_FORM : undefined}
             open={sheet !== null}
             title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}
           >
@@ -235,8 +235,10 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
               <DateSheet
                 value={task.due}
                 time={task.dueTime}
+                rrule={task.rrule}
+                rruleLabel={task.rruleLabel ?? (task.rrule ? recurrenceLabel(task.rrule) : undefined)}
                 today={today}
-                onChange={(v) => onChange?.({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null })}
+                onApply={(v) => onChange?.({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null, ...(v.rrule !== undefined ? { rrule: v.rrule } : {}) })}
                 onClose={closeSheet}
               />
             )}

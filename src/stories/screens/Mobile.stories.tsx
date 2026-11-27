@@ -12,7 +12,7 @@ import { MobileToday } from "../../views/mobile/MobileToday";
 import type { Task } from "../../types/model";
 import { MobileUpcoming } from "../../views/mobile/MobileUpcoming";
 import { BottomSheet } from "../../views/mobile/BottomSheet";
-import { DateSheet } from "../../views/mobile/DateSheet";
+import { DATE_SHEET_FORM, DateSheet } from "../../views/mobile/DateSheet";
 import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
 import { SheetFrame } from "../../views/mobile/SheetFrame";
 import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
@@ -241,11 +241,11 @@ function LiveWithSheet({ kind }: { kind: "menu" | "date" }) {
       onSwipeDate={() => undefined}
       onTaskMenu={() => undefined}
       overlay={
-        <BottomSheet open title={kind === "menu" ? task.title : "日付"} onClose={close}>
+        <BottomSheet open size={kind === "date" ? "large" : "auto"} confirmForm={kind === "date" ? DATE_SHEET_FORM : undefined} title={kind === "menu" ? task.title : "日付"} onClose={close}>
           {kind === "menu" ? (
             <TaskMenuSheet task={task} onDate={close} onPriority={close} onMove={close} onDelete={close} onClose={close} />
           ) : (
-            <DateSheet value={task.due} time={task.dueTime} today={TODAY} onChange={close} onClose={close} />
+            <DateSheet value={task.due} time={task.dueTime} today={TODAY} onApply={close} onClose={close} />
           )}
         </BottomSheet>
       }
@@ -302,8 +302,8 @@ export const M02DatePicker: Story = {
   render: () => (
     <SheetFrame>
       <MobileQuickAddSheet tokens={[{ text: "牛乳 " }, { text: "明日", kind: "date" }]} text="牛乳 明日" onTextChange={() => undefined} onSubmit={() => undefined} covered />
-      <BottomSheet open title="日付" onClose={() => undefined}>
-        <DateSheet value="2026-10-15" today={TODAY} onChange={() => undefined} onClose={() => undefined} />
+      <BottomSheet open size="large" confirmForm={DATE_SHEET_FORM} title="日付" onClose={() => undefined}>
+        <DateSheet value="2026-10-15" today={TODAY} onApply={() => undefined} onClose={() => undefined} />
       </BottomSheet>
     </SheetFrame>
   ),
