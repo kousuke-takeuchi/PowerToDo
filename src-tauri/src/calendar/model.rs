@@ -32,4 +32,20 @@ pub struct CalEvent {
     pub all_day: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
+    /// The last day (inclusive) when the event ends on a later day than `date`; `None` for a one-day event.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_date::option"
+    )]
+    pub end_date: Option<NaiveDate>,
+    /// The notes of the event, as text (Google's HTML is turned into plain text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The event's page in Google Calendar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    /// The video meeting (Google Meet, or the first video entry point of the event).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meet: Option<String>,
 }

@@ -417,3 +417,16 @@ pub async fn calendar_events(
     }
     Ok(out)
 }
+
+/// Opens a link of an event (its page in Google Calendar, a video meeting) in the browser. Only `https` links open.
+#[tauri::command]
+pub async fn open_web_link(url: String, app: AppHandle) -> AppResult<()> {
+    let https =
+        url::Url::parse(&url).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some());
+    if !https {
+        return Err(AppError::Invalid {
+            message: "開けないリンクです".into(),
+        });
+    }
+    crate::platform::open_url(&app, &url)
+}

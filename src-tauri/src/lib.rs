@@ -234,6 +234,7 @@ pub fn run() {
             commands::calendar::calendar_links,
             commands::calendar::calendar_set_links,
             commands::calendar::calendar_events,
+            commands::calendar::open_web_link,
             commands::sync::google_logout,
             commands::update::update_status,
             commands::update::update_check,
