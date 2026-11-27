@@ -1,93 +1,207 @@
 import type React from "react";
-import { useState } from "react";
-import { Ban, Calendar, CalendarPlus, CalendarSearch, Clock3, Sofa, Sun } from "lucide-react";
-import { TODAY, weekdayShort } from "../../mock/data";
-import { DatePicker } from "../DatePicker";
-import { quickDates } from "../quickDates";
+import { useContext, useState } from "react";
+import { Ban, Calendar, CalendarPlus, Check, ChevronLeft, Clock3, Repeat, Sofa, Sun } from "lucide-react";
+import { TODAY, monthDay, weekdayShort } from "../../mock/data";
+import { calendarMonths, quickRows, repeatChoices, weekHeader } from "../../app/dateSheet";
+import { TimeWheel } from "../../components/TimeWheel";
+import { nextRoundTime } from "../../app/timeChoices";
+import { nowTime } from "../dueLabel";
+import { DueParserContext } from "../DueParserContext";
 import { SheetCard, SheetRow } from "./BottomSheet";
+
+/** The form id the sheet's red check (BottomSheet confirmForm) submits. */
+export const DATE_SHEET_FORM = "date-sheet";
 
 export type DateSheetProps = {
   value?: string;
   time?: string;
+  /** The task's repeat now (its RRULE and how it reads), for the 繰り返し row. */
+  rrule?: string;
+  rruleLabel?: string;
   today?: string;
-  onChange: (v: { date?: string; time?: string }) => void;
+  weekStart?: "mon" | "sun";
+  /** The red check. `rrule`: undefined = left as it was, null = taken off. */
+  onApply: (v: { date?: string; time?: string; rrule?: string | null }) => void;
   onClose: () => void;
-  /** 日付だけ選ばせる (期限切れの再スケジュール): 「日付なし」を出さず、DatePicker は dateOnly。 */
+  /** 日付だけ選ばせる (期限切れの再スケジュール): 「日付なし」「時間」「繰り返し」を出さない。 */
   dateOnly?: boolean;
+  /** No 繰り返し row (the swipe's date sheet changes the date only). */
+  noRepeat?: boolean;
+  /** Stories: open on a page. */
+  initialPage?: "root" | "time" | "repeat";
 };
 
+type Page = "root" | "time" | "repeat";
+const MONTHS = 6;
+
+
 /**
- * 日付のシートの中身 (BottomSheet の children)。今日 / 明日 / 今週末 / 来週 / 日付なし の 5 つは押すと選んで閉じ、
- * 「カレンダーから選ぶ」でデスクトップと同じ DatePicker を開く (日付を変えたら閉じる)。選んだ時刻は残す。
+ * The date sheet in Todoist's form (spec 2026-11-28): a field you can type into (「毎週水曜 10:00」), the quick rows with their weekday,
+ * the weekday header over one list of months, and the rows 「時間」 and 「繰り返し」 that open a page each. Nothing is applied until the
+ * red check; the 「×」 drops the changes. A time is picked in 5-minute steps from the next round time.
  */
-export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateOnly }: DateSheetProps) {
-  const [calendar, setCalendar] = useState(false);
-  const pick = (date: string | undefined) => {
-    onChange(time && date ? { date, time } : { date });
+export function DateSheet({ value, time, rrule, rruleLabel, today = TODAY, weekStart = "mon", onApply, onClose, dateOnly, noRepeat, initialPage = "root" }: DateSheetProps) {
+  const parse = useContext(DueParserContext);
+  const [date, setDate] = useState<string | undefined>(value);
+  const [at, setAt] = useState<string | undefined>(time);
+  // The repeat is only sent when touched.
+  const [repeat, setRepeat] = useState<string | null | undefined>(undefined);
+  const [page, setPage] = useState<Page>(initialPage);
+  const [typed, setTyped] = useState("");
+  const [bad, setBad] = useState(false);
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onApply({ date, time: date ? at : undefined, rrule: repeat });
     onClose();
   };
-  const q = quickDates(today);
-  const rows: { key: string; icon: React.ReactNode; color: string; label: string; date?: string }[] = [
-    { key: "today", icon: <Calendar size={18} />, color: "var(--color-success)", label: "今日", date: today },
-    { key: "tomorrow", icon: <Sun size={18} />, color: "var(--color-priority-2)", label: "明日", date: q.tomorrow },
-    { key: "weekend", icon: <Sofa size={18} />, color: "var(--color-priority-3)", label: "今週末", date: q.weekend },
-    { key: "nextweek", icon: <CalendarPlus size={18} />, color: "var(--color-priority-3)", label: "来週", date: q.nextWeek },
-    ...(dateOnly ? [] : [{ key: "none", icon: <Ban size={18} />, color: "var(--color-text-secondary)", label: "日付なし", date: undefined }]),
-  ];
-  return (
-    <>
-      <SheetCard label="日付">
-      {rows.map((r) => (
-        <SheetRow
-          key={r.key}
-          icon={r.icon}
-          iconColor={r.color}
-          label={r.label}
-          value={r.date ? weekdayShort(r.date) : undefined}
-          selected={r.date === undefined ? value === undefined : r.date === value}
-          onClick={() => pick(r.date)}
-        />
-      ))}
-      {!calendar && <SheetRow icon={<CalendarSearch size={18} />} label="カレンダーから選ぶ" onClick={() => setCalendar(true)} />}
-      </SheetCard>
-      {!dateOnly && (
-        // Spec 2026-11-24: the time, with the iPhone's own wheel (input type=time). A time without a date is for today.
-        <SheetCard label="時刻">
-          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", minHeight: 48, padding: "0 16px", fontSize: 16, lineHeight: "22px", color: "var(--color-text-primary)" }}>
+  const pickDate = (d: string | undefined) => {
+    setDate(d);
+    if (!d) setAt(undefined);
+  };
+  const readTyped = async () => {
+    const text = typed.trim();
+    if (!text || !parse) return;
+    const r = await parse(text, today).catch(() => null);
+    if (!r || (!r.due && !r.rrule)) return setBad(true);
+    setBad(false);
+    setTyped("");
+    if (r.due) setDate(r.due);
+    if (r.time) setAt(r.time);
+    if (r.rrule) setRepeat(r.rrule);
+  };
+  const repeatText = repeat === undefined ? (rruleLabel ?? (rrule ? "あり" : "なし")) : (repeatChoices(date ?? today).find((c) => c.rrule === repeat)?.label ?? "あり");
+  const back = (title: string) => (
+    <button type="button" onClick={() => setPage("root")} style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 44, padding: 0, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 15, fontWeight: 600, color: "var(--color-accent)", cursor: "pointer" }}>
+      <ChevronLeft size={18} aria-hidden />
+      {title}
+    </button>
+  );
+
+  if (page === "time") {
+    return (
+      <form id={DATE_SHEET_FORM} onSubmit={submit}>
+        {back("時間")}
+        <SheetCard label="時間">
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", minHeight: 56, padding: "0 16px", fontSize: 16, color: "var(--color-text-primary)" }}>
             <span style={{ display: "inline-flex", color: "var(--color-text-secondary)" }}>
               <Clock3 size={18} />
             </span>
-            <span style={{ flex: 1 }}>時刻</span>
-            <input
-              type="time"
-              aria-label="時刻"
-              value={time ?? ""}
-              onChange={(e) => onChange(e.target.value ? { date: value ?? today, time: e.target.value } : { date: value })}
-              style={{ minWidth: 96, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 16, color: time ? "var(--color-text-primary)" : "var(--color-text-muted)", textAlign: "right" }}
+            <span style={{ flex: 1 }}>時間</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!at}
+              aria-label="時間"
+              onClick={() => {
+                if (at) return setAt(undefined);
+                // On: the wheel starts at the next round time after now (9:45 gives 10:00); a time is for a date, today if none.
+                setAt(nextRoundTime(nowTime()));
+                if (!date) setDate(today);
+              }}
+              style={{ position: "relative", width: 44, height: 26, padding: 0, border: 0, borderRadius: 13, background: at ? "var(--color-accent)" : "var(--color-border)", cursor: "pointer", transition: "background 120ms" }}
+            >
+              <span style={{ position: "absolute", top: 2, left: at ? 20 : 2, width: 22, height: 22, borderRadius: 11, background: "#FFFFFF", transition: "left 120ms" }} />
+            </button>
+          </div>
+          {at && <TimeWheel value={at} onChange={setAt} />}
+        </SheetCard>
+      </form>
+    );
+  }
+  if (page === "repeat") {
+    const choices = repeatChoices(date ?? today);
+    const current = repeat === undefined ? (rrule ? undefined : null) : repeat;
+    return (
+      <form id={DATE_SHEET_FORM} onSubmit={submit}>
+        {back("繰り返し")}
+        <SheetCard label="繰り返し">
+          {choices.map((c) => (
+            <SheetRow
+              key={c.key}
+              icon={current === c.rrule ? <Check size={18} /> : <span style={{ width: 18 }} />}
+              label={c.label}
+              onClick={() => {
+                setRepeat(c.rrule);
+                if (c.rrule && !date) setDate(today);
+                setPage("root");
+              }}
             />
-          </label>
-          {time && <SheetRow label="時刻なし" onClick={() => onChange({ date: value })} />}
+          ))}
         </SheetCard>
-      )}
-      {calendar && (
-        <SheetCard>
-        <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
-          <DatePicker
-            value={value}
-            time={time}
-            today={today}
-            dateOnly={dateOnly}
-            hideQuickPicks
-            hideTimeRepeat
-            onChange={(v) => {
-              if (dateOnly && !v.date) return;
-              onChange(v);
-              if (v.date !== value) onClose();
-            }}
-          />
+      </form>
+    );
+  }
+
+  const quickIcon: Record<string, React.ReactNode> = { tomorrow: <Sun size={18} />, later: <CalendarPlus size={18} />, weekend: <Sofa size={18} />, nextweek: <CalendarPlus size={18} /> };
+  const quickColor: Record<string, string> = { tomorrow: "var(--color-priority-2)", later: "var(--color-priority-3)", weekend: "var(--color-priority-3)", nextweek: "var(--color-priority-3)" };
+  const months = calendarMonths(today, MONTHS, weekStart);
+  return (
+    <form id={DATE_SHEET_FORM} onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <input
+        aria-label="日付を入力"
+        value={typed || (bad ? typed : "")}
+        placeholder={date ? `${monthDay(date)}${at ? ` ${Number(at.slice(0, 2))}:${at.slice(3, 5)}` : ""}` : "日付を入力"}
+        onChange={(e) => {
+          setTyped(e.target.value);
+          setBad(false);
+        }}
+        onKeyDown={(e) => {
+          // Enter reads the text (「毎週水曜 10:00」); the red check applies the sheet.
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            void readTyped();
+          }
+        }}
+        onBlur={() => void readTyped()}
+        style={{ boxSizing: "border-box", width: "100%", height: 44, padding: "0 12px", border: bad ? "1px solid var(--color-danger)" : 0, borderRadius: 10, background: "var(--color-bg-hover)", fontFamily: "var(--font-body)", fontSize: 16, color: "var(--color-text-primary)", outline: "none" }}
+      />
+      {bad && <div role="alert" style={{ marginTop: -6, fontSize: 12, lineHeight: "17px", color: "var(--color-danger)" }}>日付として読めませんでした</div>}
+      <SheetCard label="日付">
+        <SheetRow icon={<Calendar size={18} />} iconColor="var(--color-success)" label="今日" value={weekdayShort(today)} selected={date === today} onClick={() => pickDate(today)} />
+        {quickRows(today).map((r) => (
+          <SheetRow key={r.key} icon={quickIcon[r.key]} iconColor={quickColor[r.key]} label={r.label} value={weekdayShort(r.date)} selected={date === r.date} onClick={() => pickDate(r.date)} />
+        ))}
+        {!dateOnly && <SheetRow icon={<Ban size={18} />} iconColor="var(--color-text-secondary)" label="日付なし" selected={date === undefined} onClick={() => pickDate(undefined)} />}
+      </SheetCard>
+      <SheetCard label="カレンダー">
+        <div style={{ padding: "4px 8px 8px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", textAlign: "center", fontSize: 12, lineHeight: "24px", color: "var(--color-text-secondary)" }}>
+            {weekHeader(weekStart).map((w) => (
+              <span key={w}>{w}</span>
+            ))}
+          </div>
+          {months.map((m) => (
+            <section key={m.key} aria-label={m.title}>
+              <div style={{ padding: "10px 4px 4px", fontSize: 14, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}>{m.title}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", rowGap: 2 }}>
+                {m.cells.map((c, i) =>
+                  c === null ? (
+                    <span key={i} />
+                  ) : (
+                    <button
+                      key={c}
+                      type="button"
+                      disabled={c < today}
+                      aria-label={c}
+                      aria-pressed={c === date}
+                      onClick={() => pickDate(c)}
+                      style={{ justifySelf: "center", width: 40, height: 40, display: "grid", placeItems: "center", padding: 0, border: 0, borderRadius: 20, fontFamily: "var(--font-body)", fontSize: 15, background: c === date ? "var(--color-accent)" : "transparent", color: c === date ? "#FFFFFF" : c < today ? "var(--color-text-muted)" : c === today ? "var(--color-accent)" : "var(--color-text-primary)", fontWeight: c === today || c === date ? 700 : 400, cursor: c < today ? "default" : "pointer" }}
+                    >
+                      {Number(c.slice(8))}
+                    </button>
+                  ),
+                )}
+              </div>
+            </section>
+          ))}
         </div>
+      </SheetCard>
+      {!dateOnly && (
+        <SheetCard label="時間と繰り返し">
+          <SheetRow icon={<Clock3 size={18} />} label="時間" value={at ? `${Number(at.slice(0, 2))}:${at.slice(3, 5)}` : "なし"} chevron onClick={() => setPage("time")} />
+          {!noRepeat && <SheetRow icon={<Repeat size={18} />} label="繰り返し" value={repeatText} chevron onClick={() => setPage("repeat")} />}
         </SheetCard>
       )}
-    </>
+    </form>
   );
 }

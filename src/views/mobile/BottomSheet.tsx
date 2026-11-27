@@ -1,6 +1,6 @@
 import type React from "react";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ChevronRight, X } from "lucide-react";
 import { AnimatePresence, PresenceContext, animate, motion, useDragControls, useMotionValue, usePresence } from "motion/react";
 import { useEscLayer } from "../../app/layers";
 import { Glass } from "../../components/Glass";
@@ -232,6 +232,7 @@ export function SheetRow({
   value,
   selected,
   danger,
+  chevron,
   onClick,
 }: {
   icon?: React.ReactNode;
@@ -240,6 +241,8 @@ export function SheetRow({
   value?: string;
   selected?: boolean;
   danger?: boolean;
+  /** A 「›」 at the right: the row opens a page (Todoist's 表示 rows). */
+  chevron?: boolean;
   onClick?: () => void;
 }) {
   return (
@@ -268,7 +271,12 @@ export function SheetRow({
     >
       {icon && <span style={{ display: "inline-flex", color: danger ? "var(--color-danger)" : iconColor }}>{icon}</span>}
       <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{label}</span>
-      {value && <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{value}</span>}
+      {value && <span style={{ fontSize: chevron ? 15 : 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{value}</span>}
+      {chevron && (
+        <span aria-hidden style={{ display: "inline-flex", color: "var(--color-text-muted)" }}>
+          <ChevronRight size={16} />
+        </span>
+      )}
     </button>
   );
 }

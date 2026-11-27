@@ -1,6 +1,6 @@
 import type React from "react";
 import { useRef, useState } from "react";
-import { Bell, Calendar, ChevronRight, Flag, Hash, Inbox, MessageSquare, Paperclip, Repeat, Send, Tag } from "lucide-react";
+import { AlignLeft, Bell, Calendar, ChevronDown, ChevronRight, Copy, Ellipsis, Flag, Hash, Inbox, MessageSquare, Paperclip, Plus, Send, Tag, Trash2 } from "lucide-react";
 import { AddTaskRow } from "../../components/AddTaskRow";
 import { TextField } from "../../components/TextField";
 import { Button } from "../../components/Button";
@@ -16,8 +16,8 @@ import { RecurrencePicker, recurrenceLabel } from "../RecurrencePicker";
 import type { RecurrenceParse } from "../RecurrencePicker";
 import { reminderLabel } from "../ReminderPicker";
 import { useDone } from "../useDone";
-import { BottomSheet, SheetCard } from "./BottomSheet";
-import { DateSheet } from "./DateSheet";
+import { BottomSheet, SheetCard, SheetRow } from "./BottomSheet";
+import { DATE_SHEET_FORM, DateSheet } from "./DateSheet";
 import { LabelSheet } from "./LabelSheet";
 import { MobileComments, PICK_ACCEPT } from "./MobileComments";
 import { MobileShell } from "./MobileShell";
@@ -57,6 +57,8 @@ export type MobileTaskDetailProps = {
   onOpenSubtask?: (t: Task) => void;
   /** 削除 (確認のシートのあと)。デスクトップと同じく、呼び出し側が詳細を閉じる。 */
   onDelete?: () => void;
+  /** 「…」→「タスクを複製」 (the copy is added next to the task). */
+  onDuplicate?: () => void;
   /** ラベルのシートに並べる、ストアにあるラベル。 */
   labels?: Label[];
   /** 繰り返しの自然言語入力の解釈 (api.parseRecurrence)。 */
@@ -87,7 +89,7 @@ export type MobileTaskDetailProps = {
   sections?: Section[];
 };
 
-type DetailSheet = "comments" | "title" | "note" | "move" | "date" | "priority" | "label" | "reminder" | "recurrence" | "subtask" | "delete" | null;
+type DetailSheet = "comments" | "title" | "note" | "move" | "date" | "priority" | "label" | "reminder" | "recurrence" | "subtask" | "delete" | "menu" | null;
 const sheetName: Record<NonNullable<DetailSheet>, string> = {
   comments: "コメント",
   title: "名前",
@@ -100,6 +102,7 @@ const sheetName: Record<NonNullable<DetailSheet>, string> = {
   recurrence: "繰り返し",
   subtask: "サブタスクを追加",
   delete: "タスクを削除",
+  menu: "タスク",
 };
 
 type Icon = React.ComponentType<{ size?: number }>;
@@ -119,33 +122,36 @@ function Tap({ onClick, label, children }: { onClick?: () => void; label: string
   );
 }
 
-function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)" }: { icon: Icon; name: string; value: string; valueColor?: string }) {
+/** One field row of the detail's card (Todoist's): an icon, the value, a hairline above all but the first. */
+function Field({ icon: Icon, iconColor = "var(--color-text-secondary)", text, textColor = "var(--color-text-primary)", muted, multiline, onClick, label }: { icon: Icon; iconColor?: string; text: string; textColor?: string; muted?: boolean; multiline?: boolean; onClick?: () => void; label: string }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-2)",
-        padding: "13px 0",
-        boxShadow: "inset 0 -1px 0 var(--color-border)", // pen の stroke は内側
-      }}
-    >
-      <span style={{ display: "inline-flex", color: "var(--color-text-secondary)", flex: "0 0 auto" }}>
-        <Icon size={18} />
-      </span>
-      <span style={{ width: 96, flex: "0 0 auto", fontSize: 15, lineHeight: "22px", color: "var(--color-text-secondary)" }}>{name}</span>
-      <span style={{ flex: 1, minWidth: 0, fontSize: 16, lineHeight: "22px", color: valueColor }}>{value}</span>
-      <span style={{ display: "inline-flex", color: "var(--color-text-muted)", flex: "0 0 auto" }}>
-        <ChevronRight size={16} />
-      </span>
-    </div>
+    <Tap onClick={onClick} label={label}>
+      <div style={{ display: "flex", alignItems: multiline ? "flex-start" : "center", gap: "var(--space-3)", minHeight: 44, padding: "10px 0", boxShadow: "inset 0 1px 0 var(--color-border)" }}>
+        <span style={{ display: "inline-flex", color: iconColor, flex: "0 0 auto", marginTop: multiline ? 2 : 0 }}>
+          <Icon size={18} />
+        </span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: muted ? 14 : 16, lineHeight: muted ? "20px" : "22px", color: muted ? "var(--color-text-secondary)" : textColor, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</span>
+      </div>
+    </Tap>
+  );
+}
+
+/** A pill that adds an empty field (Todoist's chip row). */
+function Chip({ icon: Icon, label, onClick }: { icon: Icon; label: string; onClick?: () => void }) {
+  return (
+    <button type="button" onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto", minHeight: 36, padding: "0 12px", border: "1px solid var(--color-border)", borderRadius: 18, background: "var(--color-bg)", fontFamily: "var(--font-body)", fontSize: 13, color: "var(--color-text-secondary)", cursor: "pointer", whiteSpace: "nowrap" }}>
+      <Icon size={14} aria-hidden />
+      {label}
+    </button>
   );
 }
 
 /** M-03: タスク詳細 (全画面、下部タブなし)。戻る + パンくず、プロパティ 5 行、サブタスク、下端のコメント欄。完了チェックとサブタスクのチェックは見た目だけトグルする。 */
-export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, popup, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote, onOpenSubtask, onMove, projects = [], sections = [] }: MobileTaskDetailProps) {
+export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, popup, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, onDuplicate, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote, onOpenSubtask, onMove, projects = [], sections = [] }: MobileTaskDetailProps) {
   // 下部シートの状態。詳細は key (プロジェクト/番号) で作り直すだけで、一覧の再読み込みでは作り直さない。
   const [sheet, setSheet] = useState<DetailSheet>(initialSheet);
+  // The subtasks fold (Todoist); open at first.
+  const [subOpen, setSubOpen] = useState(true);
   const closeSheet = () => setSheet(null);
   const editable = onChange !== undefined;
   const open = (s: NonNullable<DetailSheet>) => (editable ? () => setSheet(s) : undefined);
@@ -173,8 +179,8 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
           {overlay}
           <BottomSheet
             fill={fill}
-            size={sheet === "comments" || sheet === "move" ? "large" : "auto"}
-            confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : undefined}
+            size={sheet === "comments" || sheet === "move" || sheet === "date" ? "large" : "auto"}
+            confirmForm={sheet === "title" || sheet === "note" || sheet === "subtask" ? TEXT_SHEET_FORM : sheet === "date" ? DATE_SHEET_FORM : undefined}
             open={sheet !== null}
             title={sheet ? sheetName[sheet] : undefined} onClose={closeSheet}
           >
@@ -235,8 +241,10 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
               <DateSheet
                 value={task.due}
                 time={task.dueTime}
+                rrule={task.rrule}
+                rruleLabel={task.rruleLabel ?? (task.rrule ? recurrenceLabel(task.rrule) : undefined)}
                 today={today}
-                onChange={(v) => onChange?.({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null })}
+                onApply={(v) => onChange?.({ due: v.date ?? null, dueTime: v.date ? (v.time ?? null) : null, ...(v.rrule !== undefined ? { rrule: v.rrule } : {}) })}
                 onClose={closeSheet}
               />
             )}
@@ -257,6 +265,21 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
                   }}
                 />
               </div>
+              </SheetCard>
+            )}
+            {sheet === "menu" && (
+              <SheetCard label="タスクの操作">
+                {onDuplicate && (
+                  <SheetRow
+                    icon={<Copy size={18} />}
+                    label="タスクを複製"
+                    onClick={() => {
+                      closeSheet();
+                      onDuplicate();
+                    }}
+                  />
+                )}
+                {onDelete && <SheetRow icon={<Trash2 size={18} />} label="タスクを削除" danger onClick={() => setSheet("delete")} />}
               </SheetCard>
             )}
             {sheet === "delete" && (
@@ -288,6 +311,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
         <MobileHeader
           safeArea={fill && !popup}
           closeInstead={popup}
+          actions={onDelete || onDuplicate ? [{ icon: Ellipsis, label: "その他", onClick: () => setSheet("menu") }] : undefined}
           title="タスク詳細"
           onBack={onBack}
           breadcrumb={
@@ -301,21 +325,36 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
     >
       {/* Grows to push the comment bar down, but never shrinks: a long body scrolls instead of running under the bar. */}
       <div style={{ flex: "1 0 auto", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "var(--space-4)", padding: "8px 15px" }}>
-        <div style={{ display: "flex", gap: "var(--space-3)" }}>
-          <Checkbox checked={done} onChange={setDone} ariaLabel="完了" size={22} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Tap onClick={open("title")} label="名前を編集">
-              <div style={{ fontSize: 19, lineHeight: "25px", fontWeight: 700, color: done ? "var(--color-text-muted)" : "var(--color-text-primary)", overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{task.title}</div>
-            </Tap>
-          </div>
-        </div>
-        {(task.note || editable) && (
-          <Tap onClick={open("note")} label="メモを編集">
-            <div style={{ fontSize: 13, lineHeight: "18px", color: task.note ? "var(--color-text-secondary)" : "var(--color-text-muted)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-              {task.note || "メモを追加"}
+        {/* Todoist's card (spec 2026-11-28): the title, then only the fields that have a value; the empty ones are the chips below. */}
+        <div style={{ display: "flex", flexDirection: "column", borderRadius: 16, background: "var(--color-sheet-card)", padding: "12px 16px 12px" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", paddingBottom: 8 }}>
+            <Checkbox checked={done} onChange={setDone} ariaLabel="完了" size={22} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Tap onClick={open("title")} label="名前を編集">
+                <div style={{ fontSize: 19, lineHeight: "25px", fontWeight: 700, color: done ? "var(--color-text-muted)" : "var(--color-text-primary)", overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{task.title}</div>
+              </Tap>
             </div>
-          </Tap>
-        )}
+          </div>
+          {task.note && (
+            <Field onClick={open("note")} label="メモを編集" icon={AlignLeft} text={task.note} muted multiline />
+          )}
+          {onMove && (
+            <Field onClick={() => setSheet("move")} label="プロジェクトを変更" icon={project.inbox ? Inbox : Hash} iconColor={project.inbox ? undefined : project.color} text={(project.inbox ? "受信トレイ" : project.name) + (section ? ` / ${section}` : "")} />
+          )}
+          <Field onClick={open("date")} label="期限を変更" icon={Calendar} iconColor={dueColor} text={dueText + (task.rrule ? ` · ${task.rruleLabel ?? recurrenceLabel(task.rrule)}` : "")} textColor={due ? dueColor : "var(--color-text-muted)"} />
+          {task.priority !== 4 && <Field onClick={open("priority")} label="優先度を変更" icon={Flag} iconColor={`var(--color-priority-${task.priority})`} text={`優先度 ${task.priority}`} />}
+          {task.labels.length > 0 && <Field onClick={open("label")} label="ラベルを変更" icon={Tag} text={task.labels.map((l) => `@${l}`).join(" ")} />}
+          {task.reminders.length > 0 && <Field onClick={open("reminder")} label="リマインダーを変更" icon={Bell} text={task.reminders.map(reminderLabel).join(", ")} />}
+          {editable && (!task.note || task.priority === 4 || task.labels.length === 0 || task.reminders.length === 0) && (
+            // The empty fields as chips: a tap opens the same sheet, and the field then shows as a row above.
+            <div role="group" aria-label="項目を足す" style={{ display: "flex", gap: 8, overflowX: "auto", paddingTop: 10, margin: "0 -16px", paddingLeft: 16, paddingRight: 16, scrollbarWidth: "none" }}>
+              {!task.note && <Chip icon={AlignLeft} label="説明" onClick={open("note")} />}
+              {task.priority === 4 && <Chip icon={Flag} label="優先度" onClick={open("priority")} />}
+              {task.reminders.length === 0 && <Chip icon={Bell} label="リマインダー" onClick={open("reminder")} />}
+              {task.labels.length === 0 && <Chip icon={Tag} label="ラベル" onClick={open("label")} />}
+            </div>
+          )}
+        </div>
         {(note.files.length > 0 || onAttachNote) && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-2)" }}>
             <AttachmentList touch files={note.files} ids={note.ids} alwaysRemove onRemove={onDetachNote ? (i) => onDetachNote(note.ids[i]) : undefined} />
@@ -345,26 +384,34 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             )}
           </div>
         )}
-        <div style={{ display: "flex", flexDirection: "column", boxShadow: "inset 0 1px 0 var(--color-border)" }}>
-          {onMove && (
-            <Tap onClick={() => setSheet("move")} label="プロジェクトを変更">
-              <Prop icon={project.inbox ? Inbox : Hash} name="プロジェクト" value={(project.inbox ? "受信トレイ" : project.name) + (section ? ` / ${section}` : "")} />
-            </Tap>
-          )}
-          <Tap onClick={open("date")} label="期限を変更"><Prop icon={Calendar} name="期限" value={dueText} valueColor={dueColor} /></Tap>
-          <Tap onClick={open("priority")} label="優先度を変更"><Prop icon={Flag} name="優先度" value={`P${task.priority}`} valueColor={`var(--color-priority-${task.priority})`} /></Tap>
-          <Tap onClick={open("label")} label="ラベルを変更"><Prop icon={Tag} name="ラベル" value={task.labels.map((l) => `@${l}`).join(" ") || "なし"} /></Tap>
-          <Tap onClick={open("reminder")} label="リマインダーを変更"><Prop icon={Bell} name="リマインダー" value={task.reminders.map(reminderLabel).join(", ") || "なし"} /></Tap>
-          <Tap onClick={open("recurrence")} label="繰り返しを変更"><Prop icon={Repeat} name="繰り返し" value={task.rruleLabel ?? recurrenceLabel(task.rrule)} /></Tap>
-        </div>
         <div>
-          <div style={{ fontSize: 15, lineHeight: "20px", fontWeight: 700, paddingTop: 16, color: "var(--color-text-primary)" }}>
-            サブタスク {subtasks.filter(sub.isDone).length}/{subtasks.length}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44 }}>
+            <button
+              type="button"
+              aria-expanded={subOpen}
+              onClick={() => setSubOpen(!subOpen)}
+              style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minHeight: 44, padding: 0, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 15, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)", textAlign: "left", cursor: "pointer" }}
+            >
+              サブタスク
+              <span style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{`${subtasks.filter(sub.isDone).length}/${subtasks.length}`}</span>
+            </button>
+            <button type="button" aria-label={subOpen ? "サブタスクをたたむ" : "サブタスクを開く"} onClick={() => setSubOpen(!subOpen)} style={{ width: 44, height: 44, display: "grid", placeItems: "center", border: 0, background: "none", color: "var(--color-text-secondary)", cursor: "pointer" }}>
+              {subOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+            </button>
+            {onAddSubtask && (
+              <button type="button" aria-label="サブタスクを追加" onClick={() => setSheet("subtask")} style={{ width: 44, height: 44, display: "grid", placeItems: "center", border: 0, background: "none", color: "var(--color-text-secondary)", cursor: "pointer" }}>
+                <Plus size={20} />
+              </button>
+            )}
           </div>
-          {subtasks.map((t) => (
-            <TaskRow key={t.no} variant="mobile" {...mobileRowProps(t, { today })} done={sub.isDone(t)} onToggleDone={() => sub.toggle(t)} onClick={onOpenSubtask ? () => onOpenSubtask(t) : undefined} />
-          ))}
-          <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => setSheet("subtask") : undefined} />
+          {subOpen && (
+            <div style={{ borderRadius: 16, background: "var(--color-sheet-card)", padding: "0 16px" }}>
+              {subtasks.map((t) => (
+                <TaskRow key={t.no} variant="mobile" {...mobileRowProps(t, { today })} done={sub.isDone(t)} onToggleDone={() => sub.toggle(t)} onClick={onOpenSubtask ? () => onOpenSubtask(t) : undefined} />
+              ))}
+              <AddTaskRow label="サブタスクを追加" onClick={onAddSubtask ? () => setSheet("subtask") : undefined} />
+            </div>
+          )}
         </div>
         {onAddComment && (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
@@ -388,16 +435,6 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             )}
           </div>
         )}
-        {onDelete && (
-          <button
-            type="button"
-            onClick={() => setSheet("delete")}
-            className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-            style={{ alignSelf: "flex-start", minHeight: 44, padding: "0 8px", border: 0, borderRadius: 8, fontFamily: "var(--font-body)", fontSize: 14, color: "var(--color-danger)", cursor: "pointer" }}
-          >
-            タスクを削除
-          </button>
-        )}
       </div>
       {/* The comment bar stays at the bottom of the screen while the body scrolls above it (as Todoist's). */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 1, flex: "0 0 auto", background: "var(--color-bg)", boxShadow: "inset 0 1px 0 var(--color-border)" }}>
@@ -408,7 +445,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
             type="button"
             aria-label="コメントを書く"
             onClick={() => setSheet("comments")}
-            style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", width: "100%", minHeight: 44, padding: "0 16px", border: "1px solid var(--color-border)", borderRadius: 22, background: "var(--color-bg)", fontFamily: "var(--font-body)", fontSize: 16, color: "var(--color-text-muted)", textAlign: "left", cursor: "pointer" }}
+            style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", width: "100%", minHeight: 44, padding: "0 16px", border: "1px solid var(--color-border)", borderRadius: 22, background: "var(--color-sheet-card)", fontFamily: "var(--font-body)", fontSize: 16, color: "var(--color-text-muted)", textAlign: "left", cursor: "pointer" }}
           >
             <MessageSquare size={18} aria-hidden />
             コメント

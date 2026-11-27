@@ -12,7 +12,7 @@ import { MobileToday } from "../../views/mobile/MobileToday";
 import type { Task } from "../../types/model";
 import { MobileUpcoming } from "../../views/mobile/MobileUpcoming";
 import { BottomSheet } from "../../views/mobile/BottomSheet";
-import { DateSheet } from "../../views/mobile/DateSheet";
+import { DATE_SHEET_FORM, DateSheet } from "../../views/mobile/DateSheet";
 import { MobileQuickAddSheet } from "../../views/mobile/MobileQuickAddSheet";
 import { SheetFrame } from "../../views/mobile/SheetFrame";
 import { LARGE_TITLE_HEIGHT } from "../../components/largeTitle";
@@ -20,7 +20,7 @@ import { insertToken } from "../../app/quickAddInsert";
 import { MobileToast } from "../../components/MobileToast";
 import { TaskMenuSheet } from "../../views/mobile/TaskMenuSheet";
 import { MobileDrawer, MobileMenuContext } from "../../views/mobile/MobileDrawer";
-import { ViewSheet } from "../../views/mobile/ViewSheet";
+import { VIEW_SHEET_FORM, ViewSheet } from "../../views/mobile/ViewSheet";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { CalendarSheet } from "../../views/mobile/CalendarSheet";
 import { calendarEvents, chooserStub } from "../../mock/calendar";
@@ -125,7 +125,7 @@ function useTasks(initial: Task[]) {
 
 function LiveProject() {
   const { list, toggle } = useTasks(shopping);
-  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} onProjectMenu={() => undefined} onAddTask={() => undefined} />;
+  return <MobileProjectView live fill tab="browse" project="買い物" tasks={list} sections={sections} today={TODAY} onToggleDone={toggle} onProjectMenu={() => undefined} onAddTask={() => undefined} onSectionMenu={() => undefined} />;
 }
 
 export const M01Live: Story = {
@@ -241,11 +241,11 @@ function LiveWithSheet({ kind }: { kind: "menu" | "date" }) {
       onSwipeDate={() => undefined}
       onTaskMenu={() => undefined}
       overlay={
-        <BottomSheet open title={kind === "menu" ? task.title : "日付"} onClose={close}>
+        <BottomSheet open size={kind === "date" ? "large" : "auto"} confirmForm={kind === "date" ? DATE_SHEET_FORM : undefined} title={kind === "menu" ? task.title : "日付"} onClose={close}>
           {kind === "menu" ? (
             <TaskMenuSheet task={task} onDate={close} onPriority={close} onMove={close} onDelete={close} onClose={close} />
           ) : (
-            <DateSheet value={task.due} time={task.dueTime} today={TODAY} onChange={close} onClose={close} />
+            <DateSheet value={task.due} time={task.dueTime} today={TODAY} onApply={close} onClose={close} />
           )}
         </BottomSheet>
       }
@@ -302,8 +302,8 @@ export const M02DatePicker: Story = {
   render: () => (
     <SheetFrame>
       <MobileQuickAddSheet tokens={[{ text: "牛乳 " }, { text: "明日", kind: "date" }]} text="牛乳 明日" onTextChange={() => undefined} onSubmit={() => undefined} covered />
-      <BottomSheet open title="日付" onClose={() => undefined}>
-        <DateSheet value="2026-10-15" today={TODAY} onChange={() => undefined} onClose={() => undefined} />
+      <BottomSheet open size="large" confirmForm={DATE_SHEET_FORM} title="日付" onClose={() => undefined}>
+        <DateSheet value="2026-10-15" today={TODAY} onApply={() => undefined} onClose={() => undefined} />
       </BottomSheet>
     </SheetFrame>
   ),
@@ -349,6 +349,42 @@ export const M03Popup: Story = {
             onChange={() => undefined}
             onAddSubtask={() => undefined}
             onAddComment={async () => true}
+          />
+        </DetailSheet>
+      }
+    />
+  ),
+};
+
+// A task with no extra fields: they are the chips under the card (説明, 優先度, リマインダー, ラベル), as Todoist's.
+export const M03PopupChips: Story = {
+  name: "M-03 タスク詳細 (空の項目はチップ)",
+  render: () => (
+    <MobileProjectView
+      live
+      fill
+      tab="browse"
+      project="買い物"
+      tasks={shopping}
+      sections={sections}
+      today={TODAY}
+      overlay={
+        <DetailSheet open onClose={() => undefined}>
+          <MobileTaskDetail
+            popup
+            live
+            fill
+            today={TODAY}
+            task={{ ...tasks[0], title: "洗濯物を取り込む", due: TODAY, dueTime: undefined, priority: 4, labels: [], reminders: [], note: undefined, rrule: undefined }}
+            subtasks={[]}
+            project={projects.find((p) => p.name === "買い物")!}
+            onBack={() => undefined}
+            onChange={() => undefined}
+            onAddSubtask={() => undefined}
+            onAddComment={async () => true}
+            onDelete={() => undefined}
+            onDuplicate={() => undefined}
+            onMove={() => undefined}
           />
         </DetailSheet>
       }
@@ -553,8 +589,8 @@ function TodayWithViewSheet({ initial, open = true }: { initial: ViewOptions; op
       arrangeCtx={{ today: TODAY, weekStart: "mon", labelOrder: [], projectOrder: projects.map((p) => p.name) }}
       onViewMenu={() => setShown(true)}
       overlay={
-        <BottomSheet open={shown} size="large" title="表示" onClose={() => setShown(false)}>
-          <ViewSheet screen="today" options={view} onChange={setView} />
+        <BottomSheet open={shown} size="large" confirmForm={VIEW_SHEET_FORM} title="表示" onClose={() => setShown(false)}>
+          <ViewSheet screen="today" options={view} onApply={setView} onClose={() => setShown(false)} />
         </BottomSheet>
       }
     />
@@ -564,6 +600,30 @@ function TodayWithViewSheet({ initial, open = true }: { initial: ViewOptions; op
 export const M12: Story = {
   name: "M-12 今日の表示のシート",
   render: () => <TodayWithViewSheet initial={{ ...DEFAULTS, sort: "time" }} />,
+};
+
+// Spec 2026-11-28: the project's own 表示 (Todoist's form: rows with their value, a red check). Sorted by priority here.
+export const M12Project: Story = {
+  name: "M-12 プロジェクトの表示のシート",
+  render: () => (
+    <MobileProjectView
+      live
+      fill
+      tab="browse"
+      project="買い物"
+      tasks={shopping}
+      sections={sections}
+      today={TODAY}
+      view={{ ...DEFAULTS, sort: "priority" }}
+      onViewMenu={() => undefined}
+      onProjectMenu={() => undefined}
+      overlay={
+        <BottomSheet open size="large" confirmForm={VIEW_SHEET_FORM} title="表示" onClose={() => undefined}>
+          <ViewSheet screen="project" options={{ ...DEFAULTS, sort: "priority" }} onApply={() => undefined} onClose={() => undefined} />
+        </BottomSheet>
+      }
+    />
+  ),
 };
 
 export const M12Grouped: Story = {

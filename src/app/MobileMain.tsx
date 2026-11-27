@@ -3,8 +3,9 @@ import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import type { AppStateDto, Label, NotificationPermission, SearchHit, Task, TokenKind } from "../types/model";
-import { BottomSheet } from "../views/mobile/BottomSheet";
-import { DateSheet } from "../views/mobile/DateSheet";
+import { Pencil, Plus } from "lucide-react";
+import { BottomSheet, SheetCard, SheetRow } from "../views/mobile/BottomSheet";
+import { DATE_SHEET_FORM, DateSheet } from "../views/mobile/DateSheet";
 import { MobileBrowse } from "../views/mobile/MobileBrowse";
 import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
 import { MobileProjectView } from "../views/mobile/MobileProjectView";
@@ -47,7 +48,7 @@ import { useSaveErrors } from "./useSaveStatus";
 import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { ViewOptionsCtx, useView, useViewOptionsStore } from "./view/ViewOptionsContext";
-import { ViewSheet } from "../views/mobile/ViewSheet";
+import { VIEW_SHEET_FORM, ViewSheet } from "../views/mobile/ViewSheet";
 import { CalendarSheetHost } from "../views/mobile/CalendarSheetHost";
 import { DetailSheet } from "../views/mobile/DetailSheet";
 import { useSearch } from "./useSearch";
@@ -111,6 +112,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
   const push = (s: BrowseScreen) => dispatchNav({ type: "push", screen: s });
   const back = () => dispatchNav({ type: "back" });
   // プロジェクトの「…」(名前を変更 / 削除)
+  // A section's 「…」: its menu, or its rename.
+  const [sectionSheet, setSectionSheet] = useState<{ name: string; mode: "menu" | "rename" } | null>(null);
   const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | "calendar" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   // `parent`: opened from that task's detail (a subtask row); back goes there instead of the list.
@@ -303,6 +306,17 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
     refreshAll();
     void refreshSummaries();
   };
+  /** 「タスクを複製」 (the long-press menu): the copy is added next to the task. */
+  const duplicateTask = (t: Task) =>
+    void api.duplicateTask(t.project, t.no).then(
+      () => {
+        if (listProject || detail) void p.reload().catch(() => undefined);
+        refreshAll();
+        void refreshSummaries();
+        setFlash({ text: "タスクを複製しました", tone: "info" });
+      },
+      showError,
+    );
   const renameProject = async (name: string) => {
     const from = navCurrent;
     try {
@@ -403,9 +417,11 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
   const drawerActive: DrawerTarget | undefined =
     screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
   // 表示のシート (右上の「…」): Today / Upcoming.
-  const [viewSheet, setViewSheet] = useState<"today" | "upcoming" | null>(null);
+  const [viewSheet, setViewSheet] = useState<"today" | "upcoming" | "project" | null>(null);
   const [todayView, setTodayView] = useView("today");
   const [upcomingView, setUpcomingView] = useView("upcoming");
+  // The open project's (or the inbox's) own 表示, keyed by its name like the desktop's.
+  const [projectView, setProjectView] = useView("project", navCurrent);
   const arrangeCtx = { today, weekStart: settingsPanes.datetime.weekStart, labelOrder: allLabels.map((l) => l.name), projectOrder: summaries.map((s) => s.name) };
   const reveal = () => setFlash({ text: "「ファイル」アプリの PowerToDo フォルダで確認できます", tone: "info" });
   // On 今日 a new task starts dated today, on 近日 on the day at the top of the list (as Todoist): the field opens with the date word.
@@ -510,6 +526,17 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
                   setDetail(null);
                   void p.deleteTask(openTask.no).then(refreshAll);
                 }}
+                onDuplicate={() =>
+                  void api.duplicateTask(openTask.project, openTask.no).then(
+                    () => {
+                      void p.reload().catch(() => undefined);
+                      refreshAll();
+                      void refreshSummaries();
+                      setFlash({ text: "タスクを複製しました", tone: "info" });
+                    },
+                    showError,
+                  )
+                }
                 labels={allLabels}
                 onParseRecurrence={api.parseRecurrence}
                 comments={taskComments.comments}
@@ -578,7 +605,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       </AnimatePresence>
       <BottomSheet
         fill
-        size={qaPicker === "project" ? "large" : "auto"}
+        size={qaPicker === "project" || qaPicker === "date" ? "large" : "auto"}
+        confirmForm={qaPicker === "date" ? DATE_SHEET_FORM : undefined}
         open={qa.open && qaPicker !== null}
         title={qaPicker === null ? undefined : QA_PICKER_TITLE[qaPicker]}
         onClose={() => setQaPicker(null)}
@@ -590,7 +618,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             time={parsed?.dueTime ?? undefined}
             today={today}
             // 日付なし clears the recurrence too: a recurrence alone would set the date again.
-            onChange={(v) => rewrite(v.date ? ["date", "time"] : ["date", "time", "recurrence"], dateWords(v.date, v.time, today))}
+            onApply={(v) => rewrite(v.date ? ["date", "time"] : ["date", "time", "recurrence"], dateWords(v.date, v.time, today))}
+            noRepeat
             onClose={() => setQaPicker(null)}
           />
         )}
@@ -615,12 +644,48 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       <BottomSheet fill size="large" open={calendarEvent !== null} title="予定" onClose={closeCalendarEvent}>
         {calendarEvent && <CalendarEventDetail event={calendarEvent} today={today} />}
       </BottomSheet>
-      <BottomSheet fill size="large" open={viewSheet !== null} title="表示" onClose={() => setViewSheet(null)}>
+      <BottomSheet fill size="large" confirmForm={VIEW_SHEET_FORM} open={viewSheet !== null} title="表示" onClose={() => setViewSheet(null)}>
         {viewSheet !== null && (
           <ViewSheet
+            // Each opening starts from the saved options (the sheet keeps a draft until the red check).
+            key={`${viewSheet}:${navCurrent}`}
             screen={viewSheet}
-            options={viewSheet === "today" ? todayView : upcomingView}
-            onChange={viewSheet === "today" ? setTodayView : setUpcomingView}
+            options={viewSheet === "today" ? todayView : viewSheet === "upcoming" ? upcomingView : projectView}
+            onApply={viewSheet === "today" ? setTodayView : viewSheet === "upcoming" ? setUpcomingView : setProjectView}
+            onClose={() => setViewSheet(null)}
+          />
+        )}
+      </BottomSheet>
+      <BottomSheet
+        fill
+        confirmForm={sectionSheet?.mode === "rename" ? TEXT_SHEET_FORM : undefined}
+        open={sectionSheet !== null}
+        title={sectionSheet?.mode === "rename" ? "名前を変更" : sectionSheet?.name}
+        onClose={() => setSectionSheet(null)}
+      >
+        {sectionSheet?.mode === "menu" && (
+          <SheetCard label="セクションの操作">
+            <SheetRow icon={<Pencil size={18} />} label="名前を変更" onClick={() => setSectionSheet({ name: sectionSheet.name, mode: "rename" })} />
+            <SheetRow
+              icon={<Plus size={18} />}
+              label="タスクを追加"
+              onClick={() => {
+                const name = sectionSheet.name;
+                setSectionSheet(null);
+                openQuickAddAt({ section: name });
+              }}
+            />
+          </SheetCard>
+        )}
+        {sectionSheet?.mode === "rename" && (
+          <TextSheet
+            label="セクション名"
+            value={sectionSheet.name}
+            onSave={(v) => {
+              const t = v.trim();
+              if (t && t !== sectionSheet.name) void p.renameSection(sectionSheet.name, t);
+            }}
+            onClose={() => setSectionSheet(null)}
           />
         )}
       </BottomSheet>
@@ -671,7 +736,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       </BottomSheet>
       <BottomSheet
         fill
-        size={sheet?.kind === "move" ? "large" : "auto"}
+        size={sheet?.kind === "move" || sheet?.kind === "date" || sheet?.kind === "reschedule" ? "large" : "auto"}
+        confirmForm={sheet?.kind === "date" || sheet?.kind === "reschedule" ? DATE_SHEET_FORM : undefined}
         open={sheet !== null}
         title={sheet === null ? undefined : sheetTitle[sheet.kind](sheet)}
         onClose={closeSheet}
@@ -682,16 +748,13 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             onDate={() => setSheet({ kind: "date", task: sheet.task })}
             onPriority={() => setSheet({ kind: "priority", task: sheet.task })}
             onMove={sheet.task.parentNo === undefined ? () => setSheet({ kind: "move", task: sheet.task }) : undefined}
+            onDuplicate={() => duplicateTask(sheet.task)}
             onDelete={() => removeTask(sheet.task)}
             onClose={closeSheet}
           />
         )}
         {sheet?.kind === "date" && (
-          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} onChange={(v) => {
-              setDue(sheet.task, v.date, v.time ?? null);
-              // The sheet stays open after a time change: show the new value.
-              setSheet({ kind: "date", task: { ...sheet.task, due: v.date, dueTime: v.date ? v.time : undefined } });
-            }} onClose={closeSheet} />
+          <DateSheet value={sheet.task.due} time={sheet.task.dueTime} today={today} noRepeat onApply={(v) => setDue(sheet.task, v.date, v.time ?? null)} onClose={closeSheet} />
         )}
         {sheet?.kind === "priority" && <PrioritySheet value={sheet.task.priority} onChange={(v) => setPriority(sheet.task, v)} onClose={closeSheet} />}
         {sheet?.kind === "move" && (
@@ -707,7 +770,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           <DateSheet
             dateOnly
             today={today}
-            onChange={(v) => {
+            onApply={(v) => {
               if (v.date) {
                 const before = todayData.data?.overdue ?? [];
                 void api.rescheduleOverdue(today, v.date).then(() => offerDate(before, v.date!), showError).finally(refreshAll);
@@ -926,6 +989,10 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       tab={nav.tab}
       onBack={screen.kind === "project" ? back : undefined}
       onProjectMenu={() => setProjectSheet("menu")}
+      view={projectView}
+      arrangeCtx={arrangeCtx}
+      onViewMenu={() => setViewSheet("project")}
+      onSectionMenu={(name) => setSectionSheet({ name, mode: "menu" })}
       title={title}
       project={current}
       tasks={view.tasks}

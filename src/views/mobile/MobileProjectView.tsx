@@ -1,6 +1,6 @@
 import type React from "react";
 import { useState } from "react";
-import { Check, Ellipsis } from "lucide-react";
+import { Check, Ellipsis, LayoutList } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { AddTaskRow } from "../../components/AddTaskRow";
 import { SectionHeader } from "../../components/SectionHeader";
@@ -22,6 +22,8 @@ import { CalendarEventsBlock } from "../../components/CalendarEventsBlock";
 import type { ShownEvent } from "../../app/calendarEvents";
 import type { MobileTab } from "../../app/mobileNav";
 import type { QuickAddToken } from "../QuickAddDialog";
+import { arrange, type ArrangeCtx } from "../../app/view/arrange";
+import { DEFAULTS, isDefault, type ViewOptions } from "../../app/view/viewOptions";
 
 export type MobileProjectViewProps = {
   project: string;
@@ -80,6 +82,13 @@ export type MobileProjectViewProps = {
   events?: ShownEvent[];
   /** Why the calendar shows nothing new (no login on this device, a failed fetch). */
   calendarNote?: string;
+  /** 表示の設定 (spec 2026-11-28): sort / group / filter / the done tasks. At the defaults the sections show as before; otherwise the arranged groups. */
+  view?: ViewOptions;
+  arrangeCtx?: ArrangeCtx;
+  /** The 表示 button at the top right. Omitted: none. */
+  onViewMenu?: () => void;
+  /** The 「…」 of a section's heading (Todoist's): rename / add. Omitted: no 「…」. */
+  onSectionMenu?: (section: string) => void;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -150,9 +159,21 @@ export function MobileProjectView({
   onReorder,
   events = [],
   calendarNote,
+  view,
+  arrangeCtx,
+  onViewMenu,
+  onSectionMenu,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
+  // Sections folded by the fold arrow (this visit only, like Todoist's).
+  const [folded, setFolded] = useState<Set<string>>(() => new Set());
+  const toggleFold = (name: string) =>
+    setFolded((s) => {
+      const next = new Set(s);
+      if (!next.delete(name)) next.add(name);
+      return next;
+    });
   const local = useDone();
   const leave = useLeaving(tasks);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -185,7 +206,10 @@ export function MobileProjectView({
       if (t) onTaskMenu?.(t);
     },
   });
-  const reordering = live && onReorder !== undefined;
+  // 表示の設定: only when it differs from the defaults does the list leave its sections (and the long-press reorder, which needs the manual order).
+  const options = view ?? DEFAULTS;
+  const arranged = !isDefault(options) ? arrange(mine, options, arrangeCtx ?? { today, weekStart: "mon", labelOrder: [], projectOrder: [] }) : null;
+  const reordering = live && onReorder !== undefined && arranged === null;
   const heightOf = (no: number): number => Math.max(0, ...childrenOf(no).map((c) => 1 + heightOf(c.no)));
   const subtreeOf = (no: number): string[] => [keyOf(no), ...childrenOf(no).flatMap((c) => subtreeOf(c.no))];
   /** The lifted row follows the finger (its subtree inside it goes along). */
@@ -287,7 +311,7 @@ export function MobileProjectView({
       subtitle={`${openCount} 件のタスク`}
       largeTitle
       onBack={onBack}
-      actions={onProjectMenu ? [{ icon: Ellipsis, label: "その他", onClick: onProjectMenu }] : undefined}
+      actions={[...(onViewMenu ? [{ icon: LayoutList, label: "表示", onClick: onViewMenu }] : []), ...(onProjectMenu ? [{ icon: Ellipsis, label: "その他", onClick: onProjectMenu }] : [])]}
       tab={tab}
       today={today}
       onTabChange={onTabChange}
@@ -311,22 +335,51 @@ export function MobileProjectView({
         {live && open.length === 0 && projectSections.length === 0 && (
           <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>{emptyText}</div>
         )}
-        {list("s:", unsectioned)}
+        {arranged ? (
+          <>
+            {arranged.groups.map((g, i) => (
+              <section key={g.key}>
+                {g.title && <SectionHeader mobile tight={i === 0} title={g.title} />}
+                {list(`g:${g.key}`, g.rows.map((r) => r.task))}
+              </section>
+            ))}
+            {arranged.hidden > 0 && (
+              <button type="button" onClick={onViewMenu} style={{ display: "block", width: "100%", minHeight: 44, padding: "8px 0", border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "18px", color: "var(--color-text-secondary)", textAlign: "center", cursor: onViewMenu ? "pointer" : "default" }}>
+                {`絞り込みで ${arranged.hidden} 件を隠しています`}
+              </button>
+            )}
+          </>
+        ) : null}
+        {!arranged && list("s:", unsectioned)}
         {/* With sections and no loose tasks, the FAB covers 「no section」 (no lone add row above the first section). */}
-        {onAddTask && (unsectioned.length > 0 || projectSections.length === 0) && (
+        {!arranged && onAddTask && (unsectioned.length > 0 || projectSections.length === 0) && (
           <div {...(reordering ? reorderAttrs({ kind: "slot", section: null }) : {})}>
             <AddTaskRow onClick={() => onAddTask(null)} />
           </div>
         )}
-        {projectSections.map((s, i) => {
+        {!arranged && projectSections.map((s, i) => {
           const rows = open.filter((t) => t.category === s.name).sort((a, b) => a.order - b.order);
           return (
             <section key={s.name}>
               <div {...(reordering ? reorderAttrs({ kind: "header", section: s.name }) : {})}>
-                <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
+                <SectionHeader
+                  mobile
+                  title={s.name}
+                  tight={i === 0 && unsectioned.length === 0}
+                  count={rows.length}
+                  collapsed={folded.has(s.name)}
+                  onToggle={() => toggleFold(s.name)}
+                  trailing={
+                    onSectionMenu ? (
+                      <button type="button" aria-label={`${s.name}のメニュー`} onClick={() => onSectionMenu(s.name)} style={{ width: 36, height: 28, margin: "-4px 0", display: "grid", placeItems: "center", padding: 0, border: 0, background: "none", color: "var(--color-text-secondary)", cursor: "pointer" }}>
+                        <Ellipsis size={18} />
+                      </button>
+                    ) : undefined
+                  }
+                />
               </div>
-              {list(`s:${s.name}`, rows)}
-              {onAddTask && (
+              {!folded.has(s.name) && list(`s:${s.name}`, rows)}
+              {!folded.has(s.name) && onAddTask && (
                 <div {...(reordering ? reorderAttrs({ kind: "slot", section: s.name }) : {})}>
                   <AddTaskRow onClick={() => onAddTask(s.name)} />
                 </div>

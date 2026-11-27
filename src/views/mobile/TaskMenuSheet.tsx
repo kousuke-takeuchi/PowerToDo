@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Calendar, Flag, FolderInput, Trash2 } from "lucide-react";
+import { Calendar, Copy, Flag, FolderInput, Trash2 } from "lucide-react";
 import type { Task } from "../../types/model";
 import { SheetCard, SheetRow } from "./BottomSheet";
 
@@ -9,12 +9,14 @@ export type TaskMenuSheetProps = {
   onPriority: () => void;
   /** 省略すると「移動」の行を出さない (サブタスクは移せない)。 */
   onMove?: () => void;
+  /** 「タスクを複製」 (Todoist): the copy lands next to the task. Omitted: no row. */
+  onDuplicate?: () => void;
   onDelete: () => void;
   onClose: () => void;
 };
 
 /** 長押しのメニューの中身 (BottomSheet の children): 日付 / 優先度 / 移動 / 削除。削除は同じシートの中で 2 段階 (「削除」-> 「本当に削除」)。 */
-export function TaskMenuSheet({ task, onDate, onPriority, onMove, onDelete, onClose }: TaskMenuSheetProps) {
+export function TaskMenuSheet({ task, onDate, onPriority, onMove, onDuplicate, onDelete, onClose }: TaskMenuSheetProps) {
   const [confirm, setConfirm] = useState(false);
   if (confirm) {
     return (
@@ -34,6 +36,16 @@ export function TaskMenuSheet({ task, onDate, onPriority, onMove, onDelete, onCl
       <SheetRow icon={<Calendar size={18} />} label="日付" value={task.due} onClick={onDate} />
       <SheetRow icon={<Flag size={18} />} iconColor={`var(--color-priority-${task.priority})`} label="優先度" value={`P${task.priority}`} onClick={onPriority} />
       {onMove && <SheetRow icon={<FolderInput size={18} />} label="移動" onClick={onMove} />}
+      {onDuplicate && (
+        <SheetRow
+          icon={<Copy size={18} />}
+          label="タスクを複製"
+          onClick={() => {
+            onDuplicate();
+            onClose();
+          }}
+        />
+      )}
       <SheetRow icon={<Trash2 size={18} />} label="削除" danger onClick={() => setConfirm(true)} />
     </SheetCard>
   );

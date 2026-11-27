@@ -141,13 +141,19 @@ function DesktopSectionHeader({ title, count, collapsed, onToggle, showChevron =
 }
 
 /** Spec ④ iPhone §4.3: 15 bold, no line, 36 above. `trailing` holds the overdue 「再スケジュール」. */
-function MobileSectionHeader({ title, count, trailing, tight }: SectionHeaderProps) {
+function MobileSectionHeader({ title, count, trailing, tight, collapsed, onToggle }: SectionHeaderProps) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: `${tight ? 16 : 36}px 0 6px`, fontFamily: "var(--font-body)" }}>
       <h2 style={{ margin: 0, flex: 1, minWidth: 0, fontSize: 15, lineHeight: "20px", fontWeight: 700, color: "var(--color-text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {title}
       </h2>
       {count !== undefined && <span style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" }}>{count}</span>}
+      {/* Todoist: a fold arrow (and the 「…」 as `trailing`) on the right of the section's heading. */}
+      {onToggle && (
+        <button type="button" aria-label={collapsed ? `${title}を開く` : `${title}をたたむ`} aria-expanded={!collapsed} onClick={onToggle} style={{ width: 36, height: 28, margin: "-4px 0", display: "grid", placeItems: "center", padding: 0, border: 0, background: "none", color: "var(--color-text-secondary)", cursor: "pointer" }}>
+          {collapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+        </button>
+      )}
       {trailing}
     </div>
   );
