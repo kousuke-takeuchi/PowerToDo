@@ -44,7 +44,12 @@ function compare(a: Task, b: Task, o: ViewOptions): number {
       if (!a.dueTime || !b.dueTime) return a.dueTime ? -1 : b.dueTime ? 1 : 0; // no time last either way
       return sign * a.dueTime.localeCompare(b.dueTime);
     case "added": return sign * a.createdAt.localeCompare(b.createdAt);
-    case "priority": return sign * (a.priority - b.priority);
+    case "priority": {
+      // Within a priority: the time of day (none last), then the manual order (the sort is stable).
+      if (a.priority !== b.priority) return sign * (a.priority - b.priority);
+      if (!a.dueTime || !b.dueTime) return a.dueTime ? -1 : b.dueTime ? 1 : 0;
+      return a.dueTime.localeCompare(b.dueTime);
+    }
     default: return 0;
   }
 }

@@ -105,3 +105,11 @@ test("sorts_by_time_of_day_with_no_time_last_either_way", () => {
   assert.deepEqual(order("asc"), ["朝", "午後", "同じ", "なし"]); // the tie keeps the manual order
   assert.deepEqual(order("desc"), ["午後", "同じ", "朝", "なし"]);
 });
+
+test("priority_sort_orders_a_priority_by_time_then_manual", () => {
+  const x = [t({ title: "P2夜", priority: 2, dueTime: "20:00" }), t({ title: "P2なし1", priority: 2 }), t({ title: "P1", priority: 1 }),
+             t({ title: "P2朝", priority: 2, dueTime: "08:00" }), t({ title: "P2なし2", priority: 2 })];
+  const order = (dir: "asc" | "desc") => arrange(x, { ...DEFAULTS, sort: "priority", dir }, ctx).groups[0].rows.map((r) => r.task.title);
+  assert.deepEqual(order("asc"), ["P1", "P2朝", "P2夜", "P2なし1", "P2なし2"]); // no time last, then the manual order
+  assert.deepEqual(order("desc"), ["P2朝", "P2夜", "P2なし1", "P2なし2", "P1"]); // the time stays early-first
+});
