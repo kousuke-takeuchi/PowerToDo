@@ -25,6 +25,10 @@ import type {
   ProjectSummary,
   ProjectView,
   QuickAddOutcome,
+  CalendarInfo,
+  CalendarLink,
+  CalendarLoginDto,
+  ProjectEvents,
   QuickAddPlace,
   QuickAddResult,
   RecurrenceDto,
@@ -192,6 +196,14 @@ export const api = {
    * `cancelled` and `denied` are normal ends (resolved, not rejected). A second call while one waits rejects with a Japanese message.
    */
   googleLogin: () => invoke<GoogleLoginDto>("google_login"),
+  /** Google Calendar (spec 2026-11-27). The login is cancelled with `googleLoginCancel`, like the Drive login. */
+  calendarAccounts: () => invoke<string[]>("calendar_accounts"),
+  calendarLogin: () => invoke<CalendarLoginDto>("calendar_login"),
+  calendarLogout: (email: string) => invoke<{ revoked: boolean }>("calendar_logout", { email }),
+  calendarCalendars: (email: string) => invoke<CalendarInfo[]>("calendar_calendars", { email }),
+  calendarLinks: () => invoke<Record<string, CalendarLink>>("calendar_links"),
+  calendarSetLink: (project: string, link: CalendarLink | null) => invoke<null>("calendar_set_link", { project, link }),
+  calendarEvents: (from: string, to: string, force: boolean) => invoke<Record<string, ProjectEvents>>("calendar_events", { from, to, force }),
   /** 「キャンセル」 while `googleLogin` waits. Does nothing when none waits. */
   googleLoginCancel: () => invoke<null>("google_login_cancel"),
   /** Revokes (best effort; `revoked: false` when Google could not be reached), forgets the login and detaches the sync. The target stays Google Drive. */

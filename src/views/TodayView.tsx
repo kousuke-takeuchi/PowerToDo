@@ -12,6 +12,8 @@ import { AddSlot, FilterNote, HiddenNote, dupKeysOf, useCrossRows, useOutsideClo
 import { DatePicker } from "./DatePicker";
 import { PageHeader, TitleGroup } from "./HeaderActions";
 import { dueWithTime } from "./dueLabel";
+import { CalendarEventsBlock } from "../components/CalendarEventsBlock";
+import type { ShownEvent } from "../app/calendarEvents";
 
 export type TodayViewProps = {
   tasks: Task[];
@@ -33,6 +35,8 @@ export type TodayViewProps = {
   onVisibleKeys?: (keys: string[]) => void;
   /** 「表示」の並べ替え・グループ・フィルターに使う (Main が渡す)。 */
   weekStart?: "mon" | "sun";
+  /** Today's Google Calendar events (spec 2026-11-27): above the day's tasks, display only. */
+  calendarEvents?: ShownEvent[];
   labelOrder?: string[];
   projectOrder?: string[];
   /** 並べ替え / グループ中の今日の行のハンドルを押した。「戻す」で手動の並び (グループなし) に戻せる。 */
@@ -96,7 +100,7 @@ function RescheduleButton({ today, onReschedule }: { today: string; onReschedule
 }
 
 /** 期限切れグループ (再スケジュール付き) + 今日。期限切れを出さないときは見出しなしで今日の行だけ並べる。 */
-export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects, focusedKey, onVisibleKeys, weekStart = "mon", labelOrder = [], projectOrder = [], onReorderLocked }: TodayViewProps) {
+export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask, onAddTask, onReschedule, hiddenProjects, focusedKey, onVisibleKeys, weekStart = "mon", labelOrder = [], projectOrder = [], onReorderLocked, calendarEvents = [] }: TodayViewProps) {
   const [view, setView] = useView("today");
   const [overdueCollapsed, setOverdueCollapsed] = useState(false);
   // サブタスクも 1 行として出す。完了した親の下の行は出さない (Rust の today_view と同じ)。
@@ -162,6 +166,7 @@ export function TodayView({ tasks, today, hideOverdue, onToggleDone, onOpenTask,
         )}
         <section>
           <SectionHeader title={`${monthDay(today)} · 今日 · ${weekdayLong(today)}`} count={todayCount} showChevron={false} />
+          <CalendarEventsBlock events={calendarEvents} today={today} showProject />
           {grouped ? (
             todayA.groups.map((g) => (
               <section key={g.key}>

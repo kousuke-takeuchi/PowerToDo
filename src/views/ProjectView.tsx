@@ -32,6 +32,8 @@ import { DragCtx } from "../app/drag/DragContext";
 import { TaskMenu } from "./TaskMenu";
 import { blankValue, editorValueOf } from "./taskEditorValue";
 import { dueWithTime } from "./dueLabel";
+import { CalendarEventsBlock } from "../components/CalendarEventsBlock";
+import type { ShownEvent } from "../app/calendarEvents";
 
 /** What the 「…」 menu of a project needs: its own state and what each line does (confirmations are the caller's). */
 export type ProjectMenuProps = {
@@ -49,6 +51,8 @@ export type ProjectMenuProps = {
   onDelete: () => void;
   onOpenFile: () => void;
   onRevealFile: () => void;
+  /** 「Google カレンダー」 (spec 2026-11-27): the calendar chooser. */
+  onCalendar?: () => void;
 };
 
 export type ProjectViewProps = {
@@ -85,6 +89,10 @@ export type ProjectViewProps = {
   onRenameSection?: (oldName: string, newName: string) => void;
   /** 渡すとヘッダー右に「…」のメニューが出る (spec 2026-11-18 §4)。渡さなければボタンも出ない。 */
   projectMenu?: ProjectMenuProps;
+  /** The project's Google Calendar events (spec 2026-11-27), by day above the tasks; display only. */
+  calendarEvents?: ShownEvent[];
+  /** Why the calendar shows nothing new (no login on this device, a failed fetch). */
+  calendarNote?: string;
   /** 「セクションを追加」を開く関数をマウント時に 1 度渡す (キー S 用。アンマウントで null)。 */
   onAddSectionApi?: (open: (() => void) | null) => void;
   /** アーカイブ済み: 一覧は触れない (追加・編集・完了・ドラッグなし)。ヘッダーに「アーカイブから戻す」を出す。 */
@@ -246,6 +254,8 @@ export function ProjectView({
   onAddSection,
   onRenameSection,
   projectMenu,
+  calendarEvents,
+  calendarNote,
   onAddSectionApi,
   readOnly,
   initialMenuOpen,
@@ -930,6 +940,7 @@ export function ProjectView({
           revealFile: projectMenu.onRevealFile,
           archive: projectMenu.onArchive,
           delete: projectMenu.onDelete,
+          calendar: projectMenu.onCalendar,
         },
       })
     : undefined;
@@ -948,6 +959,8 @@ export function ProjectView({
           <Subtitle text={readOnly ? `アーカイブ済み · ${openCount} 件のタスク` : `${openCount} 件のタスク`} />
         </div>
       </PageHeader>
+      {calendarNote && <div role="status" style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)", marginBottom: "var(--space-2)" }}>{calendarNote}</div>}
+      <CalendarEventsBlock events={calendarEvents ?? []} today={today} byDay />
       {state === "normal" && hiddenCount > 0 && (
         <div style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)", marginBottom: "var(--space-2)" }}>
           {hiddenCount} 件を隠しています (フィルター)

@@ -12,6 +12,8 @@ import { visibleOpen } from "./visibleOpen";
 import { AddSlot, FilterNote, HiddenNote, useCrossRows, useOutsideClose } from "./crossList";
 import { PageHeader, titleStyle } from "./HeaderActions";
 import { WeekStrip } from "./WeekStrip";
+import { CalendarEventsBlock } from "../components/CalendarEventsBlock";
+import type { ShownEvent } from "../app/calendarEvents";
 
 export type UpcomingViewProps = {
   tasks: Task[];
@@ -34,6 +36,8 @@ export type UpcomingViewProps = {
   onVisibleKeys?: (keys: string[]) => void;
   /** 「表示」の並べ替え・フィルターに使う (Main が渡す)。 */
   weekStart?: "mon" | "sun";
+  /** The Google Calendar events of a day (spec 2026-11-27): above the day's tasks, display only. */
+  calendarEventsOn?: (ymd: string) => ShownEvent[];
   labelOrder?: string[];
   projectOrder?: string[];
   /** Stories only: draw this day (YYYY-MM-DD) as the drop target (drop-highlight, D-05b). */
@@ -65,7 +69,7 @@ function dayTitle(ymd: string, today: string): string {
 }
 
 /** MonthSelect + WeekStrip (今日から 7 日) + 日付グループ。タスクのない日も見出し + AddTaskRow を出す。 */
-export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys, dropPreviewDay, weekStart = "mon", labelOrder = [], projectOrder = [] }: UpcomingViewProps) {
+export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleDone, onOpenTask, onAddTask, hiddenProjects, focusedKey, onVisibleKeys, dropPreviewDay, weekStart = "mon", labelOrder = [], projectOrder = [], calendarEventsOn }: UpcomingViewProps) {
   const [view, setView] = useView("upcoming");
   const { reduced } = useMotionTiming();
   const [monthOpen, setMonthOpen] = useState(false);
@@ -189,6 +193,7 @@ export function UpcomingView({ tasks, today, days, onExtend, onJumpTo, onToggleD
             style={dropPreviewDay === ymd ? { background: "var(--color-drop-highlight)", borderRadius: 6 } : undefined}
           >
             <SectionHeader title={dayTitle(ymd, today)} showChevron={false} />
+            <CalendarEventsBlock events={calendarEventsOn?.(ymd) ?? []} today={today} showProject />
             {rows(ymd, (arranged.get(ymd)?.groups[0]?.rows ?? []).map((r) => r.task))}
             <AddSlot defaults={{ due: ymd }} onAdd={onAddTask ? (title) => onAddTask(ymd, title) : undefined} />
           </section>

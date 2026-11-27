@@ -53,6 +53,18 @@ GitHub で release を公開すると、Actions の Release (`.github/workflows/
 
 iOS の OAuth クライアントは [iOS のビルド](ios-build.md#google-ログイン) にある。
 
+## Google カレンダーの設定
+
+カレンダーの取り込みは、Drive と同じ Google Cloud のプロジェクトと、同じ OAuth クライアント (デスクトップ用と iOS 用) を使う。ログインの要求にだけ、読み取りの権限 `calendar.readonly` を足す。次の準備が 1 回だけ要る。
+
+1. Google Cloud で「Google Calendar API」を有効にする (API とサービス → ライブラリ)。
+2. Google Auth Platform の「データアクセス」で、スコープ `https://www.googleapis.com/auth/calendar.readonly` を足す。
+3. 公開ステータスは「本番環境」のままにする (「テスト」にすると、リフレッシュトークンが 7 日で切れる)。
+
+- `calendar.readonly` は「機微なスコープ」である。Google の審査 (確認) を受けるまでは、許可の画面に「未確認のアプリ」と出て、許可できるのは 100 人までになる。使う人が数人なら、審査は要らない。配るなら、審査が要る。
+- ログインは、同期の Google ログインとは別に、カレンダーのアカウントごとにする。リフレッシュトークンは、OS のキーチェーン (サービス名 `app.powertodo.gcal`、アカウント名はメールアドレス) に置く。ログアウトで Google に取り消しを送り、キーチェーンから消す。
+- OAuth クライアントを作り直したときは、このスコープも足し直す。
+
 ## Tailscale のサイドカー
 
 `tauri dev` と `tauri build` は、`beforeDevCommand` と `beforeBuildCommand` で `npm run build:tailnet` を実行する。Go のサイドカーを `src-tauri/binaries/powertodo-tailnet-<ターゲット>` (Windows は `.exe`、git 管理外) にビルドし、Tauri が `bundle.externalBin` として同梱する。

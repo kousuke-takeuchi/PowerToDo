@@ -55,3 +55,11 @@ test("archived_project_menu_is_data_and_delete_only", () => {
     "削除",
   ]);
 });
+
+test("the calendar item follows the section item, for the inbox too, and only when given", () => {
+  const withCal = { ...actions, calendar: noop };
+  assert.deepEqual(shape(projectMenuEntries({ inbox: false, favorite: false, os: "macos", actions: withCal })).slice(0, 4), ["編集", "お気に入りに追加", "セクションを追加", "Google カレンダー"]);
+  assert.deepEqual(shape(projectMenuEntries({ inbox: true, favorite: false, os: "macos", actions: withCal })).slice(0, 2), ["セクションを追加", "Google カレンダー"]);
+  assert.ok(!shape(projectMenuEntries({ inbox: false, favorite: false, os: "macos", actions })).includes("Google カレンダー"));
+  assert.ok(!shape(projectMenuEntries({ inbox: false, archived: true, favorite: false, os: "macos", actions: withCal })).includes("Google カレンダー"));
+});

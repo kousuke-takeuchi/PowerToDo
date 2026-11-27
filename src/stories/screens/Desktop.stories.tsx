@@ -33,6 +33,8 @@ import { DEFAULTS } from "../../app/view/viewOptions";
 import type { ViewOptions } from "../../app/view/viewOptions";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
+import { CalendarDialog } from "../../views/CalendarDialog";
+import { calendarEvents, calendarLink, chooserStub } from "../../mock/calendar";
 
 const meta = {
   title: "Screens/Desktop",
@@ -62,6 +64,22 @@ function Screen({ width, banner, ...view }: Partial<ProjectViewProps> & { width?
 export const D01: Story = {
   name: "D-01 プロジェクト",
   render: () => <Screen showLongTitleRow />,
+};
+
+// Spec 2026-11-27: a project shows its Google calendar's events above the tasks (display only).
+export const D15: Story = {
+  name: "D-15 Google カレンダーの予定",
+  render: () => <Screen today={TODAY} calendarEvents={calendarEvents} />,
+};
+
+export const D15Dialog: Story = {
+  name: "D-15 Google カレンダーを選ぶ",
+  render: () => (
+    <>
+      <Screen today={TODAY} calendarEvents={calendarEvents} />
+      <CalendarDialog project="買い物" chooser={chooserStub("me@example.com")} current={calendarLink} onClose={() => undefined} />
+    </>
+  ),
 };
 
 export const D01s: Story = {

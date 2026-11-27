@@ -18,6 +18,9 @@ import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 import { placementOf } from "../../app/drag/dropTarget";
+import { CalendarEventRow } from "../../components/CalendarEventRow";
+import type { ShownEvent } from "../../app/calendarEvents";
+import { dayHeading } from "./mobileDates";
 import type { MobileTab } from "../../app/mobileNav";
 import type { QuickAddToken } from "../QuickAddDialog";
 
@@ -74,6 +77,10 @@ export type MobileProjectViewProps = {
   onAddSubtask?: (parent: Task) => void;
   /** live のみ (spec 2026-11-22): 長押しで行を持ち上げて並び替える。動かさずに離すと onTaskMenu。省略すると長押しはメニューだけ。 */
   onReorder?: (no: number, to: Placement) => void;
+  /** The project's Google Calendar events (spec 2026-11-27), shown above the tasks by day, display only. The caller limits the days. */
+  events?: ShownEvent[];
+  /** Why the calendar shows nothing new (no login on this device, a failed fetch). */
+  calendarNote?: string;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -142,6 +149,8 @@ export function MobileProjectView({
   onAddTask,
   onAddSubtask,
   onReorder,
+  events = [],
+  calendarNote,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
@@ -298,6 +307,15 @@ export function MobileProjectView({
           // Where the lifted row will land (the desktop's drop line, spec ③ §3.4)
           <div aria-hidden style={{ position: "absolute", zIndex: 4, top: reorder.state.line.y - 1, left: 15 + reorder.state.line.x, right: 15, height: 2, background: "var(--color-accent)", pointerEvents: "none" }} />
         )}
+        {calendarNote && <div role="status" style={{ padding: "6px 0", fontSize: 13, lineHeight: "18px", color: "var(--color-text-secondary)" }}>{calendarNote}</div>}
+        {[...new Set(events.map((e) => e.date))].sort().map((ymd, i) => (
+          <section key={`ev-${ymd}`} aria-label="予定">
+            <SectionHeader mobile tight={i === 0} title={dayHeading(ymd, today)} showChevron={false} />
+            {events.filter((e) => e.date === ymd).map((e) => (
+              <CalendarEventRow key={`${e.project}/${e.id}/${e.date}`} event={e} variant="mobile" />
+            ))}
+          </section>
+        ))}
         {live && open.length === 0 && projectSections.length === 0 && (
           <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>{emptyText}</div>
         )}

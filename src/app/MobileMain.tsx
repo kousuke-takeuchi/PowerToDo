@@ -31,6 +31,9 @@ import { pushUndo, undoSteps, undoText, type MobileUndo } from "./mobileUndo";
 import { completedOf } from "./completionToast";
 import { dateLabel } from "../mock/data";
 import { useNowTime, useToday } from "./hooks";
+import { useCalendarEvents } from "./useCalendarEvents";
+import { useCalendarAccounts } from "./useCalendarAccounts";
+import { eventDays, eventsOn } from "./calendarEvents";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
@@ -43,6 +46,7 @@ import { initialMobileNav } from "./startView";
 import { useSettingsPanes } from "./useSettingsPanes";
 import { ViewOptionsCtx, useView, useViewOptionsStore } from "./view/ViewOptionsContext";
 import { ViewSheet } from "../views/mobile/ViewSheet";
+import { CalendarSheetHost } from "../views/mobile/CalendarSheetHost";
 import { useSearch } from "./useSearch";
 import { useCommentCounts, useDialogComments } from "./useComments";
 import { useSummaries } from "./useSummaries";
@@ -88,6 +92,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   useSystemTheme();
   const today = useToday();
   useNowTime(); // re-render each minute so today's passed times turn red
+  // Google Calendar events of the projects that have a calendar (spec 2026-11-27): display only.
+  const cal = useCalendarEvents(today);
   const { errors: saveErrors } = useSaveErrors();
 
   // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は設定の「起動時に開く画面」(既定は今日)。
@@ -98,7 +104,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   const push = (s: BrowseScreen) => dispatchNav({ type: "push", screen: s });
   const back = () => dispatchNav({ type: "back" });
   // プロジェクトの「…」(名前を変更 / 削除)
-  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | null>(null);
+  const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | "calendar" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   // `parent`: opened from that task's detail (a subtask row); back goes there instead of the list.
   const [detail, setDetail] = useState<{ project: string; no: number; parent?: number } | null>(null);
@@ -157,10 +163,12 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
   });
 
   const search = useSearch(screen.kind === "search");
+  const calAccounts = useCalendarAccounts(screen.kind === "settings", () => void cal.refresh(true));
   const settingsPanes = useSettingsPanes(settingsOpen, { onDataDirChanged: () => undefined, onDisplayNameChanged: () => loadDisplayName() });
   // 引っ張って更新: 同期してから、見えている一覧を読み直す。同期先が無いときは同期は何もせず、読み直しだけ。
   const pullRefresh = async () => {
     await sync.syncNow(true);
+    void cal.refresh(true);
     refreshAll();
   };
   // 設定を開くとき、OS の通知の許可を読む
@@ -538,18 +546,23 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
       <BottomSheet
         fill
         confirmForm={projectSheet === "rename" || projectSheet === "section" ? TEXT_SHEET_FORM : undefined}
+        size={projectSheet === "calendar" ? "large" : "auto"}
         open={projectSheet !== null}
-        title={projectSheet === "rename" ? "名前を変更" : projectSheet === "section" ? "セクションを追加" : navCurrent === app.inbox ? "受信トレイ" : navCurrent}
+        title={projectSheet === "rename" ? "名前を変更" : projectSheet === "section" ? "セクションを追加" : projectSheet === "calendar" ? "Google カレンダー" : navCurrent === app.inbox ? "受信トレイ" : navCurrent}
         onClose={() => setProjectSheet(null)}
       >
         {projectSheet === "menu" && (
           <ProjectMenuSheet
             project={navCurrent}
             onAddSection={() => setProjectSheet("section")}
+            onCalendar={() => setProjectSheet("calendar")}
             onRename={navCurrent === app.inbox ? undefined : () => setProjectSheet("rename")}
             onDelete={navCurrent === app.inbox ? undefined : () => void deleteProject()}
             onClose={() => setProjectSheet(null)}
           />
+        )}
+        {projectSheet === "calendar" && (
+          <CalendarSheetHost project={navCurrent} current={cal.links[navCurrent] ?? null} onChanged={() => void cal.refresh(true)} onClose={() => setProjectSheet(null)} />
         )}
         {projectSheet === "section" && (
           <TextSheet
@@ -669,6 +682,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onTabChange={goTab}
         today={today}
         sync={sync.pane}
+        calendar={{ accounts: calAccounts.accounts, busy: calAccounts.busy, waiting: calAccounts.waiting, error: calAccounts.error, onAdd: () => void calAccounts.add(), onCancel: calAccounts.cancel, onLogout: (e) => void calAccounts.logout(e) }}
         notifications={{ ...settingsPanes.notifications, permission }}
         onToggleNotifications={toggleNotifications}
         onRequestPermission={requestPermission}
@@ -775,6 +789,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onReschedule={() => setSheet({ kind: "reschedule" })}
         view={todayView}
         arrangeCtx={arrangeCtx}
+        events={eventsOn(cal.events, today)}
         onViewMenu={() => setViewSheet("today")}
         onReorderToday={(keys, rescheduled) =>
           void (rescheduled ? api.updateTask(rescheduled.project, rescheduled.no, { due: today }) : Promise.resolve())
@@ -813,6 +828,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
         onVisibleDay={setUpcomingDay}
         view={upcomingView}
         arrangeCtx={arrangeCtx}
+        eventsOn={(ymd) => eventsOn(cal.events, ymd)}
+        eventDays={eventDays(cal.events).filter((day) => day <= (d.days[d.days.length - 1]?.date ?? today))}
         onViewMenu={() => setViewSheet("upcoming")}
         {...rowOps}
         overlay={layers}
@@ -910,6 +927,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
       onOpenTask={(t) => setDetail({ project: current, no: t.no })}
       onAddTask={(section) => openQuickAddAt({ section })}
       onAddSubtask={(t) => openQuickAddAt({ parentNo: t.no })}
+      events={eventDays(cal.events, current).slice(0, 14).flatMap((day) => eventsOn(cal.events, day, current))}
+      calendarNote={cal.events[current]?.needsLogin ? "このカレンダーにはログインが必要です (設定の Google カレンダー)" : cal.events[current]?.error}
       onReorder={(no, to) =>
         void p
           .moveWithin(no, to)

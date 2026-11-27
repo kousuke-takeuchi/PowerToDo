@@ -23,6 +23,7 @@ import { ProjectView } from "../views/ProjectView";
 import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
+import { CalendarDialogHost } from "../views/CalendarDialogHost";
 import { UpdateDialog } from "../views/UpdateDialog";
 import type { ExpandApi } from "../views/ProjectView";
 import { LabelDetailView } from "../views/LabelDetailView";
@@ -38,6 +39,9 @@ import { useRefuseStrayFileDrops } from "./useFileDrop";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
 import { useNowTime, useShellWidth, useToday } from "./hooks";
+import { useCalendarEvents } from "./useCalendarEvents";
+import { useCalendarAccounts } from "./useCalendarAccounts";
+import { calendarProblems, eventDays, eventsOn } from "./calendarEvents";
 import { Banners } from "./Banners";
 import { usePlatform } from "./platform";
 import { setEscFallback, useEscLayer } from "./layers";
@@ -73,6 +77,8 @@ const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
   const today = useToday();
   useNowTime(); // re-render each minute so today's passed times turn red
+  // Google Calendar events of the projects that have a calendar (spec 2026-11-27): display only.
+  const cal = useCalendarEvents(today);
   const width = useShellWidth();
   const viewStore = useViewOptionsStore();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
@@ -88,6 +94,9 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 同期 (Phase 4): サイドバーの状態、競合 / 食い違い / エラーの帯、設定の「同期」ペイン
   const sync = useSync({ active: settingsOpen, onNotice: (text, tone) => setFlash({ text, tone }) });
+  const calAccounts = useCalendarAccounts(settingsOpen, () => void cal.refresh(true));
+  // The project whose 「Google カレンダー」 dialog is open.
+  const [calendarFor, setCalendarFor] = useState<string | null>(null);
   const syncStatus = sync.status;
   const syncState = syncStatus?.state ?? "off";
   // 片方が空に見えて止まっているあいだ (帯で戻す方向を選ぶ) と、認証が断られたあいだ (ログインし直すか「確かめる」まで
@@ -860,6 +869,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         labelOrder={allLabels}
         projectOrder={summaries.map((s) => s.name)}
         onReorderLocked={reorderLocked}
+        calendarEvents={eventsOn(cal.events, today)}
       />
     );
   } else if (nav.kind === "upcoming") {
@@ -883,6 +893,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         focusedKey={focus.focusedKey ?? undefined}
         onVisibleKeys={reportKeys}
         onAddTask={(date, title) => void cross.addToInbox({ title, due: date })}
+        calendarEventsOn={(ymd) => eventsOn(cal.events, ymd)}
         hiddenProjects={failed}
         weekStart={settingsPanes.datetime.weekStart}
         labelOrder={allLabels}
@@ -959,7 +970,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
           onDelete: () => void deleteProject(),
           onOpenFile: openFile,
           onRevealFile: revealFile,
+          onCalendar: () => setCalendarFor(current),
         }}
+        calendarEvents={eventDays(cal.events, current).slice(0, 14).flatMap((day) => eventsOn(cal.events, day, current))}
+        calendarNote={calendarProblems(cal.events).find((x) => x.project === current)?.text}
         readOnly={archived}
         onAddSectionApi={(open) => (addSectionApi.current = open)}
         weekStart={settingsPanes.datetime.weekStart}
@@ -1112,6 +1126,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         busy={search.busy}
       />
+      {calendarFor !== null && <CalendarDialogHost project={calendarFor} current={cal.links[calendarFor] ?? null} onChanged={() => void cal.refresh(true)} onClose={() => setCalendarFor(null)} />}
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
         open={settingsOpen}
@@ -1123,6 +1138,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         accountPane={settingsPanes.account}
         notificationsPane={{ ...settingsPanes.notifications, trayError: app.trayError }}
         datetimePane={settingsPanes.datetime}
+        calendarPane={{ accounts: calAccounts.accounts, busy: calAccounts.busy, waiting: calAccounts.waiting, error: calAccounts.error, onAdd: () => void calAccounts.add(), onCancel: calAccounts.cancel, onLogout: (e) => void calAccounts.logout(e) }}
         updatesPane={{
           status: updates.status,
           checking: updates.checking,

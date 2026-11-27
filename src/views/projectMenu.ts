@@ -14,6 +14,8 @@ export type ProjectMenuActions = {
   revealFile: () => void;
   archive: () => void;
   delete: () => void;
+  /** 「Google カレンダー」 (spec 2026-11-27): choose the calendar the project shows. Left out: no such item. */
+  calendar?: () => void;
 };
 
 /** 「Finder で表示」の文言 (Windows はエクスプローラー、Linux はファイルマネージャー)。 */
@@ -53,7 +55,8 @@ export function projectMenuEntries({
   };
   const addSection: MenuEntry = { kind: "item", id: "add-section", label: "セクションを追加", shortcut: "S", onSelect: actions.addSection };
   if (archived) return [manage, { kind: "separator" }, { kind: "item", id: "delete", label: "削除", danger: true, onSelect: actions.delete }];
-  if (inbox) return [addSection, { kind: "separator" }, manage];
+  const calendar: MenuEntry[] = actions.calendar ? [{ kind: "item", id: "calendar", label: "Google カレンダー", onSelect: actions.calendar }] : [];
+  if (inbox) return [addSection, ...calendar, { kind: "separator" }, manage];
   return [
     { kind: "item", id: "edit", label: "編集", onSelect: actions.edit },
     {
@@ -63,6 +66,7 @@ export function projectMenuEntries({
       onSelect: actions.toggleFavorite,
     },
     addSection,
+    ...calendar,
     { kind: "separator" },
     manage,
     { kind: "separator" },

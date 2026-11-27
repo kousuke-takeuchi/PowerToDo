@@ -27,6 +27,7 @@ const SHOTS = [
   ["screens-desktop--d-07", "screen-date-picker", 1440, 900],
   ["screens-desktop--d-07-b", "screen-recurrence", 1440, 900],
   ["screens-desktop--d-01-k", "screen-row-menu", 1440, 900],
+  ["screens-desktop--d-15", "screen-calendar", 1440, 900],
   ["screens-desktop--d-09", "screen-settings", 1440, 900],
   ["screens-desktop--d-09-f", "screen-settings-nas", 1440, 900],
   ["screens-desktop--d-09-b", "screen-conflict", 1440, 900],

@@ -16,6 +16,8 @@ import { SwipeRow } from "./SwipeRow";
 import { sectionAt } from "./mobileReorder";
 import { Ellipsis } from "lucide-react";
 import { arrangeFlat, type ArrangeCtx } from "../../app/view/arrange";
+import { CalendarEventRow } from "../../components/CalendarEventRow";
+import type { ShownEvent } from "../../app/calendarEvents";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
 
@@ -53,10 +55,13 @@ export type MobileUpcomingProps = {
   arrangeCtx?: ArrangeCtx;
   /** 右上の「…」: 表示のシートを開く。省略すると「…」は出ない。 */
   onViewMenu?: () => void;
+  /** Google Calendar events by day (spec 2026-11-27): shown first in each day, display only. A day with only events is shown too. */
+  eventsOn?: (ymd: string) => ShownEvent[];
+  eventDays?: string[];
 };
 
 /** M-05: 近日。WeekStrip (今日から 7 日、タップで選択) + タスクのある日だけの日付グループ。行は日付チップなし (見出しが日付)。 */
-export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay, onVisibleDay, view, arrangeCtx, onViewMenu }: MobileUpcomingProps) {
+export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, onSelectDay, onExtend, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onMoveToDay, onVisibleDay, view, arrangeCtx, onViewMenu, eventsOn, eventDays = [] }: MobileUpcomingProps) {
   const local = useDone();
   const leave = useLeaving(tasks);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -153,7 +158,7 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
   );
   const hidden = [...arranged.values()].reduce((n, a) => n + a.hidden, 0);
   // A day whose tasks the filter hides is not shown (it has no rows).
-  const days = [...arranged.keys()].filter((d) => (arranged.get(d)?.groups[0]?.rows.length ?? 0) > 0).sort();
+  const days = [...new Set([...[...arranged.keys()].filter((d) => (arranged.get(d)?.groups[0]?.rows.length ?? 0) > 0), ...eventDays.filter((d) => d >= today)])].sort();
   return (
     <MobileShell banner={banner} onRefresh={onRefresh} fill={fill} title="近日" actions={onViewMenu ? [{ icon: Ellipsis, label: "表示", onClick: onViewMenu }] : undefined} tab="upcoming" today={today} onTabChange={onTabChange} fab onFab={onFab} overlay={overlay}>
       <div ref={reorder.list} style={{ position: "relative", padding: "0 15px" }}>
@@ -174,6 +179,9 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
             <div {...(reordering ? reorderAttrs({ kind: "header", section: ymd }) : {})}>
               <SectionHeader mobile title={dayHeading(ymd, today)} showChevron={false} />
             </div>
+            {(eventsOn?.(ymd) ?? []).map((e) => (
+              <CalendarEventRow key={`${e.project}/${e.id}`} event={e} variant="mobile" showProject />
+            ))}
             {list(
               ymd,
               (arranged.get(ymd)?.groups[0]?.rows ?? []).map((r) => r.task),
