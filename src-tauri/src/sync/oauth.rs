@@ -37,6 +37,12 @@ pub const SCOPE: &str = "https://www.googleapis.com/auth/drive.file openid email
 /// (Google's "granular permissions"), so a login can succeed without it.
 pub const DRIVE_FILE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 
+/// The Google Calendar import (spec 2026-11-27): read-only, asked per account when a calendar is chosen.
+pub const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly openid email";
+
+/// The scope the calendar import cannot work without (the consent screen lets the user untick scopes).
+pub const CALENDAR_READONLY_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+
 /// How long the login waits for the browser (spec section 5).
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// A token this close to its end is already renewed.
@@ -155,6 +161,13 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    /// The user let the app read calendars (`calendar.readonly`).
+    pub fn grants_calendar(&self) -> bool {
+        self.scope
+            .as_deref()
+            .is_some_and(|s| s.split_whitespace().any(|g| g == CALENDAR_READONLY_SCOPE))
+    }
+
     /// The user let the app use Drive files (`drive.file`).
     pub fn grants_drive(&self) -> bool {
         self.scope
@@ -207,6 +220,8 @@ pub struct GoogleOAuth {
     /// `None` for an iOS client, which has no secret.
     client_secret: Option<String>,
     endpoints: Endpoints,
+    /// What the login asks for ([`SCOPE`] unless [`GoogleOAuth::with_scope`] changed it).
+    scope: String,
 }
 
 impl std::fmt::Debug for GoogleOAuth {
@@ -230,6 +245,7 @@ impl GoogleOAuth {
             client_id: client_id.into(),
             client_secret: Some(client_secret.into()),
             endpoints,
+            scope: SCOPE.to_string(),
         })
     }
 
@@ -243,7 +259,15 @@ impl GoogleOAuth {
             client_id: client_id.into(),
             client_secret: None,
             endpoints,
+            scope: SCOPE.to_string(),
         })
+    }
+
+    /// The same client asking for other scopes (the calendar login). The refresh of a token does not
+    /// depend on it: Google refreshes with the scopes the user granted.
+    pub fn with_scope(mut self, scope: &str) -> Self {
+        self.scope = scope.to_string();
+        self
     }
 
     /// The embedded client against Google's real endpoints; `None` in a build without
@@ -273,7 +297,7 @@ impl GoogleOAuth {
             .append_pair("client_id", &self.client_id)
             .append_pair("redirect_uri", redirect_uri)
             .append_pair("response_type", "code")
-            .append_pair("scope", SCOPE)
+            .append_pair("scope", &self.scope)
             .append_pair("state", state)
             .append_pair("code_challenge", challenge)
             .append_pair("code_challenge_method", "S256")

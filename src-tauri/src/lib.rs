@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod domain;
+pub mod calendar;
 pub mod error;
 pub mod platform;
 pub mod scheduler;
