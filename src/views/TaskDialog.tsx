@@ -443,19 +443,26 @@ export function TaskDialog({
         </span>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
           {editable ? (
-            <input
+            // A textarea (not an input) so a long name wraps like in the list; it grows with its text and Enter still commits.
+            <textarea
               aria-label="タスク名"
+              rows={1}
               value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
+              ref={(el) => {
+                if (!el) return;
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+              }}
+              onChange={(e) => setTitleDraft(e.target.value.replace(/\n/g, " "))}
               onBlur={commitTitle}
               onKeyDown={(e) => {
                 // IME 変換を確定する Enter では確定 (blur) しない (keys.ts)
                 if (e.key === "Enter" && !isImeKey(e)) e.currentTarget.blur();
               }}
-              style={{ ...bareField, fontSize: 20, lineHeight: "28px", fontWeight: 700, color: doneNow ? "var(--color-text-muted)" : "var(--color-text-primary)" }}
+              style={{ ...bareField, resize: "none", overflow: "hidden", display: "block", overflowWrap: "anywhere", fontSize: 20, lineHeight: "28px", fontWeight: 700, color: doneNow ? "var(--color-text-muted)" : "var(--color-text-primary)" }}
             />
           ) : (
-            <div style={{ fontSize: 20, lineHeight: "28px", fontWeight: 700, color: doneNow ? "var(--color-text-muted)" : "var(--color-text-primary)" }}>{task.title}</div>
+            <div style={{ fontSize: 20, lineHeight: "28px", fontWeight: 700, color: doneNow ? "var(--color-text-muted)" : "var(--color-text-primary)", overflowWrap: "anywhere" }}>{task.title}</div>
           )}
           {editable ? (
             <textarea
