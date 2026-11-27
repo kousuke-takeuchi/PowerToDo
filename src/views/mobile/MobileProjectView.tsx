@@ -87,6 +87,8 @@ export type MobileProjectViewProps = {
   arrangeCtx?: ArrangeCtx;
   /** The 表示 button at the top right. Omitted: none. */
   onViewMenu?: () => void;
+  /** The 「…」 of a section's heading (Todoist's): rename / add. Omitted: no 「…」. */
+  onSectionMenu?: (section: string) => void;
 };
 
 const defaultTokens: QuickAddToken[] = [
@@ -160,9 +162,18 @@ export function MobileProjectView({
   view,
   arrangeCtx,
   onViewMenu,
+  onSectionMenu,
 }: MobileProjectViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(initialExpanded));
   const [overlay, setOverlay] = useState(initialOverlay);
+  // Sections folded by the fold arrow (this visit only, like Todoist's).
+  const [folded, setFolded] = useState<Set<string>>(() => new Set());
+  const toggleFold = (name: string) =>
+    setFolded((s) => {
+      const next = new Set(s);
+      if (!next.delete(name)) next.add(name);
+      return next;
+    });
   const local = useDone();
   const leave = useLeaving(tasks);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -351,10 +362,24 @@ export function MobileProjectView({
           return (
             <section key={s.name}>
               <div {...(reordering ? reorderAttrs({ kind: "header", section: s.name }) : {})}>
-                <SectionHeader mobile title={s.name} tight={i === 0 && unsectioned.length === 0} />
+                <SectionHeader
+                  mobile
+                  title={s.name}
+                  tight={i === 0 && unsectioned.length === 0}
+                  count={rows.length}
+                  collapsed={folded.has(s.name)}
+                  onToggle={() => toggleFold(s.name)}
+                  trailing={
+                    onSectionMenu ? (
+                      <button type="button" aria-label={`${s.name}のメニュー`} onClick={() => onSectionMenu(s.name)} style={{ width: 36, height: 28, margin: "-4px 0", display: "grid", placeItems: "center", padding: 0, border: 0, background: "none", color: "var(--color-text-secondary)", cursor: "pointer" }}>
+                        <Ellipsis size={18} />
+                      </button>
+                    ) : undefined
+                  }
+                />
               </div>
-              {list(`s:${s.name}`, rows)}
-              {onAddTask && (
+              {!folded.has(s.name) && list(`s:${s.name}`, rows)}
+              {!folded.has(s.name) && onAddTask && (
                 <div {...(reordering ? reorderAttrs({ kind: "slot", section: s.name }) : {})}>
                   <AddTaskRow onClick={() => onAddTask(s.name)} />
                 </div>

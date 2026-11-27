@@ -3,7 +3,8 @@ import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import type { AppStateDto, Label, NotificationPermission, SearchHit, Task, TokenKind } from "../types/model";
-import { BottomSheet } from "../views/mobile/BottomSheet";
+import { Pencil, Plus } from "lucide-react";
+import { BottomSheet, SheetCard, SheetRow } from "../views/mobile/BottomSheet";
 import { DATE_SHEET_FORM, DateSheet } from "../views/mobile/DateSheet";
 import { MobileBrowse } from "../views/mobile/MobileBrowse";
 import { MobileLabelDetail, MobileLabels } from "../views/mobile/MobileLabels";
@@ -111,6 +112,8 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
   const push = (s: BrowseScreen) => dispatchNav({ type: "push", screen: s });
   const back = () => dispatchNav({ type: "back" });
   // プロジェクトの「…」(名前を変更 / 削除)
+  // A section's 「…」: its menu, or its rename.
+  const [sectionSheet, setSectionSheet] = useState<{ name: string; mode: "menu" | "rename" } | null>(null);
   const [projectSheet, setProjectSheet] = useState<"menu" | "rename" | "section" | "calendar" | null>(null);
   // 開いているタスク詳細 (全画面)。閉じると元の画面に戻る。
   // `parent`: opened from that task's detail (a subtask row); back goes there instead of the list.
@@ -303,6 +306,17 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
     refreshAll();
     void refreshSummaries();
   };
+  /** 「タスクを複製」 (the long-press menu): the copy is added next to the task. */
+  const duplicateTask = (t: Task) =>
+    void api.duplicateTask(t.project, t.no).then(
+      () => {
+        if (listProject || detail) void p.reload().catch(() => undefined);
+        refreshAll();
+        void refreshSummaries();
+        setFlash({ text: "タスクを複製しました", tone: "info" });
+      },
+      showError,
+    );
   const renameProject = async (name: string) => {
     const from = navCurrent;
     try {
@@ -644,6 +658,39 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       </BottomSheet>
       <BottomSheet
         fill
+        confirmForm={sectionSheet?.mode === "rename" ? TEXT_SHEET_FORM : undefined}
+        open={sectionSheet !== null}
+        title={sectionSheet?.mode === "rename" ? "名前を変更" : sectionSheet?.name}
+        onClose={() => setSectionSheet(null)}
+      >
+        {sectionSheet?.mode === "menu" && (
+          <SheetCard label="セクションの操作">
+            <SheetRow icon={<Pencil size={18} />} label="名前を変更" onClick={() => setSectionSheet({ name: sectionSheet.name, mode: "rename" })} />
+            <SheetRow
+              icon={<Plus size={18} />}
+              label="タスクを追加"
+              onClick={() => {
+                const name = sectionSheet.name;
+                setSectionSheet(null);
+                openQuickAddAt({ section: name });
+              }}
+            />
+          </SheetCard>
+        )}
+        {sectionSheet?.mode === "rename" && (
+          <TextSheet
+            label="セクション名"
+            value={sectionSheet.name}
+            onSave={(v) => {
+              const t = v.trim();
+              if (t && t !== sectionSheet.name) void p.renameSection(sectionSheet.name, t);
+            }}
+            onClose={() => setSectionSheet(null)}
+          />
+        )}
+      </BottomSheet>
+      <BottomSheet
+        fill
         confirmForm={projectSheet === "rename" || projectSheet === "section" ? TEXT_SHEET_FORM : undefined}
         size={projectSheet === "calendar" ? "large" : "auto"}
         open={projectSheet !== null}
@@ -701,6 +748,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             onDate={() => setSheet({ kind: "date", task: sheet.task })}
             onPriority={() => setSheet({ kind: "priority", task: sheet.task })}
             onMove={sheet.task.parentNo === undefined ? () => setSheet({ kind: "move", task: sheet.task }) : undefined}
+            onDuplicate={() => duplicateTask(sheet.task)}
             onDelete={() => removeTask(sheet.task)}
             onClose={closeSheet}
           />
@@ -944,6 +992,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       view={projectView}
       arrangeCtx={arrangeCtx}
       onViewMenu={() => setViewSheet("project")}
+      onSectionMenu={(name) => setSectionSheet({ name, mode: "menu" })}
       title={title}
       project={current}
       tasks={view.tasks}
