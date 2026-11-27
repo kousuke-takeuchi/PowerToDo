@@ -3,7 +3,9 @@ import { useContext, useState } from "react";
 import { Ban, Calendar, CalendarPlus, Check, ChevronLeft, Clock3, Repeat, Sofa, Sun } from "lucide-react";
 import { TODAY, monthDay, weekdayShort } from "../../mock/data";
 import { calendarMonths, quickRows, repeatChoices, weekHeader } from "../../app/dateSheet";
-import { TimeSelect } from "../../components/TimeSelect";
+import { TimeWheel } from "../../components/TimeWheel";
+import { nextRoundTime } from "../../app/timeChoices";
+import { nowTime } from "../dueLabel";
 import { DueParserContext } from "../DueParserContext";
 import { SheetCard, SheetRow } from "./BottomSheet";
 
@@ -25,6 +27,8 @@ export type DateSheetProps = {
   dateOnly?: boolean;
   /** No 繰り返し row (the swipe's date sheet changes the date only). */
   noRepeat?: boolean;
+  /** Stories: open on a page. */
+  initialPage?: "root" | "time" | "repeat";
 };
 
 type Page = "root" | "time" | "repeat";
@@ -36,13 +40,13 @@ const MONTHS = 6;
  * the weekday header over one list of months, and the rows 「時間」 and 「繰り返し」 that open a page each. Nothing is applied until the
  * red check; the 「×」 drops the changes. A time is picked in 5-minute steps from the next round time.
  */
-export function DateSheet({ value, time, rrule, rruleLabel, today = TODAY, weekStart = "mon", onApply, onClose, dateOnly, noRepeat }: DateSheetProps) {
+export function DateSheet({ value, time, rrule, rruleLabel, today = TODAY, weekStart = "mon", onApply, onClose, dateOnly, noRepeat, initialPage = "root" }: DateSheetProps) {
   const parse = useContext(DueParserContext);
   const [date, setDate] = useState<string | undefined>(value);
   const [at, setAt] = useState<string | undefined>(time);
   // The repeat is only sent when touched.
   const [repeat, setRepeat] = useState<string | null | undefined>(undefined);
-  const [page, setPage] = useState<Page>("root");
+  const [page, setPage] = useState<Page>(initialPage);
   const [typed, setTyped] = useState("");
   const [bad, setBad] = useState(false);
   const submit = (e: React.FormEvent) => {
@@ -83,17 +87,23 @@ export function DateSheet({ value, time, rrule, rruleLabel, today = TODAY, weekS
               <Clock3 size={18} />
             </span>
             <span style={{ flex: 1 }}>時間</span>
-            <TimeSelect
-              value={at}
-              size={16}
-              height={36}
-              onChange={(t) => {
-                setAt(t);
-                // A time without a date is for today.
-                if (t && !date) setDate(today);
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!at}
+              aria-label="時間"
+              onClick={() => {
+                if (at) return setAt(undefined);
+                // On: the wheel starts at the next round time after now (9:45 gives 10:00); a time is for a date, today if none.
+                setAt(nextRoundTime(nowTime()));
+                if (!date) setDate(today);
               }}
-            />
+              style={{ position: "relative", width: 44, height: 26, padding: 0, border: 0, borderRadius: 13, background: at ? "var(--color-accent)" : "var(--color-border)", cursor: "pointer", transition: "background 120ms" }}
+            >
+              <span style={{ position: "absolute", top: 2, left: at ? 20 : 2, width: 22, height: 22, borderRadius: 11, background: "#FFFFFF", transition: "left 120ms" }} />
+            </button>
           </div>
+          {at && <TimeWheel value={at} onChange={setAt} />}
         </SheetCard>
       </form>
     );

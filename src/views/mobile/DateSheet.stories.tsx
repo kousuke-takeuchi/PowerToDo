@@ -20,6 +20,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = { name: "日付" };
+/** 「時間」のページ: 時と分 (5 分刻み) のドラムロール。 */
+export const TimePage: Story = { name: "時間のページ", args: { value: "2026-10-14", time: "10:30", initialPage: "time" } };
 export const NoDate: Story = { name: "日付なし", args: { value: undefined } };
 /** 期限切れの再スケジュール: 「日付なし」を出さない。 */
 export const Reschedule: Story = { name: "再スケジュール", args: { value: undefined, dateOnly: true } };
