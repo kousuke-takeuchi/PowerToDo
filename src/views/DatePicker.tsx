@@ -120,6 +120,15 @@ export function DatePicker({ value, time, onChange, onDone, onOpenRecurrence, re
     onChange?.(time ? { date: d, time } : { date: d });
   };
 
+  // 時刻: the row's own field (it used to be display only; a time could only be typed into the date field). A time without a
+  // date is for today. 「なし」 takes it off.
+  const setTime = (t: string | undefined) => {
+    const d = date ?? today;
+    setDate(d);
+    setMonth(monthStart(d));
+    onChange?.(t ? { date: d, time: t } : { date: d });
+  };
+
   const derived = date ? `${dateLabel(date, today)?.label ?? date}${time ? ` ${time}` : ""}` : "";
   const q = quickDates(today);
   const nextSaturday = q.weekend;
@@ -232,7 +241,24 @@ export function DatePicker({ value, time, onChange, onDone, onOpenRecurrence, re
         <>
           <PopRow icon={<Clock3 size={16} />} borderTop>
             <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>時刻</span>
-            <span style={small(time ? "var(--color-text-primary)" : "var(--color-text-muted)")}>{time ?? "なし"}</span>
+            <input
+              type="time"
+              aria-label="時刻"
+              value={time ?? ""}
+              onChange={(e) => setTime(e.target.value || undefined)}
+              style={{ ...small(time ? "var(--color-text-primary)" : "var(--color-text-muted)"), border: "1px solid var(--color-border)", borderRadius: 6, padding: "2px 6px", background: "var(--color-bg)", fontFamily: "var(--font-body)" }}
+            />
+            {time && (
+              <button
+                type="button"
+                aria-label="時刻を外す"
+                onClick={() => setTime(undefined)}
+                className="bg-transparent hover:bg-[var(--color-bg-hover)]"
+                style={{ ...small("var(--color-text-secondary)"), border: 0, borderRadius: 6, padding: "2px 6px", cursor: "pointer", fontFamily: "var(--font-body)" }}
+              >
+                なし
+              </button>
+            )}
           </PopRow>
           <PopRow icon={<Repeat size={16} />} onClick={onOpenRecurrence}>
             <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>繰り返し</span>
