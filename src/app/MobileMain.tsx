@@ -30,12 +30,13 @@ import { MobileToast } from "../components/MobileToast";
 import { pushUndo, undoSteps, undoText, type MobileUndo } from "./mobileUndo";
 import { completedOf } from "./completionToast";
 import { dateLabel } from "../mock/data";
-import { useToday } from "./hooks";
+import { useNowTime, useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
 import { dateWords, projectWord, replaceWords, type InsertKind } from "./quickAddInsert";
 import { useQuickAdd } from "./useQuickAdd";
+import { remindersWithTime } from "./autoReminder";
 import { useReminders } from "./useReminders";
 import { useSaveErrors } from "./useSaveStatus";
 import { initialMobileNav } from "./startView";
@@ -86,6 +87,7 @@ export function MobileMain(props: { app: AppStateDto; syncConflicts: SyncConflic
 function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app: AppStateDto; syncConflicts: SyncConflicts; drawerOpen: boolean; setDrawerOpen: (open: boolean) => void }) {
   useSystemTheme();
   const today = useToday();
+  useNowTime(); // re-render each minute so today's passed times turn red
   const { errors: saveErrors } = useSaveErrors();
 
   // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は設定の「起動時に開く画面」(既定は今日)。
@@ -181,7 +183,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
       .catch(() => undefined);
   };
 
-  const { qa, openQuickAdd, openQuickAddAt, openQuickAddWith, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash });
+  const { qa, openQuickAdd, openQuickAddAt, openQuickAddWith, setPlace, closeQuickAdd, setText, setReminders, submit, tokens, qaProject, parsed } = useQuickAdd({ p, current: navCurrent, setFlash, autoReminder: true });
   // The section / parent shows on the project chip while the task still goes to this project.
   const qaPlaced = qaProject === navCurrent ? qa.place : undefined;
   const qaParent = qaPlaced?.parentNo !== undefined ? view?.tasks.find((t) => t.no === qaPlaced.parentNo) : undefined;
@@ -247,8 +249,10 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
     offer({ kind: "date", entries: entries.map((t) => ({ project: t.project, no: t.no, before: { due: t.due ?? null, dueTime: t.dueTime ?? null } })), label: date ? (dateLabel(date, today)?.label ?? date) : null });
   const offerDone = (t: Task) => offer({ kind: "complete", entries: [completedOf(t)] });
   const setDue = (t: Task, date?: string, time?: string | null) => {
-    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? time : null }).then((ok) => ok && offerDate([t], date ?? null));
-    else void cross.setDue(t, date ?? null, time).then((ok) => ok && offerDate([t], date ?? null));
+    // A time gives the task the reminder 「時刻ちょうど」 (spec 2026-11-27), unless it has reminders already.
+    const reminders = date ? remindersWithTime(t.reminders, time) : undefined;
+    if (inCurrent(t)) void p.updateTask(t.no, { due: date ?? null, dueTime: date ? time : null, ...(reminders ? { reminders } : {}) }).then((ok) => ok && offerDate([t], date ?? null));
+    else void cross.setDue(t, date ?? null, time, reminders).then((ok) => ok && offerDate([t], date ?? null));
   };
   const setPriority = (t: Task, priority: 1 | 2 | 3 | 4) => {
     if (inCurrent(t)) void p.updateTask(t.no, { priority });
@@ -720,7 +724,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
           })
         }
         onChange={(patch) =>
-          void p.updateTask(openTask.no, patch).then((ok) => {
+          void p.updateTask(openTask.no, "dueTime" in patch && !("reminders" in patch) ? { ...patch, ...(remindersWithTime(openTask.reminders, patch.dueTime) ? { reminders: remindersWithTime(openTask.reminders, patch.dueTime) } : {}) } : patch).then((ok) => {
             if (ok && "due" in patch) offerDate([openTask], patch.due ?? null);
             refreshAll();
           })

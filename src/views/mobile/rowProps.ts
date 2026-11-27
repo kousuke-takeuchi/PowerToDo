@@ -2,7 +2,7 @@ import type { TaskRowProps } from "../../components/TaskRow";
 import type { Task } from "../../types/model";
 import { dueWithTime } from "../dueLabel.ts";
 
-export type RowContext = { today: string; inbox?: string; colors?: Record<string, string>; comments?: Record<string, number>; attachments?: Record<string, number> };
+export type RowContext = { today: string; /** HH:MM, for tests; default the device clock. */ now?: string; inbox?: string; colors?: Record<string, string>; comments?: Record<string, number>; attachments?: Record<string, number> };
 
 /** Spec ④ iPhone §4.1: what an iPhone row shows. `show.project` on cross views (Today, Upcoming, label, search), not on a project's own list. */
 export function mobileRowProps(
@@ -15,7 +15,7 @@ export function mobileRowProps(
     title: t.title,
     description: t.note?.split("\n")[0] || undefined,
     priority: t.priority,
-    date: dueWithTime(t, c.today, show.date !== false),
+    date: dueWithTime(t, c.today, show.date !== false, c.now),
     recurring: t.rrule ? true : undefined,
     commentCount: c.comments?.[`${t.project}/${t.no}`] || undefined,
     attachmentCount: c.attachments?.[`${t.project}/${t.no}`] || undefined,

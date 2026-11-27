@@ -7,7 +7,7 @@ const t = (p: Partial<Task>): Task => ({
   no: 1, project: "仕事", category: null, title: "週報を書く", assignee: "たろう", priority: 2, progress: 0,
   labels: [], reminders: [], order: 0, createdAt: "2026-10-01T09:00", ...p,
 });
-const ctx = { today: "2026-10-13", inbox: "受信トレイ", colors: { 仕事: "var(--color-priority-3)" }, comments: { "仕事/1": 2 }, attachments: { "仕事/1": 3 } };
+const ctx = { today: "2026-10-13", now: "08:00", inbox: "受信トレイ", colors: { 仕事: "var(--color-priority-3)" }, comments: { "仕事/1": 2 }, attachments: { "仕事/1": 3 } };
 
 test("meta_line_parts", () => {
   const r = mobileRowProps(t({ due: "2026-10-12", rrule: "FREQ=DAILY", note: "一行目\n二行目" }), ctx, { project: true });
@@ -45,4 +45,9 @@ test("the time follows the date like Todoist (7:30, no leading zero)", () => {
 test("where the date is not shown (Today's group), a time still shows alone", () => {
   assert.deepEqual(mobileRowProps(t({ due: "2026-10-13", dueTime: "10:00" }), ctx, { date: false }).date, { label: "10:00", tone: "success" });
   assert.equal(mobileRowProps(t({ due: "2026-10-13" }), ctx, { date: false }).date, undefined);
+});
+
+test("a time that has passed today is red on the row", () => {
+  assert.equal(mobileRowProps(t({ due: "2026-10-13", dueTime: "07:30" }), ctx).date?.tone, "danger");
+  assert.equal(mobileRowProps(t({ due: "2026-10-13", dueTime: "09:30" }), ctx).date?.tone, "success");
 });

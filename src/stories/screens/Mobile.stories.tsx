@@ -305,6 +305,19 @@ export const M02DatePicker: Story = {
   ),
 };
 
+// Not on the storyboard: a long task name wraps in the detail like in the list.
+export const M03LongTitle: Story = {
+  name: "M-03 長いタスク名",
+  render: () => (
+    <MobileTaskDetail
+      task={{ ...tasks[0], title: LONG_TITLE + LONG_TITLE }}
+      subtasks={[]}
+      project={projects.find((p) => p.name === "買い物")!}
+      section="今週"
+    />
+  ),
+};
+
 export const M03DateSheet: Story = {
   name: "M-03 日付のシートを開いた",
   render: () => (
