@@ -37,6 +37,8 @@ export type MobileTaskDetailProps = {
   live?: boolean;
   /** 実機用: 幅 100% / 高さ 100dvh、上下はセーフエリア。 */
   fill?: boolean;
+  /** In a popup card (DetailSheet): the shell fills the card, the header is a small bar with 「×」 (onBack closes) and no status bar room. */
+  popup?: boolean;
   today?: string;
   /** 画面に重ねる層 (帯など)。 */
   overlay?: React.ReactNode;
@@ -141,7 +143,7 @@ function Prop({ icon: Icon, name, value, valueColor = "var(--color-text-primary)
 }
 
 /** M-03: タスク詳細 (全画面、下部タブなし)。戻る + パンくず、プロパティ 5 行、サブタスク、下端のコメント欄。完了チェックとサブタスクのチェックは見た目だけトグルする。 */
-export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote, onOpenSubtask, onMove, projects = [], sections = [] }: MobileTaskDetailProps) {
+export function MobileTaskDetail({ task, subtasks, project, section, onBack, live, fill, popup, today = TODAY, overlay, banner, onToggleDone, onToggleSubtask, onChange, onAddSubtask, onDelete, labels = [], onParseRecurrence, initialSheet = null, comments = [], commentsFailed, me, onAddComment, onEditComment, onDeleteComment, onAttachComment, initialPending, initialCommentEdit, noteFiles = [], onAttachNote, onDetachNote, onOpenSubtask, onMove, projects = [], sections = [] }: MobileTaskDetailProps) {
   // 下部シートの状態。詳細は key (プロジェクト/番号) で作り直すだけで、一覧の再読み込みでは作り直さない。
   const [sheet, setSheet] = useState<DetailSheet>(initialSheet);
   const closeSheet = () => setSheet(null);
@@ -165,6 +167,7 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
     <MobileShell
       banner={banner}
       fill={fill}
+      contained={popup}
       overlay={
         <>
           {overlay}
@@ -283,7 +286,8 @@ export function MobileTaskDetail({ task, subtasks, project, section, onBack, liv
       }
       header={
         <MobileHeader
-          safeArea={fill}
+          safeArea={fill && !popup}
+          closeInstead={popup}
           title="タスク詳細"
           onBack={onBack}
           breadcrumb={

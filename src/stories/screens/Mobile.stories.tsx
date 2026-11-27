@@ -25,6 +25,7 @@ import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { CalendarSheet } from "../../views/mobile/CalendarSheet";
 import { calendarEvents, chooserStub } from "../../mock/calendar";
 import { CalendarEventDetail } from "../../components/CalendarEventDetail";
+import { DetailSheet } from "../../views/mobile/DetailSheet";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -317,6 +318,40 @@ export const M03LongTitle: Story = {
       subtasks={[]}
       project={projects.find((p) => p.name === "買い物")!}
       section="今週"
+    />
+  ),
+};
+
+// Spec 2026-11-28: the task detail is a popup over the list (it was a full screen).
+export const M03Popup: Story = {
+  name: "M-03 タスク詳細 (ポップアップ)",
+  render: () => (
+    <MobileProjectView
+      live
+      fill
+      tab="browse"
+      project="買い物"
+      tasks={shopping}
+      sections={sections}
+      today={TODAY}
+      overlay={
+        <DetailSheet open onClose={() => undefined}>
+          <MobileTaskDetail
+            popup
+            live
+            fill
+            today={TODAY}
+            task={{ ...tasks[0], labels: ["食品", "急ぎ"], reminders: ["-30m"], note: "近所のスーパーで。卵は 10 個入り。" }}
+            subtasks={byNo(4, 5, 7)}
+            project={projects.find((p) => p.name === "買い物")!}
+            section="今週"
+            onBack={() => undefined}
+            onChange={() => undefined}
+            onAddSubtask={() => undefined}
+            onAddComment={async () => true}
+          />
+        </DetailSheet>
+      }
     />
   ),
 };

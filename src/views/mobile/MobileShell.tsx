@@ -34,6 +34,8 @@ export type MobileShellProps = {
   onFab?: () => void;
   /** 画面全体に重ねる層 (M-02 のシート)。ラッパーは pointer-events: none、中身側で auto にする。 */
   overlay?: React.ReactNode;
+  /** A shell inside a card (the task detail's popup): 100% wide and tall of its container instead of 390x844 / 100dvh. */
+  contained?: boolean;
   /** 実機用: 幅 100% / 高さ 100dvh、本文はスクロール、上下の空きはセーフエリア (header 側は MobileHeader の safeArea)。省略すると 390x844 の絵のまま。 */
   fill?: boolean;
   /** header の下、本文の上に置く帯 (通常の流れ。本文はその分だけ縮む)。省略すると何も出さない。 */
@@ -86,7 +88,7 @@ function EdgeSwipe({ onOpen }: { onOpen: () => void }) {
  * モバイルのシェル 390x844: header + body (flex 1) + TabBar (下)。FAB は右 16 / タブの上 16。
  * overflow: hidden はルートだけ。body はクリップしない。
  */
-export function MobileShell({ header, title, subtitle, largeTitle, actions, onBack, initialScrollTop, children, tab, today, onTabChange, fab, onFab, overlay, fill, banner, onRefresh, refreshing: forceRefreshing }: MobileShellProps) {
+export function MobileShell({ header, title, subtitle, largeTitle, actions, onBack, initialScrollTop, children, tab, today, onTabChange, fab, onFab, overlay, fill, banner, onRefresh, refreshing: forceRefreshing, contained }: MobileShellProps) {
   const pulling = usePullToRefresh(onRefresh);
   // The tab screens' top bar has the menu button (the drawer); pushed screens have back instead.
   const openMenu = useContext(MobileMenuContext);
@@ -111,8 +113,8 @@ export function MobileShell({ header, title, subtitle, largeTitle, actions, onBa
         position: "relative",
         display: "flex",
         flexDirection: "column",
-        width: fill ? "100%" : 390,
-        height: fill ? "100dvh" : 844,
+        width: fill || contained ? "100%" : 390,
+        height: contained ? "100%" : fill ? "100dvh" : 844,
         overflow: "hidden",
         background: "var(--color-bg)",
         color: "var(--color-text-primary)",
