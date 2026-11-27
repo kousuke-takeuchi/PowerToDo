@@ -170,6 +170,17 @@ pub fn local_timestamp(at: NaiveDateTime) -> Option<i64> {
     timestamp_in(&Local, at)
 }
 
+/// The date to hand to the notification plugin's `Schedule::At`. The plugin's iOS side reads the digits of
+/// `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` with a formatter in the device's own time zone and ignores the `Z`. So the
+/// digits must be the local wall time, not UTC: with UTC digits every reminder lands (zone offset) hours early
+/// (in Japan, 9 hours), and one less than 9 hours ahead is refused as "in the past" and never scheduled.
+/// `None` for a time that does not exist (a DST gap).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))] // iOS only; tested everywhere
+fn plugin_schedule_date(at: NaiveDateTime) -> Option<time::OffsetDateTime> {
+    local_timestamp(at)?;
+    time::OffsetDateTime::from_unix_timestamp(at.and_utc().timestamp()).ok()
+}
+
 fn timestamp_in<Tz: TimeZone>(tz: &Tz, at: NaiveDateTime) -> Option<i64> {
     tz.from_local_datetime(&at)
         .earliest()
@@ -657,10 +668,7 @@ fn reschedule_with(app: &AppHandle, tasks: &[Task], settings: &Settings, data_di
     let dir = data_dir.to_string_lossy();
     let mut done = Vec::new();
     for p in &plan {
-        let Some(ts) = local_timestamp(p.item.at) else {
-            continue;
-        };
-        let Ok(date) = time::OffsetDateTime::from_unix_timestamp(ts) else {
+        let Some(date) = plugin_schedule_date(p.item.at) else {
             continue;
         };
         let mut builder = notification
@@ -1336,6 +1344,16 @@ mod tests {
             assert!(o >= 0);
             assert_ne!(o, id);
         }
+    }
+
+    #[test]
+    fn the_plugin_date_carries_the_local_wall_time_in_its_digits() {
+        use time::format_description::well_known::Iso8601;
+        // What the plugin sends is this value written as ISO 8601; its iOS side reads the digits as local time.
+        let d = plugin_schedule_date(dt("2026-11-27T21:05")).unwrap();
+        let text = d.format(&Iso8601::DEFAULT).unwrap();
+        assert!(text.starts_with("2026-11-27T21:05:00"), "{text}");
+        assert!(text.ends_with('Z'), "{text}");
     }
 
     #[test]
