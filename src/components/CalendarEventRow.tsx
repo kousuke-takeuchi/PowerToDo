@@ -1,4 +1,6 @@
+import { useContext } from "react";
 import { CalendarDays } from "lucide-react";
+import { OpenCalendarEventContext } from "../app/CalendarEventContext";
 import { eventTimeLabel, type ShownEvent } from "../app/calendarEvents";
 
 export type CalendarEventRowProps = {
@@ -14,10 +16,17 @@ export type CalendarEventRowProps = {
  */
 export function CalendarEventRow({ event, variant = "desktop", showProject }: CalendarEventRowProps) {
   const mobile = variant === "mobile";
+  // Tapping opens the detail (spec 2026-11-27) when the app provides it.
+  const open = useContext(OpenCalendarEventContext);
   return (
     <div
       data-calendar-event=""
-      style={{ display: "flex", alignItems: "flex-start", gap: mobile ? 12 : 10, padding: mobile ? "10px 0" : "8px 0", boxShadow: "inset 0 -1px 0 var(--color-border)", fontFamily: "var(--font-body)" }}
+      role={open ? "button" : undefined}
+      tabIndex={open ? 0 : undefined}
+      aria-label={open ? `予定: ${event.title}` : undefined}
+      onClick={open ? () => open(event) : undefined}
+      onKeyDown={open ? (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open(event)) : undefined}
+      style={{ display: "flex", alignItems: "flex-start", gap: mobile ? 12 : 10, padding: mobile ? "10px 0" : "8px 0", boxShadow: "inset 0 -1px 0 var(--color-border)", fontFamily: "var(--font-body)", cursor: open ? "pointer" : undefined }}
     >
       <span style={{ display: "inline-flex", width: mobile ? 22 : 18, height: mobile ? 22 : 18, alignItems: "center", justifyContent: "center", color: event.color || "var(--color-text-secondary)", flex: "0 0 auto", marginTop: 1 }}>
         <CalendarDays size={mobile ? 20 : 16} aria-hidden />

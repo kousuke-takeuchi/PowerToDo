@@ -177,7 +177,7 @@ export interface GoogleLoginDto { outcome: GoogleLoginOutcome; }
 export interface CalendarInfo { id: string; name: string; color?: string; primary: boolean; }
 export interface CalendarLink { account: string; calendarId: string; color: string; name: string; }
 /** One day of an event: a multi-day event is one per day. */
-export interface CalEvent { id: string; title: string; date: string; startTime?: string; endTime?: string; allDay: boolean; location?: string; }
+export interface CalEvent { id: string; title: string; date: string; startTime?: string; endTime?: string; allDay: boolean; location?: string; /** The last day (inclusive) when the event ends on a later day than `date`. */ endDate?: string; /** The notes, as plain text. */ description?: string; /** The event's page in Google Calendar. */ link?: string; /** The video meeting. */ meet?: string; }
 /** An event with the calendar it comes from (its color and name). */
 export interface PlacedEvent extends CalEvent { color: string; calendar: string; }
 export interface ProjectEvents { events: PlacedEvent[]; needsLogin: boolean; error?: string; }

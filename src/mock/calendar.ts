@@ -5,7 +5,7 @@ import type { CalendarChooserApi } from "../app/useCalendarChooser";
 /** Sample Google Calendar data for the stories (a fixed day: mock/data TODAY is 2026-10-13). */
 export const calendarEvents: ShownEvent[] = [
   { id: "a", project: "買い物", color: "#16a765", title: "町内会の集まり", date: "2026-10-13", allDay: true },
-  { id: "b", project: "買い物", color: "#16a765", title: "スーパーの特売 (牛乳 1 本 100 円)", date: "2026-10-13", startTime: "10:00", endTime: "11:30", allDay: false, location: "駅前のスーパー" },
+  { id: "b", project: "買い物", color: "#16a765", title: "スーパーの特売 (牛乳 1 本 100 円)", date: "2026-10-13", startTime: "10:00", endTime: "11:30", allDay: false, location: "駅前のスーパー", description: "牛乳 1 本 100 円 (お一人様 2 本まで)\n卵は 10 個入り 198 円", link: "https://www.google.com/calendar/event?eid=sample", meet: "https://meet.google.com/abc-defg-hij", calendar: "家族" },
   { id: "c", project: "買い物", color: "#16a765", title: "歯医者", date: "2026-10-15", startTime: "15:30", endTime: "16:30", allDay: false },
   { id: "d", project: "買い物", color: "#16a765", title: "家族の誕生日", date: "2026-10-18", allDay: true },
 ];

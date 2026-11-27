@@ -21,10 +21,20 @@ export function eventDays(map: Record<string, ProjectEvents>, only?: string): st
 }
 
 /** "終日", or "10:00-11:30" like Todoist's calendar rows; a start alone is just "10:00". */
-export function eventTimeLabel(e: Pick<CalEvent, "allDay" | "startTime" | "endTime">): string {
+export function eventTimeLabel(e: Pick<CalEvent, "allDay" | "startTime" | "endTime" | "endDate">): string {
   if (e.allDay || !e.startTime) return "終日";
   const t = (s: string) => `${Number(s.slice(0, 2))}:${s.slice(3, 5)}`;
+  // One that ends on a later day: the list shows its start only (the detail has the whole range).
+  if (e.endDate) return t(e.startTime);
   return e.endTime && e.endTime !== e.startTime ? `${t(e.startTime)}-${t(e.endTime)}` : t(e.startTime);
+}
+
+/** The whole range for the detail: "11月30日 (月) 10:00-11:30", "11月30日 (月) 22:00 - 12月1日 (火) 6:00", "11月30日 (月) - 12月2日 (水)" (all day). */
+export function eventRangeText(e: Pick<CalEvent, "date" | "allDay" | "startTime" | "endTime" | "endDate">, dayText: (ymd: string) => string): string {
+  const t = (s: string) => `${Number(s.slice(0, 2))}:${s.slice(3, 5)}`;
+  if (e.allDay || !e.startTime) return e.endDate ? `${dayText(e.date)} - ${dayText(e.endDate)}` : `${dayText(e.date)} (終日)`;
+  if (e.endDate) return `${dayText(e.date)} ${t(e.startTime)} - ${dayText(e.endDate)} ${e.endTime ? t(e.endTime) : ""}`.trim();
+  return `${dayText(e.date)} ${e.endTime && e.endTime !== e.startTime ? `${t(e.startTime)}-${t(e.endTime)}` : t(e.startTime)}`;
 }
 
 /** The projects that need the user's attention: a login this device lacks, or a failed fetch. */

@@ -24,6 +24,7 @@ import { ViewSheet } from "../../views/mobile/ViewSheet";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { CalendarSheet } from "../../views/mobile/CalendarSheet";
 import { calendarEvents, chooserStub } from "../../mock/calendar";
+import { CalendarEventDetail } from "../../components/CalendarEventDetail";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -549,6 +550,28 @@ export const M13Login: Story = {
 export const M13Today: Story = {
   name: "M-13 今日の予定",
   render: () => <MobileToday live fill overdue={byNo(9, 10)} todays={[...byNo(8, 11), { ...byNo(12)[0], title: "ゴミ出し" }]} today={TODAY} events={calendarEvents.filter((e) => e.date === TODAY)} />,
+};
+
+// Tapping an event opens its detail (spec 2026-11-27): the date and time, the place, the notes and two links.
+export const M15: Story = {
+  name: "M-15 Google カレンダーの予定の詳細",
+  render: () => (
+    <MobileProjectView
+      live
+      fill
+      tab="browse"
+      project="買い物"
+      tasks={shopping}
+      sections={sections}
+      today={TODAY}
+      events={calendarEvents}
+      overlay={
+        <BottomSheet open size="large" title="予定" onClose={() => undefined}>
+          <CalendarEventDetail event={calendarEvents[1]} today={TODAY} />
+        </BottomSheet>
+      }
+    />
+  ),
 };
 
 export const M14: Story = {

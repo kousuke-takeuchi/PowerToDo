@@ -24,6 +24,8 @@ import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
 import { CalendarDialogHost } from "../views/CalendarDialogHost";
+import { CalendarEventDialog } from "../views/CalendarEventDialog";
+import { OpenCalendarEventContext } from "./CalendarEventContext";
 import { UpdateDialog } from "../views/UpdateDialog";
 import type { ExpandApi } from "../views/ProjectView";
 import { LabelDetailView } from "../views/LabelDetailView";
@@ -41,7 +43,7 @@ import { UpcomingView } from "../views/UpcomingView";
 import { useNowTime, useShellWidth, useToday } from "./hooks";
 import { useCalendarEvents } from "./useCalendarEvents";
 import { useCalendarAccounts } from "./useCalendarAccounts";
-import { calendarProblems, eventDays, eventsOn } from "./calendarEvents";
+import { calendarProblems, eventDays, eventsOn, type ShownEvent } from "./calendarEvents";
 import { Banners } from "./Banners";
 import { usePlatform } from "./platform";
 import { setEscFallback, useEscLayer } from "./layers";
@@ -97,6 +99,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   const calAccounts = useCalendarAccounts(settingsOpen, () => void cal.refresh(true));
   // The project whose 「Google カレンダー」 dialog is open.
   const [calendarFor, setCalendarFor] = useState<string | null>(null);
+  // The Google Calendar event whose detail is open.
+  const [calendarEvent, setCalendarEvent] = useState<ShownEvent | null>(null);
   const syncStatus = sync.status;
   const syncState = syncStatus?.state ?? "off";
   // 片方が空に見えて止まっているあいだ (帯で戻す方向を選ぶ) と、認証が断られたあいだ (ログインし直すか「確かめる」まで
@@ -1126,6 +1130,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         busy={search.busy}
       />
+      {calendarEvent && <CalendarEventDialog event={calendarEvent} today={today} onClose={() => setCalendarEvent(null)} />}
       {calendarFor !== null && <CalendarDialogHost project={calendarFor} current={cal.links[calendarFor] ?? []} onChanged={() => void cal.refresh(true)} onClose={() => setCalendarFor(null)} />}
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
@@ -1168,6 +1173,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
 
   return (
     <ViewOptionsCtx.Provider value={viewStore}>
+      <OpenCalendarEventContext.Provider value={setCalendarEvent}>
     <ProjectColors.Provider value={projectColors}>
     <CommentCounts.Provider value={commentCounts}>
     <AttachmentCounts.Provider value={attachmentCounts}>
@@ -1217,6 +1223,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     </AttachmentCounts.Provider>
     </CommentCounts.Provider>
     </ProjectColors.Provider>
+      </OpenCalendarEventContext.Provider>
     </ViewOptionsCtx.Provider>
   );
 }

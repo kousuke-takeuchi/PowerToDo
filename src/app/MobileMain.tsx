@@ -33,7 +33,9 @@ import { dateLabel } from "../mock/data";
 import { useNowTime, useToday } from "./hooks";
 import { useCalendarEvents } from "./useCalendarEvents";
 import { useCalendarAccounts } from "./useCalendarAccounts";
-import { eventDays, eventsOn } from "./calendarEvents";
+import { eventDays, eventsOn, type ShownEvent } from "./calendarEvents";
+import { OpenCalendarEventContext } from "./CalendarEventContext";
+import { CalendarEventDetail } from "../components/CalendarEventDetail";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
@@ -77,18 +79,22 @@ export function MobileMain(props: { app: AppStateDto; syncConflicts: SyncConflic
   // The drawer (spec 2026-11-22 §4): the tab screens' top bars read the opener from context.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  // The Google Calendar event whose detail is open (the sheet lives in MobileScreens' layers).
+  const [calendarEvent, setCalendarEvent] = useState<ShownEvent | null>(null);
   // 表示の設定 (sort / group / filter of Today and Upcoming): the same rows of the common book as the desktop.
   const viewStore = useViewOptionsStore();
   return (
     <ViewOptionsCtx.Provider value={viewStore}>
       <MobileMenuContext.Provider value={openDrawer}>
-        <MobileScreens {...props} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} />
+        <OpenCalendarEventContext.Provider value={setCalendarEvent}>
+          <MobileScreens {...props} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} calendarEvent={calendarEvent} closeCalendarEvent={() => setCalendarEvent(null)} />
+        </OpenCalendarEventContext.Provider>
       </MobileMenuContext.Provider>
     </ViewOptionsCtx.Provider>
   );
 }
 
-function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app: AppStateDto; syncConflicts: SyncConflicts; drawerOpen: boolean; setDrawerOpen: (open: boolean) => void }) {
+function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendarEvent, closeCalendarEvent }: { app: AppStateDto; syncConflicts: SyncConflicts; drawerOpen: boolean; setDrawerOpen: (open: boolean) => void; calendarEvent: ShownEvent | null; closeCalendarEvent: () => void }) {
   useSystemTheme();
   const today = useToday();
   useNowTime(); // re-render each minute so today's passed times turn red
@@ -533,6 +539,9 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
           />
         )}
         {qaPicker === "label" && <LabelSheet labels={allLabels} value={parsed?.labels ?? []} onChange={(names) => rewrite(["label"], names.map((n) => `@${n}`))} />}
+      </BottomSheet>
+      <BottomSheet fill size="large" open={calendarEvent !== null} title="予定" onClose={closeCalendarEvent}>
+        {calendarEvent && <CalendarEventDetail event={calendarEvent} today={today} />}
       </BottomSheet>
       <BottomSheet fill size="large" open={viewSheet !== null} title="表示" onClose={() => setViewSheet(null)}>
         {viewSheet !== null && (

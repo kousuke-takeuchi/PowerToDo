@@ -15,12 +15,12 @@ export const labels: Label[] = [
   { name: "急ぎ", color: "var(--color-priority-1)", order: 2 }, { name: "キッチン", color: "var(--color-priority-2)", order: 3 },
 ];
 
-export const sections: Section[] = [ { project: "買い物", name: "今週", order: 0 }, { project: "買い物", name: "いつか", order: 1 } ];
+export const sections: Section[] = [ { project: "買い物", name: "今週", order: 0 }, { project: "買い物", name: "未定", order: 1 } ];
 
 export const tasks: Task[] = [
   { no: 1, project: "買い物", category: "今週", title: "牛乳と卵を買う", assignee: "たろう", priority: 1, progress: 0, due: "2026-10-14", dueTime: "15:00", note: "近所のスーパーで。卵は 10 個入り", labels: ["食品"], rrule: "FREQ=WEEKLY;BYDAY=SA", reminders: ["-0m","-30m"], order: 0, createdAt: "2026-10-10T09:00" },
   { no: 2, project: "買い物", category: "今週", title: "洗剤の詰め替え", assignee: "たろう", priority: 3, progress: 0, due: "2026-10-17", labels: ["日用品"], reminders: [], order: 1, createdAt: "2026-10-10T09:00" },
-  { no: 3, project: "買い物", category: "いつか", title: "新しいフライパン", assignee: "たろう", priority: 4, progress: 0, note: "28cm、IH 対応", labels: ["キッチン"], reminders: [], order: 0, createdAt: "2026-10-10T09:00" },
+  { no: 3, project: "買い物", category: "未定", title: "新しいフライパン", assignee: "たろう", priority: 4, progress: 0, note: "28cm、IH 対応", labels: ["キッチン"], reminders: [], order: 0, createdAt: "2026-10-10T09:00" },
   { no: 4, project: "買い物", category: "今週", title: "牛乳 1L", assignee: "たろう", priority: 4, progress: 100, parentNo: 1, labels: [], reminders: [], order: 0, createdAt: "2026-10-10T09:00", completedAt: "2026-10-12T20:00" },
   { no: 5, project: "買い物", category: "今週", title: "卵 10 個入り", assignee: "たろう", priority: 4, progress: 0, parentNo: 1, labels: [], reminders: [], order: 1, createdAt: "2026-10-10T09:00" },
   { no: 6, project: "買い物", category: "今週", title: "卵は 10 個入り (特売)", assignee: "たろう", priority: 4, progress: 0, parentNo: 5, labels: [], reminders: [], order: 0, createdAt: "2026-10-10T09:00" },

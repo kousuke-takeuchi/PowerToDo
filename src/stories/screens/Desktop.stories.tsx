@@ -35,6 +35,7 @@ import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
 import { CalendarDialog } from "../../views/CalendarDialog";
 import { calendarEvents, chooserStub } from "../../mock/calendar";
+import { CalendarEventDialog } from "../../views/CalendarEventDialog";
 
 const meta = {
   title: "Screens/Desktop",
@@ -70,6 +71,16 @@ export const D01: Story = {
 export const D15: Story = {
   name: "D-15 Google カレンダーの予定",
   render: () => <Screen today={TODAY} calendarEvents={calendarEvents} />,
+};
+
+export const D15Event: Story = {
+  name: "D-15 Google カレンダーの予定の詳細",
+  render: () => (
+    <>
+      <Screen today={TODAY} calendarEvents={calendarEvents} />
+      <CalendarEventDialog event={calendarEvents[1]} today={TODAY} onClose={() => undefined} />
+    </>
+  ),
 };
 
 export const D15Dialog: Story = {
@@ -145,7 +156,7 @@ export const D01p: Story = {
 
 export const D01q: Story = {
   name: "D-01q セクションの並べ替え",
-  render: () => <Screen sectionDragPreview="いつか" />,
+  render: () => <Screen sectionDragPreview="未定" />,
 };
 
 // Story only: the card floats where the pointer is (no engine). Same look as the drag card.
@@ -842,7 +853,7 @@ export const D10: Story = {
   render: () => <BoardScreen />,
 };
 
-// 今週の「牛乳と卵を買う」を持ち上げ、いつか列の「新しいフライパン」の下に赤い線 (列の間の移動)。
+// 今週の「牛乳と卵を買う」を持ち上げ、未定列の「新しいフライパン」の下に赤い線 (列の間の移動)。
 export const D10b: Story = {
   name: "D-10b ボードのドラッグ中",
   render: () => <BoardScreen dragPreview={{ no: 1, kind: "between", targetNo: 3 }} />,

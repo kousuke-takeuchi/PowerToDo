@@ -26,6 +26,7 @@ test("time labels", () => {
   assert.equal(eventTimeLabel(ev("a", "d", "09:00", "10:30")), "9:00-10:30");
   assert.equal(eventTimeLabel(ev("a", "d", "09:00")), "9:00");
   assert.equal(eventTimeLabel(ev("a", "d", "09:00", "09:00")), "9:00");
+  assert.equal(eventTimeLabel({ ...ev("a", "d", "22:00", "06:00"), endDate: "e" }), "22:00", "over midnight: the start only");
 });
 test("problems: a missing login and a failed fetch", () => {
   const p = calendarProblems({ ...map, 趣味: { events: [], needsLogin: false, error: "オフラインです" } });
@@ -45,4 +46,14 @@ test("a folded project shows only today's events (at most three), an open one al
   assert.deepEqual([folded.shown.length, folded.hidden], [3, 3]);
   assert.deepEqual(foldProjectEvents(e, "2026-11-30", true), { shown: e, hidden: 0 });
   assert.deepEqual(foldProjectEvents(e, "2026-12-09", false), { shown: [], hidden: 6 }, "a day with none: just the header");
+});
+
+import { eventRangeText } from "./calendarEvents.ts";
+
+test("the detail's range text", () => {
+  const day = (d: string) => `<${d}>`;
+  assert.equal(eventRangeText({ ...ev("a", "D", "10:00", "11:30") }, day), "<D> 10:00-11:30");
+  assert.equal(eventRangeText({ ...ev("a", "D", "22:00", "06:00"), endDate: "E" }, day), "<D> 22:00 - <E> 6:00");
+  assert.equal(eventRangeText({ ...ev("a", "D") }, day), "<D> (終日)");
+  assert.equal(eventRangeText({ ...ev("a", "D"), endDate: "E" }, day), "<D> - <E>");
 });
