@@ -26,7 +26,7 @@ export function CalendarSheet({ chooser }: CalendarSheetProps) {
           <div style={head}>表示しているカレンダー</div>
           <SheetCard label="表示しているカレンダー">
             {selected.map((l) => (
-              <SheetRow key={`${l.account}|${l.calendarId}`} icon={<Check size={18} />} iconColor={l.color || undefined} label={l.name || l.calendarId} value={l.account} selected onClick={() => void remove(l)} />
+              <SheetRow key={`${l.account}|${l.calendarId}`} icon={<Check size={18} />} iconColor={l.color || undefined} label={l.name || l.calendarId} value={l.account} onClick={() => void remove(l)} />
             ))}
           </SheetCard>
         </>

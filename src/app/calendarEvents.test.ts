@@ -31,3 +31,18 @@ test("problems: a missing login and a failed fetch", () => {
   const p = calendarProblems({ ...map, 趣味: { events: [], needsLogin: false, error: "オフラインです" } });
   assert.deepEqual(p.map((x) => x.project), ["家", "趣味"]);
 });
+
+import { capEvents, foldProjectEvents } from "./calendarEvents.ts";
+
+test("capEvents: all when few or expanded, else the first three and the rest counted", () => {
+  assert.deepEqual(capEvents([1, 2, 3]), { shown: [1, 2, 3], hidden: 0 });
+  assert.deepEqual(capEvents([1, 2, 3, 4, 5]), { shown: [1, 2, 3], hidden: 2 });
+  assert.deepEqual(capEvents([1, 2, 3, 4, 5], 3, true), { shown: [1, 2, 3, 4, 5], hidden: 0 });
+});
+test("a folded project shows only today's events (at most three), an open one all of them", () => {
+  const e = ["2026-11-30", "2026-11-30", "2026-11-30", "2026-11-30", "2026-12-01", "2026-12-02"].map((d, i) => ({ ...ev(`e${i}`, d, "09:00"), project: "仕事" }));
+  const folded = foldProjectEvents(e, "2026-11-30", false);
+  assert.deepEqual([folded.shown.length, folded.hidden], [3, 3]);
+  assert.deepEqual(foldProjectEvents(e, "2026-11-30", true), { shown: e, hidden: 0 });
+  assert.deepEqual(foldProjectEvents(e, "2026-12-09", false), { shown: [], hidden: 6 }, "a day with none: just the header");
+});

@@ -13,7 +13,7 @@ import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { dayHeading } from "./mobileDates";
 import { arrangeFlat, type ArrangeCtx } from "../../app/view/arrange";
-import { CalendarEventRow } from "../../components/CalendarEventRow";
+import { CalendarEventsBlock } from "../../components/CalendarEventsBlock";
 import type { ShownEvent } from "../../app/calendarEvents";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { beforeKeyOf, reordered, sectionAt } from "./mobileReorder";
@@ -186,9 +186,7 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
             <div {...(reordering ? reorderAttrs({ kind: "header", section: "today" }) : {})}>
               <SectionHeader mobile tight={live && overdueShown.length === 0} title={dayHeading(today, today)} />
             </div>
-            {events.map((e) => (
-              <CalendarEventRow key={`${e.project}/${e.id}`} event={e} variant="mobile" showProject />
-            ))}
+            <CalendarEventsBlock events={events} today={today} variant="mobile" showProject />
             {list("today", todayShown, { project: true, date: false })}
           </section>
         )}

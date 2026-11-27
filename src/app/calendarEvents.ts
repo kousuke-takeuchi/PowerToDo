@@ -33,3 +33,22 @@ export function calendarProblems(map: Record<string, ProjectEvents>): { project:
     pe.needsLogin ? [{ project, text: `「${project}」のカレンダーにはログインが必要です` }] : pe.error ? [{ project, text: `「${project}」のカレンダー: ${pe.error}` }] : [],
   );
 }
+
+/** How many events of a day show before 「ほか n 件」 (Today, Upcoming, and today's events of a folded project). */
+export const DAY_CAP = 3;
+
+/** The first `cap` events, or all when `expanded`; `hidden` is how many 「ほか n 件」 stands for. */
+export function capEvents<T>(events: T[], cap = DAY_CAP, expanded = false): { shown: T[]; hidden: number } {
+  if (expanded || events.length <= cap) return { shown: events, hidden: 0 };
+  return { shown: events.slice(0, cap), hidden: events.length - cap };
+}
+
+/**
+ * A project's events above its tasks (spec 2026-11-27 addendum): folded, only today's events show (at most `cap`) under a one-line
+ * header that counts them all; open, every day shows. `hidden` is how many the folded list leaves out.
+ */
+export function foldProjectEvents(events: ShownEvent[], today: string, open: boolean, cap = DAY_CAP): { shown: ShownEvent[]; hidden: number } {
+  if (open) return { shown: events, hidden: 0 };
+  const { shown } = capEvents(events.filter((e) => e.date === today), cap);
+  return { shown, hidden: events.length - shown.length };
+}

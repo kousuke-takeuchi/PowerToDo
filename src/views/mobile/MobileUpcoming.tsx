@@ -16,7 +16,7 @@ import { SwipeRow } from "./SwipeRow";
 import { sectionAt } from "./mobileReorder";
 import { Ellipsis } from "lucide-react";
 import { arrangeFlat, type ArrangeCtx } from "../../app/view/arrange";
-import { CalendarEventRow } from "../../components/CalendarEventRow";
+import { CalendarEventsBlock } from "../../components/CalendarEventsBlock";
 import type { ShownEvent } from "../../app/calendarEvents";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
@@ -179,9 +179,7 @@ export function MobileUpcoming({ tasks, today, live, fill, rowContext, onToggleD
             <div {...(reordering ? reorderAttrs({ kind: "header", section: ymd }) : {})}>
               <SectionHeader mobile title={dayHeading(ymd, today)} showChevron={false} />
             </div>
-            {(eventsOn?.(ymd) ?? []).map((e) => (
-              <CalendarEventRow key={`${e.project}/${e.id}`} event={e} variant="mobile" showProject />
-            ))}
+            <CalendarEventsBlock events={eventsOn?.(ymd) ?? []} today={today} variant="mobile" showProject />
             {list(
               ymd,
               (arranged.get(ymd)?.groups[0]?.rows ?? []).map((r) => r.task),
