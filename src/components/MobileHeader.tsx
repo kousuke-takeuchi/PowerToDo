@@ -1,5 +1,5 @@
 import type React from "react";
-import { ChevronLeft, Menu } from "lucide-react";
+import { ChevronLeft, Menu, X } from "lucide-react";
 import { motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { Button } from "./Button";
 import { Glass } from "./Glass";
@@ -22,6 +22,8 @@ export type MobileHeaderProps = {
   breadcrumb?: React.ReactNode;
   /** The top gap is the notch's safe area instead of the picture's 47 status bar. */
   safeArea?: boolean;
+  /** In a popup card: a 「×」 instead of the back arrow, and a small gap on top (the card is already below the status bar). */
+  closeInstead?: boolean;
 };
 
 const actionButton: React.CSSProperties = {
@@ -37,15 +39,15 @@ const actionButton: React.CSSProperties = {
 };
 
 /** iPhone top bar (spec ④ iPhone §3.3-3.4): back, the small centered title, the glass pill of actions. */
-export function MobileHeader({ title, subtitle, progress, onBack, onMenu, actions, breadcrumb, safeArea }: MobileHeaderProps) {
+export function MobileHeader({ title, subtitle, progress, onBack, onMenu, actions, breadcrumb, safeArea, closeInstead }: MobileHeaderProps) {
   const one = useMotionValue(1);
   const smallOpacity = useTransform(progress ?? one, (p) => titleLook(p).smallOpacity);
   return (
     <header style={{ flex: "0 0 auto", background: "var(--color-bg)", fontFamily: "var(--font-body)" }}>
-      <div aria-hidden style={{ height: safeArea ? "env(safe-area-inset-top)" : 47 }} />
+      <div aria-hidden style={{ height: closeInstead ? 4 : safeArea ? "env(safe-area-inset-top)" : 47 }} />
       <div style={{ position: "relative", height: 52, display: "flex", alignItems: "center", gap: 8, padding: "0 15px" }}>
         {onBack ? (
-          <Button variant="icon" icon={ChevronLeft} ariaLabel="戻る" onClick={onBack} />
+          <Button variant="icon" icon={closeInstead ? X : ChevronLeft} ariaLabel={closeInstead ? "閉じる" : "戻る"} onClick={onBack} />
         ) : onMenu ? (
           <Button variant="icon" icon={Menu} ariaLabel="メニュー" onClick={onMenu} />
         ) : null}

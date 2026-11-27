@@ -45,7 +45,8 @@ export function MobileTaskRow(p: TaskRowProps) {
       </div>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ ...oneLine, flex: 1, minWidth: 0, fontSize: 16, lineHeight: "22px", color: p.done ? "var(--color-text-muted)" : "var(--color-text-primary)" }}>{p.title}</div>
+          {/* A long title wraps like the desktop's list (it used to end in an ellipsis). */}
+          <div style={{ flex: 1, minWidth: 0, fontSize: 16, lineHeight: "22px", color: p.done ? "var(--color-text-muted)" : "var(--color-text-primary)", overflowWrap: "anywhere" }}>{p.title}</div>
           {sub && (
             // Spec ④ iPhone §4.2: a chevron at the right of the title line; switches at once (no motion).
             <button

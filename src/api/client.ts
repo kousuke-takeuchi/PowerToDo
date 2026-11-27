@@ -26,6 +26,7 @@ import type {
   ProjectView,
   QuickAddOutcome,
   CalendarInfo,
+  NotificationCheckDto,
   CalendarLink,
   CalendarLoginDto,
   ProjectEvents,
@@ -197,6 +198,10 @@ export const api = {
    */
   googleLogin: () => invoke<GoogleLoginDto>("google_login"),
   /** Google Calendar (spec 2026-11-27). The login is cancelled with `googleLoginCancel`, like the Drive login. */
+  /** What the iPhone has scheduled (settings 「通知の確認」). */
+  notificationCheck: () => invoke<NotificationCheckDto>("notification_check"),
+  /** One notification in 10 seconds, scheduled the way the reminders are. */
+  notificationTest: () => invoke<null>("notification_test"),
   calendarAccounts: () => invoke<string[]>("calendar_accounts"),
   calendarLogin: () => invoke<CalendarLoginDto>("calendar_login"),
   calendarLogout: (email: string) => invoke<{ revoked: boolean }>("calendar_logout", { email }),

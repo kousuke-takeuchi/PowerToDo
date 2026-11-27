@@ -8,6 +8,7 @@ import type { NotificationPermission } from "../../types/model";
 import { AccountPane, Desc, GeneralPane, Row, Section } from "../SettingsPanes";
 import type { AccountPaneProps, GeneralPaneProps } from "../SettingsPanes";
 import { CalendarAccountsPane, type CalendarAccountsPaneProps } from "../CalendarAccountsPane";
+import { NotificationCheck } from "../NotificationCheck";
 import { SyncPane } from "../SyncPane";
 import type { SyncPaneProps } from "../SyncPane";
 import { MobileShell } from "./MobileShell";
@@ -126,6 +127,7 @@ export function MobileSettings(props: MobileSettingsProps = {}) {
                 {notifications.error && <div role="alert" style={{ fontSize: 12, lineHeight: "17px", color: "var(--color-danger)" }}>{notifications.error}</div>}
               </Section>
             )}
+            {notifications && <NotificationCheck active={!!onBack} />}
             {calendar && (
               <Section label="Google カレンダー">
                 <CalendarAccountsPane {...calendar} />

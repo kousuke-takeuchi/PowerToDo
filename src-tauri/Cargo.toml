@@ -46,6 +46,8 @@ quick-xml = "0.42"
 percent-encoding = "2.3"
 url = "2.5"
 tauri-plugin-powertodo-ios = { path = "plugins/ios" }
+# Scheduled reminders: `Schedule::At` takes a `time::OffsetDateTime` (same 0.3 the notification plugin uses).
+time = "0.3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -59,6 +61,8 @@ strip = true
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time", "test-util", "net", "io-util"] }
 wiremock = "0.6"
+# The reminder schedule date is checked as ISO 8601 text.
+time = { version = "0.3", features = ["formatting"] }
 # `tauri::test` (a mock app) drives the updater plugin in `commands::update` tests.
 tauri = { version = "2", features = ["test"] }
 
@@ -74,8 +78,6 @@ keyring = { version = "4.2", features = ["v1"] }
 # iOS: the node's state folder is excluded from backup (`sync::tailnet_inproc::exclude_from_backup`).
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
-# Scheduled reminders: `Schedule::At` takes a `time::OffsetDateTime` (same 0.3 the notification plugin uses).
-time = "0.3"
 objc2-foundation = "0.3"
 # iOS keychain (`sync::secrets::AppleStore`): keyring 4.2 `v1` does not build for iOS, whose
 # apple-native-keyring-store needs `protected` there.

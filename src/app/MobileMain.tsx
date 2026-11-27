@@ -49,6 +49,7 @@ import { useSettingsPanes } from "./useSettingsPanes";
 import { ViewOptionsCtx, useView, useViewOptionsStore } from "./view/ViewOptionsContext";
 import { ViewSheet } from "../views/mobile/ViewSheet";
 import { CalendarSheetHost } from "../views/mobile/CalendarSheetHost";
+import { DetailSheet } from "../views/mobile/DetailSheet";
 import { useSearch } from "./useSearch";
 import { useCommentCounts, useDialogComments } from "./useComments";
 import { useSummaries } from "./useSummaries";
@@ -463,8 +464,79 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           }}
         />
   );
+  // ---- タスク詳細 (下からのポップアップ, spec 2026-11-28) ----
+  // The list stays under it. The card keeps its last content while it slides away.
+  const openTask = detail ? view?.tasks.find((t) => t.no === detail.no) : undefined;
+  const closeDetail = () => setDetail(detail?.parent !== undefined ? { project: detail.project, no: detail.parent } : null);
+  const lastDetail = useRef<React.ReactNode>(null);
+  if (detail) {
+    lastDetail.current =
+      !view || !openTask ? (
+        <div style={{ padding: "var(--space-6) 16px", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>読み込み中…</div>
+      ) : (
+        <AttachmentEnvContext.Provider value={attachmentEnv}>
+              <MobileTaskDetail
+                key={`${detail.project}/${openTask.no}`}
+                live
+                fill
+                popup
+                today={today}
+                task={openTask}
+                subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
+                project={view.project}
+                section={openTask.category ?? undefined}
+                onBack={closeDetail}
+                onOpenSubtask={(t) => setDetail({ project: detail.project, no: t.no, parent: openTask.no })}
+                onToggleDone={(done) =>
+                  void p.completeTask(openTask.no, done).then((ok) => {
+                    if (ok && done) offerDone(openTask);
+                    refreshAll();
+                  })
+                }
+                onToggleSubtask={(t, done) =>
+                  void p.completeTask(t.no, done).then((ok) => {
+                    if (ok && done) offerDone(t);
+                    refreshAll();
+                  })
+                }
+                onChange={(patch) =>
+                  void p.updateTask(openTask.no, "dueTime" in patch && !("reminders" in patch) ? { ...patch, ...(remindersWithTime(openTask.reminders, patch.dueTime) ? { reminders: remindersWithTime(openTask.reminders, patch.dueTime) } : {}) } : patch).then((ok) => {
+                    if (ok && "due" in patch) offerDate([openTask], patch.due ?? null);
+                    refreshAll();
+                  })
+                }
+                onAddSubtask={(title) => void p.addSubtask(openTask.no, title).then(refreshAll)}
+                onDelete={() => {
+                  setDetail(null);
+                  void p.deleteTask(openTask.no).then(refreshAll);
+                }}
+                labels={allLabels}
+                onParseRecurrence={api.parseRecurrence}
+                comments={taskComments.comments}
+                commentsFailed={taskComments.failed}
+                me={displayName}
+                onAddComment={taskComments.add}
+                onEditComment={taskComments.edit}
+                onDeleteComment={taskComments.remove}
+                onAttachComment={taskNote.store}
+                noteFiles={taskNote.files}
+                onAttachNote={taskNote.attach}
+                onDetachNote={(id) => void taskNote.detach(id)}
+                onMove={openTask.parentNo === undefined ? (project, section) => void moveOpenTask(openTask, project, section) : undefined}
+                projects={summaries}
+                sections={view.sections}
+              />
+              </AttachmentEnvContext.Provider>
+      );
+  }
+  const detailLayer = (
+    <DetailSheet open={detail !== null} onClose={closeDetail}>
+      {lastDetail.current}
+    </DetailSheet>
+  );
   const layers = (
     <>
+      {detailLayer}
       <MobileDrawer
         open={drawerOpen && !detail}
         onClose={() => setDrawerOpen(false)}
@@ -702,80 +774,6 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
         displayNameError={settingsPanes.account.error}
         dataDirHint={DATA_DIR_HINT}
       />
-    );
-  }
-
-  // ---- タスク詳細 (全画面) ----
-  if (detail) {
-    const openTask = view?.tasks.find((t) => t.no === detail.no);
-    if (!view || !openTask) {
-      return (
-        <MobileShell
-          fill
-          banner={banner}
-          title="タスク詳細"
-          onBack={() => setDetail(null)}
-          overlay={layers}
-        >
-          <div style={{ padding: "var(--space-6) 16px", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>読み込み中…</div>
-        </MobileShell>
-      );
-    }
-    return (
-      <AttachmentEnvContext.Provider value={attachmentEnv}>
-      <MobileTaskDetail
-        key={`${detail.project}/${openTask.no}`}
-        live
-        fill
-        today={today}
-        task={openTask}
-        subtasks={view.tasks.filter((t) => t.parentNo === openTask.no).sort((a, b) => a.order - b.order)}
-        project={view.project}
-        section={openTask.category ?? undefined}
-        onBack={() => setDetail(detail.parent !== undefined ? { project: detail.project, no: detail.parent } : null)}
-        onOpenSubtask={(t) => setDetail({ project: detail.project, no: t.no, parent: openTask.no })}
-        onToggleDone={(done) =>
-          void p.completeTask(openTask.no, done).then((ok) => {
-            if (ok && done) offerDone(openTask);
-            refreshAll();
-          })
-        }
-        onToggleSubtask={(t, done) =>
-          void p.completeTask(t.no, done).then((ok) => {
-            if (ok && done) offerDone(t);
-            refreshAll();
-          })
-        }
-        onChange={(patch) =>
-          void p.updateTask(openTask.no, "dueTime" in patch && !("reminders" in patch) ? { ...patch, ...(remindersWithTime(openTask.reminders, patch.dueTime) ? { reminders: remindersWithTime(openTask.reminders, patch.dueTime) } : {}) } : patch).then((ok) => {
-            if (ok && "due" in patch) offerDate([openTask], patch.due ?? null);
-            refreshAll();
-          })
-        }
-        onAddSubtask={(title) => void p.addSubtask(openTask.no, title).then(refreshAll)}
-        onDelete={() => {
-          setDetail(null);
-          void p.deleteTask(openTask.no).then(refreshAll);
-        }}
-        labels={allLabels}
-        onParseRecurrence={api.parseRecurrence}
-        comments={taskComments.comments}
-        commentsFailed={taskComments.failed}
-        me={displayName}
-        onAddComment={taskComments.add}
-        onEditComment={taskComments.edit}
-        onDeleteComment={taskComments.remove}
-        onAttachComment={taskNote.store}
-        noteFiles={taskNote.files}
-        onAttachNote={taskNote.attach}
-        onDetachNote={(id) => void taskNote.detach(id)}
-        onMove={openTask.parentNo === undefined ? (project, section) => void moveOpenTask(openTask, project, section) : undefined}
-        projects={summaries}
-        sections={view.sections}
-        banner={banner}
-        overlay={layers}
-      />
-      </AttachmentEnvContext.Provider>
     );
   }
 

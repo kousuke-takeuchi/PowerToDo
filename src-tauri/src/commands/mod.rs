@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod autostart;
 pub mod calendar;
 pub mod comments;
+pub mod notify_check;
 pub mod saver;
 pub mod sync;
 pub mod update;
