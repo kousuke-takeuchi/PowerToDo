@@ -41,7 +41,10 @@ pub struct CalendarApi {
 
 impl CalendarApi {
     pub fn new(base: &str) -> Result<Self, CalError> {
-        Ok(CalendarApi { http: http_client()?, base: base.trim_end_matches('/').to_string() })
+        Ok(CalendarApi {
+            http: http_client()?,
+            base: base.trim_end_matches('/').to_string(),
+        })
     }
 
     pub fn production() -> Result<Self, CalError> {
@@ -60,28 +63,48 @@ impl CalendarApi {
                 .map_err(|e| CalError::Offline(crate::calendar::http::transport_text(&e)))?;
             let status = resp.status().as_u16();
             match status {
-                200 => return resp.json::<Value>().await.map_err(|_| CalError::Other("Google の応答を読めませんでした".into())),
+                200 => {
+                    return resp
+                        .json::<Value>()
+                        .await
+                        .map_err(|_| CalError::Other("Google の応答を読めませんでした".into()));
+                }
                 // Once: the token may just have expired. The second time the login is the problem.
                 401 if attempt == 0 => token = ts.renew(&token).await?,
                 401 | 403 => return Err(CalError::Auth),
                 404 => return Err(CalError::Other("カレンダーが見つかりません".into())),
-                429 | 500..=599 => return Err(CalError::Offline("Google が混み合っています。しばらくしてからやり直してください".into())),
-                _ => return Err(CalError::Other(format!("Google のカレンダーを読めませんでした ({status})"))),
+                429 | 500..=599 => {
+                    return Err(CalError::Offline(
+                        "Google が混み合っています。しばらくしてからやり直してください".into(),
+                    ));
+                }
+                _ => {
+                    return Err(CalError::Other(format!(
+                        "Google のカレンダーを読めませんでした ({status})"
+                    )));
+                }
             }
         }
         Err(CalError::Auth)
     }
 
     fn url(&self, segments: &[&str], query: &[(&str, &str)]) -> Result<Url, CalError> {
-        let mut url = Url::parse(&self.base).map_err(|_| CalError::Other("カレンダーのアドレスが正しくありません".into()))?;
-        url.path_segments_mut().map_err(|_| CalError::Other("カレンダーのアドレスが正しくありません".into()))?.pop_if_empty().extend(segments);
+        let mut url = Url::parse(&self.base)
+            .map_err(|_| CalError::Other("カレンダーのアドレスが正しくありません".into()))?;
+        url.path_segments_mut()
+            .map_err(|_| CalError::Other("カレンダーのアドレスが正しくありません".into()))?
+            .pop_if_empty()
+            .extend(segments);
         url.query_pairs_mut().extend_pairs(query);
         Ok(url)
     }
 
     /// The calendars of the account (the ones it can read).
     pub async fn calendars(&self, ts: &TokenSource) -> Result<Vec<CalendarInfo>, CalError> {
-        let url = self.url(&["users", "me", "calendarList"], &[("minAccessRole", "reader"), ("maxResults", "250")])?;
+        let url = self.url(
+            &["users", "me", "calendarList"],
+            &[("minAccessRole", "reader"), ("maxResults", "250")],
+        )?;
         Ok(parse_calendar_list(&self.get(ts, url).await?))
     }
 
@@ -97,7 +120,13 @@ impl CalendarApi {
         let mut out = Vec::new();
         let mut page: Option<String> = None;
         for _ in 0..MAX_PAGES {
-            let mut query = vec![("singleEvents", "true"), ("orderBy", "startTime"), ("timeMin", time_min), ("timeMax", time_max), ("maxResults", "250")];
+            let mut query = vec![
+                ("singleEvents", "true"),
+                ("orderBy", "startTime"),
+                ("timeMin", time_min),
+                ("timeMax", time_max),
+                ("maxResults", "250"),
+            ];
             if let Some(p) = &page {
                 query.push(("pageToken", p));
             }

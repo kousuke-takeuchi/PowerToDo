@@ -43,11 +43,17 @@ pub fn path(app_data_dir: &Path) -> PathBuf {
 impl CalendarFile {
     /// A missing or unreadable file is an empty one (the accounts are asked for again; nothing is lost but the cache).
     pub fn load(app_data_dir: &Path) -> Self {
-        std::fs::read(path(app_data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        std::fs::read(path(app_data_dir))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, app_data_dir: &Path) -> AppResult<()> {
-        write_atomic(&path(app_data_dir), &serde_json::to_vec_pretty(self).unwrap_or_default())
+        write_atomic(
+            &path(app_data_dir),
+            &serde_json::to_vec_pretty(self).unwrap_or_default(),
+        )
     }
 
     pub fn add_account(&mut self, email: &str) {
@@ -64,7 +70,13 @@ impl CalendarFile {
     }
 
     pub fn put(&mut self, account: &str, calendar_id: &str, now: i64, events: Vec<CalEvent>) {
-        self.cache.insert(link_key(account, calendar_id), CacheEntry { fetched_at: now, events });
+        self.cache.insert(
+            link_key(account, calendar_id),
+            CacheEntry {
+                fetched_at: now,
+                events,
+            },
+        );
     }
 
     pub fn get(&self, account: &str, calendar_id: &str) -> Option<&CacheEntry> {
@@ -112,10 +124,16 @@ mod tests {
 
     #[test]
     fn a_fetch_is_fresh_for_five_minutes() {
-        let e = CacheEntry { fetched_at: 1000, events: vec![] };
+        let e = CacheEntry {
+            fetched_at: 1000,
+            events: vec![],
+        };
         assert!(is_fresh(Some(&e), 1299));
         assert!(!is_fresh(Some(&e), 1300));
         assert!(!is_fresh(None, 1000));
-        assert!(!is_fresh(Some(&e), 999), "a clock that went back is not fresh");
+        assert!(
+            !is_fresh(Some(&e), 999),
+            "a clock that went back is not fresh"
+        );
     }
 }

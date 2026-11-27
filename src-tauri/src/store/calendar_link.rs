@@ -22,7 +22,10 @@ pub struct CalendarLink {
 
 impl CalendarLink {
     pub fn encode(&self) -> String {
-        format!("{}|{}|{}|{}", self.account, self.calendar_id, self.color, self.name)
+        format!(
+            "{}|{}|{}|{}",
+            self.account, self.calendar_id, self.color, self.name
+        )
     }
 
     pub fn decode(value: &str) -> Option<Self> {
@@ -31,7 +34,12 @@ impl CalendarLink {
         if account.is_empty() || calendar_id.is_empty() {
             return None;
         }
-        Some(CalendarLink { account: account.into(), calendar_id: calendar_id.into(), color: p.next().unwrap_or("").into(), name: p.next().unwrap_or("").into() })
+        Some(CalendarLink {
+            account: account.into(),
+            calendar_id: calendar_id.into(),
+            color: p.next().unwrap_or("").into(),
+            name: p.next().unwrap_or("").into(),
+        })
     }
 }
 
@@ -41,12 +49,21 @@ impl ProjectStore {
         self.common
             .extra_settings
             .iter()
-            .filter_map(|(k, v)| Some((k.strip_prefix(PREFIX)?.to_string(), CalendarLink::decode(v)?)))
+            .filter_map(|(k, v)| {
+                Some((
+                    k.strip_prefix(PREFIX)?.to_string(),
+                    CalendarLink::decode(v)?,
+                ))
+            })
             .collect()
     }
 
     /// `None` takes the calendar off the project.
-    pub fn set_calendar_link(&mut self, project: &str, link: Option<&CalendarLink>) -> AppResult<()> {
+    pub fn set_calendar_link(
+        &mut self,
+        project: &str,
+        link: Option<&CalendarLink>,
+    ) -> AppResult<()> {
         if !self.common.projects.iter().any(|p| p.name == project) {
             return Err(invalid(format!("プロジェクトがありません: {project}")));
         }
@@ -81,7 +98,12 @@ mod tests {
     }
 
     fn link(account: &str) -> CalendarLink {
-        CalendarLink { account: account.into(), calendar_id: "primary".into(), color: "#fff".into(), name: "予定".into() }
+        CalendarLink {
+            account: account.into(),
+            calendar_id: "primary".into(),
+            color: "#fff".into(),
+            name: "予定".into(),
+        }
     }
 
     #[test]
@@ -113,7 +135,12 @@ mod tests {
 
     #[test]
     fn a_link_round_trips_and_the_name_may_hold_a_bar() {
-        let l = CalendarLink { account: "a@x.com".into(), calendar_id: "c@group.calendar.google.com".into(), color: "#16a765".into(), name: "仕事 | 共有".into() };
+        let l = CalendarLink {
+            account: "a@x.com".into(),
+            calendar_id: "c@group.calendar.google.com".into(),
+            color: "#16a765".into(),
+            name: "仕事 | 共有".into(),
+        };
         assert_eq!(CalendarLink::decode(&l.encode()), Some(l));
     }
 
@@ -122,6 +149,9 @@ mod tests {
         assert_eq!(CalendarLink::decode(""), None);
         assert_eq!(CalendarLink::decode("a@x.com"), None);
         assert_eq!(CalendarLink::decode("|id|#fff|n"), None);
-        assert_eq!(CalendarLink::decode("a@x.com|id").map(|l| (l.color, l.name)), Some((String::new(), String::new())));
+        assert_eq!(
+            CalendarLink::decode("a@x.com|id").map(|l| (l.color, l.name)),
+            Some((String::new(), String::new()))
+        );
     }
 }
