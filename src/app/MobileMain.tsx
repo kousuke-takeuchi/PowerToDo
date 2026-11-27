@@ -52,6 +52,8 @@ import { VIEW_SHEET_FORM, ViewSheet } from "../views/mobile/ViewSheet";
 import { CalendarSheetHost } from "../views/mobile/CalendarSheetHost";
 import { MobileDoc, MobileDocsList } from "../views/mobile/MobileDocs";
 import { DetailSheet } from "../views/mobile/DetailSheet";
+import { ScreenStack } from "../views/mobile/ScreenStack";
+import { directionBetween, type ScreenDirection } from "../views/mobile/screenMotion";
 import { useSearch } from "./useSearch";
 import { useCommentCounts, useDialogComments } from "./useComments";
 import { useSummaries } from "./useSummaries";
@@ -815,8 +817,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       onTabChange={goTab}
       today={today}
       banner={banner}
-      overlay={layers}
-    >
+          >
       <div
         role={tone === "danger" ? "alert" : undefined}
         style={{ padding: "var(--space-6) 16px", textAlign: "center", fontSize: 14, color: tone === "danger" ? "var(--color-danger)" : "var(--color-text-secondary)" }}
@@ -837,14 +838,24 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
     </MobileShell>
   );
 
-  // ---- 設定 (全画面) ----
+  // The way the screen arrives: from the change of the navigation since the last render (kept in refs so a re-render does not reset it).
+  const prevNav = useRef(nav);
+  const directionRef = useRef<ScreenDirection>("none");
+  if (prevNav.current !== nav) {
+    directionRef.current = directionBetween(prevNav.current, nav);
+    prevNav.current = nav;
+  }
+  const screenDirection = directionRef.current;
+  const screenKey = `${nav.tab}:${screen.kind}:${"name" in screen ? screen.name : ""}`;
+
+  const renderScreen = (): React.ReactElement => {
+  // ---- The screen to show; `renderScreen()` is what the ScreenStack animates between ----
   if (settingsOpen && !detail) {
     return (
       <MobileSettings
         fill
         banner={banner}
-        overlay={layers}
-        onBack={back}
+                onBack={back}
         onTabChange={goTab}
         today={today}
         sync={sync.pane}
@@ -897,8 +908,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             }, showError)
         }
         {...rowOps}
-        overlay={layers}
-      />
+              />
     );
   }
   if (screen.kind === "upcoming") {
@@ -924,8 +934,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
         eventDays={eventDays(cal.events).filter((day) => day <= (d.days[d.days.length - 1]?.date ?? today))}
         onViewMenu={() => setViewSheet("upcoming")}
         {...rowOps}
-        overlay={layers}
-      />
+              />
     );
   }
   if (screen.kind === "browse") {
@@ -933,8 +942,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
       <MobileBrowse
         {...header}
         banner={banner}
-        overlay={layers}
-        projects={summaries}
+                projects={summaries}
         counts={counts}
         syncState={syncState}
         lastSyncedAt={formatSynced(syncStatus?.lastSynced)}
@@ -968,8 +976,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             search.refresh();
           })
         }
-        overlay={layers}
-      />
+              />
     );
   }
   if (screen.kind === "docs") {
@@ -1011,7 +1018,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
     const d = labelsData.data;
     if (labelsData.error) return frame("ラベル", labelsData.error, "danger");
     if (!d) return frame("ラベル", "読み込み中…");
-    return <MobileLabels {...header} banner={banner} onBack={back} labels={d.labels} counts={d.counts} onOpenLabel={(name) => push({ kind: "label", name })} overlay={layers} />;
+    return <MobileLabels {...header} banner={banner} onBack={back} labels={d.labels} counts={d.counts} onOpenLabel={(name) => push({ kind: "label", name })} />;
   }
   if (screen.kind === "label") {
     const d = labelData.data;
@@ -1027,8 +1034,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
         tasks={d.tasks}
         onToggleDone={(t, done) => void cross.toggleDone(t, done).then((ok) => ok && done && offerDone(t))}
         onOpenTask={openCross}
-        overlay={layers}
-      />
+              />
     );
   }
   // 受信トレイ (タブ) / プロジェクト (閲覧から)
@@ -1070,7 +1076,17 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           })
       }
       {...rowOps}
-      overlay={layers}
-    />
+          />
+  );
+  };
+
+  // The screen animates when it changes (push / back / tab); the sheets, the drawer and the popup sit above it, outside the animation.
+  return (
+    <>
+      <ScreenStack screenKey={screenKey} direction={screenDirection}>
+        {renderScreen()}
+      </ScreenStack>
+      <div style={{ position: "fixed", inset: 0, zIndex: 10, pointerEvents: "none" }}>{layers}</div>
+    </>
   );
 }
