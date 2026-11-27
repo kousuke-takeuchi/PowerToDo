@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod domain;
+pub mod calendar;
 pub mod error;
 pub mod platform;
 pub mod scheduler;
@@ -226,6 +227,14 @@ pub fn run() {
             commands::sync::sync_recover,
             commands::sync::google_login,
             commands::sync::google_login_cancel,
+            commands::calendar::calendar_accounts,
+            commands::calendar::calendar_login,
+            commands::calendar::calendar_logout,
+            commands::calendar::calendar_calendars,
+            commands::calendar::calendar_links,
+            commands::calendar::calendar_set_links,
+            commands::calendar::calendar_events,
+            commands::calendar::open_web_link,
             commands::sync::google_logout,
             commands::update::update_status,
             commands::update::update_check,

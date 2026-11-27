@@ -62,7 +62,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// Runs `f` where blocking is allowed.
-async fn blocking<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> AppResult<R> {
+pub(super) async fn blocking<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> AppResult<R> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|e| AppError::Io {
@@ -235,9 +235,9 @@ pub struct SyncRuntime {
 }
 
 /// The place of the one Google login in flight. Dropping it frees the place.
-struct LoginSlot<'a> {
+pub(super) struct LoginSlot<'a> {
     rt: &'a SyncRuntime,
-    cancel: Arc<Notify>,
+    pub(super) cancel: Arc<Notify>,
 }
 
 impl Drop for LoginSlot<'_> {
@@ -287,7 +287,7 @@ impl SyncRuntime {
     /// Takes the place of the Google login. `None` when one is already waiting for the
     /// browser: a second login is refused (the first has the browser window), not started
     /// next to it.
-    fn begin_login(&self) -> Option<LoginSlot<'_>> {
+    pub(super) fn begin_login(&self) -> Option<LoginSlot<'_>> {
         let mut slot = lock(&self.google_login);
         if slot.is_some() {
             return None;
@@ -329,7 +329,7 @@ impl SyncRuntime {
         lock(&self.tailnet).clone()
     }
 
-    fn secrets(&self) -> Arc<Secrets> {
+    pub(super) fn secrets(&self) -> Arc<Secrets> {
         Arc::clone(&self.secrets)
     }
 
@@ -1028,7 +1028,7 @@ fn commit_nas(
 
 /// The authorization URL is built here, but it is checked once more before a browser is
 /// pointed at it.
-const GOOGLE_AUTH_URL_PREFIX: &str = "https://accounts.google.com/";
+pub(super) const GOOGLE_AUTH_URL_PREFIX: &str = "https://accounts.google.com/";
 const GOOGLE_UNAVAILABLE: &str = "このビルドでは Google Drive を使えません";
 
 /// The app state, reachable from a closure that outlives the call (`spawn_blocking`): the
@@ -1077,7 +1077,7 @@ fn require_gdrive(state: &AppState) -> AppResult<()> {
 
 /// The embedded OAuth client against Google. Refused in a build made without
 /// `google-oauth.json`.
-fn production_oauth() -> AppResult<GoogleOAuth> {
+pub(super) fn production_oauth() -> AppResult<GoogleOAuth> {
     match GoogleOAuth::production() {
         None => Err(AppError::Invalid {
             message: GOOGLE_UNAVAILABLE.into(),
@@ -1088,7 +1088,7 @@ fn production_oauth() -> AppResult<GoogleOAuth> {
 }
 
 /// The texts of [`OAuthError`] are Japanese and carry no URL, token or code.
-fn oauth_error(e: OAuthError) -> AppError {
+pub(super) fn oauth_error(e: OAuthError) -> AppError {
     match e {
         OAuthError::Offline(message) => AppError::Io { message },
         other => AppError::Invalid {
@@ -1107,7 +1107,7 @@ fn drive_backend(tokens: Arc<TokenSource>) -> AppResult<Arc<dyn StorageBackend>>
 /// is cancelled, so it does not wait five minutes for a page nobody sees. The URL itself is
 /// never kept or logged: it carries `state` and `code_challenge`.
 #[cfg(not(target_os = "ios"))]
-fn guarded_opener(
+pub(super) fn guarded_opener(
     cancel: Arc<Notify>,
     failure: Arc<Mutex<Option<String>>>,
     open: impl Fn(&str) -> Result<(), String> + Send,
@@ -1197,7 +1197,7 @@ fn commit_google(
 
 /// A token Google gave but the app will not keep is given back (best effort: the user may be
 /// offline by now, and nothing more can be done about it).
-async fn revoke_unused(oauth: &GoogleOAuth, refresh_token: &str) {
+pub(super) async fn revoke_unused(oauth: &GoogleOAuth, refresh_token: &str) {
     if let Err(e) = oauth.revoke(refresh_token).await {
         eprintln!("could not revoke a Google login that was not kept: {e}");
     }
@@ -1302,7 +1302,7 @@ where
 /// sheet ended on. The sheet blocks its thread until it closes, so it runs on the blocking
 /// pool, never on the main thread.
 #[cfg(target_os = "ios")]
-async fn present_login_sheet(
+pub(super) async fn present_login_sheet(
     app: AppHandle,
     url: String,
     scheme: String,

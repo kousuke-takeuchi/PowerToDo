@@ -4,6 +4,7 @@ pub mod comments;
 pub mod common_book;
 pub mod external;
 pub mod fired;
+pub mod calendar_link;
 pub mod labels;
 pub mod paths;
 pub mod project_book;

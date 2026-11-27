@@ -12,6 +12,7 @@
 | `store/` | xlsx の読み書き (`project_book.rs`、`common_book.rs`)、メモリの中のプロジェクト (`project_store.rs`)、コメント、添付、ラベル、「表示」の設定、データフォルダの見張り (`watcher.rs`)、外部の変更の扱い (`external.rs`) |
 | `commands/` | 画面から呼ぶコマンド。保存の予約 (`saver.rs`、変更の 1 秒後に書く)、同期、添付、コメント、更新、ログイン時の起動 |
 | `sync/` | 同期のエンジン (`engine.rs`)、タスク単位の合わせ (`merge.rs`)、前回の中身 (`base.rs`)、同期先 (`webdav.rs`、`gdrive.rs`)、Google の OAuth、Tailscale (`tailnet.rs` はデスクトップのサイドカー、`tailnet_inproc.rs` は iOS) |
+| `calendar/` | Google カレンダーの取り込み (読むだけ)。Google の JSON を型にする (`parse.rs`)、端末のファイル (`file.rs`)、API の呼び出し (`http.rs`)。予定は xlsx に入れず、`calendar.json` に控える |
 | `scheduler/` | 30 秒ごとにリマインダーを確かめ、通知を出す。iOS は予約通知に登録する |
 | `platform/` | OS ごとの違い (ファイルを開く、ファイラで見せる、iOS のプレビュー) |
 | `tray.rs`、`window.rs` | トレイとウインドウ |

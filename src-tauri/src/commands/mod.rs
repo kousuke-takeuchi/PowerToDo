@@ -4,6 +4,7 @@
 
 pub mod attachments;
 pub mod autostart;
+pub mod calendar;
 pub mod comments;
 pub mod saver;
 pub mod sync;

@@ -11,13 +11,14 @@ import type { AccountPaneProps, DataPaneProps, DateTimePaneProps, GeneralPanePro
 import { NasGuideDialog } from "./NasGuideDialog";
 import { NasFields, syncTargetOptions } from "./SyncFields";
 import { isNasConnected } from "../app/syncText";
+import { CalendarAccountsPane, type CalendarAccountsPaneProps } from "./CalendarAccountsPane";
 import { SyncPane } from "./SyncPane";
 import type { SyncPaneProps } from "./SyncPane";
 import { UpdatesPane } from "./UpdatesPane";
 import type { UpdatesPaneProps } from "./UpdatesPane";
 
 export type SyncTarget = "google" | "nas" | "none";
-export type SettingsPane = "general" | "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard" | "updates";
+export type SettingsPane = "general" | "account" | "sync" | "data" | "notifications" | "appearance" | "datetime" | "keyboard" | "updates" | "calendar";
 export type SettingsDialogProps = {
   open: boolean;
   initialTarget?: SyncTarget;
@@ -42,6 +43,8 @@ export type SettingsDialogProps = {
   datetimePane?: DateTimePaneProps;
   /** 「アップデート」ペイン (src/app/useUpdates.ts)。渡したときだけ左の一覧に「アップデート」が出る。 */
   updatesPane?: UpdatesPaneProps;
+  /** 「Google カレンダー」ペイン (spec 2026-11-27)。渡したときだけ左の一覧に出る。 */
+  calendarPane?: CalendarAccountsPaneProps;
 };
 
 type Icon = React.ComponentType<{ size?: number }>;
@@ -56,6 +59,7 @@ const navItems: { pane: SettingsPane; label: string; icon: Icon }[] = [
   { pane: "datetime", label: "日付と時刻", icon: Calendar },
   { pane: "keyboard", label: "キーボード", icon: Keyboard },
   { pane: "updates", label: "アップデート", icon: Download },
+  { pane: "calendar", label: "Google カレンダー", icon: Calendar },
 ];
 
 const titles: Record<SyncTarget, string> = { google: "Google Drive", nas: "Synology NAS (WebDAV)", none: "同期" };
@@ -92,6 +96,7 @@ export function SettingsDialog({
   notificationsPane,
   datetimePane,
   updatesPane,
+  calendarPane,
   generalPane,
 }: SettingsDialogProps) {
   const [pane, setPane] = useState<SettingsPane>(initialPane);
@@ -267,7 +272,7 @@ export function SettingsDialog({
               }}
             >
               <div style={{ fontSize: 16, lineHeight: "23px", fontWeight: 700, color: "var(--color-text-primary)" }}>設定</div>
-              {navItems.filter((n) => (n.pane !== "updates" || updatesPane) && (n.pane !== "general" || generalPane)).map(({ pane: p, label, icon: I }) => {
+              {navItems.filter((n) => (n.pane !== "updates" || updatesPane) && (n.pane !== "general" || generalPane) && (n.pane !== "calendar" || calendarPane)).map(({ pane: p, label, icon: I }) => {
                 const active = p === pane;
                 return (
                 <button
@@ -334,6 +339,7 @@ export function SettingsDialog({
               {pane === "datetime" && (datetimePane ? <DateTimePane {...datetimePane} /> : <LaterPane pane={pane} />)}
               {pane === "appearance" && <LaterPane pane={pane} />}
               {pane === "updates" && updatesPane && <UpdatesPane {...updatesPane} />}
+              {pane === "calendar" && calendarPane && <CalendarAccountsPane {...calendarPane} />}
             </div>
           </motion.div>
         </motion.div>

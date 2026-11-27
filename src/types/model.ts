@@ -173,6 +173,15 @@ export interface SyncRecoverDto { outcome: SyncRecoverOutcome; uploaded: number;
 /** `done`: ログインした。`cancelled`: 「キャンセル」を押した。`denied`: Google の画面で許可しなかった。後ろの二つは失敗ではない。 */
 export type GoogleLoginOutcome = "done" | "cancelled" | "denied";
 export interface GoogleLoginDto { outcome: GoogleLoginOutcome; }
+/** Google Calendar import (spec 2026-11-27): read-only. */
+export interface CalendarInfo { id: string; name: string; color?: string; primary: boolean; }
+export interface CalendarLink { account: string; calendarId: string; color: string; name: string; }
+/** One day of an event: a multi-day event is one per day. */
+export interface CalEvent { id: string; title: string; date: string; startTime?: string; endTime?: string; allDay: boolean; location?: string; /** The last day (inclusive) when the event ends on a later day than `date`. */ endDate?: string; /** The notes, as plain text. */ description?: string; /** The event's page in Google Calendar. */ link?: string; /** The video meeting. */ meet?: string; }
+/** An event with the calendar it comes from (its color and name). */
+export interface PlacedEvent extends CalEvent { color: string; calendar: string; }
+export interface ProjectEvents { events: PlacedEvent[]; needsLogin: boolean; error?: string; }
+export interface CalendarLoginDto { outcome: GoogleLoginOutcome; email?: string; }
 /** `revoked`: false のとき Google 側の取り消しはできなかった (この PC では、ログアウトは済んでいる)。`keychainFailed`: キーチェーンからトークンを消せなかった (Google 側で取り消し済みなので使えない)。 */
 export interface GoogleLogoutDto { revoked: boolean; keychainFailed: boolean; }
 

@@ -13,6 +13,8 @@ import { MobileShell } from "./MobileShell";
 import { SwipeRow } from "./SwipeRow";
 import { dayHeading } from "./mobileDates";
 import { arrangeFlat, type ArrangeCtx } from "../../app/view/arrange";
+import { CalendarEventsBlock } from "../../components/CalendarEventsBlock";
+import type { ShownEvent } from "../../app/calendarEvents";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { beforeKeyOf, reordered, sectionAt } from "./mobileReorder";
 import { reorderAttrs, useMobileReorder } from "./useMobileReorder";
@@ -53,10 +55,12 @@ export type MobileTodayProps = {
   arrangeCtx?: ArrangeCtx;
   /** 右上の「…」: 表示のシートを開く。省略すると「…」は出ない。 */
   onViewMenu?: () => void;
+  /** Today's Google Calendar events (spec 2026-11-27): shown above the day's tasks, display only. */
+  events?: ShownEvent[];
 };
 
 /** M-04: 今日 (ヘッダーに同期アイコンなし)。期限切れ (再スケジュール付き) + 今日。pen のとおりチェックの色は全行 priority-4。 */
-export function MobileToday({ overdue, todays, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, initialScrollTop, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onReorderToday, view, arrangeCtx, onViewMenu }: MobileTodayProps) {
+export function MobileToday({ overdue, todays, today, live, fill, rowContext, onToggleDone, onOpenTask, onFab, initialScrollTop, onReschedule, onTabChange, overlay, banner, onRefresh, onSwipeDate, onTaskMenu, onReorderToday, view, arrangeCtx, onViewMenu, events = [] }: MobileTodayProps) {
   const local = useDone();
   const leave = useLeaving([...overdue, ...todays]);
   const isDone = (t: Task) => (live ? t.progress === 100 || leave.isLeaving(t) : local.isDone(t));
@@ -182,10 +186,11 @@ export function MobileToday({ overdue, todays, today, live, fill, rowContext, on
             <div {...(reordering ? reorderAttrs({ kind: "header", section: "today" }) : {})}>
               <SectionHeader mobile tight={live && overdueShown.length === 0} title={dayHeading(today, today)} />
             </div>
+            <CalendarEventsBlock events={events} today={today} variant="mobile" showProject />
             {list("today", todayShown, { project: true, date: false })}
           </section>
         )}
-        {live && shownCount === 0 && hidden === 0 && (
+        {live && shownCount === 0 && hidden === 0 && events.length === 0 && (
           <div style={{ padding: "var(--space-6) 0", textAlign: "center", fontSize: 14, color: "var(--color-text-secondary)" }}>今日のタスクはありません</div>
         )}
         {live && hidden > 0 && (
