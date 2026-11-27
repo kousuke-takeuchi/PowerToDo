@@ -176,7 +176,7 @@ pub fn local_timestamp(at: NaiveDateTime) -> Option<i64> {
 /// (in Japan, 9 hours), and one less than 9 hours ahead is refused as "in the past" and never scheduled.
 /// `None` for a time that does not exist (a DST gap).
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))] // iOS only; tested everywhere
-fn plugin_schedule_date(at: NaiveDateTime) -> Option<time::OffsetDateTime> {
+pub(crate) fn plugin_schedule_date(at: NaiveDateTime) -> Option<time::OffsetDateTime> {
     local_timestamp(at)?;
     time::OffsetDateTime::from_unix_timestamp(at.and_utc().timestamp()).ok()
 }

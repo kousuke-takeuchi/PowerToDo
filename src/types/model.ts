@@ -181,6 +181,7 @@ export interface CalEvent { id: string; title: string; date: string; startTime?:
 /** An event with the calendar it comes from (its color and name). */
 export interface PlacedEvent extends CalEvent { color: string; calendar: string; }
 export interface ProjectEvents { events: PlacedEvent[]; needsLogin: boolean; error?: string; }
+export interface NotificationCheckDto { supported: boolean; permission: "granted" | "denied" | "prompt"; scheduled: number; titles: string[]; error?: string; }
 export interface CalendarLoginDto { outcome: GoogleLoginOutcome; email?: string; }
 /** `revoked`: false のとき Google 側の取り消しはできなかった (この PC では、ログアウトは済んでいる)。`keychainFailed`: キーチェーンからトークンを消せなかった (Google 側で取り消し済みなので使えない)。 */
 export interface GoogleLogoutDto { revoked: boolean; keychainFailed: boolean; }
