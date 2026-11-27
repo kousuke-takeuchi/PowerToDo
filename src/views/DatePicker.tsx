@@ -7,6 +7,7 @@ import type { DueTextDto } from "../types/model";
 import { DueParserContext } from "./DueParserContext";
 import { TODAY, addDays, dateLabel, weekdayIndex, weekdayShort } from "../mock/data";
 import { PopRow, PopoverShell } from "./PopoverShell";
+import { TimeSelect } from "../components/TimeSelect";
 import { quickDates } from "./quickDates";
 
 export type DatePickerProps = {
@@ -241,24 +242,7 @@ export function DatePicker({ value, time, onChange, onDone, onOpenRecurrence, re
         <>
           <PopRow icon={<Clock3 size={16} />} borderTop>
             <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>時刻</span>
-            <input
-              type="time"
-              aria-label="時刻"
-              value={time ?? ""}
-              onChange={(e) => setTime(e.target.value || undefined)}
-              style={{ ...small(time ? "var(--color-text-primary)" : "var(--color-text-muted)"), border: "1px solid var(--color-border)", borderRadius: 6, padding: "2px 6px", background: "var(--color-bg)", fontFamily: "var(--font-body)" }}
-            />
-            {time && (
-              <button
-                type="button"
-                aria-label="時刻を外す"
-                onClick={() => setTime(undefined)}
-                className="bg-transparent hover:bg-[var(--color-bg-hover)]"
-                style={{ ...small("var(--color-text-secondary)"), border: 0, borderRadius: 6, padding: "2px 6px", cursor: "pointer", fontFamily: "var(--font-body)" }}
-              >
-                なし
-              </button>
-            )}
+            <TimeSelect value={time} onChange={setTime} size={13} height={28} />
           </PopRow>
           <PopRow icon={<Repeat size={16} />} onClick={onOpenRecurrence}>
             <span style={{ ...small("var(--color-text-primary)"), flex: 1 }}>繰り返し</span>

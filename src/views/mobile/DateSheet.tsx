@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Ban, Calendar, CalendarPlus, CalendarSearch, Clock3, Sofa, Sun } from "lucide-react";
 import { TODAY, weekdayShort } from "../../mock/data";
 import { DatePicker } from "../DatePicker";
+import { TimeSelect } from "../../components/TimeSelect";
 import { quickDates } from "../quickDates";
 import { SheetCard, SheetRow } from "./BottomSheet";
 
@@ -53,20 +54,13 @@ export function DateSheet({ value, time, today = TODAY, onChange, onClose, dateO
       {!dateOnly && (
         // Spec 2026-11-24: the time, with the iPhone's own wheel (input type=time). A time without a date is for today.
         <SheetCard label="時刻">
-          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", minHeight: 48, padding: "0 16px", fontSize: 16, lineHeight: "22px", color: "var(--color-text-primary)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", minHeight: 48, padding: "0 16px", fontSize: 16, lineHeight: "22px", color: "var(--color-text-primary)" }}>
             <span style={{ display: "inline-flex", color: "var(--color-text-secondary)" }}>
               <Clock3 size={18} />
             </span>
             <span style={{ flex: 1 }}>時刻</span>
-            <input
-              type="time"
-              aria-label="時刻"
-              value={time ?? ""}
-              onChange={(e) => onChange(e.target.value ? { date: value ?? today, time: e.target.value } : { date: value })}
-              style={{ minWidth: 96, border: 0, background: "none", fontFamily: "var(--font-body)", fontSize: 16, color: time ? "var(--color-text-primary)" : "var(--color-text-muted)", textAlign: "right" }}
-            />
-          </label>
-          {time && <SheetRow label="時刻なし" onClick={() => onChange({ date: value })} />}
+            <TimeSelect value={time} size={16} height={36} onChange={(t) => onChange(t ? { date: value ?? today, time: t } : { date: value })} />
+          </div>
         </SheetCard>
       )}
       {calendar && (
