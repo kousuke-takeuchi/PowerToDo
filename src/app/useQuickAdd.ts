@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import type { QuickAddPlace, QuickAddResult } from "../types/model";
 import { spansToTokens } from "./quickAddTokens";
+import { remindersWithTime } from "./autoReminder";
 import type { useProject } from "./useProject";
 
 type Flash = { text: string; tone: "error" | "info" };
@@ -14,10 +15,13 @@ export function useQuickAdd({
   p,
   current,
   setFlash,
+  autoReminder,
 }: {
   p: ReturnType<typeof useProject>;
   current: string;
   setFlash: (flash: Flash) => void;
+  /** iPhone: a task added with a time gets 「時刻ちょうど」 unless reminders were picked (spec 2026-11-27). */
+  autoReminder?: boolean;
 }) {
   const [qa, setQa] = useState<QuickAddState>(QA_CLOSED);
   // No argument: it is passed straight as a click handler.
@@ -53,7 +57,7 @@ export function useQuickAdd({
     setQa((s) => ({ ...s, busy: true, error: undefined }));
     try {
       const out = await p.quickAdd(text, qa.place);
-      const reminders = qa.reminders;
+      const reminders = qa.reminders.length > 0 ? qa.reminders : autoReminder ? (remindersWithTime([], out.parsed.dueTime) ?? []) : [];
       setQa(QA_CLOSED);
       if (reminders.length > 0) {
         // 追加は済んでいる。リマインダーだけ失敗したら知らせる (タスクは残る)。
