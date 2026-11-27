@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { layoutFor } from "./shellLayout";
+import { nowTime } from "../views/dueLabel";
 
 /** Local calendar date as YYYY-MM-DD. */
 export function localYmd(d: Date = new Date()): string {
@@ -47,4 +48,21 @@ export function useShellWidth(): 1440 | 960 {
     return () => window.removeEventListener("resize", onResize);
   }, []);
   return width;
+}
+
+/** The device's time as HH:MM, refreshed every minute (rows with today's time turn red once it has passed). */
+export function useNowTime(): string {
+  const [now, setNow] = useState(() => nowTime());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(nowTime()), 30_000);
+    const refresh = () => setNow(nowTime());
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+  return now;
 }

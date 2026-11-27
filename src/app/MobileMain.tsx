@@ -30,7 +30,7 @@ import { MobileToast } from "../components/MobileToast";
 import { pushUndo, undoSteps, undoText, type MobileUndo } from "./mobileUndo";
 import { completedOf } from "./completionToast";
 import { dateLabel } from "../mock/data";
-import { useToday } from "./hooks";
+import { useNowTime, useToday } from "./hooks";
 import { heldFileName, useExternalChanges, useExternalReadFailures } from "./useExternalChanges";
 import { useCrossViews } from "./useCrossViews";
 import { useProject } from "./useProject";
@@ -86,6 +86,7 @@ export function MobileMain(props: { app: AppStateDto; syncConflicts: SyncConflic
 function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app: AppStateDto; syncConflicts: SyncConflicts; drawerOpen: boolean; setDrawerOpen: (open: boolean) => void }) {
   useSystemTheme();
   const today = useToday();
+  useNowTime(); // re-render each minute so today's passed times turn red
   const { errors: saveErrors } = useSaveErrors();
 
   // 画面: 下のタブと「閲覧」の中の画面の積み重ね (spec ④ iPhone §3.1-3.2)。起動直後は設定の「起動時に開く画面」(既定は今日)。

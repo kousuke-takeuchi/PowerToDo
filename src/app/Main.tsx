@@ -37,7 +37,7 @@ import { useAttachmentCounts, useAttachmentEnv, useNoteFiles } from "./useAttach
 import { useRefuseStrayFileDrops } from "./useFileDrop";
 import { TodayView } from "../views/TodayView";
 import { UpcomingView } from "../views/UpcomingView";
-import { useShellWidth, useToday } from "./hooks";
+import { useNowTime, useShellWidth, useToday } from "./hooks";
 import { Banners } from "./Banners";
 import { usePlatform } from "./platform";
 import { setEscFallback, useEscLayer } from "./layers";
@@ -72,6 +72,7 @@ const LABEL_PALETTE = [DEFAULT_LABEL_COLOR, ...PALETTE];
 /** 通常画面: AppShell + Sidebar + プロジェクト画面 + クイック追加 + タスク詳細 + 保存失敗の帯。 */
 export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: SyncConflicts }) {
   const today = useToday();
+  useNowTime(); // re-render each minute so today's passed times turn red
   const width = useShellWidth();
   const viewStore = useViewOptionsStore();
   const { errors: saveErrors, clear: clearSaveErrors } = useSaveErrors();
