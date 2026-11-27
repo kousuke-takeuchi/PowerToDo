@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { calendarProblems, eventDays, eventTimeLabel, eventsOn } from "./calendarEvents.ts";
 import type { ProjectEvents } from "../types/model.ts";
 
-const ev = (id: string, date: string, startTime?: string, endTime?: string) => ({ id, title: id, date, startTime, endTime, allDay: startTime === undefined });
+const ev = (id: string, date: string, startTime?: string, endTime?: string, color = "#16a765") => ({ id, title: id, date, startTime, endTime, allDay: startTime === undefined, color, calendar: "c" });
 const map: Record<string, ProjectEvents> = {
-  仕事: { events: [ev("late", "2026-11-30", "15:00", "16:00"), ev("allday", "2026-11-30"), ev("next", "2026-12-01", "09:00")], color: "#16a765", name: "仕事", needsLogin: false },
-  家: { events: [ev("early", "2026-11-30", "08:30")], color: "#f00", name: "家", needsLogin: true },
+  仕事: { events: [ev("late", "2026-11-30", "15:00", "16:00"), ev("allday", "2026-11-30"), ev("next", "2026-12-01", "09:00")], needsLogin: false },
+  家: { events: [ev("early", "2026-11-30", "08:30", undefined, "#f00")], needsLogin: true },
 };
 
 test("a day's events: all-day first, then by time, with the project and color", () => {
@@ -28,6 +28,6 @@ test("time labels", () => {
   assert.equal(eventTimeLabel(ev("a", "d", "09:00", "09:00")), "9:00");
 });
 test("problems: a missing login and a failed fetch", () => {
-  const p = calendarProblems({ ...map, 趣味: { events: [], color: "", name: "", needsLogin: false, error: "オフラインです" } });
+  const p = calendarProblems({ ...map, 趣味: { events: [], needsLogin: false, error: "オフラインです" } });
   assert.deepEqual(p.map((x) => x.project), ["家", "趣味"]);
 });

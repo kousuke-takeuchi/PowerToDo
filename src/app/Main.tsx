@@ -1126,7 +1126,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         today={today}
         busy={search.busy}
       />
-      {calendarFor !== null && <CalendarDialogHost project={calendarFor} current={cal.links[calendarFor] ?? null} onChanged={() => void cal.refresh(true)} onClose={() => setCalendarFor(null)} />}
+      {calendarFor !== null && <CalendarDialogHost project={calendarFor} current={cal.links[calendarFor] ?? []} onChanged={() => void cal.refresh(true)} onClose={() => setCalendarFor(null)} />}
       {/* 閉じるアニメーションのため常にマウントし open で出し入れする (閉じたときの初期化は SettingsDialog 側) */}
       <SettingsDialog
         open={settingsOpen}

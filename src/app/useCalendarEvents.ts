@@ -17,7 +17,7 @@ function plusDays(ymd: string, days: number): string {
  */
 export function useCalendarEvents(today: string, days = 91, enabled = true) {
   const [events, setEvents] = useState<Record<string, ProjectEvents>>({});
-  const [links, setLinks] = useState<Record<string, CalendarLink>>({});
+  const [links, setLinks] = useState<Record<string, CalendarLink[]>>({});
   const seq = useRef(0);
   const refresh = useCallback(
     async (force = false) => {

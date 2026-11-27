@@ -34,7 +34,7 @@ import type { ViewOptions } from "../../app/view/viewOptions";
 import { TodayView } from "../../views/TodayView";
 import { UpcomingView } from "../../views/UpcomingView";
 import { CalendarDialog } from "../../views/CalendarDialog";
-import { calendarEvents, calendarLink, chooserStub } from "../../mock/calendar";
+import { calendarEvents, chooserStub } from "../../mock/calendar";
 
 const meta = {
   title: "Screens/Desktop",
@@ -77,7 +77,7 @@ export const D15Dialog: Story = {
   render: () => (
     <>
       <Screen today={TODAY} calendarEvents={calendarEvents} />
-      <CalendarDialog project="買い物" chooser={chooserStub("me@example.com")} current={calendarLink} onClose={() => undefined} />
+      <CalendarDialog project="買い物" chooser={chooserStub("me@example.com")} onClose={() => undefined} />
     </>
   ),
 };

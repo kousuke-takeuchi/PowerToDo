@@ -562,7 +562,7 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen }: { app:
           />
         )}
         {projectSheet === "calendar" && (
-          <CalendarSheetHost project={navCurrent} current={cal.links[navCurrent] ?? null} onChanged={() => void cal.refresh(true)} onClose={() => setProjectSheet(null)} />
+          <CalendarSheetHost project={navCurrent} current={cal.links[navCurrent] ?? []} onChanged={() => void cal.refresh(true)} />
         )}
         {projectSheet === "section" && (
           <TextSheet

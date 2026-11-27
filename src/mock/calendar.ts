@@ -16,7 +16,10 @@ export const calendarList: CalendarInfo[] = [
   { id: "work", name: "仕事", color: "#f4511e", primary: false },
 ];
 
-export const calendarLink: CalendarLink = { account: "me@example.com", calendarId: "family", color: "#16a765", name: "家族" };
+export const calendarLinks: CalendarLink[] = [
+  { account: "me@example.com", calendarId: "family", color: "#16a765", name: "家族" },
+  { account: "work@example.com", calendarId: "team", color: "#f4511e", name: "チームの予定" },
+];
 
 const noop = () => undefined;
 
@@ -28,7 +31,8 @@ export const chooserStub = (account: string | null): CalendarChooserApi => ({
   calendars: account ? calendarList : null,
   busy: false,
   error: null,
+  selected: calendarLinks,
   addAccount: async () => undefined,
-  pick: async () => true,
-  clear: async () => true,
+  toggle: async () => true,
+  remove: async () => true,
 });

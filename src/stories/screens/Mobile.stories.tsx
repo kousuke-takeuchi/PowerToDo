@@ -23,7 +23,7 @@ import { MobileDrawer, MobileMenuContext } from "../../views/mobile/MobileDrawer
 import { ViewSheet } from "../../views/mobile/ViewSheet";
 import { DEFAULTS, type ViewOptions } from "../../app/view/viewOptions";
 import { CalendarSheet } from "../../views/mobile/CalendarSheet";
-import { calendarEvents, calendarLink, chooserStub } from "../../mock/calendar";
+import { calendarEvents, chooserStub } from "../../mock/calendar";
 
 // 幅 390x844。ビューポートは .storybook/preview.ts の viewport.options の "mobile" を、Story 単位の globals で選ぶ
 // (Storybook 10 の viewport は parameters.viewport.defaultViewport ではなく globals.viewport.value)。
@@ -564,7 +564,7 @@ export const M14: Story = {
       today={TODAY}
       overlay={
         <BottomSheet open size="large" title="Google カレンダー" onClose={() => undefined}>
-          <CalendarSheet chooser={chooserStub(null)} current={calendarLink} onClose={() => undefined} />
+          <CalendarSheet chooser={chooserStub(null)} />
         </BottomSheet>
       }
     />
@@ -584,7 +584,7 @@ export const M14Calendars: Story = {
       today={TODAY}
       overlay={
         <BottomSheet open size="large" title="Google カレンダー" onClose={() => undefined}>
-          <CalendarSheet chooser={chooserStub("me@example.com")} current={calendarLink} onClose={() => undefined} />
+          <CalendarSheet chooser={chooserStub("me@example.com")} />
         </BottomSheet>
       }
     />

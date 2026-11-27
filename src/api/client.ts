@@ -201,8 +201,9 @@ export const api = {
   calendarLogin: () => invoke<CalendarLoginDto>("calendar_login"),
   calendarLogout: (email: string) => invoke<{ revoked: boolean }>("calendar_logout", { email }),
   calendarCalendars: (email: string) => invoke<CalendarInfo[]>("calendar_calendars", { email }),
-  calendarLinks: () => invoke<Record<string, CalendarLink>>("calendar_links"),
-  calendarSetLink: (project: string, link: CalendarLink | null) => invoke<null>("calendar_set_link", { project, link }),
+  calendarLinks: () => invoke<Record<string, CalendarLink[]>>("calendar_links"),
+  /** The calendars a project shows (several, of several accounts); empty takes them all off. */
+  calendarSetLinks: (project: string, links: CalendarLink[]) => invoke<null>("calendar_set_links", { project, links }),
   calendarEvents: (from: string, to: string, force: boolean) => invoke<Record<string, ProjectEvents>>("calendar_events", { from, to, force }),
   /** 「キャンセル」 while `googleLogin` waits. Does nothing when none waits. */
   googleLoginCancel: () => invoke<null>("google_login_cancel"),

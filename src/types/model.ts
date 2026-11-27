@@ -178,7 +178,9 @@ export interface CalendarInfo { id: string; name: string; color?: string; primar
 export interface CalendarLink { account: string; calendarId: string; color: string; name: string; }
 /** One day of an event: a multi-day event is one per day. */
 export interface CalEvent { id: string; title: string; date: string; startTime?: string; endTime?: string; allDay: boolean; location?: string; }
-export interface ProjectEvents { events: CalEvent[]; color: string; name: string; needsLogin: boolean; error?: string; }
+/** An event with the calendar it comes from (its color and name). */
+export interface PlacedEvent extends CalEvent { color: string; calendar: string; }
+export interface ProjectEvents { events: PlacedEvent[]; needsLogin: boolean; error?: string; }
 export interface CalendarLoginDto { outcome: GoogleLoginOutcome; email?: string; }
 /** `revoked`: false のとき Google 側の取り消しはできなかった (この PC では、ログアウトは済んでいる)。`keychainFailed`: キーチェーンからトークンを消せなかった (Google 側で取り消し済みなので使えない)。 */
 export interface GoogleLogoutDto { revoked: boolean; keychainFailed: boolean; }
