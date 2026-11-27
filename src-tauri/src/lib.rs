@@ -232,7 +232,7 @@ pub fn run() {
             commands::calendar::calendar_logout,
             commands::calendar::calendar_calendars,
             commands::calendar::calendar_links,
-            commands::calendar::calendar_set_link,
+            commands::calendar::calendar_set_links,
             commands::calendar::calendar_events,
             commands::sync::google_logout,
             commands::update::update_status,

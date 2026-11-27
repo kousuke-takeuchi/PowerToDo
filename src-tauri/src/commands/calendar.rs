@@ -15,7 +15,6 @@ use super::sync::{blocking, oauth_error, production_oauth, revoke_unused};
 use super::{AppState, mutate, with_store};
 use crate::calendar::file::{CalendarFile, is_fresh};
 use crate::calendar::http::{CalError, CalendarApi};
-use crate::calendar::parse::sort_and_window;
 use crate::calendar::{CalEvent, CalendarInfo};
 use crate::error::{AppError, AppResult};
 use crate::store::calendar_link::CalendarLink;
@@ -273,41 +272,49 @@ pub async fn calendar_calendars(email: String, app: AppHandle) -> AppResult<Vec<
 #[tauri::command]
 pub async fn calendar_links(
     state: State<'_, AppState>,
-) -> AppResult<BTreeMap<String, CalendarLink>> {
+) -> AppResult<BTreeMap<String, Vec<CalendarLink>>> {
     with_store(state.inner(), |s| Ok(s.calendar_links()))
 }
 
-/// Chooses the calendar a project shows; `None` takes it off.
+/// Chooses the calendars a project shows (several, of several accounts); an empty list takes them all off.
 #[tauri::command]
-pub async fn calendar_set_link(
+pub async fn calendar_set_links(
     project: String,
-    link: Option<CalendarLink>,
+    links: Vec<CalendarLink>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     mutate(&app, state.inner(), &[], true, |s| {
-        s.set_calendar_link(&project, link.as_ref())
+        s.set_calendar_links(&project, &links)
     })
 }
 
 // ---- events ----
 
+/// An event with the calendar it comes from (its color and name), for the rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlacedEvent {
+    #[serde(flatten)]
+    pub event: CalEvent,
+    pub color: String,
+    pub calendar: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectEvents {
-    pub events: Vec<CalEvent>,
-    /// The calendar's color and name (from the link), for the rows.
-    pub color: String,
-    pub name: String,
-    /// This device is not logged in to the calendar's account: the row says 「ログインが必要です」.
+    /// The events of all the project's calendars, by date, then all-day first, then by start time.
+    pub events: Vec<PlacedEvent>,
+    /// This device is not logged in to the account of one of the calendars: the project says 「ログインが必要です」.
     pub needs_login: bool,
-    /// Why the last fetch failed (the events shown are the earlier ones, or none).
+    /// Why the last fetch of a calendar failed (the events shown are the earlier ones, or none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// The events of `[from, to]` (`YYYY-MM-DD`) of every project that has a calendar. A calendar fetched less than five
-/// minutes ago is not fetched again unless `force`; an account that fails fails only its own projects.
+/// The events of `[from, to]` (`YYYY-MM-DD`) of every project that has calendars. A calendar fetched less than five
+/// minutes ago is not fetched again unless `force`; an account that fails fails only its own calendars.
 #[tauri::command]
 pub async fn calendar_events(
     from: String,
@@ -330,7 +337,7 @@ pub async fn calendar_events(
     // One fetch per (account, calendar), however many projects share it.
     let mut errors: BTreeMap<(String, String), String> = BTreeMap::new();
     let mut fetched_any = false;
-    for link in links.values() {
+    for link in links.values().flatten() {
         let key = (link.account.clone(), link.calendar_id.clone());
         if errors.contains_key(&key) || !file.accounts.contains(&link.account) {
             continue;
@@ -366,22 +373,45 @@ pub async fn calendar_events(
         update_file(&dir, move |f| f.cache.extend(cache))?;
     }
     let mut out = BTreeMap::new();
-    for (project, link) in links {
-        let logged_in = file.accounts.contains(&link.account);
-        let events = file
-            .get(&link.account, &link.calendar_id)
-            .map(|e| sort_and_window(e.events.clone(), from, to))
-            .unwrap_or_default();
+    for (project, project_links) in links {
+        let mut events = Vec::new();
+        let mut needs_login = false;
+        let mut failures: Vec<String> = Vec::new();
+        for link in &project_links {
+            if !file.accounts.contains(&link.account) {
+                needs_login = true;
+            }
+            if let Some(e) = file.get(&link.account, &link.calendar_id) {
+                events.extend(e.events.iter().cloned().map(|event| PlacedEvent {
+                    event,
+                    color: link.color.clone(),
+                    calendar: link.name.clone(),
+                }));
+            }
+            if let Some(msg) = errors.get(&(link.account.clone(), link.calendar_id.clone()))
+                && !failures.contains(msg)
+            {
+                failures.push(msg.clone());
+            }
+        }
+        events.sort_by(|a, b| {
+            let key = |p: &PlacedEvent| {
+                (
+                    p.event.date,
+                    !p.event.all_day,
+                    p.event.start_time.clone(),
+                    p.event.title.clone(),
+                )
+            };
+            key(a).cmp(&key(b))
+        });
+        events.retain(|p| p.event.date >= from && p.event.date <= to);
         out.insert(
             project,
             ProjectEvents {
                 events,
-                color: link.color.clone(),
-                name: link.name.clone(),
-                needs_login: !logged_in,
-                error: errors
-                    .get(&(link.account.clone(), link.calendar_id.clone()))
-                    .cloned(),
+                needs_login,
+                error: (!failures.is_empty()).then(|| failures.join(" / ")),
             },
         );
     }

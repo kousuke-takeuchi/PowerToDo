@@ -115,20 +115,6 @@ pub fn parse_events(
     out
 }
 
-/// The events of `[from, to]` (inclusive), by date, then all-day first, then by start time.
-pub fn sort_and_window(mut events: Vec<CalEvent>, from: NaiveDate, to: NaiveDate) -> Vec<CalEvent> {
-    events.retain(|e| e.date >= from && e.date <= to);
-    events.sort_by(|a, b| {
-        (a.date, !a.all_day, a.start_time.clone(), a.title.clone()).cmp(&(
-            b.date,
-            !b.all_day,
-            b.start_time.clone(),
-            b.title.clone(),
-        ))
-    });
-    events
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,32 +203,5 @@ mod tests {
         let e = parse_events(&j, same);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].title, "(タイトルなし)");
-    }
-
-    #[test]
-    fn the_window_keeps_the_range_and_sorts_all_day_first_then_by_time() {
-        let mk = |id: &str, date: &str, start: Option<&str>| CalEvent {
-            id: id.into(),
-            title: id.into(),
-            date: d(date),
-            start_time: start.map(Into::into),
-            end_time: None,
-            all_day: start.is_none(),
-            location: None,
-        };
-        let l = sort_and_window(
-            vec![
-                mk("late", "2026-12-01", Some("15:00")),
-                mk("old", "2026-11-01", None),
-                mk("allday", "2026-12-01", None),
-                mk("early", "2026-12-01", Some("09:00")),
-            ],
-            d("2026-11-30"),
-            d("2026-12-31"),
-        );
-        assert_eq!(
-            l.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
-            ["allday", "early", "late"]
-        );
     }
 }

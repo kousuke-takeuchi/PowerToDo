@@ -1,6 +1,7 @@
-//! Spec 2026-11-27: which Google calendar a project shows, as `カレンダー:<project>` rows of the common book's
+//! Spec 2026-11-27: which Google calendars a project shows, as `カレンダー:<project>` rows of the common book's
 //! 設定 sheet (like the 表示 rows: they round-trip, sync per key, and an old build keeps what it does not know).
-//! The value is `<e-mail>|<calendar id>|<color>|<name>`; the name comes last, so it may hold a `|`.
+//! The value has one line per calendar, each `<e-mail>|<calendar id>|<color>|<name>` (several calendars, of several
+//! accounts, may be shown in one project); the name comes last, so it may hold a `|`.
 
 use std::collections::BTreeMap;
 
@@ -44,38 +45,41 @@ impl CalendarLink {
 }
 
 impl ProjectStore {
-    /// Project name to its calendar. A row that cannot be read is left out (and stays in the file).
-    pub fn calendar_links(&self) -> BTreeMap<String, CalendarLink> {
+    /// Project name to its calendars, in the order chosen. A line that cannot be read is left out (it goes when the row is
+    /// written again); a project with no readable line is left out.
+    pub fn calendar_links(&self) -> BTreeMap<String, Vec<CalendarLink>> {
         self.common
             .extra_settings
             .iter()
             .filter_map(|(k, v)| {
-                Some((
-                    k.strip_prefix(PREFIX)?.to_string(),
-                    CalendarLink::decode(v)?,
-                ))
+                let project = k.strip_prefix(PREFIX)?.to_string();
+                let links: Vec<CalendarLink> = v.lines().filter_map(CalendarLink::decode).collect();
+                (!links.is_empty()).then_some((project, links))
             })
             .collect()
     }
 
-    /// `None` takes the calendar off the project.
-    pub fn set_calendar_link(
-        &mut self,
-        project: &str,
-        link: Option<&CalendarLink>,
-    ) -> AppResult<()> {
+    /// Sets the calendars of a project; an empty list takes them all off. The same calendar twice is kept once.
+    pub fn set_calendar_links(&mut self, project: &str, links: &[CalendarLink]) -> AppResult<()> {
         if !self.common.projects.iter().any(|p| p.name == project) {
             return Err(invalid(format!("プロジェクトがありません: {project}")));
         }
         let key = format!("{PREFIX}{project}");
+        let mut seen = std::collections::BTreeSet::new();
+        let value = links
+            .iter()
+            .filter(|l| seen.insert((l.account.clone(), l.calendar_id.clone())))
+            .map(CalendarLink::encode)
+            .collect::<Vec<_>>()
+            .join("\n");
         let rows = &mut self.common.extra_settings;
-        match (rows.iter().position(|(k, _)| *k == key), link) {
-            (Some(i), Some(l)) => rows[i].1 = l.encode(),
-            (Some(i), None) => {
+        match (rows.iter().position(|(k, _)| *k == key), value.is_empty()) {
+            (Some(i), false) => rows[i].1 = value,
+            (Some(i), true) => {
                 rows.remove(i);
             }
-            (None, Some(l)) => rows.push((key, l.encode())),
-            (None, None) => return Ok(()),
+            (None, false) => rows.push((key, value)),
+            (None, true) => return Ok(()),
         }
         self.common_dirty = true;
         Ok(())
@@ -112,13 +116,55 @@ mod tests {
         let data = dir.path().join("data");
         let mut s = open_at(&data);
         s.create_project("仕事", "var(--color-priority-2)").unwrap();
-        s.set_calendar_link("仕事", Some(&link("a@x.com"))).unwrap();
-        s.set_calendar_link("仕事", Some(&link("b@x.com"))).unwrap();
+        s.set_calendar_links("仕事", &[link("a@x.com")]).unwrap();
+        s.set_calendar_links("仕事", &[link("b@x.com")]).unwrap();
         s.save_common().unwrap();
-        assert_eq!(open_at(&data).calendar_links()["仕事"].account, "b@x.com");
-        s.set_calendar_link("仕事", None).unwrap();
+        assert_eq!(
+            open_at(&data).calendar_links()["仕事"][0].account,
+            "b@x.com"
+        );
+        s.set_calendar_links("仕事", &[]).unwrap();
         assert!(s.calendar_links().is_empty());
-        assert!(s.set_calendar_link("ない", Some(&link("a@x.com"))).is_err());
+        assert!(s.set_calendar_links("ない", &[link("a@x.com")]).is_err());
+    }
+
+    #[test]
+    fn a_project_keeps_several_calendars_in_order_and_drops_a_repeat() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let mut s = open_at(&data);
+        s.create_project("仕事", "var(--color-priority-2)").unwrap();
+        let other = CalendarLink {
+            calendar_id: "work".into(),
+            name: "仕事 | 共有".into(),
+            ..link("b@x.com")
+        };
+        s.set_calendar_links("仕事", &[link("a@x.com"), other.clone(), link("a@x.com")])
+            .unwrap();
+        s.save_common().unwrap();
+        let got = open_at(&data).calendar_links().remove("仕事").unwrap();
+        assert_eq!(got, [link("a@x.com"), other]);
+    }
+
+    #[test]
+    fn an_unreadable_line_is_skipped_and_a_row_without_a_readable_line_is_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = open_at(&dir.path().join("data"));
+        s.create_project("仕事", "var(--color-priority-2)").unwrap();
+        s.set_calendar_links("仕事", &[link("a@x.com")]).unwrap();
+        s.common
+            .extra_settings
+            .push(("カレンダー:仕事2".into(), "壊れた".into()));
+        s.common
+            .extra_settings
+            .iter_mut()
+            .find(|(k, _)| k == "カレンダー:仕事")
+            .unwrap()
+            .1
+            .push_str("\nゴミ");
+        let links = s.calendar_links();
+        assert_eq!(links["仕事"].len(), 1);
+        assert!(!links.contains_key("仕事2"));
     }
 
     #[test]
@@ -126,7 +172,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = open_at(&dir.path().join("data"));
         s.create_project("仕事", "var(--color-priority-2)").unwrap();
-        s.set_calendar_link("仕事", Some(&link("a@x.com"))).unwrap();
+        s.set_calendar_links("仕事", &[link("a@x.com")]).unwrap();
         s.rename_project("仕事", "会社").unwrap();
         assert_eq!(s.calendar_links().keys().collect::<Vec<_>>(), ["会社"]);
         s.delete_project("会社").unwrap();
