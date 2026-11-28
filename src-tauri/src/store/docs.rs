@@ -211,6 +211,8 @@ fn some_nullable<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option
 pub enum Saved {
     Written(Doc),
     Conflict { doc: Doc, copy: Doc },
+    /// The document was archived or deleted meanwhile; the edit became a new document.
+    Recreated { copy: Doc },
 }
 
 fn path(paths: &Paths, project: &str, id: &str) -> AppResult<PathBuf> {
@@ -328,6 +330,7 @@ pub fn conflict_copy(
 
 /// Applies `edit` when the file is still the version the screen read (`base_updated`); otherwise the
 /// file stays and the screen's version becomes a conflict copy (spec: an outside change while editing).
+/// When the file is gone (archived or deleted meanwhile), the edit alone becomes a new conflict-titled document.
 #[allow(clippy::too_many_arguments)]
 pub fn save(
     paths: &Paths,
@@ -339,7 +342,28 @@ pub fn save(
     now: DateTime<FixedOffset>,
     now_ms: u64,
 ) -> AppResult<Saved> {
-    let current = read(paths, project, id)?;
+    let current = match read(paths, project, id) {
+        Ok(d) => d,
+        Err(AppError::NotFound { .. }) => {
+            let title = edit.title.as_deref().map(str::trim).unwrap_or("");
+            let lost = Doc {
+                id: id.to_string(),
+                project: project.to_string(),
+                title: if title.is_empty() { UNTITLED.to_string() } else { title.to_string() },
+                section: edit.section.flatten().filter(|s| !s.is_empty()),
+                created: stamp(now),
+                updated: stamp(now),
+                author: author.to_string(),
+                files: edit.files.unwrap_or_default(),
+                body: edit.body.unwrap_or_default(),
+                extra: Vec::new(),
+                files_extra: Vec::new(),
+            };
+            let copy = conflict_copy(paths, project, &lost, now, now_ms)?;
+            return Ok(Saved::Recreated { copy });
+        }
+        Err(e) => return Err(e),
+    };
     let mut next = current.clone();
     if let Some(t) = edit.title {
         let t = t.trim();
@@ -388,28 +412,45 @@ pub fn archive(paths: &Paths, project: &str, id: Option<&str>, now: NaiveDateTim
     Ok(())
 }
 
+/// Keeps going past a failing file (logged) so one bad file does not leave the rest behind; returns the first error.
+fn first_error(first: &mut Option<AppError>, result: AppResult<()>, name: &str) {
+    if let Err(e) = result {
+        eprintln!("document {name} did not follow: {e}");
+        first.get_or_insert(e);
+    }
+}
+
 pub fn rename_project(paths: &Paths, from: &str, to: &str) -> AppResult<()> {
+    let mut first = None;
     for (pj, id, p) in files(paths)? {
         if pj == from {
-            std::fs::rename(&p, path(paths, to, &id)?)?;
+            let r = path(paths, to, &id).and_then(|dest| std::fs::rename(&p, dest).map_err(AppError::from));
+            first_error(&mut first, r, &id);
         }
     }
-    Ok(())
+    first.map_or(Ok(()), Err)
 }
 
 pub fn rename_section(paths: &Paths, project: &str, from: &str, to: &str, now: DateTime<FixedOffset>) -> AppResult<()> {
+    if from == to {
+        return Ok(());
+    }
+    let mut first = None;
     for (pj, id, _) in files(paths)? {
         if pj != project {
             continue;
         }
-        let mut d = read(paths, &pj, &id)?;
-        if d.section.as_deref() == Some(from) {
-            d.section = Some(to.to_string());
-            d.updated = stamp(now);
-            write(paths, &d)?;
-        }
+        let r = read(paths, &pj, &id).and_then(|mut d| {
+            if d.section.as_deref() == Some(from) {
+                d.section = Some(to.to_string());
+                d.updated = stamp(now);
+                write(paths, &d)?;
+            }
+            Ok(())
+        });
+        first_error(&mut first, r, &id);
     }
-    Ok(())
+    first.map_or(Ok(()), Err)
 }
 
 #[cfg(test)]
@@ -618,5 +659,57 @@ mod tests {
         assert_eq!(e.section, None);
         let e: Edit = serde_json::from_str(r#"{"section":null}"#).unwrap();
         assert_eq!(e.section, Some(None));
+    }
+
+    #[test]
+    fn saving_a_document_archived_meanwhile_recreates_the_edit() {
+        let (_t, p) = dir();
+        let a = create(&p, "仕事", Some("在庫"), "計画", "古い\n", "たろう", at(10, 0), 1).unwrap();
+        archive(&p, "仕事", Some(&a.id), at(10, 30).naive_local()).unwrap();
+        let out = save(&p, "仕事", &a.id, &a.updated, Edit { body: Some("画面の変更\n".into()), ..Edit::default() }, "はなこ", at(10, 40), 2).unwrap();
+        let Saved::Recreated { copy } = out else { panic!("recreated expected") };
+        assert_eq!(copy.title, "無題 (競合 2026-11-28 1040)");
+        assert_eq!(copy.body, "画面の変更\n");
+        assert_eq!(copy.section, None);
+        assert_eq!(copy.author, "はなこ");
+        assert_ne!(copy.id, a.id);
+        let l = list(&p, "仕事").unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].id, copy.id);
+        assert_eq!(read(&p, "仕事", &copy.id).unwrap().body, "画面の変更\n");
+        let archived: Vec<_> = std::fs::read_dir(p.archive_dir()).unwrap().filter_map(Result::ok).collect();
+        assert_eq!(archived.len(), 1);
+        let kept = std::fs::read_to_string(archived[0].path()).unwrap();
+        assert!(kept.contains("古い\n") && !kept.contains("画面の変更"));
+        let json = serde_json::to_value(Saved::Recreated { copy }).unwrap();
+        assert_eq!(json["kind"], "recreated");
+    }
+
+    #[test]
+    fn saving_a_titled_edit_to_a_missing_document_keeps_its_title() {
+        let (_t, p) = dir();
+        let out = save(
+            &p,
+            "仕事",
+            ID,
+            "2026-11-28T10:00:00+09:00",
+            Edit { title: Some("計画".into()), section: Some(Some("在庫".into())), ..Edit::default() },
+            "はなこ",
+            at(10, 40),
+            2,
+        )
+        .unwrap();
+        let Saved::Recreated { copy } = out else { panic!("recreated expected") };
+        assert_eq!(copy.title, "計画 (競合 2026-11-28 1040)");
+        assert_eq!(copy.section.as_deref(), Some("在庫"));
+        assert_eq!(copy.body, "");
+    }
+
+    #[test]
+    fn renaming_a_section_to_itself_leaves_documents_alone() {
+        let (_t, p) = dir();
+        let a = create(&p, "仕事", Some("旧"), "a", "", "", at(10, 0), 1).unwrap();
+        rename_section(&p, "仕事", "旧", "旧", at(11, 0)).unwrap();
+        assert_eq!(read(&p, "仕事", &a.id).unwrap().updated, a.updated);
     }
 }

@@ -329,6 +329,13 @@ fn comments_follow(result: AppResult<()>) {
     }
 }
 
+/// Document files (`_docs/`) follow a project or section change the same way as comment files.
+fn docs_follow(result: AppResult<()>) {
+    if let Err(e) = result {
+        eprintln!("document files did not follow: {e}");
+    }
+}
+
 /// `<dir>/<stem> (<tag>).xlsx`, or `<stem> (<tag>-2).xlsx`, `-3`, … when that name is taken.
 fn free_archive_path(dir: &Path, stem: &str, tag: &str) -> PathBuf {
     let mut n = 1;
@@ -706,7 +713,7 @@ impl ProjectStore {
             std::fs::rename(&old_path, &new_path)?;
         }
         comments_follow(comments::rename_project(&self.paths, name, new_name));
-        comments_follow(crate::store::docs::rename_project(&self.paths, name, new_name));
+        docs_follow(crate::store::docs::rename_project(&self.paths, name, new_name));
         // The renamed file is the same file: carry over what we know about it.
         self.last_written.remove(name);
         self.record_written(new_name, &new_path);
@@ -861,7 +868,7 @@ impl ProjectStore {
             self.move_to_archive(&path, name)?;
         }
         comments_follow(comments::archive(&self.paths, name, None, self.now()));
-        comments_follow(crate::store::docs::archive(&self.paths, name, None, self.now()));
+        docs_follow(crate::store::docs::archive(&self.paths, name, None, self.now()));
         self.common.projects.retain(|p| p.name != name);
         self.common.project_extra.remove(name);
         self.books.remove(name);
@@ -1007,7 +1014,7 @@ impl ProjectStore {
             self.move_to_archive(&path, &key)?;
         }
         comments_follow(comments::archive(&self.paths, &key, None, self.now()));
-        comments_follow(crate::store::docs::archive(&self.paths, &key, None, self.now()));
+        docs_follow(crate::store::docs::archive(&self.paths, &key, None, self.now()));
         Ok(())
     }
 
@@ -1050,7 +1057,7 @@ impl ProjectStore {
             Ok(())
         })?;
         let now = chrono::Local::now().fixed_offset();
-        comments_follow(crate::store::docs::rename_section(&self.paths, project, name, &new_name, now));
+        docs_follow(crate::store::docs::rename_section(&self.paths, project, name, &new_name, now));
         self.view(project)
     }
 
