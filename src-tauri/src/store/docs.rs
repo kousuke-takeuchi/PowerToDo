@@ -1,7 +1,9 @@
 //! Project documents (spec project docs §データ): `_docs/<project>.<id>.md`, a front matter of
 //! `key: value` lines and a Markdown body. Values are written as JSON strings (a JSON string is a YAML
 //! double-quoted scalar), so any title survives; plain values written by hand are read as text.
-//! `files` holds one JSON object per `  - ` line (a YAML flow mapping). Unknown lines are kept.
+//! `files` holds one JSON object per `  - ` line (a YAML flow mapping). Unknown lines are kept; list
+//! lines under `files:` that do not parse (and their indented continuations) are written back there.
+//! A leading BOM and CRLF line ends are read as plain `\n` text and written as `\n`.
 
 use serde::Serialize;
 
@@ -25,6 +27,9 @@ pub struct Doc {
     /// Front matter lines this version does not know, written back as they were.
     #[serde(skip)]
     pub extra: Vec<String>,
+    /// Lines of the `files:` list that do not parse as an attachment, written back after `files`.
+    #[serde(skip)]
+    pub files_extra: Vec<String>,
 }
 
 pub fn new_id(now_ms: u64) -> String {
@@ -78,13 +83,26 @@ pub fn parse(project: &str, id: &str, text: &str) -> Doc {
         updated: String::new(),
         author: String::new(),
         files: Vec::new(),
-        body: text.to_string(),
+        body: String::new(),
         extra: Vec::new(),
+        files_extra: Vec::new(),
     };
-    let Some(rest) = text.strip_prefix("---\n") else { return doc };
-    let Some(end) = rest.find("\n---\n").map(|i| (i, i + 5)).or_else(|| {
-        rest.strip_suffix("\n---").map(|r| (r.len(), rest.len()))
-    }) else {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text).replace("\r\n", "\n");
+    let Some(rest) = text.strip_prefix("---\n") else {
+        doc.body = text;
+        return doc;
+    };
+    let end = if rest.starts_with("---\n") {
+        Some((0, 4))
+    } else if rest == "---" {
+        Some((0, 3))
+    } else {
+        rest.find("\n---\n")
+            .map(|i| (i, i + 5))
+            .or_else(|| rest.strip_suffix("\n---").map(|r| (r.len(), rest.len())))
+    };
+    let Some(end) = end else {
+        doc.body = text;
         return doc;
     };
     let (head, body) = (&rest[..end.0], &rest[end.1..]);
@@ -92,10 +110,17 @@ pub fn parse(project: &str, id: &str, text: &str) -> Doc {
     let mut in_files = false;
     for line in head.lines() {
         if in_files {
-            if let Some(item) = line.trim_start().strip_prefix("- ") {
-                if let Ok(f) = serde_json::from_str::<AttachmentInfo>(item.trim()) {
-                    doc.files.push(f);
+            let t = line.trim_start();
+            if t == "-" || t.starts_with("- ") {
+                match serde_json::from_str::<AttachmentInfo>(t[1..].trim()) {
+                    Ok(f) => doc.files.push(f),
+                    Err(_) => doc.files_extra.push(line.to_string()),
                 }
+                continue;
+            }
+            if !t.is_empty() && t.len() < line.len() {
+                // An indented continuation of a block-style entry.
+                doc.files_extra.push(line.to_string());
                 continue;
             }
             in_files = false;
@@ -132,10 +157,14 @@ pub fn render(doc: &Doc) -> String {
         out += line;
         out.push('\n');
     }
-    if !doc.files.is_empty() {
+    if !doc.files.is_empty() || !doc.files_extra.is_empty() {
         out += "files:\n";
         for f in &doc.files {
             out += &format!("  - {}\n", serde_json::to_string(f).expect("a file serializes"));
+        }
+        for line in &doc.files_extra {
+            out += line;
+            out.push('\n');
         }
     }
     out += "---\n\n";
@@ -194,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_without_front_matter_is_all_body_titled_by_its_id() {
+    fn a_file_without_front_matter_is_all_body_and_untitled() {
         let d = parse("仕事", ID, "# 見出し\n\n本文\n");
         assert_eq!(d.title, "無題");
         assert_eq!(d.body, "# 見出し\n\n本文\n");
@@ -206,5 +235,67 @@ mod tests {
         let d = parse("仕事", ID, "---\ntitle: a\n本文\n");
         assert_eq!(d.title, "無題");
         assert_eq!(d.body, "---\ntitle: a\n本文\n");
+    }
+
+    #[test]
+    fn crlf_and_bom_front_matter_is_read_and_written_once() {
+        for text in [
+            "---\r\ntitle: a\r\nsection: s\r\n---\r\n\r\nbody\r\n",
+            "\u{feff}---\ntitle: a\nsection: s\n---\n\nbody\n",
+            "\u{feff}---\r\ntitle: a\r\nsection: s\r\n---\r\n\r\nbody\r\n",
+        ] {
+            let d = parse("仕事", ID, text);
+            assert_eq!(d.title, "a");
+            assert_eq!(d.section.as_deref(), Some("s"));
+            assert_eq!(d.body, "body\n");
+            assert!(d.extra.is_empty());
+            let out = render(&d);
+            assert_eq!(out.matches("---\n").count(), 2, "{out}");
+            assert_eq!(out.matches("title:").count(), 1, "{out}");
+        }
+    }
+
+    #[test]
+    fn unparsed_files_entries_are_kept_under_files() {
+        let h = "b".repeat(64);
+        let text = format!(
+            "---\ntitle: a\nfiles:\n  - hash: {h}\n    ext: pdf\n  - {{\"hash\":\"{h}\",\"ext\":\"pdf\",\"name\":\"x.pdf\",\"type\":\"application/pdf\",\"size\":1}}\n  - {{broken\ncolor: blue\n---\nbody\n"
+        );
+        let d = parse("仕事", ID, &text);
+        assert_eq!(d.files.len(), 1);
+        assert_eq!(d.files[0].name, "x.pdf");
+        assert_eq!(d.extra, vec!["color: blue".to_string()]);
+        let out = render(&d);
+        let head = &out[..out.find("\n---\n").unwrap()];
+        let files_at = head.find("\nfiles:\n").expect("files key");
+        for kept in [format!("  - hash: {h}\n    ext: pdf\n"), "  - {broken".to_string()] {
+            let at = head.find(&kept).unwrap_or_else(|| panic!("{kept} missing in {out}"));
+            assert!(at > files_at, "{kept} before files: in {out}");
+        }
+        assert!(head.find("color: blue").unwrap() < files_at);
+        let again = parse("仕事", ID, &out);
+        assert_eq!(again.files, d.files);
+        assert_eq!(again.files_extra, d.files_extra);
+        assert_eq!(again.extra, d.extra);
+        assert_eq!(render(&again), out);
+    }
+
+    #[test]
+    fn only_unparsed_files_entries_still_write_the_files_key() {
+        let d = parse("仕事", ID, "---\ntitle: a\nfiles:\n  - {broken\n---\nbody\n");
+        assert!(d.files.is_empty());
+        assert!(render(&d).contains("\nfiles:\n  - {broken\n---\n"));
+    }
+
+    #[test]
+    fn an_empty_front_matter_is_recognized() {
+        for text in ["---\n---\nbody\n", "---\n---\n\nbody\n"] {
+            let d = parse("仕事", ID, text);
+            assert_eq!(d.title, "無題");
+            assert_eq!(d.body, "body\n");
+        }
+        let d = parse("仕事", ID, "---\n---");
+        assert_eq!(d.body, "");
+        assert_eq!(render(&d).matches("---\n").count(), 2);
     }
 }
