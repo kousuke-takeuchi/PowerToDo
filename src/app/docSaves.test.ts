@@ -86,7 +86,12 @@ function fakeStore(docs: Doc[], clock: () => string) {
     const cur = files.get(id);
     const now = clock();
     if (!cur) {
-      const copy = doc(`copy${++n}`, now, { title: `${edit.title ?? ""} (競合)`, body: edit.body ?? "", section: edit.section ?? null });
+      const copy = doc(`copy${++n}`, now, {
+        title: `${edit.title ?? ""} (競合)`,
+        body: edit.body ?? "",
+        section: edit.section ?? null,
+        files: edit.files ?? [],
+      });
       files.set(copy.id, copy);
       return { kind: "recreated", copy } satisfies Saved;
     }
@@ -206,4 +211,14 @@ test("a delete that fails re-sends the text typed while it ran", async () => {
   await h.saves.beginDelete("a");
   await h.saves.deleteFailed("a");
   assert.equal(h.store.writes.length, 1);
+});
+
+test("a copy rebuilt for a document deleted elsewhere keeps its reference files", async () => {
+  const files = [{ hash: "ab12", ext: "pdf", name: "仕様.pdf", type: "application/pdf", size: 10 }];
+  const h = harness([doc("a", "t0", { files })]);
+  h.openDoc(doc("a", "t0", { files }));
+  h.store.files.delete("a");
+  // The editor sends the title and body only.
+  await h.saves.save("a", h.screen.rev, { title: "計画", body: "書いた\n" });
+  assert.deepEqual(h.store.files.get("copy1")!.files, files);
 });

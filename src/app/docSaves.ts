@@ -47,10 +47,13 @@ export function target(s: DocState, id: string, rev: number): { id: string; base
   return base === undefined ? null : { id: to, base };
 }
 
-/** What a save sends: its editor's last known title, body and section, with the edit on top. */
+/**
+ * What a save sends: its editor's last known title, body, section and files, with the edit on top. A copy rebuilt
+ * for a document deleted elsewhere is made from the edit alone, so the files must travel with every save.
+ */
 export function payload(m: DocMeta, rev: number, edit: DocEdit): DocEdit {
   const k = m.moved[rev] ?? m;
-  return { title: k.title, body: k.body, section: k.section, ...edit };
+  return { title: k.title, body: k.body, section: k.section, files: k.files, ...edit };
 }
 
 /** Remembers the text a save is about to send: the current rev's in the meta, a moved rev's with its copy. */
