@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TODAY, counts, projects, sections, tasks } from "../mock/data";
 import type { Doc, DocEdit, DocSummary } from "../types/model";
 import { AppShell } from "./AppShell";
@@ -46,11 +46,19 @@ const DOCS: Doc[] = [
 
 const summary = (d: Doc): DocSummary => ({ id: d.id, project: d.project, title: d.title, section: d.section, updated: d.updated, author: d.author, files: d.files.length });
 
+/** What `window` had before the first stub, put back when a story leaves. */
+let original: { internals: unknown; events: unknown } | undefined;
+const stores = new WeakMap<Doc[], Map<string, Doc>>();
+
 /** Stands in for the Tauri side: Storybook has no backend, so the commands the pane calls answer from `docs`. */
-function installBackend(docs: Doc[]) {
-  const store = new Map(docs.map((d) => [d.id, { ...d }]));
+function installBackend(docs: Doc[]): () => void {
+  // One store per story's documents, so a second install (double mount) keeps what the first one saved.
+  const store = stores.get(docs) ?? new Map(docs.map((d) => [d.id, { ...d }]));
+  stores.set(docs, store);
   let cb = 0;
   const w = window as unknown as Record<string, unknown>;
+  original ??= { internals: w.__TAURI_INTERNALS__, events: w.__TAURI_EVENT_PLUGIN_INTERNALS__ };
+  const before = original;
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
   w.__TAURI_INTERNALS__ = {
     transformCallback: () => ++cb,
@@ -85,13 +93,20 @@ function installBackend(docs: Doc[]) {
       }
     },
   };
+  // Put back what was there, so stories viewed later in the same Storybook keep their own setup.
+  return () => {
+    w.__TAURI_INTERNALS__ = before.internals;
+    w.__TAURI_EVENT_PLUGIN_INTERNALS__ = before.events;
+  };
 }
 
 function Frame({ docs, section = null, open }: { docs: Doc[]; section?: string | null; open?: string }) {
-  const [state] = useState(() => (installBackend(docs), true));
+  // Installed before the first draw (the pane reads in its own effects, which run first) and again on every mount
+  // (React's development double mount runs the cleanup in between); the cleanup puts the original back.
+  useState(() => installBackend(docs));
+  useEffect(() => installBackend(docs), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [sec, setSec] = useState<string | null>(section);
   const [note, setNote] = useState<string | null>(null);
-  void state;
   return (
     <AppShell
       sidebar={<Sidebar active={{ kind: "project", name: "買い物" }} counts={counts} projects={projects} syncState="synced" lastSyncedAt="09:41" />}
