@@ -196,6 +196,8 @@ struct Inner {
     failures: BTreeMap<String, Failure>,
     /// `list` fails.
     list_failure: Option<Failure>,
+    /// By name: only `upload` of that name fails (its download still works).
+    upload_failures: BTreeMap<String, Failure>,
     /// By name: the next `upload` of that name first finds these bytes written by "another
     /// PC" (see `race_upload`).
     races: BTreeMap<String, Vec<u8>>,
@@ -239,6 +241,13 @@ impl MemoryBackend {
         self.lock().failures.insert(name.to_string(), failure);
     }
 
+    /// `upload_doc` of the document `name` returns `failure` from now on; downloading it still works.
+    pub fn fail_doc_upload(&self, name: &str, failure: Failure) {
+        self.lock()
+            .upload_failures
+            .insert(format!("{DOCS_PREFIX}{name}"), failure);
+    }
+
     /// `list` returns `failure` from now on.
     pub fn fail_list(&self, failure: Failure) {
         self.lock().list_failure = Some(failure);
@@ -264,6 +273,13 @@ impl MemoryBackend {
         let mut inner = self.lock();
         inner.files.retain(|_, e| !e.name.starts_with(DOCS_PREFIX));
         inner.docs_folder = false;
+    }
+
+    /// Someone deletes every file in `_docs` on the target by hand; the folder stays (nothing is archived).
+    pub fn empty_docs(&self) {
+        self.lock()
+            .files
+            .retain(|_, e| !e.name.starts_with(DOCS_PREFIX));
     }
 
     /// Test setup: a blob appears in `_attachments/` under `name`, whatever its content.
@@ -297,6 +313,7 @@ impl MemoryBackend {
     pub fn clear_failures(&self) {
         let mut inner = self.lock();
         inner.failures.clear();
+        inner.upload_failures.clear();
         inner.list_failure = None;
     }
 
@@ -427,6 +444,9 @@ impl StorageBackend for MemoryBackend {
     ) -> BoxFut<'a, RemoteFile> {
         Box::pin(async move {
             self.check(name)?;
+            if let Some(f) = self.lock().upload_failures.get(name).copied() {
+                return Err(f.error());
+            }
             let at = (self.clock)();
             let race = self.lock().races.remove(name);
             if let Some(theirs) = race {

@@ -1576,6 +1576,41 @@ fn list_doc_files(dir: &Path) -> std::io::Result<Vec<LocalFile>> {
     Ok(files)
 }
 
+/// The leaf name of a conflict copy of `loser` that an earlier run already wrote in `dir` (its
+/// follow-up failed, so the conflict came back): same body, `updated` and files, a title of
+/// `<loser title> (競合 …`. `None` when there is none.
+fn existing_conflict_copy(
+    dir: &Path,
+    project: &str,
+    loser: &crate::store::docs::Doc,
+) -> Option<String> {
+    let prefix = format!("{} (競合 ", loser.title);
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Some((pj, id)) = crate::store::docs::parse_file_name(&name) else {
+            continue;
+        };
+        if pj != project || id == loser.id {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        let doc = crate::store::docs::parse(&pj, &id, &String::from_utf8_lossy(&bytes));
+        if doc.title.starts_with(&prefix)
+            && doc.body == loser.body
+            && doc.updated == loser.updated
+            && doc.files == loser.files
+        {
+            return Some(name);
+        }
+    }
+    None
+}
+
 /// `true` when `a` was updated later than `b`: compared as instants when both stamps are RFC 3339
 /// (the offsets may differ between PCs), as text otherwise.
 fn doc_is_newer(a: &str, b: &str) -> bool {
@@ -1857,6 +1892,9 @@ impl SyncEngine {
     /// `remote` is `None` when the target has no `_docs` folder (an older target, or one wiped). A side
     /// without that folder is not read as every document deleted: the records are dropped and the
     /// other side fills it again.
+    /// A remote `_docs` that is there but empty while this side has recorded documents is read
+    /// the same way (emptied by hand). The cost: archiving the last document of the whole target
+    /// is not passed on; another PC uploads it again.
     #[allow(clippy::too_many_arguments)]
     async fn sync_docs(
         &self,
@@ -1868,10 +1906,6 @@ impl SyncEngine {
         remote: Option<Vec<RemoteFile>>,
         is_retry: bool,
     ) -> Result<(), BackendError> {
-        if remote.is_none() || !dir.is_dir() {
-            state.files.retain(|k, _| !is_doc_key(k));
-        }
-        let remote = remote.unwrap_or_default();
         let local = match list_doc_files(dir) {
             Ok(l) => l,
             Err(e) => {
@@ -1881,6 +1915,15 @@ impl SyncEngine {
                 return Ok(());
             }
         };
+        // A remote `_docs` that is there but empty while both sides had documents was emptied by
+        // hand: read like a wiped folder, not as every document archived.
+        let emptied = remote.as_ref().is_some_and(|r| r.is_empty())
+            && !local.is_empty()
+            && state.files.keys().any(|k| is_doc_key(k));
+        if remote.is_none() || !dir.is_dir() || emptied {
+            state.files.retain(|k, _| !is_doc_key(k));
+        }
+        let remote = remote.unwrap_or_default();
         let key = |leaf: &str| format!("{DOC_KEY_PREFIX}{leaf}");
         let locals: BTreeMap<String, &LocalFile> =
             local.iter().map(|f| (f.name.clone(), f)).collect();
@@ -2000,15 +2043,18 @@ impl SyncEngine {
                                 return Ok(None);
                             }
                             // The loser is saved first, so nothing is lost if the next step fails.
-                            let copy = crate::store::docs::conflict_copy(
-                                &paths,
-                                &project,
-                                &loser,
-                                now.fixed_offset(),
-                                now.timestamp_millis() as u64,
-                            )
-                            .map_err(|e| BackendError::Other(e.to_string()))?;
-                            copies.push(crate::store::docs::file_name(&project, &copy.id));
+                            // A copy an earlier run made (its follow-up failed) is used again.
+                            if existing_conflict_copy(dir, &project, &loser).is_none() {
+                                let copy = crate::store::docs::conflict_copy(
+                                    &paths,
+                                    &project,
+                                    &loser,
+                                    now.fixed_offset(),
+                                    now.timestamp_millis() as u64,
+                                )
+                                .map_err(|e| BackendError::Other(e.to_string()))?;
+                                copies.push(crate::store::docs::file_name(&project, &copy.id));
+                            }
                             if remote_wins {
                                 crate::store::paths::write_atomic(&path, &winner_bytes)
                                     .map_err(|e| BackendError::Other(e.to_string()))?;
@@ -2035,6 +2081,18 @@ impl SyncEngine {
                     Action::ArchiveLocal(_) => {
                         if let Some((project, id)) = crate::store::docs::parse_file_name(&name) {
                             let _store = host.lock_store();
+                            // Only the version the plan saw is archived: an edit made during the
+                            // run stays and is decided next run.
+                            let untouched = match std::fs::read(&path) {
+                                Ok(current) => l.is_some_and(|l| sha256_hex(&current) == l.hash),
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                                Err(e) => return Err(BackendError::Other(e.to_string())),
+                            };
+                            if !untouched {
+                                report.deferred.push(name.clone());
+                                report.rerun = true;
+                                return Ok(None);
+                            }
                             crate::store::docs::archive(&paths, &project, Some(&id), self.now())
                                 .map_err(|e| BackendError::Other(e.to_string()))?;
                         }
@@ -3488,14 +3546,113 @@ mod tests {
         assert_eq!(doc_body(&b, "仕事", &id), "A の変更");
         assert_eq!(doc_ids(&b, "仕事"), std::slice::from_ref(&id));
         assert!(idle(&a.sync().await) && idle(&b.sync().await));
-        // Archiving on one side is passed on, the file is moved, not deleted.
+        // Archiving on one side is passed on, the file is moved, not deleted. Another document
+        // stays, so `_docs` is not emptied (an emptied folder is read as wiped).
+        let other = new_doc(&a, "仕事", "メモ", "残る", "2026-10-25T11:00:00+09:00");
+        a.sync().await;
+        b.sync().await;
         crate::store::docs::archive(&Paths::new(&a.data), "仕事", Some(&id), dt(NOW)).unwrap();
         a.sync().await;
-        assert_eq!(remote.list_docs().await.unwrap(), Some(Vec::new()));
+        let listed = remote.list_docs().await.unwrap().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].name,
+            crate::store::docs::file_name("仕事", &other)
+        );
         assert_eq!(remote.archived().len(), 1);
         assert!(remote.archived()[0].0.ends_with(".md"));
         b.sync().await;
-        assert!(doc_ids(&b, "仕事").is_empty());
+        assert_eq!(doc_ids(&b, "仕事"), std::slice::from_ref(&other));
+        // B's copy is in B's `archive/`, with its text.
+        let stem = format!("仕事.{id} (");
+        let archived: Vec<std::path::PathBuf> = fs::read_dir(Paths::new(&b.data).archive_dir())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&stem) && n.ends_with(".md"))
+            })
+            .collect();
+        assert_eq!(archived.len(), 1, "{archived:?}");
+        assert!(
+            fs::read_to_string(&archived[0])
+                .unwrap()
+                .contains("A の変更")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_upload_after_a_document_conflict_makes_one_copy_only() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "元", "2026-10-25T10:00:00+09:00");
+        a.sync().await;
+        b.sync().await;
+        save_doc(&a, "仕事", &id, "A の変更", "2026-10-25T10:30:00+09:00");
+        save_doc(&b, "仕事", &id, "B の変更", "2026-10-25T10:40:00+09:00");
+        a.sync().await;
+        // B's edit is newer, so B uploads it after making the copy; the upload keeps failing.
+        let name = crate::store::docs::file_name("仕事", &id);
+        remote.fail_doc_upload(&name, Failure::Full);
+        let r = b.sync().await;
+        assert!(r.failed.iter().any(|(n, _)| *n == name), "{r:?}");
+        let r = b.sync().await;
+        assert!(r.failed.iter().any(|(n, _)| *n == name), "{r:?}");
+        let ids = doc_ids(&b, "仕事");
+        assert_eq!(ids.len(), 2, "one conflict copy, not one per run: {ids:?}");
+        assert_eq!(doc_body(&b, "仕事", &id), "B の変更");
+        let copy = ids.iter().find(|i| **i != id).unwrap().clone();
+        assert_eq!(doc_body(&b, "仕事", &copy), "A の変更");
+        // The failure clears: both sides end with the two documents.
+        remote.clear_failures();
+        let r = b.sync().await;
+        assert!(r.failed.is_empty(), "{r:?}");
+        b.sync().await;
+        a.sync().await;
+        assert_eq!(doc_ids(&b, "仕事"), ids);
+        assert_eq!(doc_ids(&a, "仕事"), ids);
+        assert_eq!(doc_body(&a, "仕事", &id), "B の変更");
+        assert_eq!(doc_body(&a, "仕事", &copy), "A の変更");
+        assert!(idle(&a.sync().await) && idle(&b.sync().await));
+        assert_eq!(remote.list_docs().await.unwrap().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_emptied_remote_docs_folder_is_not_read_as_every_document_archived() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "本文", "2026-10-25T10:00:00+09:00");
+        let other = new_doc(
+            &a,
+            "仕事",
+            "メモ",
+            "メモの本文",
+            "2026-10-25T10:05:00+09:00",
+        );
+        a.sync().await;
+        b.sync().await;
+        // The files are deleted by hand; the folder stays.
+        remote.empty_docs();
+        assert_eq!(remote.list_docs().await.unwrap(), Some(Vec::new()));
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert!(r.failed.is_empty(), "{r:?}");
+        let mut both = vec![id.clone(), other.clone()];
+        both.sort();
+        assert_eq!(doc_ids(&a, "仕事"), both);
+        assert_eq!(doc_body(&a, "仕事", &id), "本文");
+        assert!(
+            !Paths::new(&a.data).archive_dir().exists()
+                || fs::read_dir(Paths::new(&a.data).archive_dir())
+                    .unwrap()
+                    .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".md"))
+        );
+        assert_eq!(remote.list_docs().await.unwrap().unwrap().len(), 2);
+        assert!(remote.archived().is_empty());
+        b.sync().await;
+        assert_eq!(doc_ids(&b, "仕事"), both);
+        assert_eq!(doc_body(&b, "仕事", &other), "メモの本文");
     }
 
     #[tokio::test]
