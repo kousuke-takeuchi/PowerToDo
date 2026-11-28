@@ -133,15 +133,18 @@ export function MobileDoc({ project, id, sections, onGone, onNotice, ...shell }:
 
   useEffect(() => {
     gone.current = false;
+    // Local to this run: StrictMode runs the effect twice, and a shared ref would let both reads open the document.
+    let cancelled = false;
     // The saves queued by the screen that was left (its editor's flush on unmount) land before the read.
     saves
       .settled()
       .then(() => api.readDoc(project, id))
       .then(
-        (d) => !gone.current && show(d, saves.open(d)),
-        (e) => !gone.current && noticeRef.current(`ドキュメントを開けませんでした: ${messageOf(e)}`),
+        (d) => !cancelled && show(d, saves.open(d)),
+        (e) => !cancelled && noticeRef.current(`ドキュメントを開けませんでした: ${messageOf(e)}`),
       );
     return () => {
+      cancelled = true;
       gone.current = true;
     };
     // The screen is keyed by project and id.
