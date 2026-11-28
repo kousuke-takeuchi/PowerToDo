@@ -90,8 +90,8 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
 
 /**
  * The ドキュメント half of a project screen (spec 2026-11-28 §1): the list of documents (260px) and the open one.
- * Saving goes through `useDocSaves` (one queue per document; the base each save sends is decided when it runs;
- * saves an editor still had queued after a conflict go to the copy of its text). Every save sends the last known
+ * Saving goes through `useDocSaves` (one queue for the project's saves; the base each save sends is decided when it
+ * runs; saves an editor still had queued after a conflict go to the copy of its text). Every save sends the last known
  * title, body and section, so a copy made for a deleted document keeps them.
  * `docs-changed` only reloads the list; the open document is not read again (the app's own saves echo back).
  */
@@ -133,14 +133,19 @@ export function DocsPane({
     setOpen({ doc: d, rev });
     setLive({ title: d.title, section: d.section, files: d.files });
   };
-  const saves = useDocSaves(project, {
-    show,
-    written: (id, d) => {
-      if (selectedRef.current === id) setLive({ title: d.title, section: d.section, files: d.files });
+  const saves = useDocSaves(
+    project,
+    { notice: (t) => noticeRef.current(t), reload },
+    {
+      // Only the screen still on that document moves; elsewhere the notice and the list are enough.
+      moved: (from, d) => {
+        if (selectedRef.current === from) show(d, saves.open(d));
+      },
+      written: (id, d) => {
+        if (selectedRef.current === id) setLive({ title: d.title, section: d.section, files: d.files });
+      },
     },
-    notice: (t) => noticeRef.current(t),
-    reload,
-  });
+  );
   const select = async (id: string) => {
     if (id === selectedRef.current) return;
     pick(id);
@@ -148,8 +153,9 @@ export function DocsPane({
     setLive(null);
     const n = ++readN.current;
     try {
-      // Saves still queued for it (its editor was left a moment ago) land first: the read then sees them.
-      await saves.settled(id);
+      // Saves still queued (its editor, or an editor whose text went to it, was left a moment ago) land first:
+      // the read then sees them.
+      await saves.settled();
       const d = await api.readDoc(project, id);
       if (n === readN.current) show(d, saves.open(d));
     } catch (e) {
@@ -181,9 +187,9 @@ export function DocsPane({
       setOpen(null);
       setLive(null);
     } catch (e) {
-      const m = saves.meta(id);
-      if (m) m.deleting = false;
       onNotice(`削除できませんでした: ${messageOf(e)}`);
+      // Text typed while the delete ran is sent now.
+      void saves.deleteFailed(id);
     }
   };
   /** A change of the open document's section or files, saved at once with its current rev. */

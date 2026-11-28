@@ -108,6 +108,7 @@ export function MobileDoc({ project, id, sections, onGone, onNotice, ...shell }:
   const [live, setLive] = useState<{ title: string; section: string | null; files: AttachmentInfo[] } | null>(null);
   const [sheet, setSheet] = useState<"menu" | "section" | "delete" | null>(null);
   const current = useRef<string>(id);
+  const gone = useRef(false);
   const noticeRef = useRef(onNotice);
   noticeRef.current = onNotice;
   const show = (d: Doc, rev: number) => {
@@ -115,23 +116,33 @@ export function MobileDoc({ project, id, sections, onGone, onNotice, ...shell }:
     setOpen({ doc: d, rev });
     setLive({ title: d.title, section: d.section, files: d.files });
   };
-  const saves = useDocSaves(project, {
-    show,
-    written: (docId, d) => {
-      if (current.current === docId) setLive({ title: d.title, section: d.section, files: d.files });
+  // Shared with every document screen of the project: the screen left a moment ago may still be saving.
+  const saves = useDocSaves(
+    project,
+    { notice: (t) => noticeRef.current(t), reload: () => undefined },
+    {
+      // Only while this screen still shows that document.
+      moved: (from, d) => {
+        if (!gone.current && current.current === from) show(d, saves.open(d));
+      },
+      written: (docId, d) => {
+        if (current.current === docId) setLive({ title: d.title, section: d.section, files: d.files });
+      },
     },
-    notice: (t) => noticeRef.current(t),
-    reload: () => undefined,
-  });
+  );
 
   useEffect(() => {
-    let gone = false;
-    api.readDoc(project, id).then(
-      (d) => !gone && show(d, saves.open(d)),
-      (e) => !gone && noticeRef.current(`ドキュメントを開けませんでした: ${messageOf(e)}`),
-    );
+    gone.current = false;
+    // The saves queued by the screen that was left (its editor's flush on unmount) land before the read.
+    saves
+      .settled()
+      .then(() => api.readDoc(project, id))
+      .then(
+        (d) => !gone.current && show(d, saves.open(d)),
+        (e) => !gone.current && noticeRef.current(`ドキュメントを開けませんでした: ${messageOf(e)}`),
+      );
     return () => {
-      gone = true;
+      gone.current = true;
     };
     // The screen is keyed by project and id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,9 +169,9 @@ export function MobileDoc({ project, id, sections, onGone, onNotice, ...shell }:
       saves.forget(docId);
       onGone();
     } catch (e) {
-      const m = saves.meta(docId);
-      if (m) m.deleting = false;
       onNotice(`削除できませんでした: ${messageOf(e)}`);
+      // Text typed while the delete ran is sent now.
+      void saves.deleteFailed(docId);
     }
   };
 
