@@ -16,3 +16,20 @@ export const DOC_TEMPLATE = "## 目的\n\n## 経緯\n\n## リンク\n\n## 要望
 export function isEmptyBody(md: string): boolean {
   return md.replace(/<br\s*\/?>/g, "").trim() === "";
 }
+
+/**
+ * Alt text of a block image. Milkdown's image block keeps its resize ratio in the alt (`![1.00](…)`); a numeric alt
+ * is read as that ratio, any other alt is kept as text (ratio 1). On write, a text alt wins over the ratio.
+ */
+export function imageBlockAltIn(alt: string | null | undefined): { alt: string; ratio: number } {
+  const a = (alt ?? "").trim();
+  if (a === "") return { alt: "", ratio: 1 };
+  const n = Number(a);
+  if (Number.isNaN(n)) return { alt: alt ?? "", ratio: 1 };
+  return { alt: "", ratio: n === 0 ? 1 : n };
+}
+
+export function imageBlockAltOut(alt: string, ratio: number): string {
+  return alt !== "" ? alt : Number.parseFloat(String(ratio)).toFixed(2);
+}
+

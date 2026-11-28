@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Crepe } from "@milkdown/crepe";
+import { imageBlockSchema } from "@milkdown/kit/component/image-block";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/classic.css";
@@ -8,7 +9,14 @@ import { api } from "../api/client";
 import type { Doc, DocEdit } from "../types/model";
 import { createAutosave } from "../app/autosave";
 import { storeFiles } from "../app/attachments/prepare";
-import { attachmentOfSrc, DOC_TEMPLATE, isEmptyBody, srcOfAttachment } from "../app/docMarkdown";
+import {
+  attachmentOfSrc,
+  DOC_TEMPLATE,
+  imageBlockAltIn,
+  imageBlockAltOut,
+  isEmptyBody,
+  srcOfAttachment,
+} from "../app/docMarkdown";
 
 /**
  * A document's title and body (spec 2026-11-28). The body is Milkdown Crepe: its own toolbar, slash menu, tables,
@@ -63,6 +71,44 @@ export function DocEditor({ doc, onSave, mobile }: { doc: Doc; onSave: (edit: Do
           },
         },
       },
+    });
+    // Milkdown's image block writes its resize ratio as the alt (`![1.00](…)`). Keep a text alt instead:
+    // `![画面](…)` loads with alt 画面 and ratio 1 and is written back as `![画面](…)`.
+    editor.editor.config((ctx) => {
+      ctx.update(imageBlockSchema.key, (prev) => (c) => {
+        const base = prev(c);
+        return {
+          ...base,
+          attrs: { ...base.attrs, alt: { default: "", validate: "string" } },
+          parseDOM: base.parseDOM?.map((rule) => ({
+            ...rule,
+            getAttrs: (dom: HTMLElement | string) => {
+              const attrs = typeof rule.getAttrs === "function" ? rule.getAttrs(dom as never) : {};
+              if (attrs === false || attrs === null || typeof dom === "string") return attrs;
+              return { ...attrs, alt: dom.getAttribute("alt") ?? "" };
+            },
+          })),
+          parseMarkdown: {
+            match: base.parseMarkdown.match,
+            runner: (state, node, type) => {
+              const { alt, ratio } = imageBlockAltIn(node.alt as string | undefined);
+              state.addNode(type, { src: node.url as string, caption: (node.title as string | undefined) ?? "", ratio, alt });
+            },
+          },
+          toMarkdown: {
+            match: base.toMarkdown.match,
+            runner: (state, node) => {
+              state.openNode("paragraph");
+              state.addNode("image", undefined, undefined, {
+                title: node.attrs.caption,
+                url: node.attrs.src,
+                alt: imageBlockAltOut(node.attrs.alt ?? "", node.attrs.ratio),
+              });
+              state.closeNode();
+            },
+          },
+        };
+      });
     });
     editor.on((l) => {
       l.markdownUpdated((_ctx, md) => {

@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachmentOfSrc, srcOfAttachment, DOC_TEMPLATE, isEmptyBody } from "./docMarkdown.ts";
+import {
+  attachmentOfSrc,
+  srcOfAttachment,
+  DOC_TEMPLATE,
+  isEmptyBody,
+  imageBlockAltIn,
+  imageBlockAltOut,
+} from "./docMarkdown.ts";
 
 test("an image path names a blob, and back", () => {
   const h = "b".repeat(64);
@@ -22,4 +29,15 @@ test("an empty body is whitespace or an empty paragraph", () => {
   assert.equal(isEmptyBody("\n\n"), true);
   assert.equal(isEmptyBody("<br />\n"), true);
   assert.equal(isEmptyBody("a"), false);
+});
+
+test("a block image's alt is text or the resize ratio", () => {
+  assert.deepEqual(imageBlockAltIn("画面"), { alt: "画面", ratio: 1 });
+  assert.deepEqual(imageBlockAltIn("0.50"), { alt: "", ratio: 0.5 });
+  assert.deepEqual(imageBlockAltIn("0"), { alt: "", ratio: 1 });
+  assert.deepEqual(imageBlockAltIn(""), { alt: "", ratio: 1 });
+  assert.deepEqual(imageBlockAltIn(undefined), { alt: "", ratio: 1 });
+  assert.equal(imageBlockAltOut("画面", 1), "画面");
+  assert.equal(imageBlockAltOut("", 0.5), "0.50");
+  assert.equal(imageBlockAltOut("", 1), "1.00");
 });
