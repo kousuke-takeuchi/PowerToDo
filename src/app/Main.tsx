@@ -20,6 +20,7 @@ import type { AppStateDto, Task, TaskPatch } from "../types/model";
 import { useMotionTiming } from "../motion";
 import { AppShell } from "../views/AppShell";
 import { ProjectView } from "../views/ProjectView";
+import { DocsPane } from "../views/DocsPane";
 import { QuickAddDialog } from "../views/QuickAddDialog";
 import { SearchDialog } from "../views/SearchDialog";
 import { SettingsDialog } from "../views/SettingsDialog";
@@ -251,6 +252,10 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // Bottom-left notice (spec ④ §5, ② §6): completions in a row share one toast and 「元に戻す」 undoes each of them;
   // any other notice replaces it and carries its own action.
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Project documents (spec 2026-11-28): the project that shows ドキュメント (and the section it is narrowed to).
+  // Keyed by project, so switching project goes back to リスト.
+  const [docs, setDocs] = useState<{ project: string; section: string | null } | null>(null);
+  const docsOpen = docs !== null && docs.project === current;
   const noteId = useRef(0);
   const noteAction = useRef<(() => void) | null>(null);
   const completed = useCallback((t: Task) => setNotice((s) => nextNotice(s, { done: completedOf(t) })), []);
@@ -942,6 +947,7 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
     body = loading;
   } else {
     body = (
+      <>
       <ProjectView
         // Restoring from the archive remounts it, so it reports its rows again for the row keys.
         key={archived ? `${current}\u0000archived` : current}
@@ -979,12 +985,26 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
         calendarEvents={eventDays(cal.events, current).slice(0, 14).flatMap((day) => eventsOn(cal.events, day, current))}
         calendarNote={calendarProblems(cal.events).find((x) => x.project === current)?.text}
         readOnly={archived}
+        mode={docsOpen ? "docs" : "list"}
+        onMode={archived ? undefined : (m) => setDocs(m === "docs" ? { project: current, section: null } : null)}
+        onOpenSectionDocs={archived ? undefined : (section) => setDocs({ project: current, section })}
         onAddSectionApi={(open) => (addSectionApi.current = open)}
         weekStart={settingsPanes.datetime.weekStart}
         labelOrder={allLabels}
         projectOrder={summaries.map((s) => s.name)}
         onReorderLocked={reorderLocked}
       />
+      {docsOpen && (
+        <DocsPane
+          key={current}
+          project={current}
+          section={docs.section}
+          onSection={(section) => setDocs({ project: current, section })}
+          sections={view.sections.map((x) => x.name)}
+          onNotice={(text) => note(text, "閉じる", () => undefined)}
+        />
+      )}
+      </>
     );
   }
 
