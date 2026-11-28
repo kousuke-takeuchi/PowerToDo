@@ -26,7 +26,8 @@ const messageOf = (e: unknown) => String((e as { message?: unknown } | null)?.me
  * link tooltip and image blocks. Images are stored with `add_attachment` and written as `../_attachments/<hash>.<ext>`;
  * the editor shows them through blob URLs (`proxyDomURL`), the Markdown keeps the relative path.
  * Saves 1 s after typing stops, and at once when the document is left (unmount, page hide).
- * `onSave` gets the title and body only; the parent adds the section and tracks `updated`.
+ * `onSave` gets the title and body only; the parent adds the section and tracks `updated`. Saves run one at a time
+ * (each waits for the one before), so two saves never carry the same `updated`; `onSave` reports its own failures.
  * `onError` gets the message of an image that could not be stored (size limit and so on).
  */
 export function DocEditor({
@@ -50,10 +51,13 @@ export function DocEditor({
   onSaveRef.current = onSave;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const saving = useRef<Promise<void>>(Promise.resolve());
   const save = useRef(
     createAutosave(() => {
+      // Take the text now; send it after the save in flight has finished.
       const body = crepe.current?.getMarkdown();
-      void onSaveRef.current({ title: titleRef.current, ...(body !== undefined ? { body } : {}) });
+      const edit: DocEdit = { title: titleRef.current, ...(body !== undefined ? { body } : {}) };
+      saving.current = saving.current.then(() => onSaveRef.current(edit)).catch(() => undefined);
     }),
   );
 
