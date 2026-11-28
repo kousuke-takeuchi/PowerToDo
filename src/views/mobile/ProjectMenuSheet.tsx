@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { CalendarDays, Pencil, Rows3, Trash2 } from "lucide-react";
+import { CalendarDays, FileText, Pencil, Rows3, Trash2 } from "lucide-react";
 import { SheetCard, SheetRow } from "./BottomSheet";
 
 /** `onRename` / `onDelete` omitted (the inbox): only 「セクションを追加」. */
-export type ProjectMenuSheetProps = { project: string; onAddSection: () => void; /** 「Google カレンダー」 (spec 2026-11-27): choose the calendar the project shows. */ onCalendar?: () => void; onRename?: () => void; onDelete?: () => void; onClose: () => void };
+export type ProjectMenuSheetProps = { project: string; onAddSection: () => void; /** 「Google カレンダー」 (spec 2026-11-27): choose the calendar the project shows. */ onCalendar?: () => void; /** 「ドキュメント」 (spec 2026-11-28): the project's documents. */ onDocs?: () => void; onRename?: () => void; onDelete?: () => void; onClose: () => void };
 
 /** The 「…」 of a project's top bar (spec ④ iPhone §3.4): the desktop 「その他」 items 「セクションを追加」 (spec 2026-11-22 §3) / 「名前を変更」 / 「削除」. */
-export function ProjectMenuSheet({ project, onAddSection, onCalendar, onRename, onDelete, onClose }: ProjectMenuSheetProps) {
+export function ProjectMenuSheet({ project, onAddSection, onCalendar, onDocs, onRename, onDelete, onClose }: ProjectMenuSheetProps) {
   const [confirm, setConfirm] = useState(false);
   if (confirm) {
     return (
@@ -29,6 +29,7 @@ export function ProjectMenuSheet({ project, onAddSection, onCalendar, onRename, 
   }
   return (
     <SheetCard label="プロジェクトの操作">
+      {onDocs && <SheetRow icon={<FileText size={18} />} label="ドキュメント" onClick={onDocs} />}
       <SheetRow icon={<Rows3 size={18} />} label="セクションを追加" onClick={onAddSection} />
       {onCalendar && <SheetRow icon={<CalendarDays size={18} />} label="Google カレンダー" onClick={onCalendar} />}
       {onRename && <SheetRow icon={<Pencil size={18} />} label="名前を変更" onClick={onRename} />}
