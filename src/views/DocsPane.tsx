@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Ellipsis, Paperclip, Plus, X } from "lucide-react";
 import { api } from "../api/client";
 import { useDocs } from "../app/useDocs";
+import { useDocSaves } from "../app/useDocSaves";
 import { rowLine } from "../app/docList";
 import { storeFiles } from "../app/attachments/prepare";
 import { useEscLayer } from "../app/layers";
@@ -87,14 +88,11 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
   );
 }
 
-type Meta = { updated: string; section: string | null; files: AttachmentInfo[] };
-
 /**
  * The ドキュメント half of a project screen (spec 2026-11-28 §1): the list of documents (260px) and the open one.
- * Saves of one document run one after another, each with the `updated` the one before returned. That value lives in
- * `meta` (a ref written from the save result, never read from React state), so a save that DocEditor starts in a
- * microtask right after the previous one still carries the right value. Every save sends the document's current
- * `section`, so a copy made for a deleted document keeps it.
+ * Saving goes through `useDocSaves` (one queue per document; the base each save sends is decided when it runs;
+ * saves an editor still had queued after a conflict go to the copy of its text). Every save sends the last known
+ * title, body and section, so a copy made for a deleted document keeps them.
  * `docs-changed` only reloads the list; the open document is not read again (the app's own saves echo back).
  */
 export function DocsPane({
@@ -120,10 +118,7 @@ export function DocsPane({
   const [open, setOpen] = useState<{ doc: Doc; rev: number } | null>(null);
   const [live, setLive] = useState<{ title: string; section: string | null; files: AttachmentInfo[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const meta = useRef(new Map<string, Meta>());
-  const queue = useRef(new Map<string, Promise<void>>());
   const readN = useRef(0);
-  const rev = useRef(0);
   const noticeRef = useRef(onNotice);
   noticeRef.current = onNotice;
 
@@ -131,13 +126,21 @@ export function DocsPane({
     selectedRef.current = id;
     setSelected(id);
   };
-  /** Shows `d` as the open document; the editor is mounted anew (a new `rev`). */
-  const show = (d: Doc) => {
-    meta.current.set(d.id, { updated: d.updated, section: d.section, files: d.files });
+  /** Shows `d` in an editor with `rev` (a new editor is mounted); a read still in flight no longer replaces it. */
+  const show = (d: Doc, rev: number) => {
+    readN.current++;
     pick(d.id);
-    setOpen({ doc: d, rev: ++rev.current });
+    setOpen({ doc: d, rev });
     setLive({ title: d.title, section: d.section, files: d.files });
   };
+  const saves = useDocSaves(project, {
+    show,
+    written: (id, d) => {
+      if (selectedRef.current === id) setLive({ title: d.title, section: d.section, files: d.files });
+    },
+    notice: (t) => noticeRef.current(t),
+    reload,
+  });
   const select = async (id: string) => {
     if (id === selectedRef.current) return;
     pick(id);
@@ -145,50 +148,22 @@ export function DocsPane({
     setLive(null);
     const n = ++readN.current;
     try {
+      // Saves still queued for it (its editor was left a moment ago) land first: the read then sees them.
+      await saves.settled(id);
       const d = await api.readDoc(project, id);
-      if (n === readN.current) show(d);
+      if (n === readN.current) show(d, saves.open(d));
     } catch (e) {
-      if (n === readN.current) noticeRef.current(`ドキュメントを開けませんでした: ${messageOf(e)}`);
+      if (n === readN.current) {
+        pick(null);
+        noticeRef.current(`ドキュメントを開けませんでした: ${messageOf(e)}`);
+      }
     }
-  };
-
-  const run = async (id: string, edit: DocEdit) => {
-    const m = meta.current.get(id);
-    if (!m) return;
-    let r;
-    try {
-      r = await api.saveDoc(project, id, m.updated, { section: m.section, ...edit });
-    } catch (e) {
-      noticeRef.current(`保存できませんでした: ${messageOf(e)}`);
-      return;
-    }
-    // Set from the result before this promise resolves: the next queued save reads it at once.
-    if (r.kind === "written") {
-      meta.current.set(id, { updated: r.updated, section: r.section, files: r.files });
-      if (selectedRef.current === id) setLive({ title: r.title, section: r.section, files: r.files });
-    } else if (r.kind === "conflict") {
-      noticeRef.current(`ほかの場所で変更されていたため、「${titleOf(r.copy.title)}」として残しました`);
-      meta.current.set(r.doc.id, { updated: r.doc.updated, section: r.doc.section, files: r.doc.files });
-      if (selectedRef.current === id) show(r.doc);
-      reload();
-    } else {
-      noticeRef.current(`この文書はほかの場所で削除されていたため、「${titleOf(r.copy.title)}」として残しました`);
-      meta.current.delete(id);
-      meta.current.set(r.copy.id, { updated: r.copy.updated, section: r.copy.section, files: r.copy.files });
-      if (selectedRef.current === id) show(r.copy);
-      reload();
-    }
-  };
-  /** Saves of the same document wait for each other, whether they come from the editor or from here. */
-  const save = (id: string, edit: DocEdit): Promise<void> => {
-    const p = (queue.current.get(id) ?? Promise.resolve()).then(() => run(id, edit));
-    queue.current.set(id, p.catch(() => undefined));
-    return p;
   };
 
   const make = async (withTemplate: boolean) => {
     try {
-      show(await create(withTemplate));
+      const d = await create(withTemplate);
+      show(d, saves.open(d));
     } catch (e) {
       onNotice(`ドキュメントを作れませんでした: ${messageOf(e)}`);
     }
@@ -198,28 +173,41 @@ export function DocsPane({
     setDeleting(false);
     if (!id) return;
     try {
+      // The text typed so far is saved first, then archived with it; nothing is saved after.
+      await saves.beginDelete(id);
       await remove(id);
-      meta.current.delete(id);
+      saves.forget(id);
       pick(null);
       setOpen(null);
       setLive(null);
     } catch (e) {
+      const m = saves.meta(id);
+      if (m) m.deleting = false;
       onNotice(`削除できませんでした: ${messageOf(e)}`);
     }
   };
+  /** A change of the open document's section or files, saved at once with its current rev. */
+  const change = (edit: DocEdit) => {
+    const id = selectedRef.current;
+    const m = id ? saves.meta(id) : undefined;
+    if (!id || !m) return;
+    void saves.save(id, m.rev, edit);
+  };
   const setFiles = (next: (cur: AttachmentInfo[]) => AttachmentInfo[]) => {
     const id = selectedRef.current;
-    const m = id ? meta.current.get(id) : undefined;
+    const m = id ? saves.meta(id) : undefined;
     if (!id || !m) return;
     const files = next(m.files);
     m.files = files; // at once, so a second change before the save returns builds on this one
     setLive((l) => (l ? { ...l, files } : l));
-    void save(id, { files });
+    change({ files });
   };
   const addFiles = async (picked: File[]) => {
     const id = selectedRef.current;
     const infos = await storeFiles(picked, (e) => noticeRef.current(messageOf(e)));
-    if (infos.length && selectedRef.current === id) setFiles((cur) => [...cur, ...infos]);
+    if (!infos.length) return;
+    if (selectedRef.current === id) setFiles((cur) => [...cur, ...infos]);
+    else noticeRef.current("ほかのドキュメントに移ったため、ファイルを付けませんでした");
   };
 
   useEffect(() => {
@@ -231,8 +219,8 @@ export function DocsPane({
     { label: "雛形から", onClick: () => void make(true) },
   ];
   const sectionItems: MenuItem[] = [
-    { label: "プロジェクト全体", current: live?.section === null, onClick: () => void save(selected!, { section: null }) },
-    ...sections.map((s) => ({ label: s, current: live?.section === s, onClick: () => void save(selected!, { section: s }) })),
+    { label: "プロジェクト全体", current: live?.section === null, onClick: () => change({ section: null }) },
+    ...sections.map((s) => ({ label: s, current: live?.section === s, onClick: () => change({ section: s }) })),
   ];
   const mutedLine: React.CSSProperties = { fontSize: 12, lineHeight: "17px", color: "var(--color-text-muted)" };
 
@@ -305,7 +293,7 @@ export function DocsPane({
                 ]}
               />
             </div>
-            <DocEditor key={`${open.doc.id}:${open.rev}`} doc={open.doc} onSave={(edit) => save(open.doc.id, edit)} onError={onNotice} />
+            <DocEditor key={`${open.doc.id}:${open.rev}`} doc={open.doc} onSave={(edit) => saves.save(open.doc.id, open.rev, edit)} onError={onNotice} />
             <ReferenceFiles
               files={live.files}
               onAdd={(f) => void addFiles(f)}
