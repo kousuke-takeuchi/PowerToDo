@@ -12,6 +12,13 @@ export interface SyncInfo { state: SyncState; lastSyncedAt?: string; target: "go
 export interface Comment { id: string; at: string; author: string; text: string; edited: boolean; files: AttachmentInfo[]; }
 /** One attachment (spec attachments §3). `hash` + `ext` name the blob in `_attachments/`; `w`/`h` for images only. */
 export interface AttachmentInfo { hash: string; ext: string; name: string; type: string; size: number; w?: number; h?: number; }
+/** Project documents (spec 2026-11-28); mirrors the Rust structs. */
+export type DocSummary = { id: string; project: string; title: string; section: string | null; updated: string; author: string; files: number };
+export type Doc = { id: string; project: string; title: string; section: string | null; created: string; updated: string; author: string; files: AttachmentInfo[]; body: string };
+/** `section: null` moves the document to the whole project; a missing key leaves it. */
+export type DocEdit = { title?: string; section?: string | null; body?: string; files?: AttachmentInfo[] };
+/** `recreated`: the document was archived or deleted elsewhere; the edit was saved as a new document (`copy`). */
+export type Saved = ({ kind: "written" } & Doc) | { kind: "conflict"; doc: Doc; copy: Doc } | { kind: "recreated"; copy: Doc };
 /** A file of the description; `id` is what `detachFromNote` takes. */
 export interface NoteFile { id: string; at: string; author: string; file: AttachmentInfo; }
 /** Settings, spec §8: blobs on this device. */

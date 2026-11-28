@@ -460,6 +460,21 @@ mod tests {
     const ID: &str = "1792929845000-3f2a00000000009c";
 
     #[test]
+    fn saved_serializes_with_a_kind() {
+        let d = parse("仕事", ID, "");
+        let v = serde_json::to_value(Saved::Written(d.clone())).unwrap();
+        assert_eq!(v["kind"], "written");
+        assert_eq!(v["id"], ID);
+        let v = serde_json::to_value(Saved::Conflict { doc: d.clone(), copy: d.clone() }).unwrap();
+        assert_eq!(v["kind"], "conflict");
+        assert_eq!(v["doc"]["id"], ID);
+        assert_eq!(v["copy"]["id"], ID);
+        let v = serde_json::to_value(Saved::Recreated { copy: d }).unwrap();
+        assert_eq!(v["kind"], "recreated");
+        assert_eq!(v["copy"]["id"], ID);
+    }
+
+    #[test]
     fn file_names_round_trip_with_dots_in_the_project() {
         let n = file_name("v1.2 リリース", ID);
         assert_eq!(n, format!("v1.2 リリース.{ID}.md"));
