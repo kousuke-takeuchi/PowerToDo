@@ -49,6 +49,11 @@ impl Paths {
         self.data_dir.join(crate::store::comments::DIR)
     }
 
+    /// `_docs/`: one Markdown file per project document (spec project docs).
+    pub fn docs_dir(&self) -> PathBuf {
+        self.data_dir.join(crate::store::docs::DIR)
+    }
+
     /// `_attachments/`: the blobs of every comment and description (spec attachments §2).
     pub fn attachments_dir(&self) -> PathBuf {
         self.data_dir.join(crate::store::attachments::DIR)

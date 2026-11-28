@@ -1,6 +1,7 @@
 pub mod attachments;
 pub mod cells;
 pub mod comments;
+pub mod docs;
 pub mod common_book;
 pub mod external;
 pub mod fired;
