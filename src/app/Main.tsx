@@ -255,7 +255,8 @@ export function Main({ app, syncConflicts }: { app: AppStateDto; syncConflicts: 
   // Project documents (spec 2026-11-28): the project that shows ドキュメント (and the section it is narrowed to).
   // Keyed by project, so switching project goes back to リスト.
   const [docs, setDocs] = useState<{ project: string; section: string | null } | null>(null);
-  const docsOpen = docs !== null && docs.project === current;
+  // An archived project is read-only: its documents are not offered (the switch is hidden too).
+  const docsOpen = docs !== null && docs.project === current && !archived;
   const noteId = useRef(0);
   const noteAction = useRef<(() => void) | null>(null);
   const completed = useCallback((t: Task) => setNotice((s) => nextNotice(s, { done: completedOf(t) })), []);
