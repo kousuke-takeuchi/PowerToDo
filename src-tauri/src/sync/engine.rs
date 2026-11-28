@@ -26,8 +26,8 @@ use super::base::BaseStore;
 use super::merge::{Merged, merge_files};
 use super::state::{BackendKind, FileRecord, SyncState};
 use super::{
-    ATTACHMENT_KEY_PREFIX, Action, COMMENT_KEY_PREFIX, LocalFile, PlanMode, Side, conflict_name,
-    decide, fold, is_attachment_key, is_comment_key, is_sync_target, plan, sha256_hex,
+    ATTACHMENT_KEY_PREFIX, Action, COMMENT_KEY_PREFIX, DOC_KEY_PREFIX, LocalFile, PlanMode, Side, conflict_name,
+    decide, fold, is_attachment_key, is_comment_key, is_doc_key, is_sync_target, plan, sha256_hex,
 };
 use crate::error::AppError;
 use crate::store::common_book::COMMON_FILE;
@@ -66,7 +66,10 @@ fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
     files
         .iter()
         .filter(|f| {
-            is_sync_target(&f.name) || is_comment_key(&f.name) || is_attachment_key(&f.name)
+            is_sync_target(&f.name)
+                || is_comment_key(&f.name)
+                || is_doc_key(&f.name)
+                || is_attachment_key(&f.name)
         })
         .map(|f| (f.name.clone(), f.version.clone()))
         .collect()
@@ -76,6 +79,15 @@ fn versions(files: &[RemoteFile]) -> BTreeMap<String, String> {
 fn with_comments(mut files: Vec<RemoteFile>, comments: &[RemoteFile]) -> Vec<RemoteFile> {
     files.extend(comments.iter().map(|f| RemoteFile {
         name: format!("{COMMENT_KEY_PREFIX}{}", f.name),
+        ..f.clone()
+    }));
+    files
+}
+
+/// `files` plus the document files, named `_docs/<leaf>` as their records are.
+fn with_docs(mut files: Vec<RemoteFile>, docs: &[RemoteFile]) -> Vec<RemoteFile> {
+    files.extend(docs.iter().map(|f| RemoteFile {
+        name: format!("{DOC_KEY_PREFIX}{}", f.name),
         ..f.clone()
     }));
     files
@@ -97,7 +109,10 @@ pub fn remote_fingerprint(files: &[RemoteFile]) -> String {
     let mut pairs: Vec<(&str, &str)> = files
         .iter()
         .filter(|f| {
-            is_sync_target(&f.name) || is_comment_key(&f.name) || is_attachment_key(&f.name)
+            is_sync_target(&f.name)
+                || is_comment_key(&f.name)
+                || is_doc_key(&f.name)
+                || is_attachment_key(&f.name)
         })
         .map(|f| (f.name.as_str(), f.version.as_str()))
         .collect();
@@ -280,6 +295,8 @@ pub struct SyncReport {
     pub merged: Vec<String>,
     /// Comment files (leaf names) this run uploaded, downloaded, merged or archived (spec ① §3.4).
     pub comments: Vec<String>,
+    /// Document files (leaf names) this run uploaded, downloaded, kept both versions of or archived.
+    pub docs: Vec<String>,
     /// Attachment blobs (leaf names) this run copied to the target or from it (spec attachments §7).
     pub attachments: Vec<String>,
     /// Left alone from the start: unsaved, held, being saved or unreadable.
@@ -955,6 +972,10 @@ impl SyncEngine {
                     Ok(c) => with_comments(files, c.as_deref().unwrap_or_default()),
                     Err(_) => files,
                 };
+                let files = match backend.list_docs().await {
+                    Ok(d) => with_docs(files, d.as_deref().unwrap_or_default()),
+                    Err(_) => files,
+                };
                 Ok(match backend.list_attachments().await {
                     Ok(a) => with_attachments(files, &a),
                     Err(_) => files,
@@ -1138,6 +1159,15 @@ impl SyncEngine {
                 None
             }
         };
+        let remote_docs = match target.backend.list_docs().await {
+            Ok(d) => Some(d),
+            Err(e) => {
+                report
+                    .failed
+                    .push((docs_dir_label(), failure_text(&docs_dir_label(), e)));
+                None
+            }
+        };
         let remote_attachments = match target.backend.list_attachments().await {
             Ok(a) => Some(a),
             Err(e) => {
@@ -1151,6 +1181,10 @@ impl SyncEngine {
         let seen = match &remote_comments {
             Some(c) => with_comments(remote.clone(), c.as_deref().unwrap_or_default()),
             None => remote.clone(),
+        };
+        let seen = match &remote_docs {
+            Some(d) => with_docs(seen, d.as_deref().unwrap_or_default()),
+            None => seen,
         };
         let seen = match &remote_attachments {
             Some(a) => with_attachments(seen, a),
@@ -1195,6 +1229,7 @@ impl SyncEngine {
         report.skipped = skip.iter().filter(|n| is_sync_target(n)).cloned().collect();
         let records = state.files.clone();
         let comments_dir = data_dir.join(crate::store::comments::DIR);
+        let docs_dir = data_dir.join(crate::store::docs::DIR);
         let attachments_dir = data_dir.join(crate::store::attachments::DIR);
         let mut run = Run {
             engine: self,
@@ -1268,6 +1303,28 @@ impl SyncEngine {
             }
         }
 
+        // (6c) The project documents, after the comments.
+        if let Some(rd) = remote_docs {
+            match self
+                .sync_docs(
+                    host,
+                    &target.backend,
+                    &docs_dir,
+                    &mut state,
+                    &mut report,
+                    rd,
+                    is_retry,
+                )
+                .await
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    report.outcome = self.backend_failed(host, generation, target.kind, &e);
+                    return report;
+                }
+            }
+        }
+
         // (7) Done.
         if mode != PlanMode::Normal {
             // Records are rebuilt from what the mirror copied; names it left for later keep
@@ -1279,7 +1336,9 @@ impl SyncEngine {
                 .collect();
             state
                 .files
-                .retain(|name, _| is_comment_key(name) || keep.contains(&fold(name)));
+                .retain(|name, _| {
+                    is_comment_key(name) || is_doc_key(name) || keep.contains(&fold(name))
+                });
         }
         let now = self.now();
         state.last_sync = Some(now);
@@ -1298,12 +1357,15 @@ impl SyncEngine {
             || !report.archived_remote.is_empty()
             || !report.conflicts.is_empty()
             || !report.comments.is_empty()
+            || !report.docs.is_empty()
             || !report.attachments.is_empty())
             && let Ok(files) = target.backend.list().await
             && let Ok(comment_files) = target.backend.list_comments().await
+            && let Ok(doc_files) = target.backend.list_docs().await
             && let Ok(blobs) = target.backend.list_attachments().await
         {
             let files = with_comments(files, comment_files.as_deref().unwrap_or_default());
+            let files = with_docs(files, doc_files.as_deref().unwrap_or_default());
             let files = with_attachments(files, &blobs);
             let blob_keys: Vec<String> = report
                 .attachments
@@ -1315,12 +1377,18 @@ impl SyncEngine {
                 .iter()
                 .map(|n| format!("{COMMENT_KEY_PREFIX}{n}"))
                 .collect();
+            let doc_keys: Vec<String> = report
+                .docs
+                .iter()
+                .map(|n| format!("{DOC_KEY_PREFIX}{n}"))
+                .collect();
             let touched: BTreeSet<&str> = report
                 .uploaded
                 .iter()
                 .chain(&report.merged)
                 .chain(&report.archived_remote)
                 .chain(&comment_keys)
+                .chain(&doc_keys)
                 .chain(&blob_keys)
                 .map(String::as_str)
                 .chain(report.conflicts.iter().map(|(name, _)| name.as_str()))
@@ -1407,6 +1475,11 @@ fn comments_dir_label() -> String {
     format!("{}/", crate::store::comments::DIR)
 }
 
+/// How the documents folder is named in messages.
+fn docs_dir_label() -> String {
+    format!("{}/", crate::store::docs::DIR)
+}
+
 /// How the attachments folder is named in messages.
 fn attachments_dir_label() -> String {
     format!("{}/", crate::store::attachments::DIR)
@@ -1466,6 +1539,53 @@ fn list_comment_files(dir: &Path) -> std::io::Result<Vec<LocalFile>> {
         }
     }
     Ok(files)
+}
+
+/// The document files in `dir` (`_docs/`), leaf names; a missing folder has none. Unreadable
+/// files are left out (they come back next time).
+fn list_doc_files(dir: &Path) -> std::io::Result<Vec<LocalFile>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if crate::store::docs::parse_file_name(&name).is_none() {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        if let Ok((bytes, mtime)) = std::fs::read(&path).and_then(|b| Ok((b, meta.modified()?))) {
+            files.push(LocalFile {
+                name,
+                hash: sha256_hex(&bytes),
+                modified: DateTime::<Local>::from(mtime).naive_local(),
+            });
+        }
+    }
+    Ok(files)
+}
+
+/// `true` when `a` was updated later than `b`: compared as instants when both stamps are RFC 3339
+/// (the offsets may differ between PCs), as text otherwise.
+fn doc_is_newer(a: &str, b: &str) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(a),
+        DateTime::parse_from_rfc3339(b),
+    ) {
+        (Ok(x), Ok(y)) => x > y,
+        _ => a > b,
+    }
 }
 
 impl SyncEngine {
@@ -1727,6 +1847,242 @@ impl SyncEngine {
     }
 }
 
+impl SyncEngine {
+    /// The documents pass: each `_docs/<project>.<id>.md` is decided like a workbook (`decide`),
+    /// but a change on both sides keeps both versions: the one updated later keeps the name, the
+    /// other becomes a new document (a conflict copy) that the next run uploads. Nothing goes
+    /// through the store beyond the lock. Records live in `state` under `_docs/<leaf>`. A file that
+    /// fails is reported and left for the next run; refused credentials or no network stop the run.
+    ///
+    /// `remote` is `None` when the target has no `_docs` folder (an older target, or one wiped). A side
+    /// without that folder is not read as every document deleted: the records are dropped and the
+    /// other side fills it again.
+    #[allow(clippy::too_many_arguments)]
+    async fn sync_docs(
+        &self,
+        host: &dyn SyncHost,
+        backend: &Arc<dyn StorageBackend>,
+        dir: &Path,
+        state: &mut SyncState,
+        report: &mut SyncReport,
+        remote: Option<Vec<RemoteFile>>,
+        is_retry: bool,
+    ) -> Result<(), BackendError> {
+        if remote.is_none() || !dir.is_dir() {
+            state.files.retain(|k, _| !is_doc_key(k));
+        }
+        let remote = remote.unwrap_or_default();
+        let local = match list_doc_files(dir) {
+            Ok(l) => l,
+            Err(e) => {
+                report
+                    .failed
+                    .push((docs_dir_label(), failure_text(&docs_dir_label(), e)));
+                return Ok(());
+            }
+        };
+        let key = |leaf: &str| format!("{DOC_KEY_PREFIX}{leaf}");
+        let locals: BTreeMap<String, &LocalFile> =
+            local.iter().map(|f| (f.name.clone(), f)).collect();
+        let remotes: BTreeMap<String, &RemoteFile> =
+            remote.iter().map(|f| (f.name.clone(), f)).collect();
+        let mut names: BTreeSet<String> = locals.keys().chain(remotes.keys()).cloned().collect();
+        names.extend(
+            state
+                .files
+                .keys()
+                .filter_map(|k| k.strip_prefix(DOC_KEY_PREFIX).map(str::to_string)),
+        );
+        // Projects whose workbook waits for the next run: their documents wait too.
+        let waiting: BTreeSet<String> = report
+            .left_over()
+            .filter_map(|n| n.strip_suffix(".xlsx").map(str::to_string))
+            .collect();
+        let paths = crate::store::paths::Paths::new(dir.parent().unwrap_or(dir));
+        let mut changed = Vec::new();
+        for name in names {
+            if crate::store::docs::parse_file_name(&name)
+                .is_some_and(|(project, _)| waiting.contains(&project))
+            {
+                report.deferred.push(name);
+                continue;
+            }
+            let l = locals.get(&name).copied();
+            let r = remotes.get(&name).copied();
+            let record = state.files.get(&key(&name)).cloned();
+            let Some(action) = decide(&name, l, r, record.as_ref(), false) else {
+                // Gone from both sides: the record means nothing any more.
+                if l.is_none() && r.is_none() {
+                    state.files.remove(&key(&name));
+                }
+                continue;
+            };
+            let path = dir.join(&name);
+            // Names of conflict copies this file made (they are new local files).
+            let mut copies: Vec<String> = Vec::new();
+            // Ok(Some(local_changed)) for a change, Ok(None) for nothing to report.
+            let result: Result<Option<bool>, BackendError> = async {
+                match action {
+                    Action::Upload(_) => {
+                        let bytes =
+                            std::fs::read(&path).map_err(|e| BackendError::Other(e.to_string()))?;
+                        let hash = sha256_hex(&bytes);
+                        let f = backend.upload_doc(&name, r, bytes).await?;
+                        put_record(state, key(&name), &f, hash);
+                        Ok(Some(false))
+                    }
+                    Action::Download(_) => {
+                        let r = r.expect("a download has a remote file");
+                        let bytes = backend.download(r).await?;
+                        let written = {
+                            let _store = host.lock_store();
+                            // Written only over the version the plan saw: an edit made while the
+                            // download ran is kept and decided next run.
+                            let untouched = match std::fs::read(&path) {
+                                Ok(current) => l.is_some_and(|l| sha256_hex(&current) == l.hash),
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => l.is_none(),
+                                Err(e) => return Err(BackendError::Other(e.to_string())),
+                            };
+                            if untouched {
+                                if let Some(parent) = path.parent() {
+                                    std::fs::create_dir_all(parent)
+                                        .map_err(|e| BackendError::Other(e.to_string()))?;
+                                }
+                                crate::store::paths::write_atomic(&path, &bytes)
+                                    .map_err(|e| BackendError::Other(e.to_string()))?;
+                            }
+                            untouched
+                        };
+                        if !written {
+                            report.deferred.push(name.clone());
+                            report.rerun = true;
+                            return Ok(None);
+                        }
+                        put_record(state, key(&name), r, sha256_hex(&bytes));
+                        Ok(Some(true))
+                    }
+                    Action::Conflict { .. } => {
+                        let r = r.expect("a conflict has a remote file");
+                        let theirs = backend.download(r).await?;
+                        let ours =
+                            std::fs::read(&path).map_err(|e| BackendError::Other(e.to_string()))?;
+                        if ours == theirs {
+                            // The same content on both sides (a backend whose version is not the hash).
+                            put_record(state, key(&name), r, sha256_hex(&ours));
+                            return Ok(None);
+                        }
+                        let (project, id) = crate::store::docs::parse_file_name(&name)
+                            .expect("only document names reach here");
+                        let a = crate::store::docs::parse(
+                            &project,
+                            &id,
+                            &String::from_utf8_lossy(&ours),
+                        );
+                        let b = crate::store::docs::parse(
+                            &project,
+                            &id,
+                            &String::from_utf8_lossy(&theirs),
+                        );
+                        // The newer `updated` keeps the name; the other becomes a new document.
+                        let remote_wins = doc_is_newer(&b.updated, &a.updated);
+                        let (loser, winner_bytes) = if remote_wins {
+                            (a, theirs)
+                        } else {
+                            (b, ours.clone())
+                        };
+                        let now = Local::now();
+                        {
+                            let _store = host.lock_store();
+                            // An edit made while the download ran stays: decided next run.
+                            if std::fs::read(&path).ok().as_deref() != Some(ours.as_slice()) {
+                                report.deferred.push(name.clone());
+                                report.rerun = true;
+                                return Ok(None);
+                            }
+                            // The loser is saved first, so nothing is lost if the next step fails.
+                            let copy = crate::store::docs::conflict_copy(
+                                &paths,
+                                &project,
+                                &loser,
+                                now.fixed_offset(),
+                                now.timestamp_millis() as u64,
+                            )
+                            .map_err(|e| BackendError::Other(e.to_string()))?;
+                            copies.push(crate::store::docs::file_name(&project, &copy.id));
+                            if remote_wins {
+                                crate::store::paths::write_atomic(&path, &winner_bytes)
+                                    .map_err(|e| BackendError::Other(e.to_string()))?;
+                            }
+                        }
+                        if remote_wins {
+                            put_record(state, key(&name), r, sha256_hex(&winner_bytes));
+                        } else {
+                            let hash = sha256_hex(&winner_bytes);
+                            let f = backend.upload_doc(&name, Some(r), winner_bytes).await?;
+                            put_record(state, key(&name), &f, hash);
+                        }
+                        // The copy is a new local file: the next run uploads it.
+                        report.rerun = true;
+                        Ok(Some(true))
+                    }
+                    Action::ArchiveRemote(_) => {
+                        backend
+                            .archive_doc(r.expect("an archive has a remote file"))
+                            .await?;
+                        state.files.remove(&key(&name));
+                        Ok(Some(false))
+                    }
+                    Action::ArchiveLocal(_) => {
+                        if let Some((project, id)) = crate::store::docs::parse_file_name(&name) {
+                            let _store = host.lock_store();
+                            crate::store::docs::archive(&paths, &project, Some(&id), self.now())
+                                .map_err(|e| BackendError::Other(e.to_string()))?;
+                        }
+                        state.files.remove(&key(&name));
+                        Ok(Some(true))
+                    }
+                    Action::Record(_) => {
+                        // Both sides hold the same content: only the record is written (not a change).
+                        if let (Some(l), Some(r)) = (l, r) {
+                            put_record(state, key(&name), r, l.hash.clone());
+                        }
+                        Ok(None)
+                    }
+                    _ => Ok(None),
+                }
+            }
+            .await;
+            changed.append(&mut copies);
+            match result {
+                Ok(None) => {}
+                Ok(Some(local_changed)) => {
+                    report.docs.push(name.clone());
+                    if local_changed {
+                        changed.push(name);
+                    }
+                }
+                // Like a workbook: retried once at once, then left to the schedule.
+                Err(BackendError::Precondition) if !is_retry => {
+                    report.deferred.push(name);
+                    report.rerun = true;
+                }
+                Err(BackendError::Precondition) => {
+                    let m = format!(
+                        "「{name}」は同期先でも更新され続けているため同期できませんでした (次の同期でもう一度試します)"
+                    );
+                    report.failed.push((name, m));
+                }
+                Err(e @ (BackendError::Auth | BackendError::Offline(_))) => return Err(e),
+                Err(e) => report.failed.push((name.clone(), failure_text(&name, e))),
+            }
+        }
+        if !changed.is_empty() {
+            host.docs_changed(&changed);
+        }
+        Ok(())
+    }
+}
+
 /// Writes a comment file from the remote side, under the store lock (the app appends under it
 /// too): what is on disk now is merged in, so a comment written while the run was away is kept.
 /// The record keeps the remote content's hash, so a kept local line is uploaded next run.
@@ -1818,10 +2174,12 @@ fn drop_gone_records(
         .chain(skip.iter().map(|n| fold(n)))
         .collect();
     let before = state.files.len();
-    // Comment records belong to the comments pass, which drops its own.
+    // Comment and document records belong to their passes, which drop their own.
     state
         .files
-        .retain(|name, _| is_comment_key(name) || present.contains(&fold(name)));
+        .retain(|name, _| {
+            is_comment_key(name) || is_doc_key(name) || present.contains(&fold(name))
+        });
     state.files.len() != before
 }
 
@@ -2684,6 +3042,7 @@ mod tests {
             && r.clashes.is_empty()
             && r.merged.is_empty()
             && r.comments.is_empty()
+            && r.docs.is_empty()
             && r.attachments.is_empty()
     }
 
@@ -2989,6 +3348,209 @@ mod tests {
         settled(&a).await;
         assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
         say(&b, "仕事", 1, "x");
+        b.sync().await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
+    }
+
+    // ---- project documents (_docs) ----
+
+    fn at(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
+        chrono::DateTime::parse_from_rfc3339(s).unwrap()
+    }
+
+    fn doc_ids(pc: &Pc, project: &str) -> Vec<String> {
+        let mut ids: Vec<String> = crate::store::docs::list(&Paths::new(&pc.data), project)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.id)
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn doc_body(pc: &Pc, project: &str, id: &str) -> String {
+        crate::store::docs::read(&Paths::new(&pc.data), project, id)
+            .unwrap()
+            .body
+    }
+
+    fn save_doc(pc: &Pc, project: &str, id: &str, body: &str, when: &str) {
+        let paths = Paths::new(&pc.data);
+        let base = crate::store::docs::read(&paths, project, id).unwrap().updated;
+        let edit = crate::store::docs::Edit {
+            body: Some(body.into()),
+            ..Default::default()
+        };
+        let now = at(when);
+        crate::store::docs::save(
+            &paths,
+            project,
+            id,
+            &base,
+            edit,
+            "たろう",
+            now,
+            now.timestamp_millis() as u64,
+        )
+        .unwrap();
+    }
+
+    fn new_doc(pc: &Pc, project: &str, title: &str, body: &str, when: &str) -> String {
+        let now = at(when);
+        crate::store::docs::create(
+            &Paths::new(&pc.data),
+            project,
+            None,
+            title,
+            body,
+            "たろう",
+            now,
+            now.timestamp_millis() as u64,
+        )
+        .unwrap()
+        .id
+    }
+
+    #[tokio::test]
+    async fn a_document_changed_on_both_sides_keeps_both() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "元", "2026-10-25T10:00:00+09:00");
+        let r = a.sync().await;
+        assert_eq!(r.docs.len(), 1, "{r:?}");
+        b.sync().await;
+        assert_eq!(doc_body(&b, "仕事", &id), "元");
+        save_doc(&a, "仕事", &id, "A の変更", "2026-10-25T10:30:00+09:00");
+        save_doc(&b, "仕事", &id, "B の変更", "2026-10-25T10:40:00+09:00");
+        a.sync().await;
+        let r = b.sync().await;
+        assert!(r.rerun, "the conflict copy is uploaded by the next run: {r:?}");
+        assert!(r.failed.is_empty(), "{r:?}");
+        // B's edit is newer, so it keeps the name; A's becomes a second document.
+        let ids = doc_ids(&b, "仕事");
+        assert_eq!(ids.len(), 2, "{ids:?}");
+        assert_eq!(doc_body(&b, "仕事", &id), "B の変更");
+        let copy = ids.iter().find(|i| **i != id).unwrap().clone();
+        assert_eq!(doc_body(&b, "仕事", &copy), "A の変更");
+        let title = crate::store::docs::read(&Paths::new(&b.data), "仕事", &copy)
+            .unwrap()
+            .title;
+        assert!(title.starts_with("議事録 (競合 "), "{title}");
+        // The copy goes up with the next run, and A gets both.
+        let r = b.sync().await;
+        assert!(!r.rerun, "no endless reruns: {r:?}");
+        assert_eq!(r.docs.len(), 1, "{r:?}");
+        a.sync().await;
+        assert_eq!(doc_ids(&a, "仕事"), ids);
+        assert_eq!(doc_body(&a, "仕事", &id), "B の変更");
+        assert_eq!(doc_body(&a, "仕事", &copy), "A の変更");
+        assert!(idle(&a.sync().await) && idle(&b.sync().await));
+        assert_eq!(remote.list_docs().await.unwrap().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_document_changed_on_both_sides_keeps_the_newer_one_whichever_side_it_is_on() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "元", "2026-10-25T10:00:00+09:00");
+        a.sync().await;
+        b.sync().await;
+        save_doc(&a, "仕事", &id, "A の変更", "2026-10-25T10:50:00+09:00");
+        save_doc(&b, "仕事", &id, "B の変更", "2026-10-25T10:40:00+09:00");
+        a.sync().await;
+        b.sync().await;
+        // A is newer: B takes A's text under the same name and keeps its own as a copy.
+        assert_eq!(doc_body(&b, "仕事", &id), "A の変更");
+        let ids = doc_ids(&b, "仕事");
+        assert_eq!(ids.len(), 2);
+        let copy = ids.iter().find(|i| **i != id).unwrap();
+        assert_eq!(doc_body(&b, "仕事", copy), "B の変更");
+        // The remote holds the winner under the original name.
+        let listed = remote.list_docs().await.unwrap().unwrap();
+        let remote_name = crate::store::docs::file_name("仕事", &id);
+        let f = listed.iter().find(|f| f.name == remote_name).unwrap();
+        let bytes = remote.download(f).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("A の変更"));
+    }
+
+    #[tokio::test]
+    async fn a_document_changed_on_one_side_is_copied() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "元", "2026-10-25T10:00:00+09:00");
+        a.sync().await;
+        let r = b.sync().await;
+        assert_eq!(r.docs.len(), 1, "{r:?}");
+        assert_eq!(doc_body(&b, "仕事", &id), "元");
+        save_doc(&a, "仕事", &id, "A の変更", "2026-10-25T10:30:00+09:00");
+        a.sync().await;
+        b.sync().await;
+        assert_eq!(doc_body(&b, "仕事", &id), "A の変更");
+        assert_eq!(doc_ids(&b, "仕事"), std::slice::from_ref(&id));
+        assert!(idle(&a.sync().await) && idle(&b.sync().await));
+        // Archiving on one side is passed on, the file is moved, not deleted.
+        crate::store::docs::archive(&Paths::new(&a.data), "仕事", Some(&id), dt(NOW)).unwrap();
+        a.sync().await;
+        assert_eq!(remote.list_docs().await.unwrap(), Some(Vec::new()));
+        assert_eq!(remote.archived().len(), 1);
+        assert!(remote.archived()[0].0.ends_with(".md"));
+        b.sync().await;
+        assert!(doc_ids(&b, "仕事").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_old_target_without_docs_folder_is_not_read_as_deleted() {
+        let remote = backend();
+        let (a, _b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "本文", "2026-10-25T10:00:00+09:00");
+        assert_eq!(remote.list_docs().await.unwrap(), None);
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert_eq!(doc_ids(&a, "仕事"), std::slice::from_ref(&id));
+        assert_eq!(doc_body(&a, "仕事", &id), "本文");
+        let listed = remote.list_docs().await.unwrap().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(r.archived_local.is_empty() && r.failed.is_empty(), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn a_wiped_remote_docs_folder_is_filled_again() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "本文", "2026-10-25T10:00:00+09:00");
+        a.sync().await;
+        b.sync().await;
+        remote.wipe_docs();
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert_eq!(doc_body(&a, "仕事", &id), "本文");
+        assert_eq!(remote.list_docs().await.unwrap().unwrap().len(), 1);
+        b.sync().await;
+        assert_eq!(doc_body(&b, "仕事", &id), "本文");
+    }
+
+    #[tokio::test]
+    async fn a_wiped_local_docs_folder_is_filled_again() {
+        let remote = backend();
+        let (a, _b) = two_pcs(&remote).await;
+        let id = new_doc(&a, "仕事", "議事録", "本文", "2026-10-25T10:00:00+09:00");
+        a.sync().await;
+        fs::remove_dir_all(a.data.join(crate::store::docs::DIR)).unwrap();
+        let r = a.sync().await;
+        assert_eq!(r.outcome, RunOutcome::Done, "{r:?}");
+        assert_eq!(doc_body(&a, "仕事", &id), "本文");
+        assert_eq!(remote.list_docs().await.unwrap().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remote_check_sees_a_new_document() {
+        let remote = backend();
+        let (a, b) = two_pcs(&remote).await;
+        settled(&a).await;
+        a.engine.check_remote().await;
+        settled(&a).await;
+        assert_eq!(a.engine.check_remote().await, CheckOutcome::Unchanged);
+        new_doc(&b, "仕事", "議事録", "本文", "2026-10-25T10:00:00+09:00");
         b.sync().await;
         assert_eq!(a.engine.check_remote().await, CheckOutcome::Changed);
     }

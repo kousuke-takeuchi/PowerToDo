@@ -31,6 +31,10 @@ const PROP_ARCHIVE: &str = "archive";
 /// The comment files' folder in the root (spec ① §3.4).
 const COMMENTS_FOLDER_NAME: &str = "_comments";
 const PROP_COMMENTS: &str = "comments";
+/// The project documents' folder in the root.
+const DOCS_FOLDER_NAME: &str = "_docs";
+const PROP_DOCS: &str = "docs";
+const MD_MIME: &str = "text/markdown";
 /// The attachment blobs' folder in the root (spec attachments §7).
 const ATTACHMENTS_FOLDER_NAME: &str = "_attachments";
 const PROP_ATTACHMENTS: &str = "attachments";
@@ -279,6 +283,38 @@ impl GoogleDriveBackend {
         Ok(Some(files))
     }
 
+    /// The `_docs` folders of the root: one, unless two PCs made it at the same moment (new
+    /// files go to the smallest id, the others are still read).
+    async fn doc_folders(&self) -> Result<Vec<String>, BackendError> {
+        let root = self.resolve_root().await?;
+        self.find_folders(PROP_DOCS, Some(&root)).await
+    }
+
+    /// The document files (`<project>.<id>.md` in every `_docs`), `None` when the root has no such folder.
+    async fn list_doc_files(&self) -> Result<Option<Vec<RemoteFile>>, BackendError> {
+        let folders = self.doc_folders().await?;
+        if folders.is_empty() {
+            return Ok(None);
+        }
+        let mut files = Vec::new();
+        for folder in folders {
+            let q = format!(
+                "'{}' in parents and trashed=false and mimeType!='{FOLDER_MIME}'",
+                escape_q(&folder)
+            );
+            for item in self.query(&q, &format!("files({FILE_FIELDS})")).await? {
+                let is_doc = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|n| crate::store::docs::parse_file_name(n).is_some());
+                if is_doc {
+                    files.push(remote_file(&item)?);
+                }
+            }
+        }
+        Ok(Some(files))
+    }
+
     /// The `_attachments` folders of the root (several when two PCs made it at the same moment: files
     /// are read from all, new ones go to the smallest id).
     async fn attachment_folders(&self) -> Result<Vec<String>, BackendError> {
@@ -331,6 +367,38 @@ impl GoogleDriveBackend {
             Some(f) => Ok(f),
             None => self.comments_folder().await,
         }
+    }
+
+    /// The `_docs` folder that holds `file`: the only one, or the one its parents name.
+    async fn doc_folder_of(&self, file: &RemoteFile) -> Result<String, BackendError> {
+        let folders = self.doc_folders().await?;
+        if folders.len() > 1 {
+            let url = self.url(
+                &Self::file_path("/drive/v3", &file.id),
+                &[("fields", "parents")],
+            )?;
+            let reply = self.get_json(url).await?;
+            if reply.status != 404 {
+                let meta = reply.json("Google Drive のファイル")?;
+                let parents = meta.get("parents").and_then(serde_json::Value::as_array);
+                if let Some(p) = folders
+                    .iter()
+                    .find(|f| parents.is_some_and(|ps| ps.iter().any(|p| p.as_str() == Some(f))))
+                {
+                    return Ok(p.clone());
+                }
+            }
+        }
+        match folders.into_iter().next() {
+            Some(f) => Ok(f),
+            None => self.docs_folder().await,
+        }
+    }
+
+    async fn docs_folder(&self) -> Result<String, BackendError> {
+        let root = self.root_id().await?;
+        self.find_or_create_folder(DOCS_FOLDER_NAME, PROP_DOCS, Some(&root))
+            .await
     }
 
     async fn comments_folder(&self) -> Result<String, BackendError> {
@@ -548,19 +616,21 @@ impl GoogleDriveBackend {
             .filter_map(|f| f.get("name").and_then(serde_json::Value::as_str))
             .map(str::to_string)
             .collect();
-        // A comment file keeps its `.jsonl` (archive_file_name writes `.xlsx`).
-        let (stem, jsonl) = match file.name.strip_suffix(".jsonl") {
-            Some(stem) => (stem, true),
-            None => (file.name.strip_suffix(".xlsx").unwrap_or(&file.name), false),
+        // A comment file keeps its `.jsonl` and a document its `.md` (archive_file_name writes `.xlsx`).
+        let (stem, ext) = if let Some(stem) = file.name.strip_suffix(".jsonl") {
+            (stem, Some(".jsonl"))
+        } else if let Some(stem) = file.name.strip_suffix(".md") {
+            (stem, Some(".md"))
+        } else {
+            (file.name.strip_suffix(".xlsx").unwrap_or(&file.name), None)
         };
         let tag = file.modified.format("%Y-%m-%d %H%M").to_string();
         let dest = (1..=MAX_ARCHIVE_NAMES)
             .map(|n| {
                 let name = archive_file_name(stem, &tag, n);
-                if jsonl {
-                    format!("{}.jsonl", name.strip_suffix(".xlsx").unwrap_or(&name))
-                } else {
-                    name
+                match ext {
+                    Some(ext) => format!("{}{ext}", name.strip_suffix(".xlsx").unwrap_or(&name)),
+                    None => name,
                 }
             })
             .find(|candidate| !taken.contains(candidate))
@@ -648,6 +718,37 @@ impl StorageBackend for GoogleDriveBackend {
     fn archive_comment<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
         Box::pin(async move {
             let folder = self.comment_folder_of(file).await?;
+            self.archive_in(&folder, file).await
+        })
+    }
+
+    fn list_docs(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(self.list_doc_files())
+    }
+
+    fn upload_doc<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            match existing {
+                Some(file) => {
+                    let folders = self.doc_folders().await?;
+                    self.update_in(&folders, file, bytes, MD_MIME).await
+                }
+                None => {
+                    let folder = self.docs_folder().await?;
+                    self.create_in(&folder, name, bytes, MD_MIME).await
+                }
+            }
+        })
+    }
+
+    fn archive_doc<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async move {
+            let folder = self.doc_folder_of(file).await?;
             self.archive_in(&folder, file).await
         })
     }
@@ -1074,6 +1175,96 @@ mod tests {
             body.contains("\"parents\":[\"com1\"]") && body.contains("application/x-ndjson"),
             "{body}"
         );
+    }
+
+    const DOCS_FOLDER_Q: &str = "mimeType='application/vnd.google-apps.folder' and appProperties has { key='powertodo' and value='docs' } and trashed=false and 'root1' in parents";
+    const DOCS_LIST_Q: &str =
+        "'doc1' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'";
+    const DOC_NAME: &str = "仕事.1792929845000-3f2a00000000009c.md";
+
+    #[tokio::test]
+    async fn docs_listing_without_the_folder_is_none() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, DOCS_FOLDER_Q, json!({"files": []})).await;
+        assert_eq!(b.list_docs().await.unwrap(), None);
+        assert!(
+            sent(&server, "POST").await.is_empty(),
+            "listing never creates the folder"
+        );
+    }
+
+    #[tokio::test]
+    async fn docs_listing_reads_the_docs_folder() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, DOCS_FOLDER_Q, json!({"files": [{"id": "doc1"}]})).await;
+        mount_list(
+            &server,
+            DOCS_LIST_Q,
+            json!({"files": [file_json("d1", DOC_NAME, "m1"), file_json("x", "notes.md", "m2")]}),
+        )
+        .await;
+        let files = b.list_docs().await.unwrap().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            (files[0].id.as_str(), files[0].name.as_str()),
+            ("d1", DOC_NAME)
+        );
+    }
+
+    #[tokio::test]
+    async fn doc_upload_creates_inside_the_docs_folder() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, DOCS_FOLDER_Q, json!({"files": [{"id": "doc1"}]})).await;
+        let exists_q = format!("'doc1' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder' and name='{DOC_NAME}'");
+        mount_list(&server, &exists_q, json!({"files": []})).await;
+        Mock::given(method("POST"))
+            .and(path("/upload/drive/v3/files"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(file_json(
+                "d9",
+                DOC_NAME,
+                "m9",
+            )))
+            .mount(&server)
+            .await;
+        let f = b.upload_doc(DOC_NAME, None, b"x\n".to_vec()).await.unwrap();
+        assert_eq!(f.id, "d9");
+        let post = sent(&server, "POST").await;
+        let body = String::from_utf8_lossy(&post[0].body).to_string();
+        assert!(
+            body.contains("\"parents\":[\"doc1\"]") && body.contains("text/markdown"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_document_keeps_its_md_extension_in_the_archive() {
+        let server = MockServer::start().await;
+        let b = backend(&server).await;
+        mount_root(&server).await;
+        mount_list(&server, DOCS_FOLDER_Q, json!({"files": [{"id": "doc1"}]})).await;
+        let arch_q = "mimeType='application/vnd.google-apps.folder' and appProperties has { key='powertodo' and value='archive' } and trashed=false and 'root1' in parents";
+        mount_list(&server, arch_q, json!({"files": [{"id": "arch1"}]})).await;
+        mount_list(
+            &server,
+            "'arch1' in parents and trashed=false",
+            json!({"files": []}),
+        )
+        .await;
+        Mock::given(method("PATCH"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(file_json("d1", DOC_NAME, "m1")))
+            .mount(&server)
+            .await;
+        b.archive_doc(&rf("d1", DOC_NAME, "m1")).await.unwrap();
+        let patch = sent(&server, "PATCH").await;
+        let body = String::from_utf8_lossy(&patch[0].body).to_string();
+        assert!(body.contains(".md\""), "{body}");
+        assert!(!body.contains(".xlsx"), "{body}");
     }
 
     const ATT_FOLDER_Q: &str = "mimeType='application/vnd.google-apps.folder' and appProperties has { key='powertodo' and value='attachments' } and trashed=false and 'root1' in parents";
