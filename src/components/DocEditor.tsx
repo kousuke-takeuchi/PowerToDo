@@ -14,6 +14,7 @@ import {
   DOC_TEMPLATE,
   imageBlockAltIn,
   imageBlockAltOut,
+  imageTypeOfExt,
   isEmptyBody,
   srcOfAttachment,
 } from "../app/docMarkdown";
@@ -80,7 +81,8 @@ export function DocEditor({
             if (!f) return url;
             try {
               const bytes = await api.readAttachment(f);
-              const u = URL.createObjectURL(new Blob([bytes]));
+              const type = imageTypeOfExt(f.ext);
+              const u = URL.createObjectURL(new Blob([bytes], type ? { type } : {}));
               urls.current.push(u);
               return u;
             } catch {

@@ -7,6 +7,7 @@ import {
   isEmptyBody,
   imageBlockAltIn,
   imageBlockAltOut,
+  imageTypeOfExt,
 } from "./docMarkdown.ts";
 
 test("an image path names a blob, and back", () => {
@@ -40,4 +41,15 @@ test("a block image's alt is text or the resize ratio", () => {
   assert.equal(imageBlockAltOut("画面", 1), "画面");
   assert.equal(imageBlockAltOut("", 0.5), "0.50");
   assert.equal(imageBlockAltOut("", 1), "1.00");
+});
+
+test("an image extension names its MIME type", () => {
+  assert.equal(imageTypeOfExt("png"), "image/png");
+  assert.equal(imageTypeOfExt("JPG"), "image/jpeg");
+  assert.equal(imageTypeOfExt("jpeg"), "image/jpeg");
+  assert.equal(imageTypeOfExt("svg"), "image/svg+xml");
+  assert.equal(imageTypeOfExt("webp"), "image/webp");
+  assert.equal(imageTypeOfExt("gif"), "image/gif");
+  assert.equal(imageTypeOfExt("pdf"), undefined);
+  assert.equal(imageTypeOfExt(""), undefined);
 });

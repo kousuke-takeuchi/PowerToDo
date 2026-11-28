@@ -33,3 +33,17 @@ export function imageBlockAltOut(alt: string, ratio: number): string {
   return alt !== "" ? alt : Number.parseFloat(String(ratio)).toFixed(2);
 }
 
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+};
+
+/** The MIME type of an image by its extension, or undefined when it is not one of the known images. */
+export function imageTypeOfExt(ext: string): string | undefined {
+  return IMAGE_TYPES[ext.toLowerCase()];
+}
+
