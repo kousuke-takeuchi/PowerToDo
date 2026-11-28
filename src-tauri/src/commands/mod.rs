@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod autostart;
 pub mod calendar;
 pub mod comments;
+pub mod docs;
 pub mod notify_check;
 pub mod saver;
 pub mod sync;
@@ -697,6 +698,10 @@ impl SyncHost for TauriSyncHost {
         comments::emit_comments_changed(&self.app, files.to_vec());
     }
 
+    fn docs_changed(&self, files: &[String]) {
+        docs::emit_docs_changed(&self.app, files.to_vec());
+    }
+
     fn attachments_changed(&self, files: &[String]) {
         attachments::emit_attachments_changed(&self.app, files.to_vec());
     }
@@ -1096,6 +1101,13 @@ struct ExternalReadFailed {
 /// lock is taken first, and the saver is only asked about / told to cancel while holding it.
 fn handle_fs_batch(app: &AppHandle, paths: Vec<PathBuf>) {
     let state = app.state::<AppState>();
+    let data_dir = state.lock_store().as_ref().map(|s| s.paths().data_dir.clone());
+    if let Some(dir) = data_dir {
+        let leaves = docs::doc_leaves(&dir, &paths);
+        if !leaves.is_empty() {
+            docs::emit_docs_changed(app, leaves);
+        }
+    }
     let out = {
         let mut guard = state.lock_store();
         let Some(store) = guard.as_mut() else {

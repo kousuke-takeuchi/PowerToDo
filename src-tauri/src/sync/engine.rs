@@ -232,6 +232,8 @@ pub trait SyncHost: Send + Sync {
 
     /// Comment files (leaf names) a run wrote here: the screens showing them read them again.
     fn comments_changed(&self, _files: &[String]) {}
+    /// Document files (leaf names) a run wrote here: the screens showing them read them again.
+    fn docs_changed(&self, _files: &[String]) {}
     /// Blobs (leaf names) a run wrote here: a record that waited for its file can show it now.
     fn attachments_changed(&self, _files: &[String]) {}
     /// Right before a normal run: bring the app up to date with the disk and the network (iOS:

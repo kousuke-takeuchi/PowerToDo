@@ -43,6 +43,10 @@ pub fn start(dir: &Path, on_paths: impl Fn(Vec<PathBuf>) + Send + 'static) -> Ap
     inner
         .watch(dir, RecursiveMode::NonRecursive)
         .map_err(watch_error)?;
+    let docs = dir.join(crate::store::docs::DIR);
+    if std::fs::create_dir_all(&docs).is_ok() {
+        inner.watch(&docs, RecursiveMode::NonRecursive).map_err(watch_error)?;
+    }
     std::thread::Builder::new()
         .name("powertodo-watch".into())
         .spawn(move || debounce_loop(rx, stop_rx, on_paths))
