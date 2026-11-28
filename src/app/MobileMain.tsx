@@ -846,7 +846,14 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
     prevNav.current = nav;
   }
   const screenDirection = directionRef.current;
-  const screenKey = `${nav.tab}:${screen.kind}:${"name" in screen ? screen.name : ""}`;
+  const screenKey = [
+    nav.tab,
+    screen.kind,
+    "name" in screen ? screen.name : "",
+    "project" in screen ? screen.project : "",
+    "section" in screen ? (screen.section ?? "") : "",
+    "id" in screen ? screen.id : "",
+  ].join("\u0000");
 
   const renderScreen = (): React.ReactElement => {
   // ---- The screen to show; `renderScreen()` is what the ScreenStack animates between ----
@@ -985,7 +992,6 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
         key={`${screen.project}\u0000${screen.section ?? ""}`}
         fill
         banner={banner}
-        overlay={layers}
         onBack={back}
         today={today}
         onTabChange={goTab}
@@ -1002,7 +1008,6 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
         key={`${screen.project}\u0000${screen.id}`}
         fill
         banner={banner}
-        overlay={layers}
         onBack={back}
         today={today}
         onTabChange={goTab}
