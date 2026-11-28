@@ -44,8 +44,11 @@ pub fn start(dir: &Path, on_paths: impl Fn(Vec<PathBuf>) + Send + 'static) -> Ap
         .watch(dir, RecursiveMode::NonRecursive)
         .map_err(watch_error)?;
     let docs = dir.join(crate::store::docs::DIR);
-    if std::fs::create_dir_all(&docs).is_ok() {
-        inner.watch(&docs, RecursiveMode::NonRecursive).map_err(watch_error)?;
+    // A failure here only loses document notices; keep watching the workbooks.
+    if std::fs::create_dir_all(&docs).is_ok()
+        && let Err(e) = inner.watch(&docs, RecursiveMode::NonRecursive)
+    {
+        eprintln!("powertodo: cannot watch {}: {e}", docs.display());
     }
     std::thread::Builder::new()
         .name("powertodo-watch".into())

@@ -28,11 +28,22 @@ fn author_of(s: &crate::store::project_store::ProjectStore) -> String {
 }
 
 /// The `_docs/` leaves among the watcher's paths (the rest go to the workbook handling).
+/// The parent is compared as given first, then canonicalized: the OS may report the real
+/// path of a data folder reached through a symlink (macOS reports `/private/var/...`).
 pub fn doc_leaves(data_dir: &std::path::Path, paths: &[std::path::PathBuf]) -> Vec<String> {
     let dir = data_dir.join(crate::store::docs::DIR);
+    let canonical = std::cell::OnceCell::new();
+    let in_docs = |p: &std::path::Path| match p.parent() {
+        None => false,
+        Some(parent) if parent == dir => true,
+        Some(parent) => {
+            let real = canonical.get_or_init(|| dir.canonicalize().ok());
+            matches!((parent.canonicalize(), real), (Ok(a), Some(b)) if &a == b)
+        }
+    };
     let mut out: Vec<String> = paths
         .iter()
-        .filter(|p| p.parent() == Some(dir.as_path()))
+        .filter(|p| in_docs(p))
         .filter_map(|p| p.file_name()?.to_str().map(str::to_string))
         .filter(|n| crate::store::docs::parse_file_name(n).is_some())
         .collect();
@@ -120,5 +131,21 @@ mod tests {
             d.join("_docs").join("note.txt"),
         ];
         assert_eq!(doc_leaves(&d, &paths), vec![format!("仕事.{id}.md")]);
+    }
+
+    #[test]
+    fn doc_leaves_accepts_a_path_reached_through_a_symlink() {
+        let real = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(real.path().join("_docs")).unwrap();
+        let link_parent = tempfile::tempdir().unwrap();
+        let link = link_parent.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        #[cfg(not(unix))]
+        let link = real.path().to_path_buf();
+        let id = "1792929845000-3f2a00000000009c";
+        let name = format!("仕事.{id}.md");
+        let reported = real.path().canonicalize().unwrap().join("_docs").join(&name);
+        assert_eq!(doc_leaves(&link, &[reported]), vec![name]);
     }
 }
