@@ -222,3 +222,26 @@ test("a copy rebuilt for a document deleted elsewhere keeps its reference files"
   await h.saves.save("a", h.screen.rev, { title: "計画", body: "書いた\n" });
   assert.deepEqual(h.store.files.get("copy1")!.files, files);
 });
+
+/**
+ * What DocEditor's autosave does with each edit it takes (its unmount flush included): hands it to the controller
+ * at once. An editor that chained its own saves (`saving.then(() => save(edit))`) queued the flush only after the
+ * save in flight came back, so `settled` could resolve before it.
+ */
+const editorSend = (saves: ReturnType<typeof createDocSaves>, id: string, rev: number) => (edit: DocEdit) => {
+  void saves.save(id, rev, edit);
+};
+
+test("settled waits for an editor's unmount flush made while its save is in flight", async () => {
+  const h = harness([doc("a", "t0")]);
+  h.openDoc(doc("a", "t0"));
+  const send = editorSend(h.saves, "a", h.screen.rev);
+  send({ title: "計画", body: "一\n" });
+  // The first save is in flight when the editor is left.
+  await new Promise((r) => setTimeout(r, 0));
+  send({ title: "計画", body: "一二\n" });
+  // Reopening (or deleting) reads after settled: both saves are written by then.
+  await h.saves.settled();
+  assert.equal(h.store.writes.length, 2);
+  assert.equal(h.store.files.get("a")!.body, "一二\n");
+});
