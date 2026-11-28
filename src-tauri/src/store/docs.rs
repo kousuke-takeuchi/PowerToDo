@@ -5,9 +5,14 @@
 //! lines under `files:` that do not parse (and their indented continuations) are written back there.
 //! A leading BOM and CRLF line ends are read as plain `\n` text and written as `\n`.
 
-use serde::Serialize;
+use std::path::PathBuf;
 
+use chrono::{DateTime, FixedOffset, NaiveDateTime};
+use serde::{Deserialize, Serialize};
+
+use crate::error::{AppError, AppResult};
 use crate::store::attachments::AttachmentInfo;
+use crate::store::paths::{Paths, validate_project_name, write_atomic};
 
 pub const DIR: &str = "_docs";
 pub const UNTITLED: &str = "無題";
@@ -172,6 +177,241 @@ pub fn render(doc: &Doc) -> String {
     out
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocSummary {
+    pub id: String,
+    pub project: String,
+    pub title: String,
+    pub section: Option<String>,
+    pub updated: String,
+    pub author: String,
+    pub files: usize,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Edit {
+    pub title: Option<String>,
+    /// `Some(None)` moves the document to the whole project.
+    #[serde(default, deserialize_with = "some_nullable")]
+    pub section: Option<Option<String>>,
+    pub body: Option<String>,
+    pub files: Option<Vec<AttachmentInfo>>,
+}
+
+/// Reads a present key (even `null`) as `Some(..)`; a missing key stays `None` through `default`.
+fn some_nullable<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
+pub enum Saved {
+    Written(Doc),
+    Conflict { doc: Doc, copy: Doc },
+}
+
+fn path(paths: &Paths, project: &str, id: &str) -> AppResult<PathBuf> {
+    validate_project_name(project)?;
+    if !is_id(id) {
+        return Err(AppError::Invalid { message: "ドキュメントの ID が正しくありません".into() });
+    }
+    Ok(paths.docs_dir().join(file_name(project, id)))
+}
+
+fn stamp(now: DateTime<FixedOffset>) -> String {
+    now.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
+}
+
+fn write(paths: &Paths, doc: &Doc) -> AppResult<()> {
+    std::fs::create_dir_all(paths.docs_dir())?;
+    write_atomic(&path(paths, &doc.project, &doc.id)?, render(doc).as_bytes())
+}
+
+/// The documents of `_docs/` as (project, id, path).
+fn files(paths: &Paths) -> AppResult<Vec<(String, String, PathBuf)>> {
+    let entries = match std::fs::read_dir(paths.docs_dir()) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut out = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        if let Some((project, id)) = parse_file_name(&name) {
+            out.push((project, id, entry.path()));
+        }
+    }
+    Ok(out)
+}
+
+pub fn read(paths: &Paths, project: &str, id: &str) -> AppResult<Doc> {
+    match std::fs::read_to_string(path(paths, project, id)?) {
+        Ok(t) => Ok(parse(project, id, &t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(AppError::NotFound {
+            message: "ドキュメントが見つかりません".into(),
+        }),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn list(paths: &Paths, project: &str) -> AppResult<Vec<DocSummary>> {
+    let mut out = Vec::new();
+    for (pj, id, p) in files(paths)? {
+        if pj != project {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+        let d = parse(&pj, &id, &text);
+        out.push(DocSummary {
+            id: d.id,
+            project: d.project,
+            title: d.title,
+            section: d.section,
+            updated: d.updated,
+            author: d.author,
+            files: d.files.len(),
+        });
+    }
+    out.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| b.id.cmp(&a.id)));
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create(
+    paths: &Paths,
+    project: &str,
+    section: Option<&str>,
+    title: &str,
+    body: &str,
+    author: &str,
+    now: DateTime<FixedOffset>,
+    now_ms: u64,
+) -> AppResult<Doc> {
+    let title = title.trim();
+    let doc = Doc {
+        id: new_id(now_ms),
+        project: project.to_string(),
+        title: if title.is_empty() { UNTITLED.to_string() } else { title.to_string() },
+        section: section.map(str::to_string).filter(|s| !s.is_empty()),
+        created: stamp(now),
+        updated: stamp(now),
+        author: author.to_string(),
+        files: Vec::new(),
+        body: body.to_string(),
+        extra: Vec::new(),
+        files_extra: Vec::new(),
+    };
+    write(paths, &doc)?;
+    Ok(doc)
+}
+
+/// Writes `loser` as a new document titled `<title> (競合 yyyy-mm-dd hhmm)`.
+pub fn conflict_copy(
+    paths: &Paths,
+    project: &str,
+    loser: &Doc,
+    now: DateTime<FixedOffset>,
+    now_ms: u64,
+) -> AppResult<Doc> {
+    let copy = Doc {
+        id: new_id(now_ms),
+        project: project.to_string(),
+        title: format!("{} (競合 {})", loser.title, now.format("%Y-%m-%d %H%M")),
+        ..loser.clone()
+    };
+    write(paths, &copy)?;
+    Ok(copy)
+}
+
+/// Applies `edit` when the file is still the version the screen read (`base_updated`); otherwise the
+/// file stays and the screen's version becomes a conflict copy (spec: an outside change while editing).
+#[allow(clippy::too_many_arguments)]
+pub fn save(
+    paths: &Paths,
+    project: &str,
+    id: &str,
+    base_updated: &str,
+    edit: Edit,
+    author: &str,
+    now: DateTime<FixedOffset>,
+    now_ms: u64,
+) -> AppResult<Saved> {
+    let current = read(paths, project, id)?;
+    let mut next = current.clone();
+    if let Some(t) = edit.title {
+        let t = t.trim();
+        next.title = if t.is_empty() { UNTITLED.to_string() } else { t.to_string() };
+    }
+    if let Some(s) = edit.section {
+        next.section = s.filter(|s| !s.is_empty());
+    }
+    if let Some(b) = edit.body {
+        next.body = b;
+    }
+    if let Some(f) = edit.files {
+        next.files = f;
+    }
+    next.updated = stamp(now);
+    next.author = author.to_string();
+    if current.updated != base_updated {
+        let copy = conflict_copy(paths, project, &next, now, now_ms)?;
+        return Ok(Saved::Conflict { doc: current, copy });
+    }
+    write(paths, &next)?;
+    Ok(Saved::Written(next))
+}
+
+/// Moves one document (`Some(id)`) or all of a project's into `archive/` as `<stem> (<YYYYMMDD-HHMM>).md`.
+pub fn archive(paths: &Paths, project: &str, id: Option<&str>, now: NaiveDateTime) -> AppResult<()> {
+    let tag = now.format("%Y%m%d-%H%M").to_string();
+    for (pj, i, p) in files(paths)? {
+        if pj != project || id.is_some_and(|x| x != i) {
+            continue;
+        }
+        let dir = paths.archive_dir();
+        std::fs::create_dir_all(&dir)?;
+        let stem = format!("{pj}.{i}");
+        let mut k = 1;
+        let dest = loop {
+            let name = if k == 1 { format!("{stem} ({tag}).md") } else { format!("{stem} ({tag}-{k}).md") };
+            let d = dir.join(name);
+            if !d.exists() {
+                break d;
+            }
+            k += 1;
+        };
+        std::fs::rename(&p, dest)?;
+    }
+    Ok(())
+}
+
+pub fn rename_project(paths: &Paths, from: &str, to: &str) -> AppResult<()> {
+    for (pj, id, p) in files(paths)? {
+        if pj == from {
+            std::fs::rename(&p, path(paths, to, &id)?)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn rename_section(paths: &Paths, project: &str, from: &str, to: &str, now: DateTime<FixedOffset>) -> AppResult<()> {
+    for (pj, id, _) in files(paths)? {
+        if pj != project {
+            continue;
+        }
+        let mut d = read(paths, &pj, &id)?;
+        if d.section.as_deref() == Some(from) {
+            d.section = Some(to.to_string());
+            d.updated = stamp(now);
+            write(paths, &d)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +537,86 @@ mod tests {
         let d = parse("仕事", ID, "---\n---");
         assert_eq!(d.body, "");
         assert_eq!(render(&d).matches("---\n").count(), 2);
+    }
+
+    use chrono::{DateTime, FixedOffset, NaiveDate};
+
+    fn at(h: u32, m: u32) -> DateTime<FixedOffset> {
+        NaiveDate::from_ymd_opt(2026, 11, 28).unwrap().and_hms_opt(h, m, 0).unwrap()
+            .and_local_timezone(FixedOffset::east_opt(9 * 3600).unwrap()).unwrap()
+    }
+
+    fn dir() -> (tempfile::TempDir, crate::store::paths::Paths) {
+        let t = tempfile::tempdir().unwrap();
+        let p = crate::store::paths::Paths::new(t.path());
+        (t, p)
+    }
+
+    #[test]
+    fn create_list_read_save() {
+        let (_t, p) = dir();
+        let a = create(&p, "仕事", None, "全体", "", "たろう", at(10, 0), 1).unwrap();
+        let b = create(&p, "仕事", Some("在庫アプリ"), "在庫", "## 目的\n", "たろう", at(10, 5), 2).unwrap();
+        create(&p, "私事", None, "別", "", "たろう", at(10, 6), 3).unwrap();
+        let l = list(&p, "仕事").unwrap();
+        assert_eq!(l.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(), ["在庫", "全体"]);
+        let saved = save(&p, "仕事", &a.id, &a.updated, Edit { body: Some("本文\n".into()), ..Edit::default() }, "はなこ", at(11, 0), 4).unwrap();
+        let Saved::Written(d) = saved else { panic!("no conflict expected") };
+        assert_eq!(d.body, "本文\n");
+        assert_eq!(d.author, "はなこ");
+        assert_eq!(read(&p, "仕事", &a.id).unwrap().body, "本文\n");
+        assert_eq!(read(&p, "仕事", &b.id).unwrap().section.as_deref(), Some("在庫アプリ"));
+    }
+
+    #[test]
+    fn saving_over_a_newer_file_keeps_both() {
+        let (_t, p) = dir();
+        let a = create(&p, "仕事", None, "計画", "古い\n", "たろう", at(10, 0), 1).unwrap();
+        // Someone else saved after the screen read it.
+        save(&p, "仕事", &a.id, &a.updated, Edit { body: Some("外の変更\n".into()), ..Edit::default() }, "はなこ", at(10, 30), 2).unwrap();
+        let out = save(&p, "仕事", &a.id, &a.updated, Edit { body: Some("画面の変更\n".into()), ..Edit::default() }, "たろう", at(10, 40), 3).unwrap();
+        let Saved::Conflict { doc, copy } = out else { panic!("conflict expected") };
+        assert_eq!(doc.body, "外の変更\n");
+        assert_eq!(copy.body, "画面の変更\n");
+        assert_eq!(copy.title, "計画 (競合 2026-11-28 1040)");
+        assert_ne!(copy.id, a.id);
+        assert_eq!(list(&p, "仕事").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn project_rename_and_archive_follow() {
+        let (_t, p) = dir();
+        let a = create(&p, "仕事", None, "a", "", "", at(10, 0), 1).unwrap();
+        rename_project(&p, "仕事", "業務").unwrap();
+        assert!(list(&p, "仕事").unwrap().is_empty());
+        assert_eq!(list(&p, "業務").unwrap()[0].id, a.id);
+        archive(&p, "業務", None, at(12, 0).naive_local()).unwrap();
+        assert!(list(&p, "業務").unwrap().is_empty());
+        let archived: Vec<_> = std::fs::read_dir(p.archive_dir()).unwrap().filter_map(Result::ok).collect();
+        assert_eq!(archived.len(), 1);
+    }
+
+    #[test]
+    fn section_rename_rewrites_only_that_section() {
+        let (_t, p) = dir();
+        let a = create(&p, "仕事", Some("旧"), "a", "", "", at(10, 0), 1).unwrap();
+        let b = create(&p, "仕事", Some("他"), "b", "", "", at(10, 0), 2).unwrap();
+        rename_section(&p, "仕事", "旧", "新", at(11, 0)).unwrap();
+        assert_eq!(read(&p, "仕事", &a.id).unwrap().section.as_deref(), Some("新"));
+        assert_eq!(read(&p, "仕事", &b.id).unwrap().section.as_deref(), Some("他"));
+    }
+
+    #[test]
+    fn reading_a_missing_document_is_not_found() {
+        let (_t, p) = dir();
+        assert!(matches!(read(&p, "仕事", ID), Err(crate::error::AppError::NotFound { .. })));
+    }
+
+    #[test]
+    fn edit_tells_a_missing_section_from_null() {
+        let e: Edit = serde_json::from_str(r#"{"body":"x"}"#).unwrap();
+        assert_eq!(e.section, None);
+        let e: Edit = serde_json::from_str(r#"{"section":null}"#).unwrap();
+        assert_eq!(e.section, Some(None));
     }
 }

@@ -706,6 +706,7 @@ impl ProjectStore {
             std::fs::rename(&old_path, &new_path)?;
         }
         comments_follow(comments::rename_project(&self.paths, name, new_name));
+        comments_follow(crate::store::docs::rename_project(&self.paths, name, new_name));
         // The renamed file is the same file: carry over what we know about it.
         self.last_written.remove(name);
         self.record_written(new_name, &new_path);
@@ -860,6 +861,7 @@ impl ProjectStore {
             self.move_to_archive(&path, name)?;
         }
         comments_follow(comments::archive(&self.paths, name, None, self.now()));
+        comments_follow(crate::store::docs::archive(&self.paths, name, None, self.now()));
         self.common.projects.retain(|p| p.name != name);
         self.common.project_extra.remove(name);
         self.books.remove(name);
@@ -1005,6 +1007,7 @@ impl ProjectStore {
             self.move_to_archive(&path, &key)?;
         }
         comments_follow(comments::archive(&self.paths, &key, None, self.now()));
+        comments_follow(crate::store::docs::archive(&self.paths, &key, None, self.now()));
         Ok(())
     }
 
@@ -1046,6 +1049,8 @@ impl ProjectStore {
             }
             Ok(())
         })?;
+        let now = chrono::Local::now().fixed_offset();
+        comments_follow(crate::store::docs::rename_section(&self.paths, project, name, &new_name, now));
         self.view(project)
     }
 
@@ -4309,6 +4314,36 @@ mod tests {
         e.store.rename_project("仕事", "業務").unwrap();
         assert!(has_comments(&e, "業務", 1));
         assert!(!has_comments(&e, "仕事", 1));
+    }
+
+    #[test]
+    fn rename_and_delete_project_carry_its_documents() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.add_task("仕事", input("a")).unwrap();
+        e.store.save("仕事").unwrap();
+        let paths = Paths::new(e.data());
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-28T10:00:00+09:00").unwrap();
+        crate::store::docs::create(&paths, "仕事", None, "a", "", "", at, 1).unwrap();
+        e.store.rename_project("仕事", "業務").unwrap();
+        assert_eq!(crate::store::docs::list(&paths, "業務").unwrap().len(), 1);
+        e.store.delete_project("業務").unwrap();
+        assert!(crate::store::docs::list(&paths, "業務").unwrap().is_empty());
+    }
+
+    #[test]
+    fn rename_section_carries_its_documents() {
+        let mut e = env();
+        e.store.create_project("仕事", "c").unwrap();
+        e.store.add_section("仕事", "旧").unwrap();
+        let paths = Paths::new(e.data());
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-28T10:00:00+09:00").unwrap();
+        let d = crate::store::docs::create(&paths, "仕事", Some("旧"), "a", "", "", at, 1).unwrap();
+        e.store.rename_section("仕事", "旧", "新").unwrap();
+        assert_eq!(
+            crate::store::docs::read(&paths, "仕事", &d.id).unwrap().section.as_deref(),
+            Some("新")
+        );
     }
 
     #[test]
