@@ -47,3 +47,10 @@ export function imageTypeOfExt(ext: string): string | undefined {
   return IMAGE_TYPES[ext.toLowerCase()];
 }
 
+/** The project of a document leaf `<project>.<id>.md` (the project name may contain dots), or null. */
+export function projectOfDocLeaf(leaf: string): string | null {
+  if (!leaf.endsWith(".md")) return null;
+  const stem = leaf.slice(0, -3);
+  const dot = stem.lastIndexOf(".");
+  return dot > 0 ? stem.slice(0, dot) : null;
+}

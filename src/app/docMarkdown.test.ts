@@ -8,6 +8,7 @@ import {
   imageBlockAltIn,
   imageBlockAltOut,
   imageTypeOfExt,
+  projectOfDocLeaf,
 } from "./docMarkdown.ts";
 
 test("an image path names a blob, and back", () => {
@@ -52,4 +53,11 @@ test("an image extension names its MIME type", () => {
   assert.equal(imageTypeOfExt("gif"), "image/gif");
   assert.equal(imageTypeOfExt("pdf"), undefined);
   assert.equal(imageTypeOfExt(""), undefined);
+});
+
+test("a document leaf names its project exactly", () => {
+  assert.equal(projectOfDocLeaf("仕事.abc123.md"), "仕事");
+  assert.equal(projectOfDocLeaf("仕事.v2.abc123.md"), "仕事.v2");
+  assert.equal(projectOfDocLeaf("abc123.md"), null);
+  assert.equal(projectOfDocLeaf("仕事.abc123.txt"), null);
 });
