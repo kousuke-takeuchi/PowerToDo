@@ -5,7 +5,10 @@ export type BrowseScreen =
   | { kind: "labels" }
   | { kind: "label"; name: string }
   | { kind: "search" }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  /** A project's documents (spec 2026-11-28 §1), all of them or one section's. */
+  | { kind: "docs"; project: string; section: string | null }
+  | { kind: "doc"; project: string; id: string };
 export type MobileNav = { tab: MobileTab; browse: BrowseScreen[] };
 export type NavAction =
   | { type: "tab"; tab: MobileTab }
@@ -32,12 +35,26 @@ export function reduceNav(s: MobileNav, a: NavAction): MobileNav {
     case "back":
       return { ...s, browse: s.browse.slice(0, -1) };
     case "renamed":
-      return { ...s, browse: s.browse.map((x) => (x.kind === "project" && x.name === a.from ? { kind: "project", name: a.to } : x)) };
+      return {
+        ...s,
+        browse: s.browse.map((x) => {
+          if (x.kind === "project" && x.name === a.from) return { kind: "project", name: a.to };
+          if ((x.kind === "docs" || x.kind === "doc") && x.project === a.from) return { ...x, project: a.to };
+          return x;
+        }),
+      };
     case "removed": {
-      const i = s.browse.findIndex((x) => x.kind === "project" && x.name === a.project);
+      const i = s.browse.findIndex((x) => projectOfScreen(x) === a.project);
       return i < 0 ? s : { ...s, browse: s.browse.slice(0, i) };
     }
   }
+}
+
+/** The project a 閲覧 screen belongs to, if any. */
+function projectOfScreen(x: BrowseScreen): string | undefined {
+  if (x.kind === "project") return x.name;
+  if (x.kind === "docs" || x.kind === "doc") return x.project;
+  return undefined;
 }
 
 export function screenOf(s: MobileNav): Screen {
@@ -61,8 +78,9 @@ export function crossNavOf(s: MobileNav): { kind: "inbox" | "today" | "upcoming"
   }
 }
 
-/** The project the list shows and quick add adds to: the open project, else the inbox. */
+/** The project the list shows and quick add adds to: the open project (or the one whose documents are open), else the inbox. */
 export function projectOf(s: MobileNav, inbox: string): string {
   const sc = screenOf(s);
+  if (sc.kind === "docs" || sc.kind === "doc") return sc.project;
   return sc.kind === "project" ? sc.name : inbox;
 }

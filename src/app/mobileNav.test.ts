@@ -51,3 +51,24 @@ test("drawer_open_replaces_the_browse_stack", () => {
   assert.deepEqual(screenOf(s), { kind: "project", name: "仕事" });
   assert.deepEqual(screenOf(reduceNav(s, { type: "back" })), { kind: "browse" });
 });
+
+test("a renamed project renames its document screens", () => {
+  const s = go({ type: "push", screen: { kind: "project", name: "仕事" } }, { type: "push", screen: { kind: "docs", project: "仕事", section: null } }, { type: "push", screen: { kind: "doc", project: "仕事", id: "1792929845000-3f2a00000000009c" } });
+  const r = reduceNav(s, { type: "renamed", from: "仕事", to: "業務" });
+  assert.deepEqual(r.browse.map((x) => ("project" in x ? x.project : "name" in x ? x.name : x.kind)), ["業務", "業務", "業務"]);
+});
+
+test("a removed project drops its document screens", () => {
+  const s = go({ type: "push", screen: { kind: "project", name: "仕事" } }, { type: "push", screen: { kind: "docs", project: "仕事", section: "在庫アプリ" } });
+  assert.deepEqual(reduceNav(s, { type: "removed", project: "仕事" }).browse, []);
+});
+
+test("document screens of another project stay when a project is removed", () => {
+  const s = go({ type: "push", screen: { kind: "project", name: "私事" } }, { type: "push", screen: { kind: "docs", project: "私事", section: null } });
+  assert.equal(reduceNav(s, { type: "removed", project: "仕事" }).browse.length, 2);
+});
+
+test("the documents screens keep their project as the current one", () => {
+  const s = go({ type: "push", screen: { kind: "project", name: "仕事" } }, { type: "push", screen: { kind: "docs", project: "仕事", section: null } });
+  assert.equal(projectOf(s, "受信トレイ"), "仕事");
+});
