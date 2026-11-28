@@ -3,6 +3,10 @@ import type {
   Comment,
   AttachmentInfo,
   AttachmentUsage,
+  Doc,
+  DocEdit,
+  DocSummary,
+  Saved,
   NoteFile,
   AutostartDto,
   DueTextDto,
@@ -129,6 +133,13 @@ export const api = {
   /** `dest` is the path the dialog plugin's `save()` returned. */
   saveAttachmentAs: (f: Pick<AttachmentInfo, "hash" | "ext">, dest: string) => invoke<void>("save_attachment_as", { hash: f.hash, ext: f.ext, dest }),
   attachmentUsage: () => invoke<AttachmentUsage>("attachment_usage"),
+
+  // ---- project documents (spec 2026-11-28) ----
+  listDocs: (project: string) => invoke<DocSummary[]>("list_docs", { project }),
+  readDoc: (project: string, id: string) => invoke<Doc>("read_doc", { project, id }),
+  createDoc: (project: string, section: string | null, title: string, body: string) => invoke<Doc>("create_doc", { project, section, title, body }),
+  saveDoc: (project: string, id: string, baseUpdated: string, edit: DocEdit) => invoke<Saved>("save_doc", { project, id, baseUpdated, edit }),
+  deleteDoc: (project: string, id: string) => invoke<void>("delete_doc", { project, id }),
   deleteTask: (project: string, no: number) => invoke<ProjectView>("delete_task", { project, no }),
   duplicateTask: (project: string, no: number) => invoke<[ProjectView, number]>("duplicate_task", { project, no }),
   moveTask: (project: string, no: number, toProject: string, toSection?: string | null) =>

@@ -1,0 +1,31 @@
+.doc-editor { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.doc-editor__title { border: 0; outline: none; background: transparent; font-family: var(--font-body); font-size: 22px; font-weight: 600; color: var(--color-text-primary); padding: 0; }
+.doc-editor--mobile .doc-editor__title { font-size: 28px; font-weight: 700; }
+.doc-editor__template { align-self: flex-start; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg); color: var(--color-accent); font-family: var(--font-body); font-size: 14px; padding: 6px 12px; cursor: pointer; }
+.doc-editor__body .milkdown {
+  --crepe-color-background: var(--color-bg);
+  --crepe-color-on-background: var(--color-text-primary);
+  --crepe-color-surface: var(--color-bg);
+  --crepe-color-surface-low: var(--color-bg-hover);
+  --crepe-color-on-surface: var(--color-text-primary);
+  --crepe-color-on-surface-variant: var(--color-text-secondary);
+  --crepe-color-outline: var(--color-border);
+  --crepe-color-primary: var(--color-accent);
+  --crepe-color-hover: var(--color-bg-hover);
+  --crepe-color-selected: var(--color-bg-hover);
+  --crepe-color-secondary: var(--color-accent-soft);
+  --crepe-color-on-secondary: var(--color-text-primary);
+  --crepe-color-inline-area: var(--color-bg-hover);
+  --crepe-color-inline-code: var(--color-text-primary);
+  --crepe-color-error: var(--color-danger);
+  --crepe-font-default: var(--font-body);
+  --crepe-font-title: var(--font-body);
+}
+.doc-editor--mobile .doc-editor__body .milkdown-top-bar { position: sticky; top: 0; z-index: 1; overflow-x: auto; }
+/* iPhone: Crepe's own 60px 120px around the text leaves no room on a phone. The top bar scrolls sideways in one row. */
+.doc-editor--mobile .doc-editor__body .milkdown .ProseMirror { padding: 12px 0 24px; }
+.doc-editor--mobile .doc-editor__body .milkdown .milkdown-top-bar,
+.doc-editor--mobile .doc-editor__body .milkdown .milkdown-top-bar .top-bar-inner { flex-wrap: nowrap; }
+.doc-editor--mobile .doc-editor__body .milkdown .milkdown-top-bar { padding: 0; overflow-x: auto; scrollbar-width: none; }
+/* Desktop: a narrower margin than Crepe's, the pane has its own. */
+.doc-editor:not(.doc-editor--mobile) .doc-editor__body .milkdown .ProseMirror { padding: 24px 40px; }

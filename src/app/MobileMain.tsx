@@ -3,7 +3,7 @@ import { AnimatePresence } from "motion/react";
 import { api, errorMessage } from "../api/client";
 import { onNotificationError, onOpenTask, onProjectChanged, onProjectsChanged, onWatchFailed, onWindowShown } from "../api/events";
 import type { AppStateDto, Label, NotificationPermission, SearchHit, Task, TokenKind } from "../types/model";
-import { Pencil, Plus } from "lucide-react";
+import { FileText, Pencil, Plus } from "lucide-react";
 import { BottomSheet, SheetCard, SheetRow } from "../views/mobile/BottomSheet";
 import { DATE_SHEET_FORM, DateSheet } from "../views/mobile/DateSheet";
 import { MobileBrowse } from "../views/mobile/MobileBrowse";
@@ -50,6 +50,7 @@ import { useSettingsPanes } from "./useSettingsPanes";
 import { ViewOptionsCtx, useView, useViewOptionsStore } from "./view/ViewOptionsContext";
 import { VIEW_SHEET_FORM, ViewSheet } from "../views/mobile/ViewSheet";
 import { CalendarSheetHost } from "../views/mobile/CalendarSheetHost";
+import { MobileDoc, MobileDocsList } from "../views/mobile/MobileDocs";
 import { DetailSheet } from "../views/mobile/DetailSheet";
 import { useSearch } from "./useSearch";
 import { useCommentCounts, useDialogComments } from "./useComments";
@@ -415,7 +416,15 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
     else dispatchNav({ type: "open", screen: to.kind === "project" ? { kind: "project", name: to.name } : { kind: to.kind } });
   };
   const drawerActive: DrawerTarget | undefined =
-    screen.kind === "project" ? { kind: "project", name: screen.name } : screen.kind === "label" ? { kind: "labels" } : screen.kind === "browse" ? undefined : { kind: screen.kind };
+    screen.kind === "project"
+      ? { kind: "project", name: screen.name }
+      : screen.kind === "docs" || screen.kind === "doc"
+        ? { kind: "project", name: screen.project }
+        : screen.kind === "label"
+          ? { kind: "labels" }
+          : screen.kind === "browse"
+            ? undefined
+            : { kind: screen.kind };
   // 表示のシート (右上の「…」): Today / Upcoming.
   const [viewSheet, setViewSheet] = useState<"today" | "upcoming" | "project" | null>(null);
   const [todayView, setTodayView] = useView("today");
@@ -667,6 +676,15 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           <SheetCard label="セクションの操作">
             <SheetRow icon={<Pencil size={18} />} label="名前を変更" onClick={() => setSectionSheet({ name: sectionSheet.name, mode: "rename" })} />
             <SheetRow
+              icon={<FileText size={18} />}
+              label="ドキュメント"
+              onClick={() => {
+                const name = sectionSheet.name;
+                setSectionSheet(null);
+                push({ kind: "docs", project: navCurrent, section: name });
+              }}
+            />
+            <SheetRow
               icon={<Plus size={18} />}
               label="タスクを追加"
               onClick={() => {
@@ -702,6 +720,10 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
             project={navCurrent}
             onAddSection={() => setProjectSheet("section")}
             onCalendar={() => setProjectSheet("calendar")}
+            onDocs={() => {
+              setProjectSheet(null);
+              push({ kind: "docs", project: navCurrent, section: null });
+            }}
             onRename={navCurrent === app.inbox ? undefined : () => setProjectSheet("rename")}
             onDelete={navCurrent === app.inbox ? undefined : () => void deleteProject()}
             onClose={() => setProjectSheet(null)}
@@ -947,6 +969,41 @@ function MobileScreens({ app, syncConflicts, drawerOpen, setDrawerOpen, calendar
           })
         }
         overlay={layers}
+      />
+    );
+  }
+  if (screen.kind === "docs") {
+    return (
+      <MobileDocsList
+        key={`${screen.project}\u0000${screen.section ?? ""}`}
+        fill
+        banner={banner}
+        overlay={layers}
+        onBack={back}
+        today={today}
+        onTabChange={goTab}
+        onNotice={(text) => setFlash({ text, tone: "info" })}
+        project={screen.project}
+        section={screen.section}
+        onOpen={(id) => push({ kind: "doc", project: screen.project, id })}
+      />
+    );
+  }
+  if (screen.kind === "doc") {
+    return (
+      <MobileDoc
+        key={`${screen.project}\u0000${screen.id}`}
+        fill
+        banner={banner}
+        overlay={layers}
+        onBack={back}
+        today={today}
+        onTabChange={goTab}
+        onNotice={(text) => setFlash({ text, tone: "info" })}
+        project={screen.project}
+        id={screen.id}
+        sections={(view?.sections ?? []).map((x) => x.name)}
+        onGone={back}
       />
     );
   }

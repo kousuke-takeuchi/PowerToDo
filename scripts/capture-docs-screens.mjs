@@ -33,6 +33,7 @@ const SHOTS = [
   ["screens-desktop--d-09-b", "screen-conflict", 1440, 900],
   ["screens-desktop--d-10", "screen-board", 1440, 900],
   ["screens-desktop--d-12", "screen-onboarding", 1440, 900],
+  ["views-docs--list-and-body", "screen-docs", 1440, 900],
   ["screens-dark--d-01-dark", "screen-project-dark", 1440, 900],
   ["views-attachments--dialog-with-note-files", "screen-attachments", 1440, 900],
   ["views-attachments--viewer", "screen-attachment-viewer", 1440, 900],

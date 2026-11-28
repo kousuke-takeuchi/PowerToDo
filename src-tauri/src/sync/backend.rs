@@ -108,6 +108,35 @@ pub trait StorageBackend: Send + Sync {
         })
     }
 
+    // ---- the `_docs` folder (project documents). Names are the leaf names (`仕事.<id>.md`). ----
+
+    /// The document files directly in `_docs/`, `None` when the target has no such folder.
+    /// Complete or `Err`, like [`StorageBackend::list`].
+    fn list_docs(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// [`StorageBackend::upload`] inside `_docs/` (the folder is created when needed).
+    fn upload_doc<'a>(
+        &'a self,
+        _name: &'a str,
+        _existing: Option<&'a RemoteFile>,
+        _bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async {
+            Err(BackendError::Other(
+                "この同期先はドキュメントを扱えません".into(),
+            ))
+        })
+    }
+    /// [`StorageBackend::move_to_archive`] for a file of `_docs/`.
+    fn archive_doc<'a>(&'a self, _file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async {
+            Err(BackendError::Other(
+                "この同期先はドキュメントを扱えません".into(),
+            ))
+        })
+    }
+
     // ---- the `_attachments` folder (spec attachments §7). A file is named by its content, so a
     // name that exists is never written again and a deletion is never passed on. ----
 
@@ -128,6 +157,8 @@ pub trait StorageBackend: Send + Sync {
 
 /// Where comment files live inside the target, as a name prefix of [`MemoryBackend`] entries.
 const COMMENTS_PREFIX: &str = "_comments/";
+/// The same for project documents.
+const DOCS_PREFIX: &str = "_docs/";
 /// The same for attachment blobs.
 const ATTACHMENTS_PREFIX: &str = "_attachments/";
 
@@ -165,6 +196,8 @@ struct Inner {
     failures: BTreeMap<String, Failure>,
     /// `list` fails.
     list_failure: Option<Failure>,
+    /// By name: only `upload` of that name fails (its download still works).
+    upload_failures: BTreeMap<String, Failure>,
     /// By name: the next `upload` of that name first finds these bytes written by "another
     /// PC" (see `race_upload`).
     races: BTreeMap<String, Vec<u8>>,
@@ -174,6 +207,8 @@ struct Inner {
     archive: Vec<(String, Vec<u8>)>,
     /// The `_comments` folder exists (made by the first comment upload).
     comments_folder: bool,
+    /// The `_docs` folder exists (made by the first document upload).
+    docs_folder: bool,
 }
 
 /// An in-memory remote for tests. `version` is the SHA-256 of the content (or, with
@@ -206,6 +241,13 @@ impl MemoryBackend {
         self.lock().failures.insert(name.to_string(), failure);
     }
 
+    /// `upload_doc` of the document `name` returns `failure` from now on; downloading it still works.
+    pub fn fail_doc_upload(&self, name: &str, failure: Failure) {
+        self.lock()
+            .upload_failures
+            .insert(format!("{DOCS_PREFIX}{name}"), failure);
+    }
+
     /// `list` returns `failure` from now on.
     pub fn fail_list(&self, failure: Failure) {
         self.lock().list_failure = Some(failure);
@@ -224,6 +266,20 @@ impl MemoryBackend {
             .files
             .retain(|_, e| !e.name.starts_with(COMMENTS_PREFIX));
         inner.comments_folder = false;
+    }
+
+    /// Someone deletes the `_docs` folder on the target (its files are gone, not archived).
+    pub fn wipe_docs(&self) {
+        let mut inner = self.lock();
+        inner.files.retain(|_, e| !e.name.starts_with(DOCS_PREFIX));
+        inner.docs_folder = false;
+    }
+
+    /// Someone deletes every file in `_docs` on the target by hand; the folder stays (nothing is archived).
+    pub fn empty_docs(&self) {
+        self.lock()
+            .files
+            .retain(|_, e| !e.name.starts_with(DOCS_PREFIX));
     }
 
     /// Test setup: a blob appears in `_attachments/` under `name`, whatever its content.
@@ -257,6 +313,7 @@ impl MemoryBackend {
     pub fn clear_failures(&self) {
         let mut inner = self.lock();
         inner.failures.clear();
+        inner.upload_failures.clear();
         inner.list_failure = None;
     }
 
@@ -387,6 +444,9 @@ impl StorageBackend for MemoryBackend {
     ) -> BoxFut<'a, RemoteFile> {
         Box::pin(async move {
             self.check(name)?;
+            if let Some(f) = self.lock().upload_failures.get(name).copied() {
+                return Err(f.error());
+            }
             let at = (self.clock)();
             let race = self.lock().races.remove(name);
             if let Some(theirs) = race {
@@ -472,6 +532,62 @@ impl StorageBackend for MemoryBackend {
                 name: name.to_string(),
                 ..f
             })
+        })
+    }
+
+    fn list_docs(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(async move {
+            let inner = self.lock();
+            if let Some(f) = inner.list_failure {
+                return Err(f.error());
+            }
+            if !inner.docs_folder {
+                return Ok(None);
+            }
+            let mut files: Vec<RemoteFile> = inner
+                .files
+                .iter()
+                .filter_map(|(id, e)| {
+                    let leaf = e.name.strip_prefix(DOCS_PREFIX)?;
+                    leaf.ends_with(".md").then(|| RemoteFile {
+                        name: leaf.to_string(),
+                        ..Self::remote_file(id, e)
+                    })
+                })
+                .collect();
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(Some(files))
+        })
+    }
+
+    fn upload_doc<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            let full = format!("{DOCS_PREFIX}{name}");
+            let existing = existing.map(|f| RemoteFile {
+                name: full.clone(),
+                ..f.clone()
+            });
+            let f = self.upload(&full, existing.as_ref(), bytes).await?;
+            self.lock().docs_folder = true;
+            Ok(RemoteFile {
+                name: name.to_string(),
+                ..f
+            })
+        })
+    }
+
+    fn archive_doc<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(async move {
+            let full = RemoteFile {
+                name: format!("{DOCS_PREFIX}{}", file.name),
+                ..file.clone()
+            };
+            self.move_to_archive(&full).await
         })
     }
 
@@ -694,6 +810,22 @@ mod tests {
         b.clear_failures();
         assert_eq!(b.list().await.unwrap().len(), 2);
         assert_eq!(b.download(&files[0]).await.unwrap(), b"a");
+    }
+
+    #[tokio::test]
+    async fn docs_round_trip_and_stay_out_of_list() {
+        let b = backend();
+        assert_eq!(b.list_docs().await.unwrap(), None);
+        let n = "仕事.1792929845000-3f2a00000000009c.md";
+        let f = b.upload_doc(n, None, b"---\ntitle: a\n---\nx".to_vec()).await.unwrap();
+        let listed = b.list_docs().await.unwrap().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, n);
+        assert_eq!(b.download(&listed[0]).await.unwrap(), b"---\ntitle: a\n---\nx");
+        assert!(b.list().await.unwrap().iter().all(|x| x.name != n));
+        assert_eq!(b.list_comments().await.unwrap(), None);
+        b.archive_doc(&f).await.unwrap();
+        assert_eq!(b.list_docs().await.unwrap(), Some(Vec::new()));
     }
 
     #[tokio::test]

@@ -27,6 +27,9 @@ const COMMENTS_DIR: &str = "_comments";
 /// `COMMENTS_DIR` as the `dir` of `child_url`.
 const COMMENTS_SUB: &str = "_comments/";
 const COMMENTS_ID_PREFIX: &str = "_comments/";
+/// The project documents' folder in the target, and its `child_url` form.
+const DOCS_DIR: &str = "_docs";
+const DOCS_SUB: &str = "_docs/";
 /// The attachment blobs' folder (spec attachments §7); ids carry it like the comment files' do.
 const ATTACHMENTS_DIR: &str = "_attachments";
 const ATTACHMENTS_SUB: &str = "_attachments/";
@@ -251,6 +254,10 @@ impl WebDavBackend {
         Url::parse(&format!("{}{COMMENTS_DIR}/", self.base)).expect("base plus a plain segment")
     }
 
+    fn docs_url(&self) -> Url {
+        Url::parse(&format!("{}{DOCS_DIR}/", self.base)).expect("base plus a plain segment")
+    }
+
     fn attachments_url(&self) -> Url {
         Url::parse(&format!("{}{ATTACHMENTS_DIR}/", self.base)).expect("base plus a plain segment")
     }
@@ -328,6 +335,18 @@ impl WebDavBackend {
         };
         let files = self.files_of(url, entries, |n| n.ends_with(".jsonl"))?;
         Ok(Some(files.into_iter().map(in_comments).collect()))
+    }
+
+    /// The document files, `None` when `_docs/` does not exist.
+    async fn list_doc_files(&self) -> Result<Option<Vec<RemoteFile>>, BackendError> {
+        let url = self.docs_url();
+        let Some(entries) = self.propfind(url.clone(), "1").await? else {
+            return Ok(None);
+        };
+        let files = self.files_of(url, entries, |n| {
+            crate::store::docs::parse_file_name(n).is_some()
+        })?;
+        Ok(Some(files.into_iter().map(in_docs).collect()))
     }
 
     /// The blobs, empty when `_attachments/` does not exist. Temporary names (`<name>.part-…`) are not blobs.
@@ -528,23 +547,26 @@ impl WebDavBackend {
         let dir = self.archive_url();
         self.make_folder(dir.clone()).await?;
         // Never overwrite an earlier archived copy: `<stem> (<modified>).xlsx`, then `-2`, `-3`,
-        // ... like the local `archive/` (a comment file keeps its `.jsonl`).
-        let (stem, ext) = match file.name.strip_suffix(".jsonl") {
-            Some(stem) => (stem, ".jsonl"),
-            None => (
+        // ... like the local `archive/` (a comment file keeps its `.jsonl`, a document its `.md`).
+        let (stem, ext) = if let Some(stem) = file.name.strip_suffix(".jsonl") {
+            (stem, ".jsonl")
+        } else if let Some(stem) = file.name.strip_suffix(".md") {
+            (stem, ".md")
+        } else {
+            (
                 file.name.strip_suffix(".xlsx").unwrap_or(&file.name),
                 ".xlsx",
-            ),
+            )
         };
         let tag = file.modified.format("%Y-%m-%d %H%M").to_string();
         for n in 1..=MAX_ARCHIVE_NAMES {
             let archived = archive_file_name(stem, &tag, n);
             let archived = match ext {
-                ".jsonl" => format!(
-                    "{}.jsonl",
+                ".xlsx" => archived,
+                _ => format!(
+                    "{}{ext}",
                     archived.strip_suffix(".xlsx").unwrap_or(&archived)
                 ),
-                _ => archived,
             };
             let dest = format!("{dir}{}", encode_segment(&archived));
             let moved = self
@@ -618,6 +640,8 @@ impl StorageBackend for WebDavBackend {
             // A comment file's id carries its folder (see `in_comments`).
             let dir = if file.id.starts_with(COMMENTS_ID_PREFIX) {
                 COMMENTS_SUB
+            } else if file.id.starts_with(DOCS_SUB) {
+                DOCS_SUB
             } else if file.id.starts_with(ATTACHMENTS_SUB) {
                 ATTACHMENTS_SUB
             } else {
@@ -664,6 +688,28 @@ impl StorageBackend for WebDavBackend {
         Box::pin(self.archive_in(COMMENTS_SUB, file))
     }
 
+    fn list_docs(&self) -> BoxFut<'_, Option<Vec<RemoteFile>>> {
+        Box::pin(self.list_doc_files())
+    }
+
+    fn upload_doc<'a>(
+        &'a self,
+        name: &'a str,
+        existing: Option<&'a RemoteFile>,
+        bytes: Vec<u8>,
+    ) -> BoxFut<'a, RemoteFile> {
+        Box::pin(async move {
+            self.make_folder(self.docs_url()).await?;
+            self.upload_in(DOCS_SUB, name, existing, bytes)
+                .await
+                .map(in_docs)
+        })
+    }
+
+    fn archive_doc<'a>(&'a self, file: &'a RemoteFile) -> BoxFut<'a, ()> {
+        Box::pin(self.archive_in(DOCS_SUB, file))
+    }
+
     fn list_attachments(&self) -> BoxFut<'_, Vec<RemoteFile>> {
         Box::pin(self.list_attachment_files())
     }
@@ -677,6 +723,14 @@ impl StorageBackend for WebDavBackend {
 fn in_attachments(f: RemoteFile) -> RemoteFile {
     RemoteFile {
         id: format!("{ATTACHMENTS_SUB}{}", f.name),
+        ..f
+    }
+}
+
+/// A file of `_docs/`: its id carries the folder, so `download` finds it.
+fn in_docs(f: RemoteFile) -> RemoteFile {
+    RemoteFile {
+        id: format!("{DOCS_SUB}{}", f.name),
         ..f
     }
 }
@@ -1192,6 +1246,77 @@ mod tests {
             size: 5,
         };
         assert_eq!(backend(&s).download(&f).await.unwrap(), b"line\n");
+    }
+
+    // --- the _docs folder (project documents) -------------------------------------------
+
+    const DOC: &str = "仕事.1792929845000-3f2a00000000009c.md";
+    const DOC_ENC: &str = "%E4%BB%95%E4%BA%8B.1792929845000-3f2a00000000009c.md";
+
+    #[tokio::test]
+    async fn docs_listing_of_a_missing_folder_is_none() {
+        let s = MockServer::start().await;
+        mount(&s, "PROPFIND", "/powertodo/_docs/", 404, "").await;
+        assert!(backend(&s).list_docs().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn docs_listing_reads_document_files() {
+        let s = MockServer::start().await;
+        let body = multistatus(&[
+            collection_response("/powertodo/_docs/"),
+            file_response(
+                &format!("/powertodo/_docs/{DOC_ENC}"),
+                Some("&quot;e1&quot;"),
+                LM,
+                40,
+            ),
+            file_response("/powertodo/_docs/notes.txt", None, LM, 1),
+            file_response("/powertodo/_docs/readme.md", None, LM, 1),
+        ]);
+        mount(&s, "PROPFIND", "/powertodo/_docs/", 207, &body).await;
+        let files = backend(&s).list_docs().await.unwrap().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, DOC);
+        assert_eq!(files[0].id, format!("_docs/{DOC}"));
+    }
+
+    #[tokio::test]
+    async fn doc_upload_makes_the_folder_and_puts_inside_it() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/_docs/", 201, "").await;
+        mount(&s, "PUT", &format!("/powertodo/_docs/{DOC_ENC}"), 201, "").await;
+        let stat = multistatus(&[file_response(
+            &format!("/powertodo/_docs/{DOC_ENC}"),
+            Some("&quot;v1&quot;"),
+            LM,
+            3,
+        )]);
+        mount(&s, "PROPFIND", &format!("/powertodo/_docs/{DOC_ENC}"), 207, &stat).await;
+        let f = backend(&s)
+            .upload_doc(DOC, None, b"x\n".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(f.id, format!("_docs/{DOC}"));
+        assert_eq!(f.version, "\"v1\"");
+        let reqs = requests(&s).await;
+        assert!(reqs.iter().any(|r| r.method.as_str() == "MKCOL"));
+        let put = reqs.iter().find(|r| r.method.as_str() == "PUT").unwrap();
+        assert_eq!(header_of(put, "if-none-match").as_deref(), Some("*"));
+    }
+
+    #[tokio::test]
+    async fn doc_download_reads_from_the_folder() {
+        let s = MockServer::start().await;
+        mount(&s, "GET", &format!("/powertodo/_docs/{DOC_ENC}"), 200, "body\n").await;
+        let f = RemoteFile {
+            id: format!("_docs/{DOC}"),
+            name: DOC.into(),
+            version: "v".into(),
+            modified: local(LM),
+            size: 5,
+        };
+        assert_eq!(backend(&s).download(&f).await.unwrap(), b"body\n");
     }
 
     // --- the _attachments folder (spec attachments §7) ------------------------------------
@@ -1844,6 +1969,21 @@ mod tests {
         );
         // Never over an existing archived copy.
         assert_eq!(header_of(&reqs[1], "overwrite").as_deref(), Some("F"));
+    }
+
+    #[tokio::test]
+    async fn a_document_keeps_its_md_extension_in_the_archive() {
+        let s = MockServer::start().await;
+        mount(&s, "MKCOL", "/powertodo/archive/", 201, "").await;
+        mount(&s, "MOVE", &format!("/powertodo/_docs/{DOC_ENC}"), 201, "").await;
+        let mut file = remote(DOC, "v");
+        file.id = format!("_docs/{DOC}");
+        backend(&s).archive_doc(&file).await.unwrap();
+        let reqs = requests(&s).await;
+        let mv = reqs.iter().find(|r| r.method.as_str() == "MOVE").unwrap();
+        let dest = header_of(mv, "destination").unwrap();
+        assert!(dest.ends_with(".md"), "{dest}");
+        assert!(!dest.contains(".xlsx"), "{dest}");
     }
 
     #[tokio::test]

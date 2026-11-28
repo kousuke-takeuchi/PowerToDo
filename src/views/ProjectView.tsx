@@ -2,6 +2,8 @@ import type React from "react";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AddTaskRow } from "../components/AddTaskRow";
+import { FileText } from "lucide-react";
+import { Segmented } from "../components/Segmented";
 import { SectionHeader } from "../components/SectionHeader";
 import { TaskRow, type TaskRowProps } from "../components/TaskRow";
 import { Button } from "../components/Button";
@@ -89,6 +91,11 @@ export type ProjectViewProps = {
   onRenameSection?: (oldName: string, newName: string) => void;
   /** 渡すとヘッダー右に「…」のメニューが出る (spec 2026-11-18 §4)。渡さなければボタンも出ない。 */
   projectMenu?: ProjectMenuProps;
+  /** Project documents (spec 2026-11-28): the リスト / ドキュメント switch under the title. Without `onMode` there is no switch. */
+  mode?: "list" | "docs";
+  onMode?: (m: "list" | "docs") => void;
+  /** Shows the section's documents (the file icon at the right of a section header). */
+  onOpenSectionDocs?: (section: string) => void;
   /** The project's Google Calendar events (spec 2026-11-27), by day above the tasks; display only. */
   calendarEvents?: ShownEvent[];
   /** Why the calendar shows nothing new (no login on this device, a failed fetch). */
@@ -254,6 +261,9 @@ export function ProjectView({
   onAddSection,
   onRenameSection,
   projectMenu,
+  mode = "list",
+  onMode,
+  onOpenSectionDocs,
   calendarEvents,
   calendarNote,
   onAddSectionApi,
@@ -886,6 +896,20 @@ export function ProjectView({
                 count={rows.filter((t) => !isDone(t)).length}
                 collapsed={isCollapsed}
                 onToggle={() => setCollapsed((c) => toggleSet(c, s.name))}
+                trailing={
+                  onOpenSectionDocs ? (
+                    <button
+                      type="button"
+                      aria-label="ドキュメント"
+                      title="このセクションのドキュメント"
+                      onClick={() => onOpenSectionDocs(s.name)}
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-bg-hover)]"
+                      style={{ width: 24, height: 24, display: "grid", placeItems: "center", padding: 0, border: 0, borderRadius: 6, background: "none", color: "var(--color-text-secondary)", cursor: "pointer", flex: "0 0 auto" }}
+                    >
+                      <FileText size={16} />
+                    </button>
+                  ) : undefined
+                }
                 onStartEdit={onRenameSection ? () => setEditingSection(s.name) : undefined}
                 editor={
                   onRenameSection && editingSection === s.name ? (
@@ -957,8 +981,23 @@ export function ProjectView({
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <h1 style={titleStyle}>{project}</h1>
           <Subtitle text={readOnly ? `アーカイブ済み · ${openCount} 件のタスク` : `${openCount} 件のタスク`} />
+          {onMode && (
+            <div style={{ width: 220, marginTop: 4 }}>
+              <Segmented
+                options={[
+                  { value: "list", label: "リスト" },
+                  { value: "docs", label: "ドキュメント" },
+                ]}
+                value={mode}
+                onChange={onMode}
+                ariaLabel="表示の切り替え"
+              />
+            </div>
+          )}
         </div>
       </PageHeader>
+      {mode === "list" && (
+        <>
       {calendarNote && <div role="status" style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: "19px", color: "var(--color-text-secondary)", marginBottom: "var(--space-2)" }}>{calendarNote}</div>}
       <CalendarEventsBlock events={calendarEvents ?? []} today={today} byDay />
       {state === "normal" && hiddenCount > 0 && (
@@ -973,6 +1012,8 @@ export function ProjectView({
         </div>
       ) : (
         body()
+      )}
+        </>
       )}
       {editingProject && projectMenu && (
         <ProjectEditDialog

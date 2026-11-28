@@ -122,7 +122,7 @@ function DesktopSectionHeader({ title, count, collapsed, onToggle, showChevron =
     );
   }
   return (
-    <div style={rowStyle} className={onHandlePointerDown ? "group" : undefined}>
+    <div style={rowStyle} className={onHandlePointerDown || trailing ? "group" : undefined}>
       {onHandlePointerDown && (
         <span
           role="button"
