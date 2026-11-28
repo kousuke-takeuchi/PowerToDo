@@ -4,9 +4,9 @@
 
 **Goal:** Projects and sections get any number of documents (WYSIWYG, saved as Markdown in `_docs/`) with reference files, on desktop and iPhone, synced over NAS and Google Drive.
 
-**Architecture:** Rust owns the file format (`store/docs.rs`: front matter + Markdown body, one file per document at `_docs/<project>.<id>.md`) and exposes commands; the sync engine gets a `_docs` pass modelled on the `_comments` pass, but a two-sided change keeps both (the older side becomes a conflict copy). The screen edits with TipTap 3 and its Markdown extension; Markdown <-> editor JSON and the image path mapping are pure `.ts` tested with `node --test`.
+**Architecture:** Rust owns the file format (`store/docs.rs`: front matter + Markdown body, one file per document at `_docs/<project>.<id>.md`) and exposes commands; the sync engine gets a `_docs` pass modelled on the `_comments` pass, but a two-sided change keeps both (the older side becomes a conflict copy). The screen edits with Milkdown Crepe (open source, MIT), which is Markdown-native and brings its own toolbar, slash menu, tables, links and image blocks, so the app writes no editor UI; the image path mapping and the autosave are pure `.ts` tested with `node --test`.
 
-**Tech Stack:** Rust (Tauri 2), React 19 + TypeScript, TipTap 3.34.0 (`@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`, `@tiptap/markdown`, `@tiptap/extension-list`, `@tiptap/extension-table`, `@tiptap/extension-image`), node `--test`.
+**Tech Stack:** Rust (Tauri 2), React 19 + TypeScript, Milkdown Crepe 7.23.0 (`@milkdown/crepe`, MIT), node `--test`.
 
 **Spec:** `docs/superpowers/specs/2026-11-28-project-docs-design.md` (section 1, 「データ」, 「古い版の端末」). Sections 2 (calendar tab) and 3 (gantt tab) are NOT in this plan.
 
@@ -20,7 +20,7 @@
 - A two-sided change (sync, or an external edit while the screen holds an older version) keeps both: the newer `updated` keeps the name; the other gets a new id and the title `<題名> (競合 yyyy-mm-dd hhmm)`.
 - Old app versions do not know `_docs/`: they must neither sync nor touch it (no change to their code paths).
 - User-visible text is Japanese; identifiers, comments and commit messages are English Conventional Commits. No `Co-Authored-By` or other AI trailer in commits.
-- Pin TipTap packages to exactly `3.34.0` (released 2026-11-13; newer ones are under two weeks old).
+- Prefer open-source libraries over hand-written UI (owner's request, 2026-11-28). Pin `@milkdown/crepe` to exactly `7.23.0` (released 2026-10-27; use only versions at least two weeks old).
 - Pure screen logic goes in `.ts` without React/DOM and is tested with `node --test` (`npm run test:web`).
 - Every behaviour change updates docs in the same commit (`docs/internal/data-model.md`, `docs/03-desktop.md`, `docs/04-iphone.md`, `design/storyboard.md`).
 - Example names in tests and docs are invented (e.g. 在庫アプリ, 仕事); no real user data.
@@ -29,8 +29,8 @@
 
 1. A project name containing dots (`v1.2 リリース`) must still map `_docs/<project>.<id>.md` back to the right project: parse takes the id from the end. Test in Task 1.
 2. A title containing `:`, `"`, `#` or a leading space must survive a write and read unchanged: values are written as JSON strings. Test in Task 1.
-3. Typing then closing the document (or switching to another one, or leaving the screen) within the 1 s autosave delay must still save: the autosave flushes on leave. Test in Task 6 (`autosave.ts`).
-4. A body image whose blob has not arrived yet (sync pending) must show its alt text, not break the editor, and must be written back with its original relative path. Test in Task 5.
+3. Typing then closing the document (or switching to another one, or leaving the screen) within the 1 s autosave delay must still save: the autosave flushes on leave. Test in Task 5 (`autosave.ts`).
+4. A body image whose blob has not arrived yet (sync pending) must show Crepe's broken-image state, not break the editor, and must be written back with its original relative path (`proxyDomURL` changes only what is shown). Test in Task 5 (`attachmentOfSrc`) and the browser check of Task 6 Step 7.
 5. The file changed on disk (another editor, or a sync download) while the screen still holds the older version: saving must not overwrite it; it creates a conflict copy and says so. Test in Task 2.
 
 ---
@@ -50,10 +50,10 @@
 | `src-tauri/src/sync/mod.rs` | `DOC_KEY_PREFIX`, `is_doc_key` |
 | `src-tauri/src/sync/engine.rs` | `_docs` pass, listing, fingerprint, `docs_changed` host hook |
 | `src/api/client.ts`, `src/api/events.ts` | typed commands and event |
-| `src/app/docMarkdown.ts` (+test) | TipTap extension list, Markdown <-> JSON, image path mapping, template |
+| `src/app/docMarkdown.ts` (+test) | image path mapping, template, empty body |
 | `src/app/autosave.ts` (+test) | debounce with flush |
 | `src/app/useDocs.ts` | list/read/save/create/delete with the event |
-| `src/components/DocEditor.tsx` | TipTap editor + toolbar |
+| `src/components/DocEditor.tsx`, `DocEditor.css` (+story) | Milkdown Crepe editor with the app's theme, title field, autosave |
 | `src/components/ReferenceFiles.tsx` | 参考資料 box |
 | `src/views/DocsPane.tsx` (+stories) | desktop list + document |
 | `src/views/mobile/MobileDocs.tsx` (+stories) | iPhone list screen and document screen |
@@ -1154,78 +1154,47 @@ git commit -m "feat(sync): sync _docs on NAS and Google Drive; a two-sided chang
 
 ---
 
-### Task 5: Markdown <-> editor (pure) and dependencies
+### Task 5: Pure helpers for the editor, and the dependency
 
 **Files:**
 - Modify: `package.json`, `package-lock.json`
-- Create: `src/app/docMarkdown.ts`, `src/app/docMarkdown.test.ts`
+- Create: `src/app/docMarkdown.ts`, `src/app/docMarkdown.test.ts`, `src/app/autosave.ts`, `src/app/autosave.test.ts`
 
 **Interfaces:**
 - Produces (used by Task 6):
-  - `export const docExtensions: AnyExtension[]` (StarterKit with link `openOnClick: false`, TaskList, TaskItem nested, TableKit, Image)
-  - `export function fromMarkdown(md: string): JSONContent`
-  - `export function toMarkdown(doc: JSONContent): string`
   - `export function attachmentOfSrc(src: string): { hash: string; ext: string } | null` (`../_attachments/<hash>.<ext>` or `../_attachments/<hash>`)
   - `export function srcOfAttachment(f: { hash: string; ext: string }): string`
   - `export const DOC_TEMPLATE: string` (`## 目的\n\n## 経緯\n\n## リンク\n\n## 要望\n\n## やりたいこと\n`)
+  - `export function isEmptyBody(md: string): boolean` (only whitespace, or only an empty paragraph marker Crepe may write)
+  - `createAutosave(save: () => void, delayMs = 1000, timers?) -> { touch(): void; flush(): void; cancel(): void }`
 
-- [ ] **Step 1: Install pinned packages**
+The editor is Milkdown Crepe (MIT, `@milkdown/crepe@7.23.0`, released 2026-10-27). It is Markdown-native (remark) and brings its own UI: the top toolbar (`TopBar`: headings, bold, italic, strike, code, link, image, table, code block, quote, rule, bullet / ordered / task lists), the slash menu and block handle (`BlockEdit`), the link tooltip, table editing, image blocks with an upload hook (`ImageBlock.onUpload`) and a URL hook (`ImageBlock.proxyDomURL`). We write no toolbar or table UI of our own.
+
+- [ ] **Step 1: Install, pinned**
 
 ```bash
-npm install --save-exact @tiptap/react@3.34.0 @tiptap/pm@3.34.0 @tiptap/core@3.34.0 @tiptap/starter-kit@3.34.0 @tiptap/markdown@3.34.0 @tiptap/extension-list@3.34.0 @tiptap/extension-table@3.34.0 @tiptap/extension-image@3.34.0
+npm install --save-exact @milkdown/crepe@7.23.0
 ```
 
-Check: `npm ls @tiptap/core` shows one version, 3.34.0.
+Check: `npm ls @milkdown/kit` shows `7.23.0` once. Check the options used in Task 6 exist in this version (do not rely on memory):
 
-- [ ] **Step 2: Failing tests** (`src/app/docMarkdown.test.ts`)
+```bash
+grep -n "features\|featureConfigs" node_modules/@milkdown/crepe/lib/types/core/crepe.d.ts
+grep -n "onUpload\|proxyDomURL\|onImageLoadError" node_modules/@milkdown/crepe/lib/types/feature/image-block/index.d.ts
+grep -n "getMarkdown\|on:\|setReadonly" node_modules/@milkdown/crepe/lib/types/core/builder.d.ts
+sed -n '/enum CrepeFeature/,/}/p' node_modules/@milkdown/crepe/lib/types/feature/index.d.ts
+ls node_modules/@milkdown/crepe/lib/theme
+```
+
+Expected: `features`, `featureConfigs`, `onUpload`, `proxyDomURL`, `onImageLoadError`, `getMarkdown`, `on`; features include `top-bar`, `latex`, `ai`; themes include `common`, `crepe`, `crepe-dark`.
+
+- [ ] **Step 2: Failing tests** (`src/app/docMarkdown.test.ts`, `src/app/autosave.test.ts`)
 
 ```ts
+// src/app/docMarkdown.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fromMarkdown, toMarkdown, attachmentOfSrc, srcOfAttachment, DOC_TEMPLATE } from "./docMarkdown.ts";
-
-const SAMPLE = `# 目的
-
-**太字** と *斜体* と ~~取り消し~~ と \`code\`。[リンク](https://example.com)
-
-- 箇条 1
-- 箇条 2
-
-1. 番号 1
-2. 番号 2
-
-- [ ] やること
-- [x] 済んだこと
-
-> 引用
-
-\`\`\`ts
-const a = 1;
-\`\`\`
-
-| 列 1 | 列 2 |
-| --- | --- |
-| a | b |
-
-![画面](../_attachments/${"a".repeat(64)}.png)
-
----
-
-### 小見出し
-`;
-
-test("every element of the spec survives a round trip, and a second one changes nothing", () => {
-  const once = toMarkdown(fromMarkdown(SAMPLE));
-  for (const piece of ["# 目的", "**太字**", "*斜体*", "~~取り消し~~", "`code`", "[リンク](https://example.com)", "- 箇条 1", "1. 番号 1", "- [ ] やること", "- [x] 済んだこと", "> 引用", "```ts", "| 列 1 | 列 2 |", `![画面](../_attachments/${"a".repeat(64)}.png)`, "---", "### 小見出し"]) {
-    assert.ok(once.includes(piece), `lost: ${piece}`);
-  }
-  assert.equal(toMarkdown(fromMarkdown(once)), once);
-});
-
-test("empty and Japanese-only text round trip", () => {
-  assert.equal(toMarkdown(fromMarkdown("")).trim(), "");
-  assert.equal(toMarkdown(fromMarkdown("日本語の段落\n")).trim(), "日本語の段落");
-});
+import { attachmentOfSrc, srcOfAttachment, DOC_TEMPLATE, isEmptyBody } from "./docMarkdown.ts";
 
 test("an image path names a blob, and back", () => {
   const h = "b".repeat(64);
@@ -1233,6 +1202,7 @@ test("an image path names a blob, and back", () => {
   assert.deepEqual(attachmentOfSrc(`../_attachments/${h}`), { hash: h, ext: "" });
   assert.equal(attachmentOfSrc("https://example.com/a.png"), null);
   assert.equal(attachmentOfSrc("../_attachments/short.png"), null);
+  assert.equal(attachmentOfSrc(`../_attachments/${h}.PNG`), null);
   assert.equal(srcOfAttachment({ hash: h, ext: "png" }), `../_attachments/${h}.png`);
   assert.equal(srcOfAttachment({ hash: h, ext: "" }), `../_attachments/${h}`);
 });
@@ -1240,104 +1210,17 @@ test("an image path names a blob, and back", () => {
 test("the template has the five headings", () => {
   assert.deepEqual(DOC_TEMPLATE.match(/^## .+$/gm), ["## 目的", "## 経緯", "## リンク", "## 要望", "## やりたいこと"]);
 });
+
+test("an empty body is whitespace or an empty paragraph", () => {
+  assert.equal(isEmptyBody(""), true);
+  assert.equal(isEmptyBody("\n\n"), true);
+  assert.equal(isEmptyBody("<br />\n"), true);
+  assert.equal(isEmptyBody("a"), false);
+});
 ```
-
-Run: `node --test src/app/docMarkdown.test.ts` — Expected: FAIL (module missing).
-
-- [ ] **Step 3: Implement** (`src/app/docMarkdown.ts`)
 
 ```ts
-/** Project documents (spec 2026-11-28): the editor's extensions and Markdown <-> editor JSON. Pure; tested with node. */
-import type { AnyExtension, JSONContent } from "@tiptap/core";
-import { MarkdownManager } from "@tiptap/markdown";
-import StarterKit from "@tiptap/starter-kit";
-import { TaskItem, TaskList } from "@tiptap/extension-list";
-import { TableKit } from "@tiptap/extension-table";
-import Image from "@tiptap/extension-image";
-
-export const docExtensions: AnyExtension[] = [
-  StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false, autolink: true } }),
-  TaskList,
-  TaskItem.configure({ nested: true }),
-  TableKit,
-  Image,
-];
-
-const manager = new MarkdownManager({ extensions: docExtensions });
-
-export function fromMarkdown(md: string): JSONContent {
-  return manager.parse(md);
-}
-
-export function toMarkdown(doc: JSONContent): string {
-  return manager.serialize(doc);
-}
-
-const PREFIX = "../_attachments/";
-
-export function attachmentOfSrc(src: string): { hash: string; ext: string } | null {
-  if (!src.startsWith(PREFIX)) return null;
-  const m = /^([0-9a-f]{64})(?:\.([0-9a-z]{1,16}))?$/.exec(src.slice(PREFIX.length));
-  return m ? { hash: m[1], ext: m[2] ?? "" } : null;
-}
-
-export function srcOfAttachment(f: { hash: string; ext: string }): string {
-  return f.ext ? `${PREFIX}${f.hash}.${f.ext}` : `${PREFIX}${f.hash}`;
-}
-
-export const DOC_TEMPLATE = "## 目的\n\n## 経緯\n\n## リンク\n\n## 要望\n\n## やりたいこと\n";
-```
-
-Check the StarterKit v3 option names before relying on them: `grep -n "heading\|link" node_modules/@tiptap/starter-kit/dist/index.d.ts`. If `link` options are named differently, use the names found there.
-
-- [ ] **Step 4: Run**
-
-Run: `node --test src/app/docMarkdown.test.ts && npx tsc --noEmit`
-Expected: 4 pass, no type errors.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add package.json package-lock.json src/app/docMarkdown.ts src/app/docMarkdown.test.ts
-git commit -m "feat(docs): markdown round trip for the document editor (tiptap 3.34.0)"
-```
-
----
-
-### Task 6: API, autosave, editor and the 参考資料 box
-
-**Files:**
-- Modify: `src/api/client.ts`, `src/api/events.ts`, `src/api/types` file that holds `AttachmentInfo` (find with `grep -rn "export type AttachmentInfo" src/api`)
-- Create: `src/app/autosave.ts`, `src/app/autosave.test.ts`, `src/app/useDocs.ts`, `src/components/DocEditor.tsx`, `src/components/ReferenceFiles.tsx`
-
-**Interfaces:**
-- Consumes: Task 3 commands, Task 5 module.
-- Produces (used by Tasks 7, 8):
-  - types `DocSummary`, `Doc`, `DocEdit`, `Saved` (mirror of the Rust structs; `Saved = { kind: "written" } & Doc | { kind: "conflict"; doc: Doc; copy: Doc }`)
-  - `api.listDocs(project)`, `api.readDoc(project, id)`, `api.createDoc(project, section, title, body)`, `api.saveDoc(project, id, baseUpdated, edit)`, `api.deleteDoc(project, id)`; event `onDocsChanged(cb: (files: string[]) => void)`
-  - `createAutosave(save: () => void, delayMs = 1000, timers = { set: setTimeout, clear: clearTimeout }): { touch(): void; flush(): void; cancel(): void }`
-  - `useDocs(project: string, section: string | null)` -> `{ list: DocSummary[]; error?: string; reload(): void; create(withTemplate: boolean): Promise<Doc>; remove(id: string): Promise<void> }`
-  - `<DocEditor doc={Doc} onSave={(edit: DocEdit) => Promise<void>} readAttachment={...} addFiles={...} mobile?: boolean />`
-  - `<ReferenceFiles files={AttachmentInfo[]} onAdd={(files: File[]) => void} onOpen={(f) => void} onRemove={(f) => void} mobile?: boolean />`
-
-Note on `Saved` serialization: Rust `#[serde(tag = "kind", rename_all = "camelCase")]` on a newtype variant `Written(Doc)` serializes as `{ "kind": "written", ...docFields }`. Confirm with a Rust unit test in `docs.rs`:
-
-```rust
-    #[test]
-    fn saved_serializes_with_a_kind() {
-        let d = parse("仕事", ID, "");
-        let v = serde_json::to_value(Saved::Written(d.clone())).unwrap();
-        assert_eq!(v["kind"], "written");
-        assert_eq!(v["id"], ID);
-        let v = serde_json::to_value(Saved::Conflict { doc: d.clone(), copy: d }).unwrap();
-        assert_eq!(v["kind"], "conflict");
-        assert_eq!(v["copy"]["id"], ID);
-    }
-```
-
-- [ ] **Step 1: Failing autosave tests** (`src/app/autosave.test.ts`)
-
-```ts
+// src/app/autosave.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createAutosave } from "./autosave.ts";
@@ -1374,8 +1257,7 @@ test("leaving before the pause saves at once, and only once", () => {
 
 test("flush with nothing typed does not save", () => {
   const t = fakeTimers(); let saves = 0;
-  const a = createAutosave(() => saves++, 1000, t);
-  a.flush();
+  createAutosave(() => saves++, 1000, t).flush();
   assert.equal(saves, 0);
 });
 
@@ -1387,17 +1269,46 @@ test("cancel drops a pending save", () => {
 });
 ```
 
-Run: `node --test src/app/autosave.test.ts` — FAIL.
+Run: `node --test src/app/docMarkdown.test.ts src/app/autosave.test.ts` — Expected: FAIL (modules missing).
 
-- [ ] **Step 2: Implement** (`src/app/autosave.ts`)
+- [ ] **Step 3: Implement**
 
 ```ts
+// src/app/docMarkdown.ts
+/** Project documents (spec 2026-11-28): body image paths and the template. Pure; tested with node. */
+const PREFIX = "../_attachments/";
+
+export function attachmentOfSrc(src: string): { hash: string; ext: string } | null {
+  if (!src.startsWith(PREFIX)) return null;
+  const m = /^([0-9a-f]{64})(?:\.([0-9a-z]{1,16}))?$/.exec(src.slice(PREFIX.length));
+  return m ? { hash: m[1], ext: m[2] ?? "" } : null;
+}
+
+export function srcOfAttachment(f: { hash: string; ext: string }): string {
+  return f.ext ? `${PREFIX}${f.hash}.${f.ext}` : `${PREFIX}${f.hash}`;
+}
+
+export const DOC_TEMPLATE = "## 目的\n\n## 経緯\n\n## リンク\n\n## 要望\n\n## やりたいこと\n";
+
+export function isEmptyBody(md: string): boolean {
+  return md.replace(/<br\s*\/?>/g, "").trim() === "";
+}
+```
+
+```ts
+// src/app/autosave.ts
 /** Autosave of a document (spec 2026-11-28: 1 s after typing stops, or at once when leaving). Pure. */
 type Timers = { set: (fn: () => void, ms: number) => unknown; clear: (id: never) => void };
 
-export function createAutosave(save: () => void, delayMs = 1000, timers: Timers = { set: (f, ms) => setTimeout(f, ms), clear: (id) => clearTimeout(id) }) {
+const browserTimers: Timers = { set: (f, ms) => setTimeout(f, ms), clear: (id) => clearTimeout(id) };
+
+export function createAutosave(save: () => void, delayMs = 1000, timers: Timers = browserTimers) {
   let id: unknown;
   let dirty = false;
+  const stop = () => {
+    if (id !== undefined) timers.clear(id as never);
+    id = undefined;
+  };
   const run = () => {
     id = undefined;
     if (!dirty) return;
@@ -1407,25 +1318,68 @@ export function createAutosave(save: () => void, delayMs = 1000, timers: Timers 
   return {
     touch() {
       dirty = true;
-      if (id !== undefined) timers.clear(id as never);
+      stop();
       id = timers.set(run, delayMs);
     },
     flush() {
-      if (id !== undefined) timers.clear(id as never);
+      stop();
       run();
     },
     cancel() {
-      if (id !== undefined) timers.clear(id as never);
-      id = undefined;
+      stop();
       dirty = false;
     },
   };
 }
 ```
 
-Run: `node --test src/app/autosave.test.ts` — 4 pass.
+- [ ] **Step 4: Run**
 
-- [ ] **Step 3: API and event**
+Run: `node --test src/app/docMarkdown.test.ts src/app/autosave.test.ts && npx tsc --noEmit`
+Expected: 7 pass, no type errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add package.json package-lock.json src/app/docMarkdown.ts src/app/docMarkdown.test.ts src/app/autosave.ts src/app/autosave.test.ts
+git commit -m "feat(docs): image paths, template and autosave for documents; add milkdown crepe 7.23.0"
+```
+
+---
+
+### Task 6: API, the Crepe editor and the 参考資料 box
+
+**Files:**
+- Modify: `src/api/client.ts`, `src/api/events.ts`, the types file that holds `AttachmentInfo` (find with `grep -rn "export type AttachmentInfo" src/api`), `src-tauri/src/store/docs.rs` (one test)
+- Create: `src/app/useDocs.ts`, `src/components/DocEditor.tsx`, `src/components/DocEditor.css`, `src/components/ReferenceFiles.tsx`
+
+**Interfaces:**
+- Consumes: Task 3 commands, Task 5 module.
+- Produces (used by Tasks 7, 8):
+  - types `DocSummary`, `Doc`, `DocEdit`, `Saved` (mirror of the Rust structs; `Saved = ({ kind: "written" } & Doc) | { kind: "conflict"; doc: Doc; copy: Doc }`)
+  - `api.listDocs(project)`, `api.readDoc(project, id)`, `api.createDoc(project, section, title, body)`, `api.saveDoc(project, id, baseUpdated, edit)`, `api.deleteDoc(project, id)`; event `onDocsChanged(cb: (files: string[]) => void)`
+  - `useDocs(project: string, section: string | null)` -> `{ list: DocSummary[]; error?: string; reload(): void; create(withTemplate: boolean): Promise<Doc>; remove(id: string): Promise<void> }`
+  - `<DocEditor doc={Doc} onSave={(edit: DocEdit) => Promise<void>} mobile?: boolean />` (keyed by `doc.id` in the parent)
+  - `<ReferenceFiles files={AttachmentInfo[]} onAdd={(files: File[]) => void} onOpen={(f) => void} onRemove={(f) => void} mobile?: boolean />`
+
+- [ ] **Step 1: Pin the `Saved` JSON shape in Rust** (append to `docs.rs` tests)
+
+```rust
+    #[test]
+    fn saved_serializes_with_a_kind() {
+        let d = parse("仕事", ID, "");
+        let v = serde_json::to_value(Saved::Written(d.clone())).unwrap();
+        assert_eq!(v["kind"], "written");
+        assert_eq!(v["id"], ID);
+        let v = serde_json::to_value(Saved::Conflict { doc: d.clone(), copy: d }).unwrap();
+        assert_eq!(v["kind"], "conflict");
+        assert_eq!(v["copy"]["id"], ID);
+    }
+```
+
+Run: `cd src-tauri && cargo test --lib store::docs::tests::saved_serializes_with_a_kind` — Expected: PASS (if it fails, fix the serde attributes on `Saved` until it passes; the screen relies on this shape).
+
+- [ ] **Step 2: API and event**
 
 In the types file beside `AttachmentInfo`:
 
@@ -1450,9 +1404,9 @@ In `client.ts`, after the attachments block:
 
 In `events.ts`, copy the `comments-changed` listener as `onDocsChanged` for `docs-changed` with payload `{ files: string[] }`.
 
-Add the five commands to the Storybook / browser mock of `invoke` if there is one (`grep -rn "list_comments" src/stories src/app/*mock*`), returning in-memory documents, so stories render.
+If stories use a mock of `invoke` (`grep -rn "list_comments" src/stories src/app | grep -v test | head`), add the five commands there with in-memory documents so stories render.
 
-- [ ] **Step 4: `useDocs`** (`src/app/useDocs.ts`)
+- [ ] **Step 3: `useDocs`** (`src/app/useDocs.ts`)
 
 ```ts
 import { useCallback, useEffect, useState } from "react";
@@ -1466,12 +1420,20 @@ export function useDocs(project: string, section: string | null) {
   const [all, setAll] = useState<DocSummary[]>([]);
   const [error, setError] = useState<string>();
   const reload = useCallback(() => {
-    api.listDocs(project).then((l) => { setAll(l); setError(undefined); }, (e) => setError(String(e?.message ?? e)));
+    api.listDocs(project).then(
+      (l) => {
+        setAll(l);
+        setError(undefined);
+      },
+      (e) => setError(String(e?.message ?? e)),
+    );
   }, [project]);
   useEffect(() => {
     reload();
-    const off = onDocsChanged((files) => { if (files.some((f) => f.startsWith(`${project}.`))) reload(); });
-    return () => { void off.then((f) => f()); };
+    const off = onDocsChanged((files) => {
+      if (files.some((f) => f.startsWith(`${project}.`))) reload();
+    });
+    return () => void off.then((f) => f());
   }, [project, reload]);
   const list = section === null ? all : all.filter((d) => d.section === section);
   const create = async (withTemplate: boolean): Promise<Doc> => {
@@ -1479,41 +1441,224 @@ export function useDocs(project: string, section: string | null) {
     reload();
     return d;
   };
-  const remove = async (id: string) => { await api.deleteDoc(project, id); reload(); };
+  const remove = async (id: string) => {
+    await api.deleteDoc(project, id);
+    reload();
+  };
   return { list, error, reload, create, remove };
 }
 ```
 
-(Match `onDocsChanged`'s return type to what `events.ts` returns for the other listeners; adjust the cleanup line accordingly. Use the project's existing error-text helper if one exists: `grep -rn "function errorText\|messageOf" src/app | head`.)
+Match the types path (`../api/types`) and the listener's return type to what the repo uses (`grep -n "export function on" src/api/events.ts`), and use the repo's error-text helper if there is one (`grep -rn "function errorText\|messageOf" src/app | head -3`).
 
-- [ ] **Step 5: `DocEditor`** (`src/components/DocEditor.tsx`)
+- [ ] **Step 4: `DocEditor`** (`src/components/DocEditor.tsx`)
 
-Behaviour:
-- `useEditor({ extensions: [...docExtensions with Image replaced by DocImage], content: fromMarkdown(doc.body) })`, recreated when `doc.id` changes (key the component by id in the parent).
-- Title field (plain `<input>`, 22px semibold on desktop, 28 bold on iPhone) above the editor; changing it calls `autosave.touch()`.
-- `onUpdate` -> `autosave.touch()`; the save callback builds `{ title, body: toMarkdown(editor.getJSON()) }` and calls `onSave`.
-- `useEffect` cleanup and `onBlur` of the container call `autosave.flush()`; `window` `pagehide` / `visibilitychange` (hidden) also flush.
-- Empty document: show a button 「雛形から始める」 that sets `fromMarkdown(DOC_TEMPLATE)` and touches.
-- Toolbar (desktop above the editor, iPhone sticky above the keyboard as a horizontally scrolling row): 見出し 1-3, 太字, 斜体, 取り消し線, 箇条書き, 番号, チェック, 引用, コード, リンク (prompt for the URL with the app's text sheet / dialog), 表 (3x3 with header row), 画像 (file picker), 区切り線. Use the `lucide-react` icons already in the app; labels as `aria-label` in Japanese.
-- Links: click with Cmd/Ctrl on desktop, tap on iPhone, calls the app's existing external-link opener (`grep -rn "openUrl\|opener" src/app src/api | head`).
-- `DocImage = Image.extend({ addNodeView() { ... } })`: create an `<img>`; `attachmentOfSrc(node.attrs.src)` -> `readAttachment` -> `URL.createObjectURL(new Blob([bytes], { type }))`; on failure or a non-attachment src that is not `https:`, show the alt text in a muted box; `destroy()` revokes the URL. `node.attrs.src` is never changed, so `toMarkdown` writes the relative path back.
-- Pasting / dropping an image: intercept with `editorProps.handlePaste` / `handleDrop`, store each image with `api.addAttachment` (shrink like the comment composer does: reuse its helper, `grep -rn "addAttachment(" src | head`), then insert `{ type: "image", attrs: { src: srcOfAttachment(info), alt: info.name } }`.
-- Styles in a `<style>` block scoped by a class (`.doc-editor h1 { ... }`) using the app's tokens (`--font-body`, `--color-text-primary`, `--color-border`, `--color-accent`); checkboxes of task items use the accent colour.
+```tsx
+import { useEffect, useRef, useState } from "react";
+import { Crepe } from "@milkdown/crepe";
+import "@milkdown/crepe/theme/common/style.css";
+import "@milkdown/crepe/theme/crepe.css";
+import "./DocEditor.css";
+import { api } from "../api/client";
+import type { Doc, DocEdit } from "../api/types";
+import { createAutosave } from "../app/autosave";
+import { attachmentOfSrc, DOC_TEMPLATE, isEmptyBody, srcOfAttachment } from "../app/docMarkdown";
+
+/**
+ * A document's title and body (spec 2026-11-28). The body is Milkdown Crepe: its own toolbar, slash menu, tables,
+ * link tooltip and image blocks. Images are stored with `add_attachment` and written as `../_attachments/<hash>.<ext>`;
+ * the editor shows them through blob URLs (`proxyDomURL`), the Markdown keeps the relative path.
+ * Saves 1 s after typing stops, and at once when the document is left (unmount, page hide).
+ */
+export function DocEditor({ doc, onSave, mobile }: { doc: Doc; onSave: (edit: DocEdit) => Promise<void>; mobile?: boolean }) {
+  const host = useRef<HTMLDivElement>(null);
+  const crepe = useRef<Crepe | null>(null);
+  const [title, setTitle] = useState(doc.title);
+  const titleRef = useRef(doc.title);
+  const [empty, setEmpty] = useState(isEmptyBody(doc.body));
+  const urls = useRef<string[]>([]);
+  const save = useRef(
+    createAutosave(() => {
+      const body = crepe.current?.getMarkdown();
+      void onSave({ title: titleRef.current, ...(body !== undefined ? { body } : {}) });
+    }),
+  );
+
+  const mount = (markdown: string) => {
+    if (!host.current) return;
+    const editor = new Crepe({
+      root: host.current,
+      defaultValue: markdown,
+      features: { [Crepe.Feature.TopBar]: true, [Crepe.Feature.Latex]: false, [Crepe.Feature.AI]: false },
+      featureConfigs: {
+        [Crepe.Feature.Placeholder]: { text: "本文を書く。「/」で見出しや表を入れる", mode: "doc" },
+        [Crepe.Feature.ImageBlock]: {
+          onUpload: async (file: File) => {
+            const info = await api.addAttachment(await file.arrayBuffer(), { name: file.name, type: file.type });
+            return srcOfAttachment(info);
+          },
+          proxyDomURL: async (url: string) => {
+            const f = attachmentOfSrc(url);
+            if (!f) return url;
+            try {
+              const bytes = await api.readAttachment(f);
+              const u = URL.createObjectURL(new Blob([bytes]));
+              urls.current.push(u);
+              return u;
+            } catch {
+              // Not synced yet (or lost): the image block shows its broken state with the alt text.
+              return url;
+            }
+          },
+        },
+      },
+    });
+    editor.on((l) => {
+      l.markdownUpdated((_ctx, md) => {
+        setEmpty(isEmptyBody(md));
+        save.current.touch();
+      });
+    });
+    void editor.create();
+    crepe.current = editor;
+  };
+
+  useEffect(() => {
+    mount(doc.body);
+    const leave = () => save.current.flush();
+    const hidden = () => document.visibilityState === "hidden" && leave();
+    window.addEventListener("pagehide", leave);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      leave();
+      window.removeEventListener("pagehide", leave);
+      document.removeEventListener("visibilitychange", hidden);
+      void crepe.current?.destroy();
+      crepe.current = null;
+      urls.current.forEach((u) => URL.revokeObjectURL(u));
+      urls.current = [];
+    };
+    // The parent keys this component by doc.id: one editor per document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className={`doc-editor${mobile ? " doc-editor--mobile" : ""}`} onBlur={() => save.current.flush()}>
+      <input
+        className="doc-editor__title"
+        aria-label="題名"
+        value={title}
+        placeholder="無題"
+        onChange={(e) => {
+          setTitle(e.target.value);
+          titleRef.current = e.target.value;
+          save.current.touch();
+        }}
+      />
+      {empty && (
+        <button
+          type="button"
+          className="doc-editor__template"
+          onClick={() => {
+            void crepe.current?.destroy();
+            if (host.current) host.current.innerHTML = "";
+            mount(DOC_TEMPLATE);
+            setEmpty(false);
+            save.current.touch();
+          }}
+        >
+          雛形から始める
+        </button>
+      )}
+      <div ref={host} className="doc-editor__body" />
+    </div>
+  );
+}
+```
+
+Check against the installed types before keeping each line: `markdownUpdated` in `node_modules/@milkdown/kit/lib/types/plugin/listener` (or `grep -rn "markdownUpdated" node_modules/@milkdown/plugin-listener/lib/*.d.ts`), the `Placeholder` config keys (`grep -n "text\|mode" node_modules/@milkdown/crepe/lib/types/feature/placeholder/index.d.ts`), the CSS paths (`ls node_modules/@milkdown/crepe/lib/theme/common node_modules/@milkdown/crepe/lib/theme/crepe`), and `api.addAttachment` / `api.readAttachment` signatures in `src/api/client.ts`. Use what the files say; change the code here when they differ.
+
+Images in comments are shrunk before storing (`grep -rn "addAttachment(" src | head`): use the same helper in `onUpload` so a phone photo is not stored at full size.
+
+Links: Crepe's link tooltip opens the URL in the WebView by default. Intercept clicks on `a[href^="http"]` inside `.doc-editor__body` (capture phase): `preventDefault()` and open with the app's external-link opener (`grep -rn "openUrl\|plugin-opener" src | head -3`); on desktop only when Cmd/Ctrl is held, on iPhone on tap.
+
+- [ ] **Step 5: Theme** (`src/components/DocEditor.css`)
+
+Map Crepe's CSS variables to the app's tokens so the editor follows light / dark (find the variable names with `grep -o "\-\-crepe-[a-z-]*" node_modules/@milkdown/crepe/lib/theme/crepe/style.css | sort -u`):
+
+```css
+.doc-editor { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.doc-editor__title { border: 0; outline: none; background: transparent; font-family: var(--font-body); font-size: 22px; font-weight: 600; color: var(--color-text-primary); padding: 0; }
+.doc-editor--mobile .doc-editor__title { font-size: 28px; font-weight: 700; }
+.doc-editor__template { align-self: flex-start; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg); color: var(--color-accent); font-family: var(--font-body); font-size: 14px; padding: 6px 12px; cursor: pointer; }
+.doc-editor__body .milkdown {
+  --crepe-color-background: var(--color-bg);
+  --crepe-color-on-background: var(--color-text-primary);
+  --crepe-color-surface: var(--color-bg);
+  --crepe-color-surface-low: var(--color-bg-hover);
+  --crepe-color-on-surface: var(--color-text-primary);
+  --crepe-color-on-surface-variant: var(--color-text-secondary);
+  --crepe-color-outline: var(--color-border);
+  --crepe-color-primary: var(--color-accent);
+  --crepe-font-default: var(--font-body);
+  --crepe-font-title: var(--font-body);
+}
+.doc-editor--mobile .doc-editor__body .milkdown-top-bar { position: sticky; top: 0; z-index: 1; overflow-x: auto; }
+```
+
+Keep only the variables the grep found; add any colour variable it found that is not listed, mapped to the closest token.
 
 - [ ] **Step 6: `ReferenceFiles`** (`src/components/ReferenceFiles.tsx`)
 
-Heading 「参考資料」 with a count; rows of icon (by `type`), name, size (reuse the size formatter of the comment attachments: `grep -rn "formatSize\|bytesText" src | head`); click opens with `api.openAttachment`; a 「…」 with 「外す」; a 「ファイルを追加」 button with a hidden `<input type="file" multiple>`; on desktop the whole box accepts drops. Adding calls `onAdd(files)`; the parent stores each with `api.addAttachment` and saves `{ files: [...doc.files, ...infos] }` immediately (not through the 1 s autosave).
+Heading 「参考資料」 with a count; rows of icon (by `type`, lucide icons already in the app), name, size (reuse the size formatter of the comment attachments: `grep -rn "formatSize\|bytesText" src | head -3`); click opens with `api.openAttachment`; a 「…」 with 「外す」; a 「ファイルを追加」 button with a hidden `<input type="file" multiple>`; on desktop the box accepts drops (`onDragOver` preventDefault, `onDrop` reads `e.dataTransfer.files`). The parent stores each file with `api.addAttachment` and saves `{ files: [...doc.files, ...infos] }` right away (not through the autosave), then replaces its `doc` with the result.
 
-- [ ] **Step 7: Check**
+- [ ] **Step 7: Check in a browser**
 
-Run: `npx tsc --noEmit && npm run test:web && cd src-tauri && cargo test --lib store::docs`
-Expected: pass.
+Add a story `Components/DocEditor` 「本文」 that renders `DocEditor` with the sample body below (and a no-op `onSave` that logs the body to `window.__lastBody`), build Storybook and use the capture helper (`scripts/capture-docs-screens.mjs` pattern, as done for the time wheel) to: type one character at the end, wait 1.2 s, and read `window.__lastBody`. Every piece in this list must be in it: `# 目的`, `**太字**`, `*斜体*`, `~~取り消し~~`, `` `code` ``, `[リンク](https://example.com)`, `- 箇条 1`, `1. 番号 1`, `- [ ] やること`, `- [x] 済んだこと`, `> 引用`, `` ```ts ``, `| 列 1 | 列 2 |`, `![画面](../_attachments/<64 a>.png)`, `---`, `### 小見出し`. Write down in the commit message any piece Crepe writes differently (e.g. `*` vs `_` for italic) and accept it only if a second load and save gives the same text.
 
-- [ ] **Step 8: Commit**
+Sample body:
+
+````markdown
+# 目的
+
+**太字** と *斜体* と ~~取り消し~~ と `code`。[リンク](https://example.com)
+
+- 箇条 1
+- 箇条 2
+
+1. 番号 1
+2. 番号 2
+
+- [ ] やること
+- [x] 済んだこと
+
+> 引用
+
+```ts
+const a = 1;
+```
+
+| 列 1 | 列 2 |
+| --- | --- |
+| a | b |
+
+![画面](../_attachments/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)
+
+---
+
+### 小見出し
+````
+
+- [ ] **Step 8: Check**
+
+Run: `npx tsc --noEmit && npm run test:web && npm run build-storybook && npm run check:stories`
+Expected: pass, `missing: none`.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/api src/app/autosave.ts src/app/autosave.test.ts src/app/useDocs.ts src/components/DocEditor.tsx src/components/ReferenceFiles.tsx src-tauri/src/store/docs.rs
-git commit -m "feat(docs): document editor with autosave, images and reference files"
+git add src/api src/app/useDocs.ts src/components/DocEditor.tsx src/components/DocEditor.css src/components/DocEditor.stories.tsx src/components/ReferenceFiles.tsx src-tauri/src/store/docs.rs
+git commit -m "feat(docs): crepe document editor with autosave, attachment images and reference files"
 ```
 
 ---
@@ -1597,7 +1742,7 @@ Add the two kinds to `BrowseScreen`. In the `renamed` case map `docs` and `doc` 
 
 Two exports in `src/views/mobile/MobileDocs.tsx`, both inside `MobileShell` like the other browse screens (large title, back button):
 - `MobileDocsList`: title 「ドキュメント」, subtitle the project (and `· <section>`), rows like the desktop list (title, muted line), the shell's add button (FAB) opens a sheet 「空のドキュメント」「雛形から」; tapping a row pushes `{ kind: "doc", … }`.
-- `MobileDoc`: header with back and 「…」 (sheet: 「セクションを変える」 -> list sheet, 「削除」 -> confirm sheet), body `<DocEditor mobile …/>` then `<ReferenceFiles mobile …/>`. The editor toolbar sits above the keyboard (`position: sticky; bottom: 0` inside the scroll area, padded by `env(safe-area-inset-bottom)`); leaving the screen (back, tab change) flushes the autosave through the unmount cleanup.
+- `MobileDoc`: header with back and 「…」 (sheet: 「セクションを変える」 -> list sheet, 「削除」 -> confirm sheet), body `<DocEditor mobile …/>` then `<ReferenceFiles mobile …/>`. Crepe's top bar stays at the top of the scroll area (sticky, from `DocEditor.css`) so it is reachable while the keyboard is up; leaving the screen (back, tab change) flushes the autosave through the unmount cleanup.
 
 - [ ] **Step 4: Entry rows**
 
@@ -1624,3 +1769,5 @@ git commit -m "feat(mobile): documents screens from the project and section menu
 
 - Spec §1 一覧 / 中身 / 参考資料 / エディタ -> Tasks 5-8; データ / 同期 / 名前の変更と削除 / 外で直したファイル -> Tasks 1-4; 古い版 -> Task 4 Step 8 (folder is new, old code never lists it) and the data-model doc. 「セクションを消す」 has no store operation today (Task 2 Step 6 note).
 - Spec sections 2 and 3 (calendar, gantt) are separate plans.
+- Open-source picks for the later plans (checked 2026-11-28, versions to be re-checked then): calendar tab: FullCalendar (`@fullcalendar/*`, MIT standard plugins) or react-big-calendar (MIT); gantt tab: SVAR React Gantt (`@svar-ui/react-gantt`, MIT; tree with summary rows, drag to move and resize, day/week/month scales) or Frappe Gantt (`frappe-gantt`, MIT, simpler).
+- The front matter stays a small hand-written reader/writer (Task 1): the YAML crates read but do not keep unknown lines and their order, which the data rules require.
