@@ -18,14 +18,27 @@ import {
   srcOfAttachment,
 } from "../app/docMarkdown";
 
+const messageOf = (e: unknown) => String((e as { message?: unknown } | null)?.message ?? e);
+
 /**
  * A document's title and body (spec 2026-11-28). The body is Milkdown Crepe: its own toolbar, slash menu, tables,
  * link tooltip and image blocks. Images are stored with `add_attachment` and written as `../_attachments/<hash>.<ext>`;
  * the editor shows them through blob URLs (`proxyDomURL`), the Markdown keeps the relative path.
  * Saves 1 s after typing stops, and at once when the document is left (unmount, page hide).
  * `onSave` gets the title and body only; the parent adds the section and tracks `updated`.
+ * `onError` gets the message of an image that could not be stored (size limit and so on).
  */
-export function DocEditor({ doc, onSave, mobile }: { doc: Doc; onSave: (edit: DocEdit) => Promise<void>; mobile?: boolean }) {
+export function DocEditor({
+  doc,
+  onSave,
+  mobile,
+  onError,
+}: {
+  doc: Doc;
+  onSave: (edit: DocEdit) => Promise<void>;
+  mobile?: boolean;
+  onError?: (message: string) => void;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const crepe = useRef<Crepe | null>(null);
   const [title, setTitle] = useState(doc.title);
@@ -34,6 +47,8 @@ export function DocEditor({ doc, onSave, mobile }: { doc: Doc; onSave: (edit: Do
   const urls = useRef<string[]>([]);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
   const save = useRef(
     createAutosave(() => {
       const body = crepe.current?.getMarkdown();
@@ -53,7 +68,11 @@ export function DocEditor({ doc, onSave, mobile }: { doc: Doc; onSave: (edit: Do
           onUpload: async (file: File) => {
             let failure: unknown;
             const [info] = await storeFiles([file], (e) => (failure = e));
-            if (!info) throw failure ?? new Error("画像を保存できませんでした");
+            if (!info) {
+              const message = failure !== undefined ? messageOf(failure) : "画像を保存できませんでした";
+              onErrorRef.current?.(message);
+              throw failure ?? new Error(message);
+            }
             return srcOfAttachment(info);
           },
           proxyDomURL: async (url: string) => {
