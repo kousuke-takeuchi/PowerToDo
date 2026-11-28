@@ -8,6 +8,7 @@ import "./DocEditor.css";
 import { api } from "../api/client";
 import type { Doc, DocEdit } from "../types/model";
 import { createAutosave } from "../app/autosave";
+import { HEADING_OPTIONS, IMAGE_TEXTS, LINK_TEXTS, SLASH_MENU } from "../app/crepeLabels";
 import { storeFiles } from "../app/attachments/prepare";
 import {
   attachmentOfSrc,
@@ -69,7 +70,11 @@ export function DocEditor({
       features: { [Crepe.Feature.TopBar]: true, [Crepe.Feature.Latex]: false, [Crepe.Feature.AI]: false },
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "本文を書く。「/」で見出しや表を入れる", mode: "doc" },
+        [Crepe.Feature.TopBar]: { headingOptions: HEADING_OPTIONS },
+        [Crepe.Feature.BlockEdit]: SLASH_MENU,
+        [Crepe.Feature.LinkTooltip]: LINK_TEXTS,
         [Crepe.Feature.ImageBlock]: {
+          ...IMAGE_TEXTS,
           onUpload: async (file: File) => {
             let failure: unknown;
             const [info] = await storeFiles([file], (e) => (failure = e));

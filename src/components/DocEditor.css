@@ -22,3 +22,10 @@
   --crepe-font-title: var(--font-body);
 }
 .doc-editor--mobile .doc-editor__body .milkdown-top-bar { position: sticky; top: 0; z-index: 1; overflow-x: auto; }
+/* iPhone: Crepe's own 60px 120px around the text leaves no room on a phone. The top bar scrolls sideways in one row. */
+.doc-editor--mobile .doc-editor__body .milkdown .ProseMirror { padding: 12px 0 24px; }
+.doc-editor--mobile .doc-editor__body .milkdown .milkdown-top-bar,
+.doc-editor--mobile .doc-editor__body .milkdown .milkdown-top-bar .top-bar-inner { flex-wrap: nowrap; }
+.doc-editor--mobile .doc-editor__body .milkdown .milkdown-top-bar { padding: 0; overflow-x: auto; scrollbar-width: none; }
+/* Desktop: a narrower margin than Crepe's, the pane has its own. */
+.doc-editor:not(.doc-editor--mobile) .doc-editor__body .milkdown .ProseMirror { padding: 24px 40px; }
